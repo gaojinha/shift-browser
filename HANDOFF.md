@@ -322,6 +322,10 @@ let pool = SqlitePoolOptions::new()
  16. **target=_blank / window.open 链接已处理**：Rust 侧 `WebviewBuilder::on_new_window` 回调——MVP 方案：在**当前 webview** 导航到链接 URL（`wv.navigate`），返回 `NewWindowResponse::Deny` 不创建新窗口。**关键**：webkit2gtk 的 `javascript_can_open_windows_automatically` 默认 false（JS 不能自动开窗口），需在 `fix_gtk_layout` 里用 `Settings::builder().javascript_can_open_windows_automatically(true).build()` + `WebViewExt::set_settings` 开启（Cargo.toml 加 `webkit2gtk = "=2.0"` 依赖）。**验证**：window.open 触发 `on_new_window: url=https://www.qq.com/` → 当前 webview 导航成功 → `page_load_finished: title=www.qq.com` ✓
  17. **GtkOverlay 布局重构（窗口还原修复）**：原 GtkFixed 方案把主 webview `set_size_request(窗口尺寸)` 导致窗口 natural size 被撑大（1920x1011），WM 无法缩小窗口（最大化后还原失败、无法手工调整大小）。**重构**：窗口 vbox → [GtkOverlay] → 主 webview（主层，自动填满窗口，natural size 固定 1280x800）+ GtkFixed（上层，child webviews 绝对定位，natural size 固定 1280x800）；resize 监听**只更新 child webviews**（主 webview 在 overlay 主层自动跟随窗口）。**验证**：最大化 1920x1011（地址栏铺满 1920 宽、内容区 1920x877）→ 还原 1280x800 ✓ 循环多次正常
  18. **滚动问题排查结论（非 bug）**：Bing 首页 `scrollHeight 666 ≈ 视口 666`（内容刚好一屏，无滚动条正常）；网易等长页面可正常滚动。之前 xdotool 滚轮/PageDown 测试"失效"是**合成事件不被 WebKitGTK 处理**（同合成键盘），真实用户操作正常
+ 19. **密码管理完整功能已验证（高哥手动）**：弹窗打开 → "+ 添加密码" → 填域名/密码 → 保存成功。验证数据库：passwords 表 1 条（domain=127.0.0.1，密文 44 字符 base64 = AES-256-GCM 非明文），settings 表 master_key 已生成（32 字节）。**修复两个关键问题**：
+    - **弹窗不显示**：PasswordsDialog 在 App.vue 里**始终挂载**（无 v-if），`onMounted` 只在应用启动时执行一次 → ⋮ 点击时 child 不隐藏。**改 watch(props.show)**：show 变 true 时隐藏 child + 加载列表，false 时恢复
+    - **弹窗显示但点不了**：GtkOverlay 重构后 Fixed 在 overlay 上层**填满整个窗口**，拦截所有点击（地址栏按钮、弹窗按钮都收不到）→ ① Fixed 用 `set_valign(Start)` + `set_margin_top(112)` 定位到内容区（不覆盖地址栏）；② `set_webview_visible(false)` 时**连 Fixed 一起 hide**（弹窗可交互），恢复时 show
+    - **验证**：点后退按钮有 `go_back` 日志（点击到达 Vue UI）；点 ⋮ → `visible=false count=3` → 弹窗遮罩 (#13,13,13) + 面板 (#222) 渲染；点"+ 添加密码" → 表单展开（输入框 11688 像素）
 
 ### 8.2 待办（下一步）
 

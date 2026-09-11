@@ -179,8 +179,9 @@ impl TabManager {
         {
           let fixed = find_or_create_fixed(&vbox);
           // gtk-rs 0.18 无 reparent：先从 vbox 移除再放入 Fixed
+          // Fixed 在窗口 (0, CONTENT_TOP_OFFSET)，child 在 Fixed 内 (0,0)
           vbox.remove(&child_gtk);
-          fixed.put(&child_gtk, 0, CONTENT_TOP_OFFSET as i32);
+          fixed.put(&child_gtk, 0, 0);
           child_gtk.set_size_request(w as i32, h as i32);
           // 允许 JS 自动打开窗口（target=_blank / window.open 触发 create 信号）
           let settings = webkit2gtk::Settings::builder()
@@ -270,9 +271,12 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
           main_gtk.set_size_request(1280, 800);
           main_gtk.show();
 
-          // GtkFixed 放上层：child webviews 绝对定位；natural size 固定 1280x800（避免撑大窗口）
+          // GtkFixed 放上层：child webviews 绝对定位
+          // 关键：Fixed 用 margin_top 定位到内容区（y=112 起），避免覆盖地址栏拦截点击事件
           let fixed = gtk::Fixed::new();
-          fixed.set_size_request(1280, 800);
+          fixed.set_valign(gtk::Align::Start);
+          fixed.set_margin_top(CONTENT_TOP_OFFSET as i32);
+          fixed.set_size_request(1280, 800 - CONTENT_TOP_OFFSET as i32 - STATUS_BAR_HEIGHT as i32);
           overlay.add_overlay(&fixed);
           fixed.show();
 
@@ -284,7 +288,7 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
       .map_err(|e| format!("主 webview 句柄获取失败: {}", e))?;
   }
 
-  // 注册窗口 resize 监听：只同步 child webviews（主 webview 在 overlay 主层自动跟随窗口）
+  // 注册窗口 resize 监听：同步 child webviews 和 Fixed 容器（主 webview 在 overlay 主层自动跟随窗口）
   let app_handle = app.handle().clone();
   if let Some(window) = app.get_window("main") {
     window.on_window_event(move |event| {
@@ -297,7 +301,7 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
           w, h, content_h
         );
 
-        // child webviews：位置 (0, CONTENT_TOP_OFFSET)，尺寸 (w, content_h)
+        // child webviews：Fixed 内位置 (0,0)，尺寸 (w, content_h)；Fixed 本身在窗口 (0, CONTENT_TOP_OFFSET)
         if let Some(state) = app_handle.try_state::<TabManager>() {
           let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
           for id in ids {
@@ -309,7 +313,8 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
                   .parent()
                   .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
                 {
-                  fixed.move_(&gtk_wv, 0, CONTENT_TOP_OFFSET as i32);
+                  fixed.move_(&gtk_wv, 0, 0);
+                  fixed.set_size_request(w, content_h);
                 }
                 gtk_wv.set_size_request(w, content_h);
               });
@@ -557,11 +562,26 @@ pub async fn set_webview_visible(
   for id in ids {
     let label = format!("tab-{}", id);
     if let Some(wv) = window.get_webview(&label) {
-      if visible {
-        wv.show();
-      } else {
-        wv.hide();
-      }
+      let wv2 = wv.clone();
+      wv.with_webview(move |pwv| {
+        let gtk_wv = pwv.inner();
+        // 同时隐藏/显示 Fixed 容器：Fixed 覆盖内容区会拦截弹窗点击，必须一起隐藏
+        if let Some(fixed) = gtk_wv
+          .parent()
+          .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
+        {
+          if visible {
+            fixed.show();
+          } else {
+            fixed.hide();
+          }
+        }
+        if visible {
+          wv2.show();
+        } else {
+          wv2.hide();
+        }
+      });
       count += 1;
     }
   }

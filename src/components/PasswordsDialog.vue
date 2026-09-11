@@ -2,7 +2,7 @@
 // 密码管理弹窗
 // 注意：child webview 是 GTK 部件盖在 Vue UI 上，弹窗会被页面盖住。
 // 因此挂载时隐藏所有标签 webview，卸载时恢复。
-import { onMounted, onUnmounted, ref } from 'vue'
+import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { usePasswordsStore } from '../stores/passwords'
 
@@ -11,20 +11,23 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const passwordsStore = usePasswordsStore()
 
+// 弹窗显示时隐藏所有标签 webview（child 盖在 Vue UI 上），关闭时恢复
+// 注意：不能用 onMounted——组件在 App.vue 里始终挂载，onMounted 只在应用启动时执行一次
+watch(
+  () => props.show,
+  async (v) => {
+    if (v) {
+      await passwordsStore.loadPasswords()
+    }
+    await invoke('set_webview_visible', { visible: !v })
+  }
+)
+
 const form = ref({ domain: '', username: '', password: '', notes: '' })
 const showAdd = ref(false)
 const revealId = ref<number | null>(null)
 const revealPassword = ref('')
 const errorMsg = ref('')
-
-onMounted(async () => {
-  await passwordsStore.loadPasswords()
-  await invoke('set_webview_visible', { visible: false })
-})
-
-onUnmounted(async () => {
-  await invoke('set_webview_visible', { visible: true })
-})
 
 async function onAdd() {
   errorMsg.value = ''

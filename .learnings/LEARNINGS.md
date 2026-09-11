@@ -119,6 +119,32 @@ Corrections, insights, and knowledge gaps captured during development.
 
 ---
 
+## 2026-09-12 00:30 — GtkOverlay 上层 Fixed 拦截点击事件（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser Tauri，GtkOverlay 双层布局后地址栏/弹窗按钮点击全部失效
+**要点**:
+- **根因**：GtkOverlay 的 `add_overlay` 子部件（GtkFixed）默认填满整个 overlay——即使 Fixed 里没有子部件覆盖地址栏区域，**Fixed 本身作为顶层容器拦截所有点击事件**（GTK 事件路由：上层子部件优先），Vue UI（主 webview 主层）收不到任何点击
+- **修复 1（定位）**：Fixed 用 `set_valign(gtk::Align::Start)` + `set_margin_top(CONTENT_TOP_OFFSET=112)` 定位到内容区，不覆盖地址栏（y<112 的点击能到达 Vue UI）；resize 时 `fixed.set_size_request(w, content_h)` 跟随窗口
+- **修复 2（弹窗交互）**：Fixed 仍覆盖内容区（y=112-778），弹窗面板在内容区里 → 点击弹窗按钮被 Fixed 拦截。`set_webview_visible(false)` 时**连 Fixed 一起 `hide()`**（弹窗可交互），`visible=true` 时 `show()` 恢复
+- **child 坐标变化**：Fixed 定位到 (0,112) 后，child 在 Fixed 内位置改为 (0,0)（不再 (0,112)）；resize 监听里 `fixed.move_(&gtk_wv, 0, 0)` + `fixed.set_size_request(w, content_h)`
+- **验证**：点后退按钮有 `go_back` 日志（点击到达 Vue UI）；弹窗遮罩 + 面板渲染；"+ 添加密码"点击展开表单
+- **教训**：GtkOverlay 上层子部件不只是"叠层显示"，还会**独立拦截事件**——任何需要主层交互的弹窗/覆盖层都要考虑上层容器的遮挡
+
+---
+
+## 2026-09-12 00:30 — Vue 组件始终挂载时 onMounted 陷阱（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser Tauri，PasswordsDialog 在 App.vue 里无 v-if 始终挂载，⋮ 点击后弹窗不显示
+**要点**:
+- **根因**：`<PasswordsDialog :show="showPasswords" />` 无 v-if → 组件在 App.vue 启动时挂载一次，`onMounted` 只在启动时执行（此时 show=false，弹窗不渲染）；⋮ 点击 → showPasswords=true → 组件 props 变化**不重新挂载** → onMounted 不执行 → child webviews 不隐藏 → 弹窗被盖住
+- **解法**：`watch(() => props.show, async (v) => { ... })`——show 变 true 时隐藏 child + 加载列表，false 时恢复；**不要用 onMounted/onUnmounted 做显示副作用**（组件生命周期 ≠ 弹窗显示周期）
+- **验证**：⋮ 点击 → `visible=false count=3` → 弹窗渲染 ✓
+- **教训**：Vue 组件"始终挂载 + props 控制显示"时，副作用必须放 watch(props)，不能放生命周期钩子
+
+---
+
 ## 2026-09-11 23:30 — GtkOverlay 布局与窗口 natural size（correction）
 
 **类别**: correction
