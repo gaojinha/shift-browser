@@ -7,13 +7,19 @@ import AddressBar from './components/AddressBar.vue'
 import BookmarksBar from './components/BookmarksBar.vue'
 import StatusBar from './components/StatusBar.vue'
 import PasswordsDialog from './components/PasswordsDialog.vue'
+import GroupsDialog from './components/GroupsDialog.vue'
 import { useTabsStore } from './stores/tabs'
+import { useGroupsStore } from './stores/groups'
 
 const tabsStore = useTabsStore()
+const groupsStore = useGroupsStore()
 const showPasswords = ref(false)
+const showGroups = ref(false)
 let saveTimer: number | null = null
 
 onMounted(async () => {
+  // 分组尽早加载（不等标签恢复，避免右键菜单/组头迟迟不显示）
+  groupsStore.loadGroups().catch(() => {})
   // 启动时恢复标签状态
   await tabsStore.loadTabs()
   if (tabsStore.tabs.length === 0) {
@@ -47,12 +53,13 @@ watch(
 <template>
   <div class="app">
     <TabBar />
-    <AddressBar @open-passwords="showPasswords = true" />
+    <AddressBar @open-passwords="showPasswords = true" @open-groups="showGroups = true" />
     <BookmarksBar />
     <!-- 内容区：webview 由 Rust 以 (0, 112) 起盖住此区域 -->
     <div class="content-area" id="contentArea"></div>
     <StatusBar />
     <PasswordsDialog :show="showPasswords" @close="showPasswords = false" />
+    <GroupsDialog :show="showGroups" @close="showGroups = false" />
   </div>
 </template>
 

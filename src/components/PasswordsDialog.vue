@@ -68,7 +68,7 @@ async function onDelete(id: number) {
 </script>
 
 <template>
-  <div class="dialog-overlay" v-if="props.show" @click.self="emit('close')">
+  <div class="dialog-overlay" v-if="props.show">
     <div class="dialog">
       <div class="dialog-header">
         <span>密码管理</span>

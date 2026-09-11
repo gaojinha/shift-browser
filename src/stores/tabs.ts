@@ -28,9 +28,16 @@ actions: {
     /** 从 Rust 拉取全部标签（启动时调用） */
     async loadTabs() {
       const tabs = await invoke<Tab[]>('get_tabs')
-      this.tabs = tabs
+      // Rust 返回的 Tab 无 groupId 字段，补默认值（未分组）
+      this.tabs = tabs.map((t) => ({ ...t, groupId: t.groupId ?? null }))
       const active = tabs.find((t) => t.is_active)
       this.activeTabId = active?.id ?? null
+    },
+
+    /** 分配标签到分组（groupId = null 表示取消分组） */
+    assignTabToGroup(tabId: string, groupId: number | null) {
+      const tab = this.tabs.find((t) => t.id === tabId)
+      if (tab) tab.groupId = groupId
     },
 
     /** 创建新标签页 */
@@ -95,7 +102,7 @@ actions: {
       const tab = await invoke<Tab | null>('update_tab', { id, title, favicon })
       if (tab) {
         const idx = this.tabs.findIndex((t) => t.id === id)
-        if (idx !== -1) this.tabs[idx] = tab
+        if (idx !== -1) this.tabs[idx] = { ...tab, groupId: this.tabs[idx].groupId ?? null }
       }
     },
 
@@ -142,7 +149,9 @@ actions: {
       this.pollTimer = window.setInterval(async () => {
         try {
           const tabs = await invoke<Tab[]>('get_tabs')
-          this.tabs = tabs
+          // 保留前端运行时 groupId（Rust 侧无此字段）
+          const prevGroups = new Map(this.tabs.map((t) => [t.id, t.groupId]))
+          this.tabs = tabs.map((t) => ({ ...t, groupId: prevGroups.get(t.id) ?? null }))
           const active = tabs.find((t) => t.is_active)
           if (active) this.activeTabId = active.id
         } catch (e) {

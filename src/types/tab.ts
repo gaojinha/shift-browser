@@ -6,4 +6,6 @@ export interface Tab {
   favicon: string
   is_active: boolean
   is_pinned: boolean
+  /** 运行时标签分组 id（前端内存字段，不持久化；null = 未分组） */
+  groupId: number | null
 }
