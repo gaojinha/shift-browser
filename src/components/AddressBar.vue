@@ -6,6 +6,8 @@ import { useTabsStore } from '../stores/tabs'
 const tabsStore = useTabsStore()
 const addressInput = ref('')
 
+const emit = defineEmits<{ (e: 'openPasswords'): void }>()
+
 // 当前活动标签变化时同步地址栏
 watch(
   () => tabsStore.activeTab?.url,
@@ -70,7 +72,7 @@ function onForward() {
       />
     </div>
     <button class="action-btn" title="收藏">☆</button>
-    <button class="action-btn" title="菜单">⋮</button>
+    <button class="action-btn" title="菜单" @click="emit('openPasswords')">⋮</button>
   </div>
 </template>
 

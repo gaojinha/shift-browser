@@ -64,6 +64,7 @@ pub fn run() {
       passwords::save_password,
       passwords::get_password,
       passwords::get_passwords_for_domain,
+      passwords::list_passwords,
       passwords::delete_password,
       // 标签页
       tabs::create_tab,
@@ -73,6 +74,7 @@ pub fn run() {
       tabs::go_back,
       tabs::go_forward,
       tabs::get_tabs,
+      tabs::set_webview_visible,
       tabs::update_tab,
     ])
     .setup(|app| {

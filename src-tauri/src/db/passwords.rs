@@ -188,6 +188,30 @@ pub async fn get_passwords_for_domain(
     Ok(result)
 }
 
+/// 列出所有密码记录（不含明文，前端展示列表用）
+#[tauri::command]
+pub async fn list_passwords(
+    db: tauri::State<'_, Db>,
+) -> DbResult<Vec<PasswordMeta>> {
+    let rows = sqlx::query_as::<_, (i64, String, Option<String>, Option<String>, String, String)>(
+        "SELECT id, domain, username, notes, created_at, updated_at FROM passwords ORDER BY domain, id",
+    )
+    .fetch_all(&db.pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(id, domain, username, notes, created_at, updated_at)| PasswordMeta {
+            id,
+            domain,
+            username,
+            notes,
+            created_at,
+            updated_at,
+        })
+        .collect())
+}
+
 /// 删除密码记录
 #[tauri::command]
 pub async fn delete_password(db: tauri::State<'_, Db>, id: i64) -> DbResult<()> {
@@ -196,6 +220,17 @@ pub async fn delete_password(db: tauri::State<'_, Db>, id: i64) -> DbResult<()> 
         .execute(&db.pool)
         .await?;
     Ok(())
+}
+
+/// 密码元信息（不含明文）
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PasswordMeta {
+    pub id: i64,
+    pub domain: String,
+    pub username: Option<String>,
+    pub notes: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 /// 解密后的密码条目（返回给前端）

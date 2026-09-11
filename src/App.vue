@@ -1,14 +1,16 @@
 <script setup lang="ts">
 // 浏览器主窗口布局
 // 结构：TabBar(40) + AddressBar(42) + BookmarksBar(30) + 内容区(webview) + StatusBar(22)
-import { onMounted, onUnmounted, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import TabBar from './components/TabBar.vue'
 import AddressBar from './components/AddressBar.vue'
 import BookmarksBar from './components/BookmarksBar.vue'
 import StatusBar from './components/StatusBar.vue'
+import PasswordsDialog from './components/PasswordsDialog.vue'
 import { useTabsStore } from './stores/tabs'
 
 const tabsStore = useTabsStore()
+const showPasswords = ref(false)
 let saveTimer: number | null = null
 
 onMounted(async () => {
@@ -45,11 +47,12 @@ watch(
 <template>
   <div class="app">
     <TabBar />
-    <AddressBar />
+    <AddressBar @open-passwords="showPasswords = true" />
     <BookmarksBar />
     <!-- 内容区：webview 由 Rust 以 (0, 112) 起盖住此区域 -->
     <div class="content-area" id="contentArea"></div>
     <StatusBar />
+    <PasswordsDialog :show="showPasswords" @close="showPasswords = false" />
   </div>
 </template>
 
@@ -64,6 +67,6 @@ watch(
 .content-area {
   flex: 1;
   position: relative;
-  background: #fff;
+  background: #1a1a1a;
 }
 </style>

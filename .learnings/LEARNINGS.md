@@ -91,3 +91,28 @@ Corrections, insights, and knowledge gaps captured during development.
 - **造浏览历史测试后退/前进**：GUI 输入不可靠时，**临时改前端默认 URL**（如 `createTab(url = 'https://www.baidu.com')`）→ 重启 → 默认 baidu 标签 → 点主页按钮 navigateTab 到 bing → 历史 baidu→bing → 点后退应回 baidu，点前进应回 bing。测完改回默认 URL
 - **tauri Webview 无 back/forward API**：只有 `navigate(url)` 和 `eval(js)`；后退/前进用 `eval("history.back()")`/`eval("history.forward()")`，页面加载完成会触发 `on_page_load` 回调（`page_load_finished` 日志可验证）
 - **页面滚动正常但看似"不能滚"**：Bing 首页内容短（一屏装下）不需要滚动，百度首页内容多能滚动——是内容量差异，不是滚动机制问题
+
+---
+
+## 2026-09-11 22:30 — 窗口 resize 同步与弹窗遮挡（knowledge_gap）
+
+**类别**: knowledge_gap
+**场景**: ShiftBrowser Tauri，高哥最大化窗口后发现 UI 不跟随 + 密码管理弹窗被 child webview 遮挡
+**要点**:
+- **窗口 resize 后 webview 尺寸不同步**：主 webview 和 child webview 的 GTK 尺寸是启动时硬编码的（`set_size_request(1280, 800)`），窗口最大化到 1920x1011 后 Vue UI 仍只占 1280 宽（右侧露出 GTK 空白），child webview 也停在 1280x666。**解法**：`setup_gtk_layout` 里注册 `window.on_window_event(|e| if let WindowEvent::Resized(size) = e { ... })`，在回调里 `with_webview` 更新 Fixed 内所有 webview：主 webview `fixed.move_(&wv, 0, 0)` + `set_size_request(w, h)`；child webview `move_(&wv, 0, CONTENT_TOP_OFFSET)` + `set_size_request(w, h-134)`。验证：最大化后日志 `window resized: 1920x1011 content_h=877`，截图确认 UI 铺满
+- **`on_window_event` 回调捕获 AppHandle**：回调是 `Fn(&WindowEvent) + Send + 'static`，不能直接捕获 gtk 对象；捕获 `app.handle().clone()`（AppHandle）即可在回调里 `get_webview` + `with_webview` 操作 GTK
+- **`window.webviews()` 只返回 main webview**：child webview（tab-xxx）不在列表里！遍历必须从 `TabManager` State 拿标签 id，逐个 `window.get_webview(&format!("tab-{}", id))`
+- **Vue 弹窗被 child webview 遮挡**：child webview 是独立 GTK 部件，GtkFixed 绝对定位叠在主 webview（Vue UI）之上。Vue 弹窗（fixed 定位）渲染在主 webview 里，被 child 盖住看不见。**解法**：弹窗打开时 `set_webview_visible(false)` 隐藏所有 child webview → 弹窗可见 → 关闭时 `set_webview_visible(true)` 恢复
+- **窗口最小尺寸约束**：Tauri 窗口默认最小 1280x800，`xdotool windowsize` 无法缩小；最大化用 `wmctrl -i -r <WID> -b add,maximized_vert,maximized_horz`，还原 remove 可能不生效（窗口位置跑偏），直接杀进程重启恢复默认
+- **xdotool 点击坐标基于窗口内容区**：窗口被 WM 移动/resize 后，绝对坐标失效；`mousemove --window <wid>` 相对坐标也要注意窗口实际尺寸（`getwindowgeometry` 为准），弹窗/表单元素位置会随窗口大小变化
+
+---
+
+## 2026-09-11 22:30 — 密码管理 UI 测试（insight）
+
+**类别**: insight
+**场景**: ShiftBrowser Tauri 密码管理弹窗 GUI 验证
+**要点**:
+- **弹窗验证用像素差异对比**：OCR 识别不了深色弹窗小字（遮罩叠加后对比度低），改用"点击前 vs 点击后"截图采样对比（`getpixel` 差异点数量 + 分布）判断表单是否展开——6057 个差异点、y=500-700 密集 = 输入框+按钮新增
+- **表单输入无法自动化**：WebKitGTK 忽略合成键盘字符（xdotool type 无效），粘贴（ctrl+v）可填输入框但点击保存按钮位置难定位（表单展开后元素坐标变化）；密码保存的完整验证只能由高哥手动操作
+- **`set_webview_visible` 命令**：`tabs.rs` 里遍历 TabManager 的标签 id 逐个 `get_webview` 隐藏/显示（不能用 `window.webviews()`，它不含 child）

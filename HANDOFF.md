@@ -316,14 +316,17 @@ let pool = SqlitePoolOptions::new()
  10. **db 扩展模块已完成**：新增 `db/sessions.rs`（save_session/load_last_session/list_sessions/delete_session，data 字段存标签 JSON 快照）、`db/downloads.rs`（create_download/update_download_progress/get_downloads/delete_download）、`db/tab_groups.rs`（CRUD）、`db/workspaces.rs`（CRUD）；`db/mod.rs` 声明 + lib.rs 全部注册
  11. **密码加密存储已完成**：`db/passwords.rs` 用 AES-256-GCM（依赖 `aes-gcm 0.10` + `rand 0.8` + `base64 0.22`），主密钥随机 32 字节存 settings 表（key=master_key），每条密码随机 12 字节 nonce + 密文 base64；命令 save_password/get_password/get_passwords_for_domain/delete_password。**验证**：3 个单元测试通过（加解密往返、随机 nonce 密文不同、错误密钥解密失败）
  12. **会话恢复已完成**：前端 `stores/tabs.ts` 加 `restoreLastSession()`（load_last_session → 解析 JSON → 逐个 createTab 恢复）/`saveCurrentSession()`；`App.vue` 启动时无标签则恢复会话（失败才创建默认标签）+ watch 标签变化 3 秒防抖自动保存。**验证**：数据库 sessions 表有自动保存记录（`https://cn.bing.com/`），重启后 `create_tab: url=https://cn.bing.com/`（恢复上次会话）✓
+ 13. **密码管理 UI 骨架已完成**：Rust 侧 `tabs.rs` 加 `list_passwords` 命令 + `set_webview_visible` 命令；前端新增 `components/PasswordsDialog.vue`（弹窗组件：列表/添加表单/查看密码/删除）+ `stores/passwords.ts`。**关键发现**：child webview 是独立 GTK 部件，用 GtkFixed 绝对定位叠在主 webview（Vue UI）之上，导致 Vue 弹窗被 child 遮挡看不见。**解法**：`set_webview_visible` 命令先 hide 所有标签 webview → 弹窗可见 → 关闭时 show 恢复。验证：点击菜单按钮 `set_webview_visible: visible=false count=1`，截图弹窗面板渲染成功，点击"+ 添加密码"表单展开（像素差异 6057 个采样点）✓
+ 14. **窗口 resize 同步已完成**：Rust 侧 `setup_gtk_layout` 注册 `on_window_event` 监听 Resized → 更新 Fixed 内主 webview 全屏 + child webview 位置/尺寸（w, h-134）。**验证**：`wmctrl` 最大化到 1920x1011 → 日志 `window resized: 1920x1011 content_h=877` → 截图确认地址栏/标签栏/书签栏铺满 1920 宽、内容区 1920x877、状态栏正常 ✓
+ 15. **git 仓库已初始化**：`.gitignore` 排除 node_modules/dist/target/learnings/db，首次提交 `7c2df83`（57 个文件）
 
 ### 8.2 待办（下一步）
 
-1. **P1**：密码管理 UI（保存/查看/删除密码的界面）
+1. **P1**：密码管理 UI 完整功能验证（表单输入受限于 WebKitGTK 合成键盘，需高哥手动测试添加/查看/删除密码）
 2. **P1**：下载管理 UI（下载记录列表/进度展示）
 3. **P1**：标签分组/工作区 UI（对应 Rust 命令已就绪）
-4. **P2**：窗口 resize 时同步 Fixed 内 webview 尺寸（当前硬编码 1280x800）
-5. **P2**：初始化 git 仓库
+4. **已解决**：~~P2：窗口 resize 时同步 Fixed 内 webview 尺寸~~ → 14. 已完成，on_window_event 监听
+5. **已解决**：~~P2：初始化 git 仓库~~ → 15. 已完成
 
 ### 8.3 测试环境注意事项
 
@@ -332,6 +335,9 @@ let pool = SqlitePoolOptions::new()
 - **日志**：Rust 命令有 `[tabs]` 前缀 println（create/close/switch/navigate 都打日志），验证交互看 `/tmp/shift-browser.log`
 - **⚠️ IME 干扰**：系统有中文输入法时，`xdotool type` 输入的 ASCII 会被 IME 当拼音转换（如 "baidu" → "豆包"），导致地址栏输入测试不可靠。绕过方式：`xclip` 设置剪贴板 + `ctrl+v` 粘贴，或直接改前端默认 URL 验证
 - **OCR 验证**：`import -window <wid>` 截图 + `tesseract` OCR 可识别界面文字（标签标题、输入框内容）；裁剪区域放大 3-4 倍 + `ImageOps.autocontrast` 提高识别率
+- **窗口 resize 测试**：窗口有最小尺寸约束（1280x800），`xdotool windowsize` 无法缩小；最大化用 `wmctrl -i -r <WID> -b add,maximized_vert,maximized_horz`，还原用 `wmctrl -i -r <WID> -b remove,...`（可能不生效，直接杀进程重启恢复默认 1280x800）
+- **WebKitGTK 合成键盘限制**：`xdotool type` 无法在 WebKitGTK 输入文字字符（合成键盘事件被忽略），但 ctrl 组合键（ctrl+a/ctrl+v）有效。密码管理 UI 的表单输入只能由高哥手动操作
+- **滚动条**：Bing 首页内容不足一屏时无滚动条（WebKitGTK 正常行为），百度等长页面有滚动条
 
 ---
 

@@ -242,6 +242,58 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
       })
       .map_err(|e| format!("主 webview 句柄获取失败: {}", e))?;
   }
+
+  // 注册窗口 resize 监听：同步 Fixed 内所有 webview 的位置和尺寸
+  // （主 webview 全屏铺满，child webview 到 (0, CONTENT_TOP_OFFSET) 高 h-134）
+  let app_handle = app.handle().clone();
+  if let Some(window) = app.get_window("main") {
+    window.on_window_event(move |event| {
+      if let tauri::WindowEvent::Resized(size) = event {
+        let w = size.width as i32;
+        let h = size.height as i32;
+        let content_h = (h as f64 - CONTENT_TOP_OFFSET - STATUS_BAR_HEIGHT).max(100.0) as i32;
+        println!(
+          "[tabs] window resized: {}x{} content_h={}",
+          w, h, content_h
+        );
+
+        // 主 webview 全屏
+        if let Some(main_wv) = app_handle.get_webview("main") {
+          main_wv.with_webview(move |pwv| {
+            let gtk_wv = pwv.inner();
+            if let Some(fixed) = gtk_wv
+              .parent()
+              .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
+            {
+              fixed.move_(&gtk_wv, 0, 0);
+            }
+            gtk_wv.set_size_request(w, h);
+          });
+        }
+
+        // child webviews：位置 (0, CONTENT_TOP_OFFSET)，尺寸 (w, content_h)
+        if let Some(state) = app_handle.try_state::<TabManager>() {
+          let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
+          for id in ids {
+            let label = format!("tab-{}", id);
+            if let Some(wv) = app_handle.get_webview(&label) {
+              wv.with_webview(move |pwv| {
+                let gtk_wv = pwv.inner();
+                if let Some(fixed) = gtk_wv
+                  .parent()
+                  .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
+                {
+                  fixed.move_(&gtk_wv, 0, CONTENT_TOP_OFFSET as i32);
+                }
+                gtk_wv.set_size_request(w, content_h);
+              });
+            }
+          }
+        }
+      }
+    });
+  }
+
   Ok(())
 }
 
@@ -443,6 +495,38 @@ pub async fn navigate_tab(
 #[tauri::command]
 pub async fn get_tabs(state: tauri::State<'_, TabManager>) -> Result<Vec<Tab>, String> {
   Ok(state.all_tabs())
+}
+
+/// 隐藏/显示所有标签页 webview（弹窗/菜单等 Vue UI 覆盖层需要）
+#[tauri::command]
+pub async fn set_webview_visible(
+  app: AppHandle,
+  state: tauri::State<'_, TabManager>,
+  visible: bool,
+) -> Result<(), String> {
+  let window = app
+    .get_window("main")
+    .ok_or_else(|| "主窗口不存在".to_string())?;
+  // 注意：child webview 不在 window.webviews() 列表里（只有 main），
+  // 必须从 TabManager 拿已知标签逐个 get_webview
+  let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
+  let mut count = 0usize;
+  for id in ids {
+    let label = format!("tab-{}", id);
+    if let Some(wv) = window.get_webview(&label) {
+      if visible {
+        wv.show();
+      } else {
+        wv.hide();
+      }
+      count += 1;
+    }
+  }
+  println!(
+    "[tabs] set_webview_visible: visible={} count={}",
+    visible, count
+  );
+  Ok(())
 }
 
 /// 后退（对当前活动标签执行 history.back()）
