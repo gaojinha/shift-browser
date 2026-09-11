@@ -327,15 +327,36 @@ let pool = SqlitePoolOptions::new()
     - **弹窗显示但点不了**：GtkOverlay 重构后 Fixed 在 overlay 上层**填满整个窗口**，拦截所有点击（地址栏按钮、弹窗按钮都收不到）→ ① Fixed 用 `set_valign(Start)` + `set_margin_top(112)` 定位到内容区（不覆盖地址栏）；② `set_webview_visible(false)` 时**连 Fixed 一起 hide**（弹窗可交互），恢复时 show
     - **验证**：点后退按钮有 `go_back` 日志（点击到达 Vue UI）；点 ⋮ → `visible=false count=3` → 弹窗遮罩 (#13,13,13) + 面板 (#222) 渲染；点"+ 添加密码" → 表单展开（输入框 11688 像素）
 
+ 20. **GtkOverlay 布局修正**：Fixed 容器用 `set_valign(Start)` + `set_margin_top(112)` 定位到内容区，不再覆盖地址栏/标签栏/书签栏；`set_webview_visible` 命令同时 hide/show Fixed（否则 Fixed 覆盖整个窗口拦截弹窗点击）。**验证**：地址栏按钮可点击（visible=true 时有 go_back 日志），弹窗按钮可交互
+ 21. **地址栏 ⋮ 菜单修复**：原 ⋮ 下拉菜单在 WebKitGTK 中菜单项文字不渲染（高度塌陷 25px）+ 点击菜单项后弹窗瞬间打开又关闭（WebKitGTK 合成 click 事件穿透到新渲染的遮罩 backdrop）。**解法**：去掉下拉菜单，改为 🔑（密码管理）和 🗂（标签分组）两个直接按钮
+ 22. **弹窗遮罩 @click.self 关闭去掉**：WebKitGTK 中合成点击事件会穿透到新渲染的遮罩，触发 `@click.self="emit('close')"` 导致弹窗瞬间关闭。PasswordsDialog/GroupsDialog 遮罩改为纯展示，只用 ✕ 按钮关闭
+ 23. **标签分组 UI 骨架已完成**（commit 57d9caf）：
+     - **前端**：`types/tab.ts` 加 `groupId`，`stores/groups.ts` 新建（loadGroups/createGroup/updateGroup/deleteGroup），`stores/tabs.ts` 保留 groupId + assignTabToGroup
+     - **TabBar.vue** 重写：分组头显示（颜色条 + 折叠/展开 + 计数），右键菜单分配分组（移动到分组/取消分组/新建分组并移动）
+     - **GroupsDialog.vue** 新建：创建/重命名/改色（8色选择器）/删除分组
+     - **App.vue**：GroupsDialog 接入 + loadGroups 启动时**并行加载**（不等 loadTabs/restoreLastSession，避免右键菜单打开时分组为空）
+     - **TabBar 右键菜单兜底加载**：打开时如果 groups 为空自动 loadGroups
+     - **WebKitGTK 兼容**：prompt() 不显示 → 默认名"新分组 N"；confirm() 不显示 → 删除分组不确认
+ 24. **标签分组功能已验证**：
+     - ✅ GroupsDialog 打开/关闭正常（set_webview_visible false/true + 面板渲染）
+     - ✅ 新建分组（"工作"）成功：数据库 tab_groups 1 条（id=1, name=工作, color=#4a9eff）
+     - ✅ 分组列表显示（工作/生活/娱乐 3 个分组，含颜色点 + 删除按钮）
+     - ✅ 组头在 TabBar 显示（颜色条 + 名字 + 计数 + ▶/▼ 按钮），3 个组头间距正确
+     - ✅ 折叠/展开功能：点击 ▼ 按钮切换 collapsed 状态，数据库同步更新
+     - ✅ 右键标签 → "移动到分组" → 选分组 → TabBar 实时更新（组头 + 组内标签）
+     - ⚠️ 标签归组是前端运行时概念（tab.groupId 不持久化），重启后归组丢失
+
 ### 8.2 待办（下一步）
 
-1. **P1**：密码管理 UI 完整功能验证（表单输入受限于 WebKitGTK 合成键盘，需高哥手动测试添加/查看/删除密码）
+1. **P1**：密码管理 UI 完整功能验证（查看/删除密码，需高哥手动测试）
 2. **P1**：下载管理 UI（下载记录列表/进度展示）
-3. **P1**：标签分组/工作区 UI（对应 Rust 命令已就绪）
-4. **已解决**：~~P2：窗口 resize 时同步 Fixed 内 webview 尺寸~~ → 14. 已完成
-5. **已解决**：~~P2：初始化 git 仓库~~ → 15. 已完成
-6. **已解决**：~~窗口最大化后无法还原/调整大小~~ → 17. GtkOverlay 重构已完成
-7. **已解决**：~~target=_blank 链接打不开~~ → 16. on_new_window 已完成
+3. **P1**：标签分组持久化（groupId 重启后丢失 → 需决定持久化方案：sessions JSON 加字段 or 单独映射表）
+4. **P1**：GroupsDialog 重命名/改色/删除分组验证
+5. **已解决**：~~P2：窗口 resize 时同步 Fixed 内 webview 尺寸~~ → 14. 已完成
+6. **已解决**：~~P2：初始化 git 仓库~~ → 15. 已完成
+7. **已解决**：~~窗口最大化后无法还原/调整大小~~ → 17. GtkOverlay 重构已完成
+8. **已解决**：~~target=_blank 链接打不开~~ → 16. on_new_window 已完成
+9. **已解决**：~~标签分组/工作区 UI~~ → 23-24. 分组 UI 骨架 + 功能验证已完成
 
 ### 8.3 测试环境注意事项
 
