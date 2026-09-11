@@ -1,0 +1,16 @@
+# Node
+node_modules/
+dist/
+
+# Rust
+src-tauri/target/
+
+# 系统
+.DS_Store
+*.log
+*.tmp
+
+# 数据库（运行时生成，位于系统数据目录）
+*.db
+*.db-wal
+*.db-shm

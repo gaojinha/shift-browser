@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
+}
+
+:root {
+  --tab-bar-height: 40px;
+  --address-bar-height: 42px;
+  --bookmark-bar-height: 28px;
+  --ui-font: 12px;
+}
+
+/* 深色主题默认值 */
+body {
+  background: #1a1a1a;
+  color: #e0e0e0;
+  user-select: none;
+}
