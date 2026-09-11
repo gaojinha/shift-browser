@@ -319,14 +319,19 @@ let pool = SqlitePoolOptions::new()
  13. **密码管理 UI 骨架已完成**：Rust 侧 `tabs.rs` 加 `list_passwords` 命令 + `set_webview_visible` 命令；前端新增 `components/PasswordsDialog.vue`（弹窗组件：列表/添加表单/查看密码/删除）+ `stores/passwords.ts`。**关键发现**：child webview 是独立 GTK 部件，用 GtkFixed 绝对定位叠在主 webview（Vue UI）之上，导致 Vue 弹窗被 child 遮挡看不见。**解法**：`set_webview_visible` 命令先 hide 所有标签 webview → 弹窗可见 → 关闭时 show 恢复。验证：点击菜单按钮 `set_webview_visible: visible=false count=1`，截图弹窗面板渲染成功，点击"+ 添加密码"表单展开（像素差异 6057 个采样点）✓
  14. **窗口 resize 同步已完成**：Rust 侧 `setup_gtk_layout` 注册 `on_window_event` 监听 Resized → 更新 Fixed 内主 webview 全屏 + child webview 位置/尺寸（w, h-134）。**验证**：`wmctrl` 最大化到 1920x1011 → 日志 `window resized: 1920x1011 content_h=877` → 截图确认地址栏/标签栏/书签栏铺满 1920 宽、内容区 1920x877、状态栏正常 ✓
  15. **git 仓库已初始化**：`.gitignore` 排除 node_modules/dist/target/learnings/db，首次提交 `7c2df83`（57 个文件）
+ 16. **target=_blank / window.open 链接已处理**：Rust 侧 `WebviewBuilder::on_new_window` 回调——MVP 方案：在**当前 webview** 导航到链接 URL（`wv.navigate`），返回 `NewWindowResponse::Deny` 不创建新窗口。**关键**：webkit2gtk 的 `javascript_can_open_windows_automatically` 默认 false（JS 不能自动开窗口），需在 `fix_gtk_layout` 里用 `Settings::builder().javascript_can_open_windows_automatically(true).build()` + `WebViewExt::set_settings` 开启（Cargo.toml 加 `webkit2gtk = "=2.0"` 依赖）。**验证**：window.open 触发 `on_new_window: url=https://www.qq.com/` → 当前 webview 导航成功 → `page_load_finished: title=www.qq.com` ✓
+ 17. **GtkOverlay 布局重构（窗口还原修复）**：原 GtkFixed 方案把主 webview `set_size_request(窗口尺寸)` 导致窗口 natural size 被撑大（1920x1011），WM 无法缩小窗口（最大化后还原失败、无法手工调整大小）。**重构**：窗口 vbox → [GtkOverlay] → 主 webview（主层，自动填满窗口，natural size 固定 1280x800）+ GtkFixed（上层，child webviews 绝对定位，natural size 固定 1280x800）；resize 监听**只更新 child webviews**（主 webview 在 overlay 主层自动跟随窗口）。**验证**：最大化 1920x1011（地址栏铺满 1920 宽、内容区 1920x877）→ 还原 1280x800 ✓ 循环多次正常
+ 18. **滚动问题排查结论（非 bug）**：Bing 首页 `scrollHeight 666 ≈ 视口 666`（内容刚好一屏，无滚动条正常）；网易等长页面可正常滚动。之前 xdotool 滚轮/PageDown 测试"失效"是**合成事件不被 WebKitGTK 处理**（同合成键盘），真实用户操作正常
 
 ### 8.2 待办（下一步）
 
 1. **P1**：密码管理 UI 完整功能验证（表单输入受限于 WebKitGTK 合成键盘，需高哥手动测试添加/查看/删除密码）
 2. **P1**：下载管理 UI（下载记录列表/进度展示）
 3. **P1**：标签分组/工作区 UI（对应 Rust 命令已就绪）
-4. **已解决**：~~P2：窗口 resize 时同步 Fixed 内 webview 尺寸~~ → 14. 已完成，on_window_event 监听
+4. **已解决**：~~P2：窗口 resize 时同步 Fixed 内 webview 尺寸~~ → 14. 已完成
 5. **已解决**：~~P2：初始化 git 仓库~~ → 15. 已完成
+6. **已解决**：~~窗口最大化后无法还原/调整大小~~ → 17. GtkOverlay 重构已完成
+7. **已解决**：~~target=_blank 链接打不开~~ → 16. on_new_window 已完成
 
 ### 8.3 测试环境注意事项
 
@@ -335,7 +340,7 @@ let pool = SqlitePoolOptions::new()
 - **日志**：Rust 命令有 `[tabs]` 前缀 println（create/close/switch/navigate 都打日志），验证交互看 `/tmp/shift-browser.log`
 - **⚠️ IME 干扰**：系统有中文输入法时，`xdotool type` 输入的 ASCII 会被 IME 当拼音转换（如 "baidu" → "豆包"），导致地址栏输入测试不可靠。绕过方式：`xclip` 设置剪贴板 + `ctrl+v` 粘贴，或直接改前端默认 URL 验证
 - **OCR 验证**：`import -window <wid>` 截图 + `tesseract` OCR 可识别界面文字（标签标题、输入框内容）；裁剪区域放大 3-4 倍 + `ImageOps.autocontrast` 提高识别率
-- **窗口 resize 测试**：窗口有最小尺寸约束（1280x800），`xdotool windowsize` 无法缩小；最大化用 `wmctrl -i -r <WID> -b add,maximized_vert,maximized_horz`，还原用 `wmctrl -i -r <WID> -b remove,...`（可能不生效，直接杀进程重启恢复默认 1280x800）
+- **窗口 resize 测试**：窗口有最小尺寸约束（1280x800），`xdotool windowsize` 无法缩小；最大化用 `wmctrl -i -r <WID> -b add,maximized_vert,maximized_horz`，还原用 `wmctrl -i -r <WID> -b remove,...`（GtkOverlay 方案后还原正常）
 - **WebKitGTK 合成键盘限制**：`xdotool type` 无法在 WebKitGTK 输入文字字符（合成键盘事件被忽略），但 ctrl 组合键（ctrl+a/ctrl+v）有效。密码管理 UI 的表单输入只能由高哥手动操作
 - **滚动条**：Bing 首页内容不足一屏时无滚动条（WebKitGTK 正常行为），百度等长页面有滚动条
 

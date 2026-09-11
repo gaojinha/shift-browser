@@ -116,3 +116,43 @@ Corrections, insights, and knowledge gaps captured during development.
 - **弹窗验证用像素差异对比**：OCR 识别不了深色弹窗小字（遮罩叠加后对比度低），改用"点击前 vs 点击后"截图采样对比（`getpixel` 差异点数量 + 分布）判断表单是否展开——6057 个差异点、y=500-700 密集 = 输入框+按钮新增
 - **表单输入无法自动化**：WebKitGTK 忽略合成键盘字符（xdotool type 无效），粘贴（ctrl+v）可填输入框但点击保存按钮位置难定位（表单展开后元素坐标变化）；密码保存的完整验证只能由高哥手动操作
 - **`set_webview_visible` 命令**：`tabs.rs` 里遍历 TabManager 的标签 id 逐个 `get_webview` 隐藏/显示（不能用 `window.webviews()`，它不含 child）
+
+---
+
+## 2026-09-11 23:30 — GtkOverlay 布局与窗口 natural size（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser Tauri，GtkFixed 方案下窗口最大化后无法还原/调整大小
+**要点**:
+- **根因**：GtkFixed 里主 webview 用 `set_size_request(窗口尺寸)` 跟随窗口 → 主 webview 的 size_request 撑大窗口 **natural size**（1920x1011）→ GTK 窗口无法缩小到小于 natural size → WM 还原失败（`wmctrl remove` 不生效、`wmctrl -e` 也拒绝）
+- **GtkFixed 的特性**：子部件实际分配尺寸 = size request（fixed 的 allocate 按 size_request 分配），`size_allocate` 会被下一次布局循环覆盖；要改变子部件尺寸必须 `set_size_request`
+- **解法：GtkOverlay 双层布局**：窗口 vbox → [GtkOverlay] → 主 webview（**主层**，GTK 自动填满 overlay，不需要手动 size_request）+ GtkFixed（**上层**，child webviews 绝对定位）。主 webview 和 Fixed 的 natural size 都固定 1280x800（初始 set_size_request），窗口可正常缩小；最大化时主 webview 自动铺满、child webviews 由 resize 监听更新 size_request
+- **GtkOverlay API**：`overlay.add(&main)` 主层（自动填满）；`overlay.add_overlay(&fixed)` 上层（覆盖在主层之上）；`overlay.children()` 包含主层+上层所有子部件
+- **resize 监听只更新 child webviews**：主 webview 在 overlay 主层自动跟随窗口（GTK 管理），不需要也不应该手动 set_size_request
+- **验证**：最大化 1920x1011（地址栏铺满 1920 宽）→ 还原 1280x800 ✓ 循环多次正常
+
+---
+
+## 2026-09-11 23:30 — target=_blank 新窗口处理（knowledge_gap）
+
+**类别**: knowledge_gap
+**场景**: ShiftBrowser Tauri，点击 target=_blank 链接无反应
+**要点**:
+- **Tauri 2 WebviewBuilder::on_new_window**：回调 `Fn(Url, NewWindowFeatures) -> NewWindowResponse`，返回 `Deny` 拒绝新窗口 / `Allow` 默认创建 / `Create{window}` 指定窗口。MVP 方案：回调里 `wv.navigate(url)` 在**当前 webview** 打开链接 + 返回 `Deny`
+- **关键前置**：webkit2gtk 的 `javascript_can_open_windows_automatically` **默认 false**——JS 的 window.open / target=_blank 不触发 create 信号，on_new_window 回调根本不会执行！必须开启：`webkit2gtk::Settings::builder().javascript_can_open_windows_automatically(true).build()` + `WebViewExt::set_settings(&settings)`
+- **webkit2gtk Settings 无 setter**：`impl Settings` 只有 new/builder/font_size 方法，所有配置在 **SettingsBuilder** 上（`settings.set_xxx()` 不存在！），必须 builder 创建新 Settings 再 `set_settings` 替换
+- **方法遮蔽**：`webkit2gtk::WebView` 继承 gtk::Widget，`webview.settings()` 解析到 `gtk::WidgetExt::settings()`（返回 gtk::Settings），不是 WebKitSettings！必须显式 `webkit2gtk::WebViewExt::settings(&webview)` 或 `webview.set_settings(&settings)`（WebViewExt 的 set_settings）
+- **Cargo 依赖**：`webkit2gtk = { version = "=2.0", features = ["v2_40"] }`（与 tauri-runtime-wry 同版本）
+- **验证**：window.open 触发 `on_new_window: url=https://www.qq.com/` → 当前 webview 导航成功 → `page_load_finished: title=www.qq.com`
+- **调试技巧**：eval 注入 JS 构造 target=_blank 链接 + window.open 验证 create 信号；但 eval 的 `a.click()` 合成点击可能不算"用户手势"不触发 create，window.open 更可靠
+
+---
+
+## 2026-09-11 23:30 — 合成事件与滚动测试（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser Tauri，xdotool 滚轮/PageDown 测试"滚动失效"
+**要点**:
+- **xdotool 合成滚轮/键盘事件不被 WebKitGTK 处理**（同合成键盘字符）：`xdotool click 5`（滚轮下）、`xdotool key Page_Down` 对 child webview 无效，页面零变化——**不是 bug，是自动化测试限制**，真实用户滚轮/键盘正常（高哥实测网易能滚动）
+- **判断页面是否需要滚动**：用 eval 检查 `document.documentElement.scrollHeight vs window.innerHeight`——Bing 首页 `SH:666x666`（内容刚好一屏，无滚动条正常）；网易等长页面 scrollHeight 远超视口，有滚动条
+- **验证事件是否到达 webview**：eval 注入 `document.addEventListener('click', e => document.title = 'CLICK:'+e.clientX+','+e.clientY)`，配合 `on_document_title_changed` 回调打印日志——点击 (640,400) → `CLICK:640,288`（y 差 112 = CONTENT_TOP_OFFSET，坐标转换正确，事件路由正常）

@@ -9,6 +9,8 @@ use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewBuilder, We
 
 #[cfg(target_os = "linux")]
 use gtk::prelude::*;
+#[cfg(target_os = "linux")]
+use webkit2gtk::WebViewExt;
 
 // UI 布局常量（与前端 CSS 保持一致）
 pub const TAB_BAR_HEIGHT: f64 = 40.0;
@@ -104,11 +106,21 @@ impl TabManager {
 
     // 页面加载完成时同步标题（用 host 作标题，MVP 阶段）
     let app_handle = app.clone();
+    let app_handle2 = app_handle.clone();
     let tab_id = id.to_string();
+    let label = format!("tab-{}", id);
     let child = window
       .add_child(
-        WebviewBuilder::new(format!("tab-{}", id), WebviewUrl::External(parsed_url))
-          .on_page_load(move |_webview, payload| {
+        WebviewBuilder::new(label.clone(), WebviewUrl::External(parsed_url))
+          // target=_blank / window.open 新窗口请求：MVP 在当前 webview 导航，不创建新窗口
+          .on_new_window(move |url, _features| {
+            println!("[tabs] on_new_window: url={}", url);
+            if let Some(wv) = app_handle.get_webview(&label) {
+              let _ = wv.navigate(url.clone());
+            }
+            tauri::webview::NewWindowResponse::Deny
+          })
+.on_page_load(move |_webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
               let url = payload.url();
               let host = url.host_str().unwrap_or("").to_string();
@@ -120,7 +132,7 @@ impl TabManager {
 
               println!("[tabs] page_load_finished: tab={} title={}", tab_id, title);
 
-              if let Some(state) = app_handle.try_state::<TabManager>() {
+              if let Some(state) = app_handle2.try_state::<TabManager>() {
                 let mut tabs = state.tabs.lock().unwrap();
                 if let Some(tab) = tabs.get_mut(&tab_id) {
                   tab.url = url.to_string();
@@ -170,11 +182,28 @@ impl TabManager {
           vbox.remove(&child_gtk);
           fixed.put(&child_gtk, 0, CONTENT_TOP_OFFSET as i32);
           child_gtk.set_size_request(w as i32, h as i32);
+          // 允许 JS 自动打开窗口（target=_blank / window.open 触发 create 信号）
+          let settings = webkit2gtk::Settings::builder()
+            .javascript_can_open_windows_automatically(true)
+            .build();
+          child_gtk.set_settings(&settings);
           child_gtk.show();
           println!(
             "[tabs] child_webview reparent 到 Fixed: pos=(0,{}) size=({:.0},{:.0})",
             CONTENT_TOP_OFFSET, w, h
           );
+          // 布局完成后打印实际分配尺寸（idle 延迟，等 GTK 布局循环）
+          let child_gtk2 = child_gtk.clone();
+          gtk::glib::idle_add_local_once(move || {
+            let alloc = child_gtk2.allocation();
+            println!(
+              "[tabs] child allocation: {}x{} at ({},{})",
+              alloc.width(),
+              alloc.height(),
+              alloc.x(),
+              alloc.y()
+            );
+          });
         } else {
           println!("[tabs] child_webview 的 parent 不是 GtkBox，跳过 reparent");
         }
@@ -217,7 +246,8 @@ impl TabManager {
 }
 
 /// 应用启动时初始化 GTK 布局（setup 阶段调用，主线程）
-/// 创建 GtkFixed 容器并 reparent 主 webview，为 child webview 绝对定位做准备
+/// 布局结构：窗口 vbox → [GtkOverlay] → 主 webview（主层，自动填满）+ GtkFixed（上层，child webviews 绝对定位）
+/// 主 webview 在 overlay 主层自动跟随窗口（不手动改 size_request，避免撑大窗口 natural size 导致无法缩小）
 #[cfg(target_os = "linux")]
 pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
   if let Some(main_wv) = app.get_webview("main") {
@@ -229,13 +259,24 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
           .parent()
           .and_then(|p| p.dynamic_cast::<gtk::Box>().ok())
         {
-          let fixed = find_or_create_fixed(&vbox);
-          // gtk-rs 0.18 无 reparent：先从 vbox 移除再放入 Fixed
+          // 创建 GtkOverlay 挂到 vbox（填满窗口）
+          let overlay = gtk::Overlay::new();
           vbox.remove(&main_gtk);
-          fixed.put(&main_gtk, 0, 0);
+          vbox.pack_start(&overlay, true, true, 0);
+          overlay.show();
+
+          // 主 webview 放主层：自动填满 overlay，natural size 固定 1280x800
+          overlay.add(&main_gtk);
           main_gtk.set_size_request(1280, 800);
           main_gtk.show();
-          println!("[tabs] setup: 主 webview reparent 到 Fixed (1280x800)");
+
+          // GtkFixed 放上层：child webviews 绝对定位；natural size 固定 1280x800（避免撑大窗口）
+          let fixed = gtk::Fixed::new();
+          fixed.set_size_request(1280, 800);
+          overlay.add_overlay(&fixed);
+          fixed.show();
+
+          println!("[tabs] setup: GtkOverlay 布局初始化完成");
         } else {
           println!("[tabs] setup: 主 webview 的 parent 不是 GtkBox，跳过 reparent");
         }
@@ -243,8 +284,7 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
       .map_err(|e| format!("主 webview 句柄获取失败: {}", e))?;
   }
 
-  // 注册窗口 resize 监听：同步 Fixed 内所有 webview 的位置和尺寸
-  // （主 webview 全屏铺满，child webview 到 (0, CONTENT_TOP_OFFSET) 高 h-134）
+  // 注册窗口 resize 监听：只同步 child webviews（主 webview 在 overlay 主层自动跟随窗口）
   let app_handle = app.handle().clone();
   if let Some(window) = app.get_window("main") {
     window.on_window_event(move |event| {
@@ -256,20 +296,6 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
           "[tabs] window resized: {}x{} content_h={}",
           w, h, content_h
         );
-
-        // 主 webview 全屏
-        if let Some(main_wv) = app_handle.get_webview("main") {
-          main_wv.with_webview(move |pwv| {
-            let gtk_wv = pwv.inner();
-            if let Some(fixed) = gtk_wv
-              .parent()
-              .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
-            {
-              fixed.move_(&gtk_wv, 0, 0);
-            }
-            gtk_wv.set_size_request(w, h);
-          });
-        }
 
         // child webviews：位置 (0, CONTENT_TOP_OFFSET)，尺寸 (w, content_h)
         if let Some(state) = app_handle.try_state::<TabManager>() {
@@ -297,9 +323,26 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
   Ok(())
 }
 
-/// 从 vbox 查找已创建的 GtkFixed 容器，不存在则创建并挂到 vbox（填满窗口）
+/// 从 vbox 查找 GtkOverlay 里的 GtkFixed 容器，不存在则创建并挂到 vbox（兜底）
 #[cfg(target_os = "linux")]
 fn find_or_create_fixed(vbox: &gtk::Box) -> gtk::Fixed {
+  // 优先：vbox → GtkOverlay → GtkFixed
+  if let Some(overlay) = vbox
+    .children()
+    .iter()
+    .find(|c| c.type_().name() == "GtkOverlay")
+    .and_then(|c| c.dynamic_cast_ref::<gtk::Overlay>().map(|o| o.clone()))
+  {
+    if let Some(f) = overlay
+      .children()
+      .iter()
+      .find(|c| c.type_().name() == "GtkFixed")
+      .and_then(|c| c.dynamic_cast_ref::<gtk::Fixed>().map(|f| f.clone()))
+    {
+      return f;
+    }
+  }
+  // 兜底：vbox 直接找 Fixed
   if let Some(f) = vbox
     .children()
     .iter()
