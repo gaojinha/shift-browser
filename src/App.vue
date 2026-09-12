@@ -8,6 +8,7 @@ import BookmarksBar from './components/BookmarksBar.vue'
 import StatusBar from './components/StatusBar.vue'
 import PasswordsDialog from './components/PasswordsDialog.vue'
 import GroupsDialog from './components/GroupsDialog.vue'
+import DownloadsDialog from './components/DownloadsDialog.vue'
 import { useTabsStore } from './stores/tabs'
 import { useGroupsStore } from './stores/groups'
 
@@ -15,6 +16,7 @@ const tabsStore = useTabsStore()
 const groupsStore = useGroupsStore()
 const showPasswords = ref(false)
 const showGroups = ref(false)
+const showDownloads = ref(false)
 let saveTimer: number | null = null
 
 onMounted(async () => {
@@ -53,13 +55,18 @@ watch(
 <template>
   <div class="app">
     <TabBar />
-    <AddressBar @open-passwords="showPasswords = true" @open-groups="showGroups = true" />
+    <AddressBar
+      @open-passwords="showPasswords = true"
+      @open-groups="showGroups = true"
+      @open-downloads="showDownloads = true"
+    />
     <BookmarksBar />
     <!-- 内容区：webview 由 Rust 以 (0, 112) 起盖住此区域 -->
     <div class="content-area" id="contentArea"></div>
     <StatusBar />
     <PasswordsDialog :show="showPasswords" @close="showPasswords = false" />
     <GroupsDialog :show="showGroups" @close="showGroups = false" />
+    <DownloadsDialog :show="showDownloads" @close="showDownloads = false" />
   </div>
 </template>
 

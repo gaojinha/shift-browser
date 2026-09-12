@@ -6,7 +6,11 @@ import { useTabsStore } from '../stores/tabs'
 const tabsStore = useTabsStore()
 const addressInput = ref('')
 
-const emit = defineEmits<{ (e: 'openPasswords'): void; (e: 'openGroups'): void }>()
+const emit = defineEmits<{
+  (e: 'openPasswords'): void
+  (e: 'openGroups'): void
+  (e: 'openDownloads'): void
+}>()
 
 // 当前活动标签变化时同步地址栏
 watch(
@@ -74,6 +78,7 @@ function onForward() {
     <button class="action-btn" title="收藏">☆</button>
     <button class="action-btn" title="密码管理" @click="emit('openPasswords')">🔑</button>
     <button class="action-btn" title="标签分组" @click="emit('openGroups')">🗂</button>
+    <button class="action-btn" title="下载管理" @click="emit('openDownloads')">⬇</button>
   </div>
 </template>
 

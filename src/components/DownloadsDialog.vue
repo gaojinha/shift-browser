@@ -1,0 +1,242 @@
+<script setup lang="ts">
+// 下载管理弹窗
+// 注意：child webview 是 GTK 部件盖在 Vue UI 上，弹窗会被页面盖住。
+// 因此显示时隐藏所有标签 webview（同 PasswordsDialog），关闭时恢复。
+import { watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { useDownloadsStore } from '../stores/downloads'
+
+const props = defineProps<{ show: boolean }>()
+const emit = defineEmits<{ (e: 'close'): void }>()
+
+const downloadsStore = useDownloadsStore()
+
+// 弹窗显示时隐藏所有标签 webview（child 盖在 Vue UI 上），关闭时恢复
+watch(
+  () => props.show,
+  async (v) => {
+    if (v) {
+      await downloadsStore.loadDownloads()
+    }
+    await invoke('set_webview_visible', { visible: !v })
+  }
+)
+
+/** 格式化字节数（B/KB/MB） */
+function formatBytes(n: number): string {
+  if (n <= 0) return '0 B'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+/** 进度百分比 */
+function percent(d: { total_bytes: number; received_bytes: number }): number {
+  if (d.total_bytes <= 0) return 0
+  return Math.min(100, Math.round((d.received_bytes / d.total_bytes) * 100))
+}
+
+/** 状态文字 + 颜色 */
+function stateInfo(state: string): { text: string; cls: string } {
+  switch (state) {
+    case 'completed':
+      return { text: '已完成', cls: 'state-done' }
+    case 'failed':
+      return { text: '失败', cls: 'state-fail' }
+    case 'cancelled':
+      return { text: '已取消', cls: 'state-cancel' }
+    default:
+      return { text: '下载中', cls: 'state-run' }
+  }
+}
+
+async function onDelete(id: number) {
+  await downloadsStore.deleteDownload(id)
+}
+</script>
+
+<template>
+  <div class="dialog-overlay" v-if="props.show">
+    <div class="dialog">
+      <div class="dialog-header">
+        <span>下载管理</span>
+        <button class="close-btn" @click="emit('close')">✕</button>
+      </div>
+
+      <div class="dialog-body">
+        <div class="list" v-if="downloadsStore.list.length > 0">
+          <div v-for="d in downloadsStore.list" :key="d.id" class="item">
+            <div class="item-info">
+              <span class="item-name">{{ d.filename }}</span>
+              <span class="item-url">{{ d.url || '未知来源' }}</span>
+              <div class="item-progress">
+                <div class="progress-track">
+                  <div class="progress-fill" :style="{ width: percent(d) + '%' }"></div>
+                </div>
+                <span class="progress-text">
+                  {{ formatBytes(d.received_bytes) }} / {{ formatBytes(d.total_bytes) }}
+                  ({{ percent(d) }}%)
+                </span>
+              </div>
+            </div>
+            <div class="item-actions">
+              <span class="state" :class="stateInfo(d.state).cls">{{ stateInfo(d.state).text }}</span>
+              <button class="mini-btn danger" @click="onDelete(d.id)">删除</button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="empty">还没有下载记录</div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.dialog {
+  width: 520px;
+  max-height: 80vh;
+  background: #222;
+  border-radius: 10px;
+  border: 1px solid #444;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  color: #e0e0e0;
+  font-size: 14px;
+  border-bottom: 1px solid #333;
+}
+.close-btn {
+  border: none;
+  background: transparent;
+  color: #999;
+  font-size: 14px;
+  cursor: pointer;
+}
+.dialog-body {
+  padding: 12px 16px;
+  overflow-y: auto;
+}
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #2a2a2a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  gap: 10px;
+}
+.item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.item-name {
+  color: #e0e0e0;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item-url {
+  color: #888;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.progress-track {
+  flex: 1;
+  height: 6px;
+  background: #1e1e1e;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: #4a9eff;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+.progress-text {
+  color: #888;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.state {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.state-run {
+  color: #4a9eff;
+  background: rgba(74, 158, 255, 0.15);
+}
+.state-done {
+  color: #4ecb71;
+  background: rgba(78, 203, 113, 0.15);
+}
+.state-fail {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.15);
+}
+.state-cancel {
+  color: #999;
+  background: rgba(153, 153, 153, 0.15);
+}
+.mini-btn {
+  background: #3d3d3d;
+  color: #ccc;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mini-btn:hover {
+  background: #4a4a4a;
+}
+.mini-btn.danger:hover {
+  background: #5c2b2b;
+  color: #ff8a8a;
+}
+.empty {
+  color: #666;
+  font-size: 13px;
+  text-align: center;
+  padding: 24px 0;
+}
+</style>
