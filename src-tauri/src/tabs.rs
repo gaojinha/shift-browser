@@ -150,7 +150,10 @@ impl TabManager {
                 let mut tabs = state.tabs.lock().unwrap();
                 if let Some(tab) = tabs.get_mut(&tab_id) {
                   tab.url = url.to_string();
-                  tab.title = title;
+                  // 仅当还没有真标题（title-notify 未触发过）时用 host 占位，避免覆盖 document.title
+                  if tab.title.is_empty() || tab.title == tab.url {
+                    tab.title = title;
+                  }
                 }
               }
 
@@ -185,6 +188,33 @@ impl TabManager {
     {
       let db = app.state::<Db>();
       Self::fix_gtk_layout(&child, w, h, db.pool.clone(), app.clone())?;
+    }
+
+    // 监听 WebKit title 变化 → 实时同步标签标题（on_page_load 的 host 只是初始占位）
+    #[cfg(target_os = "linux")]
+    {
+      let app_for_title = app.clone();
+      let id_for_title = id.to_string();
+      let _ = child.with_webview(move |pwv| {
+        let wv = pwv.inner().clone();
+        let app2 = app_for_title;
+        let tab_id = id_for_title;
+        wv.connect_title_notify(move |webview| {
+          if let Some(t) = webview.title() {
+            let title = t.trim().to_string();
+            if title.is_empty() {
+              return;
+            }
+            if let Some(state) = app2.try_state::<TabManager>() {
+              if let Some(tab) = state.tabs.lock().unwrap().get_mut(&tab_id) {
+                if tab.title != title {
+                  tab.title = title;
+                }
+              }
+            }
+          }
+        });
+      });
     }
 
     // 新标签创建后重新注入扩展 + 广告拦截（新 webview 需要注入）
@@ -478,6 +508,30 @@ impl TabManager {
     Ok(())
   }
 
+  /// 标签切换专用：先 hide 旧标签再 show 新标签
+  /// 注意 1：绝不能在 run_on_main_thread 闭包里再调 wv.show()/hide()——
+  /// 那两个 API 内部是"主线程则直接 handle_user_message"的重入路径，
+  /// 在事件循环处理 Task 时重入会导致可见性变更静默失效（切换无反应）。
+  /// 注意 2：顺序必须 hide→show。GtkFixed 里后添加的 widget 盖在上面，
+  /// 若先 show 新再 hide 旧，旧标签（若后创建）会盖住新标签，
+  /// 表现为"切了标签内容不变，很久才变过来"。hide 先行后白屏空窗仅毫秒级。
+  fn switch_visibility(app: &AppHandle, show_id: &str, hide_id: Option<&str>) -> Result<(), String> {
+    let window = app
+      .get_window("main")
+      .ok_or_else(|| "主窗口不存在".to_string())?;
+    let show_wv = window
+      .get_webview(&format!("tab-{}", show_id))
+      .ok_or_else(|| "目标标签 webview 不存在".to_string())?;
+    let hide_wv = hide_id.and_then(|h| window.get_webview(&format!("tab-{}", h)));
+    // 先隐藏旧标签（避免 z-order 盖住新标签），再显示新标签
+    if let Some(wv) = &hide_wv {
+      let _ = wv.hide();
+    }
+    let _ = show_wv.show();
+    let _ = show_wv.set_focus();
+    Ok(())
+  }
+
   /// 关闭并销毁 webview
   fn destroy_webview(app: &AppHandle, id: &str) {
     let window = match app.get_window("main") {
@@ -750,11 +804,6 @@ pub async fn switch_tab(
     *active = Some(id.clone());
     old
   };
-  if let Some(old) = &old_active {
-    if old != &id {
-      let _ = TabManager::set_webview_visible(&app, old, false);
-    }
-  }
 
   // 更新激活状态
   {
@@ -768,8 +817,14 @@ pub async fn switch_tab(
     }
   }
 
-  // 显示目标 webview
-  let _ = TabManager::set_webview_visible(&app, &id, true);
+  // 切换可见性：一次主线程投递里"先显示新标签、再隐藏旧标签"
+  // （原实现 hide→show 两次投递且顺序相反，中间白屏空窗 + 双跨线程往返导致切换迟钝）
+  if old_active.as_deref() == Some(id.as_str()) {
+    // 点的就是当前标签：仅确保可见
+    let _ = TabManager::set_webview_visible(&app, &id, true);
+  } else {
+    let _ = TabManager::switch_visibility(&app, &id, old_active.as_deref());
+  }
 
   let tabs = state.tabs.lock().unwrap();
   Ok(tabs.get(&id).cloned())

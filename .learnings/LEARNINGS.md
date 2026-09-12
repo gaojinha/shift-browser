@@ -376,3 +376,24 @@ Corrections, insights, and knowledge gaps captured during development.
 - **注入必须跳过主 webview**（label=="main"，Vue UI）：`remove_all_scripts()` 会误删 Tauri 主 webview 的 UserScript（Vue UI 桥接），导致界面白屏崩溃
 - **allow_list 留空**：WebKitGTK 的 UserScript/UserStyleSheet allow_list 不识别 `"http://*"` 通配符格式，脚本不注入；跳过主 webview 后 child 都是外部网页，allow_list 留空安全
 - **注入只对刷新后的页面生效**：UserScript 在页面加载时执行，已打开的页面需刷新
+
+## 2026-09-12 广告拦截 CSS 规则块尾逗号坑
+- **错误**: 扩充 ADBLOCK_CSS 时，在中间选择器组后面用了 `{ display: none !important; },`（逗号结尾再接新组），CSS 语法不允许这种写法，导致后面整段规则失效。
+- **纠正**: 所有选择器合并到一个 `{ display: none !important; }` 块里，块与块之间不需要分隔符。
+- **教训**: 往 CSS 常量里加规则，先想清楚是"追加选择器到已有块"还是"新开一个块"，别混。
+
+## 2026-09-12 23:00 — 广告拦截误杀选择器（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser 广告拦截扩充 CSS/关键词
+**要点**:
+- `a[href*="tmall.com"]` 会把天猫购物页所有链接藏掉，联盟追踪才该拦（`uland.taobao` / `s.click.taobao` / `click.tb`）
+- `div[style*="position:fixed"][style*="z-index"]` 会误杀登录框、cookie 条、播放器，只拦 `z-index:2147483647` 这种广告弹层常用值
+- 文本关键词匹配必须限制容器大小（高度 ≤520、字数 4-400），否则「推广」「赞助」会把整页正文藏掉
+- 自定义关键词走 settings.`adblock_keywords` JSON，注入时拼进 JS 数组；UserScript 只在页面加载时执行，改词后要刷新页面
+
+## 2026-09-12 Tauri show/hide 不能包在 run_on_main_thread 里（重入失效）
+- **错误**: 为"减少往返"把 `wv.show()/wv.hide()` 包进 `app.run_on_main_thread(closure)`，结果切换标签页内容不切换，多点几次才偶尔生效。
+- **根因**: tauri-runtime-wry 的 `send_user_message` 在**主线程时直接重入 `handle_user_message`**（非主线程才 proxy.send_event 排队）。在事件循环处理 Task 闭包时重入，可见性变更静默失效。
+- **纠正**: webview 的 show/hide 直接在 async 命令线程调用——它们内部走 proxy 事件队列，入队顺序=执行顺序，天然保证"先 show 新再 hide 旧"。
+- **通用教训**: Tauri 的窗口/webview 操作 API 本身就是线程安全的（内部投递到主线程），**绝不要**再手动包 run_on_main_thread，那是套娃。

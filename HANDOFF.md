@@ -1,6 +1,6 @@
 # ShiftBrowser v5.0.0（Tauri 重构）交接文档
 
-> 最后更新：2026-09-12（下载管理真实下载流程 ✅：WebKit download 信号接入，下载记录/进度/完成/失败）
+> 最后更新：2026-09-12（广告拦截自定义关键词 ✅：设置里可手工加词 + CSS 规则扩充，误杀选择器已收紧）
 > 交接人：王二狗 → 下任 agent
 
 ---
@@ -416,7 +416,13 @@ let pool = SqlitePoolOptions::new()
      - **Rust**：`tabs.rs` 用 `WebContext::connect_download_started`（全局注册一次，static AtomicBool 防重复）——下载开始：从 URL 推断文件名 → 设置目的地 `~/Downloads/<文件名>` → 同步插入记录拿 id（block_on，避免进度回调拿不到 id）→ 注册 received_data（进度更新）/ finished（completed）/ failed 回调 → 每次变更 emit `downloads-updated` 事件
      - **前端**：`DownloadsDialog.vue` onMounted 监听 `downloads-updated` 事件，弹窗打开时实时刷新列表（进度条/状态）
      - **⚠️ WebKit 下载 API 要点**：WebView 无 download 信号（webkit2gtk-rs 2.0）→ 用 `WebContext::connect_download_started`（需 use WebContextExt）；Download 对象无 get_suggested_filename/get_uri → 用 `request().uri()`（需 URIRequestExt）推断文件名、`response().content_length()`（需 URIResponseExt）拿总字节
-     - **⚠️ 验证**：自动化测试受阻（地址栏合成键盘输入不可靠，导航不触发）——需高哥真人测试（打开下载页点下载链接）
+      - **⚠️ 验证**：自动化测试受阻（地址栏合成键盘输入不可靠，导航不触发）——需高哥真人测试（打开下载页点下载链接）
+  39. **广告拦截自定义关键词已完成（2026-09-12）**：
+      - **功能**：设置 → 隐私 → 广告拦截下方可手工加/删关键词；内置词（关闭广告/头条报/推广等）+ 用户词一起注入
+      - **Rust**：`get_adblock_keywords` / `set_adblock_keywords`，settings 表 `adblock_keywords` JSON 数组；`build_adblock_js` 替换模板 `__SB_KEYWORDS__`
+      - **CSS**：扩充电商联盟链接、知乎/哔哩/视频平台类名；**去掉** `a[href*=tmall.com]`（购物页会全灭）和全局 `position:fixed+z-index`（会误杀弹窗）
+      - **JS**：文本匹配限制 `offsetHeight<=520` 且字数 4-400，避免把整页正文藏掉
+      - **验证**：单测 `build_js_*` 通过；release 已编译。需高哥重启后：⚙ → 隐私里看到加词框，加词后刷新页面生效
 
 ### 8.2 待办（下一步）
 
@@ -428,7 +434,8 @@ let pool = SqlitePoolOptions::new()
 6. **已解决**：~~P2：工作区 UI~~ → 34. 已完成（独立标签集合，2026-09-12）
 7. **已解决**：~~P2：AI 侧边栏~~ → 35. 已完成（AGNES AI 对话，2026-09-12）
 8. **已解决**：~~P2：下载管理实际下载流程~~ → 37. 已完成（WebKit download 信号接入，2026-09-12，commit de574aa）
-9. **已解决**：~~P2：扩展管理（Chrome 扩展加载，Tauri 支持有限）~~ → 38. 已完成（UserContentManager 用户脚本/样式注入，2026-09-12，commit v5.4.0；高哥验证红色边框+链接波浪线生效）
+  9. **已解决**：~~P2：扩展管理（Chrome 扩展加载，Tauri 支持有限）~~ → 38. 已完成（UserContentManager 用户脚本/样式注入，2026-09-12，commit v5.4.0；高哥验证红色边框+链接波浪线生效）
+  11. **已解决**：~~广告拦截增强（自定义关键词）~~ → 39. 已完成（2026-09-12）：内置词 + 设置页手工加词（`adblock_keywords`）+ CSS 扩充电商/内容/视频平台；去掉 `a[href*=tmall.com]`、全局 `position:fixed` 等误杀规则；文本匹配限制高度 520 / 字数 4-400
 5. **已解决**：~~P2：窗口 resize 时同步 Fixed 内 webview 尺寸~~ → 14. 已完成
 6. **已解决**：~~P2：初始化 git 仓库~~ → 15. 已完成
 7. **已解决**：~~窗口最大化后无法还原/调整大小~~ → 17. GtkOverlay 重构已完成

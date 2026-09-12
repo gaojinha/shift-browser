@@ -10,6 +10,8 @@ interface TabsState {
   tabs: Tab[]
   activeTabId: string | null
   pollTimer: number | null
+  /** 切换中标记（合并连点，防消息排队） */
+  _switching: boolean
 }
 
 export const useTabsStore = defineStore('tabs', {
@@ -17,6 +19,7 @@ export const useTabsStore = defineStore('tabs', {
     tabs: [],
     activeTabId: null,
     pollTimer: null,
+    _switching: false,
   }),
 
   getters: {
@@ -69,12 +72,19 @@ actions: {
 
     /** 切换标签页 */
     async switchTab(id: string) {
-      const tab = await invoke<Tab | null>('switch_tab', { id })
-      if (!tab) return
-      for (const t of this.tabs) {
-        t.is_active = t.id === id
+      // 合并连点：上一次切换未返回时忽略新点击（快速连点会让主线程消息排队逐个重绘，越切越卡）
+      if (this._switching) return
+      this._switching = true
+      try {
+        const tab = await invoke<Tab | null>('switch_tab', { id })
+        if (!tab) return
+        for (const t of this.tabs) {
+          t.is_active = t.id === id
+        }
+        this.activeTabId = id
+      } finally {
+        this._switching = false
       }
-      this.activeTabId = id
     },
 
     /** 导航到新 URL */

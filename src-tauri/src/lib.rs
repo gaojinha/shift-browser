@@ -130,6 +130,10 @@ pub fn run() {
               println!("[ShiftBrowser] web extensions 目录: {}", dir.display());
             }
           }
+          // 注意：不要尝试 set_process_model(SharedSecondaryProcess)——
+          // 1) 主 webview 在 setup 前已创建，进程池已固化，设置被 g_return_if_fail 静默忽略；
+          // 2) 实测强行切换会触发 WebKit bug（WebLoaderStrategy internallyFailedLoad），整个应用崩。
+          // 多标签开销靠"切标签前 hide 旧 + 前端连点合并"缓解，进程模型保持默认。
         }
       }
 
