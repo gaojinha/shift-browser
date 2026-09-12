@@ -182,3 +182,45 @@ Corrections, insights, and knowledge gaps captured during development.
 - **xdotool 合成滚轮/键盘事件不被 WebKitGTK 处理**（同合成键盘字符）：`xdotool click 5`（滚轮下）、`xdotool key Page_Down` 对 child webview 无效，页面零变化——**不是 bug，是自动化测试限制**，真实用户滚轮/键盘正常（高哥实测网易能滚动）
 - **判断页面是否需要滚动**：用 eval 检查 `document.documentElement.scrollHeight vs window.innerHeight`——Bing 首页 `SH:666x666`（内容刚好一屏，无滚动条正常）；网易等长页面 scrollHeight 远超视口，有滚动条
 - **验证事件是否到达 webview**：eval 注入 `document.addEventListener('click', e => document.title = 'CLICK:'+e.clientX+','+e.clientY)`，配合 `on_document_title_changed` 回调打印日志——点击 (640,400) → `CLICK:640,288`（y 差 112 = CONTENT_TOP_OFFSET，坐标转换正确，事件路由正常）
+
+---
+
+## 2026-09-12 12:00 — 前端加载失败 Connection refused（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser Tauri，release 版启动后前端白屏，日志 "Connection refused"
+**要点**:
+- **根因 1：缺 custom-protocol feature**：Cargo.toml `tauri = { features = ["unstable"] }` 没有 `"custom-protocol"` → 应用进入 **dev 模式**（`tauri::is_dev()` 为 true）→ 主 webview 连 `http://localhost:5173`（无 vite dev server）→ 前端加载失败。**修复**：features 加 `"custom-protocol"`，release 版走 `tauri://localhost` 协议从 dist 加载
+- **根因 2：strip=true 删符号**：`strip = true`（Cargo profile）会删除 cdylib（web extension）的符号表 → WebKit 找不到入口函数（`generate_web_extension`）→ `tauri://localhost` 协议失效。**修复**：改 `strip = "debuginfo"`（保留符号，体积略大）
+- **辅助**：Linux 上手动设置 web extensions 目录：`WebContext::default()` + `set_web_extensions_directory(exe 所在目录)`（Tauri 2 不自动设置 extensions_path）
+- **教训**：release 版前端白屏先查两件事——① tauri features 有没有 custom-protocol；② profile 有没有 strip=true。这两项都影响 web extension 加载
+
+## 2026-09-12 12:30 — child webview reparent 后链接点击失效（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser Tauri，child webview 移入 GtkFixed 后网页内点击链接不导航
+**要点**:
+- **根因**：child webview 被 reparent（vbox → GtkFixed）后，**WebKit 输入窗口不处理 DOM 点击**——点击事件到达 `WebKitWebView` 的 `button_press_event` 信号（GTK 层面），但 WebKit 内部不把它当作 DOM 点击（链接不导航、按钮不响应）
+- **无效方案**：`grab_focus()`（只解决键盘输入焦点）、标准 `gtk_widget_reparent` FFI（布局正常但点击仍不处理）、unrealize+realize（页面黑屏）、不 reparent（窗口被撑到 2798px 高）
+- **有效方案**：`connect_button_press_event` 里用 `run_javascript` 执行：`elementFromPoint(x,y)` 找点击位置的元素 → `closest('a[href]')` 找链接 → `window.open(a.href)` 打开（触发 on_new_window 创建新标签页）。**这是"手动补导航"，绕过 WebKit 输入窗口问题**
+- **注意**：`window.open` 需要 `javascript_can_open_windows_automatically(true)`（在现有 Settings 上修改，不能新建替换——新建会把 Tauri 默认设置弄丢，链接点击直接失效）
+- **窗口坐标 vs child 坐标**：GTK 事件坐标是 child webview 内的（y 从 0 起），页面 DOM 坐标一致，直接传给 elementFromPoint 即可；窗口坐标 = child 坐标 + CONTENT_TOP_OFFSET(112)
+
+## 2026-09-12 13:00 — on_new_window 创建新标签页（insight）
+
+**类别**: insight
+**场景**: ShiftBrowser Tauri，点击链接应打开新标签页（统一行为）
+**要点**:
+- **on_new_window 回调里创建新标签**：`tauri::async_runtime::spawn` + `create_tab(app.clone(), app.state::<TabManager>(), url_str)` + 返回 `NewWindowResponse::Deny`（拒绝 WebKit 原生新窗口）——比"当前 webview 导航"更符合浏览器习惯
+- **前端刷新靠轮询**：Tauri 2 无 event listen 插件（tauri-plugin-event 不在 crates.io），后端 emit 事件前端收不到——但前端 `startPolling()` 每 2s 拉 `get_tabs`，新标签自动出现（延迟 ≤2s，可接受）
+- **JS 手动导航统一用 window.open**：`window.location.href` 是当前页导航（行为不一致：target=_blank 走 on_new_window、普通链接走当前页）；统一 `window.open(a.href)` 让所有链接都走 on_new_window → 新标签页，行为一致
+- **验证链路**：button_press → `on_new_window: url=...` → `create_tab` → `create_webview` → 新标签创建成功 → `page_load_finished` → 前端轮询显示新标签 ✓
+
+## 2026-09-12 13:30 — 前端改动必须重建 dist（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser Tauri，改了 BookmarksBar.vue 但书签删除按钮不显示
+**要点**:
+- **生产模式从 dist 加载**：`tauri.conf.json` frontendDist 指向 `../dist`，release 版加载的是构建产物，**不是 src/**——改 .vue 后必须 `npm run build`（vue-tsc + vite build）重建 dist，否则改动不生效
+- **验证**：hover 书签 → 出现 × 删除按钮（OCR：`www.qg.com * cn.bing.com`）✓
+- **教训**：改前端代码后先问自己"这是 dev 还是 prod？prod 必须 npm run build"

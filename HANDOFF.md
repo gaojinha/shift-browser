@@ -1,6 +1,6 @@
 # ShiftBrowser v5.0.0（Tauri 重构）交接文档
 
-> 最后更新：2026-09-11（Phase 1 多标签核心功能已跑通 ✅）
+> 最后更新：2026-09-12（链接点击修复 + 新标签页 + 书签删除 ✅）
 > 交接人：王二狗 → 下任 agent
 
 ---
@@ -345,10 +345,23 @@ let pool = SqlitePoolOptions::new()
      - ✅ 折叠/展开功能：点击 ▼ 按钮切换 collapsed 状态，数据库同步更新
      - ✅ 右键标签 → "移动到分组" → 选分组 → TabBar 实时更新（组头 + 组内标签）
      - ⚠️ 标签归组是前端运行时概念（tab.groupId 不持久化），重启后归组丢失
+ 25. **🔴 前端加载失败已修复（2026-09-12 关键突破）**：现象 "Connection refused"（前端白屏）。
+     - **根因 1**：Cargo.toml tauri features 缺 `"custom-protocol"` → 应用进入 dev 模式 → 主 webview 连 http://localhost:5173（无 dev server）→ 报错。**修复**：features 加 `"custom-protocol"`。
+     - **根因 2**：`strip = true` 会删除 cdylib（web extension）的符号 → WebKit 找不到入口函数 → `tauri://localhost` 协议失效。**修复**：改 `strip = "debuginfo"`（保留符号）。
+     - **辅助**：lib.rs 手动设置 web extensions 目录（`WebContext::default()` + `set_web_extensions_directory(exe 目录)`），Tauri 2 不自动设置。
+     - **验证**：启动后前端 UI 完整（标签栏/地址栏/书签栏正常，窗口 1280x800）。
+ 26. **🔴 链接点击不跳转已修复（2026-09-12）**：现象：网页内点链接无反应。
+     - **根因**：child webview 被 reparent 到 GtkFixed 后，**WebKit 输入窗口不处理 DOM 点击**（点击到达 WebKitWebView 的 button_press 信号，但 WebKit 内部不导航）。grab_focus、标准 `gtk_widget_reparent`（FFI）均无效。
+     - **解法**：`connect_button_press_event` 里用 JS 检查点击位置：`elementFromPoint(x,y)` + `closest('a[href]')`，命中链接则 `window.open(a.href)`（旧方案 `window.location.href` 是当前页导航）。
+     - **关键**：`settings.set_javascript_can_open_windows_automatically(true)` 必须开（在现有 Settings 上改，不能新建替换，否则丢失 Tauri 默认设置导致链接点击失效）。
+     - **验证**：日志 `on_new_window: url=...` → `create_tab` → `create_webview` → 新标签创建成功。
+ 27. **点击链接打开新标签页已实现（2026-09-12）**：`on_new_window` 回调由"当前 webview 导航"改为"**创建新标签页**"：`tauri::async_runtime::spawn` + `create_tab(app, state, url)` + 返回 `Deny`。前端靠 `startPolling()` 轮询（2s）自动显示新标签。**验证**：点新浪链接 → 新标签创建成功 → 标签栏出现新标签（OCR 5 个标签）→ 页面在新标签加载 ✓
+ 28. **书签删除 UI 已实现**：`BookmarksBar.vue` hover 显示 × 删除按钮。**关键**：改 src/ 里的 .vue 必须 `npm run build` 重建 dist（生产从 dist 加载），否则不生效。**验证**：hover 书签出现 ×（OCR：`www.qg.com * cn.bing.com`）✓
+ 29. **密码管理完整功能已验证（高哥手动 2026-09-12）**：查看密码 / 删除密码功能正常 ✓
 
 ### 8.2 待办（下一步）
 
-1. **P1**：密码管理 UI 完整功能验证（查看/删除密码，需高哥手动测试）
+1. **已解决**：~~P1：密码管理 UI 完整功能验证（查看/删除密码）~~ → 29. 高哥手动验证通过（2026-09-12）
 2. **P1**：下载管理 UI（下载记录列表/进度展示）
 3. **P1**：标签分组持久化（groupId 重启后丢失 → 需决定持久化方案：sessions JSON 加字段 or 单独映射表）
 4. **P1**：GroupsDialog 重命名/改色/删除分组验证
@@ -357,12 +370,13 @@ let pool = SqlitePoolOptions::new()
 7. **已解决**：~~窗口最大化后无法还原/调整大小~~ → 17. GtkOverlay 重构已完成
 8. **已解决**：~~target=_blank 链接打不开~~ → 16. on_new_window 已完成
 9. **已解决**：~~标签分组/工作区 UI~~ → 23-24. 分组 UI 骨架 + 功能验证已完成
+10. **已解决**：~~链接点击不跳转 / 前端加载失败~~ → 25-27. 已修复（custom-protocol + JS 手动导航 + 新标签页）
 
 ### 8.3 测试环境注意事项
 
 - **Wayland**：应用必须 `GDK_BACKEND=x11` 启动才有窗口；`ffmpeg x11grab` 截屏全黑，要用 `import -window <wid>`；窗口位置会漂移，xdotool 用 `mousemove --window <wid>` 相对坐标
-- **启动**：先 vite（5173）再 `(setsid env GDK_BACKEND=x11 ./src-tauri/target/debug/shift-browser > /tmp/shift-browser.log 2>&1 < /dev/null &)`
-- **日志**：Rust 命令有 `[tabs]` 前缀 println（create/close/switch/navigate 都打日志），验证交互看 `/tmp/shift-browser.log`
+- **启动**（2026-09-12 更新）：生产模式，无需 vite：`(setsid env XMODIFIERS= GDK_BACKEND=x11 ./src-tauri/target/release/shift-browser > /tmp/shift-browser.log 2>&1 < /dev/null &)`（release 版，前端从 dist 加载）
+- **日志**：Rust 命令有 `[tabs]` 前缀 println（create/close/switch/navigate/button_press 都打日志），验证交互看 `/tmp/shift-browser.log`；窗口坐标 = child webview 坐标 + 112（CONTENT_TOP_OFFSET）
 - **⚠️ IME 干扰**：系统有中文输入法时，`xdotool type` 输入的 ASCII 会被 IME 当拼音转换（如 "baidu" → "豆包"），导致地址栏输入测试不可靠。绕过方式：`xclip` 设置剪贴板 + `ctrl+v` 粘贴，或直接改前端默认 URL 验证
 - **OCR 验证**：`import -window <wid>` 截图 + `tesseract` OCR 可识别界面文字（标签标题、输入框内容）；裁剪区域放大 3-4 倍 + `ImageOps.autocontrast` 提高识别率
 - **窗口 resize 测试**：窗口有最小尺寸约束（1280x800），`xdotool windowsize` 无法缩小；最大化用 `wmctrl -i -r <WID> -b add,maximized_vert,maximized_horz`，还原用 `wmctrl -i -r <WID> -b remove,...`（GtkOverlay 方案后还原正常）
