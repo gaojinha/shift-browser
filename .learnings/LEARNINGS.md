@@ -335,3 +335,16 @@ Corrections, insights, and knowledge gaps captured during development.
 - **文件名推断**：URL 最后一段去 query（`u.split('?').next()` + `rsplit('/').next()`）
 - **自动化测试受阻**：WebKitGTK 合成键盘输入（xdotool type/key）在地址栏不可靠（导航不触发）——真人操作正常；下载功能需真人验证
 - **教训**：WebKitGTK 的 API 与文档有差异（信号位置、方法名），编译报错先 grep ~/.cargo/registry 里的 webkit2gtk 源码确认 API
+
+## 2026-09-12 22:10 — GTK 主线程 block_on 死锁（correction，重要）
+
+**类别**: correction
+**场景**: ShiftBrowser 下载管理——点击下载链接后浏览器整个卡死（高哥实测反馈）
+**要点**:
+- **根因**：`connect_download_started` 回调跑在 **GTK 主线程**，回调里 `tauri::async_runtime::block_on` 等 sqlx 插入 → 主线程被阻塞，WebKit 下载引擎/界面事件全卡 → **UI 死机**
+- **铁律**：**GTK/WebKit 回调里绝对不要 block_on**（无论等待多短）——GTK 主循环需要持续处理事件，任何阻塞都是死锁
+- **正确方案**：回调里 `tauri::async_runtime::spawn` 异步插入；记录 id 用 `Arc<Mutex<Option<i64>>>` 共享；进度/完成/失败回调里 spawn 任务，先读共享 id，没就绪就 `tokio::time::sleep` 轮询等（最多 5 秒）——全程不碰主线程
+- **MutexGuard 跨 await**：`match *lock.lock().unwrap() { ... None => await ... }` 编译报 "future cannot be sent between threads safely"——先 `let id_now = { *lock.lock().unwrap() };` 让 guard 在块尾 drop，再 await
+- **SQLite 写锁竞争**：下载快时 received_data 每秒触发多次，每次都 UPDATE → 写锁排队（UPDATE 卡 1-5 秒，INSERT 直接 database is locked 失败）→ 两个修复：① `SqliteConnectOptions::busy_timeout(10s)` ② 进度节流（`Arc<Mutex<Instant>>` 500ms 内最多写一次）
+- **total 未知**：下载开始时 `response().content_length()` 可能为 0（如百度网盘）→ 进度回调时再取一次，`UPDATE ... total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END`
+- **教训**：异步回调链里"读共享状态再 await"的写法，先提取值再 await，guard 别跨 await 边界

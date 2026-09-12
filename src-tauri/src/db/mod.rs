@@ -28,7 +28,9 @@ impl Db {
       .filename(&db_path)
       .create_if_missing(true)
       .foreign_keys(true)
-      .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
+      .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+      // 写锁等待 10 秒：下载进度频繁更新 + 多连接并发写时避免 database is locked 立即失败
+      .busy_timeout(std::time::Duration::from_secs(10));
 
     let pool = SqlitePoolOptions::new()
       .max_connections(5)

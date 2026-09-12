@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl};
 
 use crate::db::{history, Db};
@@ -288,14 +288,19 @@ impl TabManager {
                   .map(|r| r.content_length() as i64)
                   .unwrap_or(0);
 
-                // 同步插入记录拿 id（下载开始很快，避免进度回调拿不到 id）
+                // 共享下载记录 id（异步插入完成后设置；进度/完成/失败回调等 id 就绪）
+                // 注意：绝不能在 GTK 主线程回调里 block_on（会死锁卡死 UI），全部走 spawn 异步
+                let id_state: Arc<Mutex<Option<i64>>> = Arc::new(Mutex::new(None));
+
+                // 异步插入记录
                 let pool0 = dl_pool.clone();
                 let app0 = dl_app.clone();
                 let filename_db = filename.clone();
                 let url_db = url.clone();
                 let dest_db = dest.clone();
-                let id = tauri::async_runtime::block_on(async move {
-                  sqlx::query(
+                let id_state0 = id_state.clone();
+                tauri::async_runtime::spawn(async move {
+                  let res = sqlx::query(
                     "INSERT INTO downloads (filename, url, path, total_bytes, received_bytes, state) VALUES (?, ?, ?, ?, 0, 'in_progress')",
                   )
                   .bind(&filename_db)
@@ -303,62 +308,118 @@ impl TabManager {
                   .bind(Some(&dest_db))
                   .bind(total)
                   .execute(&pool0)
-                  .await
-                  .map(|r| r.last_insert_rowid())
-                  .unwrap_or(0)
+                  .await;
+                  if let Ok(r) = res {
+                    let id = r.last_insert_rowid();
+                    *id_state0.lock().unwrap() = Some(id);
+                    println!("[downloads] 记录 id={} filename={} total={}", id, filename_db, total);
+                    let _ = app0.emit("downloads-updated", ());
+                  } else {
+                    println!("[downloads] 记录插入失败");
+                  }
                 });
-                println!("[downloads] 记录 id={} filename={} total={}", id, filename, total);
-                let _ = app0.emit("downloads-updated", ());
 
-                // 进度回调（每次收到数据）
+                // 等待下载记录 id 就绪（最多 5 秒）
+                async fn wait_download_id(state: &Arc<Mutex<Option<i64>>>) -> Option<i64> {
+                  for _ in 0..100 {
+                    if let Some(id) = *state.lock().unwrap() {
+                      return Some(id);
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                  }
+                  None
+                }
+
+                // 进度回调（每次收到数据，异步更新，不阻塞主线程）
+                // 节流：500ms 内最多写一次数据库（下载快时 received_data 每秒多次，全写会锁竞争）
                 let pool2 = dl_pool.clone();
                 let app2 = dl_app.clone();
+                let id_state2 = id_state.clone();
+                let last_progress: Arc<Mutex<std::time::Instant>> =
+                  Arc::new(Mutex::new(std::time::Instant::now()));
                 download.connect_received_data(move |dl, _len| {
                   let received = dl.received_data_length() as i64;
+                  // 总字节可能下载开始时未知（0），进度回调时再补一次
+                  let total_now = dl.response().map(|r| r.content_length() as i64).unwrap_or(0);
+                  let mut last = last_progress.lock().unwrap();
+                  if last.elapsed() < std::time::Duration::from_millis(500) {
+                    return;
+                  }
+                  *last = std::time::Instant::now();
+                  drop(last);
                   let pool3 = pool2.clone();
                   let app3 = app2.clone();
+                  let id_state3 = id_state2.clone();
                   tauri::async_runtime::spawn(async move {
-                    let _ = sqlx::query("UPDATE downloads SET received_bytes = ? WHERE id = ?")
+                    let id_now = { *id_state3.lock().unwrap() };
+                    let id = match id_now {
+                      Some(id) => Some(id),
+                      None => wait_download_id(&id_state3).await,
+                    };
+                    if let Some(id) = id {
+                      let _ = sqlx::query(
+                        "UPDATE downloads SET received_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END WHERE id = ?",
+                      )
                       .bind(received)
+                      .bind(total_now)
                       .bind(id)
                       .execute(&pool3)
                       .await;
-                    let _ = app3.emit("downloads-updated", ());
+                      let _ = app3.emit("downloads-updated", ());
+                    }
                   });
                 });
 
                 // 完成回调
                 let pool4 = dl_pool.clone();
                 let app4 = dl_app.clone();
+                let id_state4 = id_state.clone();
                 download.connect_finished(move |dl| {
                   let received = dl.received_data_length() as i64;
                   let pool5 = pool4.clone();
                   let app5 = app4.clone();
+                  let id_state5 = id_state4.clone();
                   tauri::async_runtime::spawn(async move {
-                    let _ = sqlx::query(
-                      "UPDATE downloads SET received_bytes = ?, state = 'completed' WHERE id = ?",
-                    )
-                    .bind(received)
-                    .bind(id)
-                    .execute(&pool5)
-                    .await;
-                    let _ = app5.emit("downloads-updated", ());
+                    let id_now = { *id_state5.lock().unwrap() };
+                    let id = match id_now {
+                      Some(id) => Some(id),
+                      None => wait_download_id(&id_state5).await,
+                    };
+                    if let Some(id) = id {
+                      let _ = sqlx::query(
+                        "UPDATE downloads SET received_bytes = ?, state = 'completed' WHERE id = ?",
+                      )
+                      .bind(received)
+                      .bind(id)
+                      .execute(&pool5)
+                      .await;
+                      let _ = app5.emit("downloads-updated", ());
+                    }
                   });
                 });
 
                 // 失败回调
                 let pool6 = dl_pool.clone();
                 let app6 = dl_app.clone();
+                let id_state6 = id_state.clone();
                 download.connect_failed(move |_dl, err| {
                   println!("[downloads] 下载失败: {}", err);
                   let pool7 = pool6.clone();
                   let app7 = app6.clone();
+                  let id_state7 = id_state6.clone();
                   tauri::async_runtime::spawn(async move {
-                    let _ = sqlx::query("UPDATE downloads SET state = 'failed' WHERE id = ?")
-                      .bind(id)
-                      .execute(&pool7)
-                      .await;
-                    let _ = app7.emit("downloads-updated", ());
+                    let id_now = { *id_state7.lock().unwrap() };
+                    let id = match id_now {
+                      Some(id) => Some(id),
+                      None => wait_download_id(&id_state7).await,
+                    };
+                    if let Some(id) = id {
+                      let _ = sqlx::query("UPDATE downloads SET state = 'failed' WHERE id = ?")
+                        .bind(id)
+                        .execute(&pool7)
+                        .await;
+                      let _ = app7.emit("downloads-updated", ());
+                    }
                   });
                 });
               });
