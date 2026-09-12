@@ -290,3 +290,24 @@ Corrections, insights, and knowledge gaps captured during development.
 - **原因**：**一直用 cargo build（dev），但运行的是 release 二进制**——dev 编译的 target/debug 不是运行目标；release 二进制嵌入的是编译时的 dist（Tauri 编译期嵌入前端资源）
 - **解决**：Rust 改动必须 `cargo build --release`（6 分钟左右）；前端改动 npm run build 后也必须重新 cargo build --release（dist 是编译期嵌入）
 - **教训**：**Tauri 项目改代码后必须 build --release**；排查"改动不生效"先看运行的是哪个二进制（ps aux 确认 target/release）
+
+## 2026-09-12 18:20 — Vue 事件名连续大写陷阱（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser Tauri，AI 按钮点击无响应（hover 正常、其他按钮正常）
+**要点**:
+- **症状**：AddressBar 的 AI 按钮 hover 变色正常，但点击完全无反应；其他按钮（openPasswords/openGroups 等）正常
+- **根因**：`emit('openAI')` 的事件名含连续大写 "AI"——Vue 3 的 hyphenate 转换（`/\B([A-Z])/g`）把 `openAI` 转成 `open-a-i`，而模板写的是 `@open-ai`——**不匹配**——emit 无效
+- **解决**：事件名改用 `openAi`（避免连续大写）——`openAi` → `open-ai` 匹配
+- **教训**：**Vue 事件名避免连续大写**（openAI/openURL 等都不行），用 openAi/openUrl；排查"按钮点击无反应"先检查 emit 事件名和模板 @事件名的匹配
+
+## 2026-09-12 18:30 — WebKitGTK 面板高度/emoji 按钮/overlay 关闭（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser Tauri，AI 侧边栏面板开发
+**要点**:
+- **面板高度**：flex 子元素 `height: 100%` 在 WebKitGTK 不生效（面板只有内容高度）→ 用 `position: fixed; right: 0; top: 0; height: 100vh` 解决
+- **emoji 按钮**：🤖（U+1F916）在 WebKitGTK 渲染异常（hover 正常但 click 不触发）→ 按钮内容改用文字
+- **overlay 关闭**：`@click.self` 会因 WebKitGTK 点击判定（release 元素触发 click？）导致弹窗开了又关 → 去掉 overlay 关闭，只保留 ✕ 按钮
+- **xdotool 自动化**：`xdotool click`（屏幕坐标）在窗口失焦时无效 → 用 `xdotool click --window $WID`（窗口相对坐标）可靠；窗口激活用 `windowactivate --sync`
+- **教训**：WebKitGTK 的 CSS/事件行为与标准浏览器有差异，遇到"渲染正常但交互异常"优先怀疑 WebKitGTK 特性（浮层菜单点击、emoji 渲染、flex 高度、click 判定）

@@ -1,6 +1,6 @@
 # ShiftBrowser v5.0.0（Tauri 重构）交接文档
 
-> 最后更新：2026-09-12（工作区 UI 完成 ✅：独立标签集合，切换/新建/删除）
+> 最后更新：2026-09-12（AI 侧边栏完成 ✅：AGNES AI 对话 + 总结/翻译/解释当前页）
 > 交接人：王二狗 → 下任 agent
 
 ---
@@ -392,6 +392,18 @@ let pool = SqlitePoolOptions::new()
      - **⚠️ HTML 弹窗被 GTK webview 盖住**：弹窗打开时必须 set_webview_visible(false) 隐藏 webview（HTML overlay 盖不住 GTK 层），关闭时恢复——TabBar watch showWorkspaceDialog 处理
      - **⚠️ 关闭按钮字符**：×（U+00D7）在 WebKitGTK 可能不渲染 → 统一用 ✕（U+2715，与设置弹窗一致）
      - **⚠️ release 编译**：Rust 改动必须 `cargo build --release`（运行的是 release 二进制，dev 编译不生效）
+ 35. **AI 侧边栏已完成（2026-09-12，commit 2bf5947）**：
+     - **功能**：浏览器内置 AI 助手（右侧滑出面板）——对话问答 + 快捷操作（总结当前页/翻译当前页/解释当前页）
+     - **AI 后端**：对接 **AGNES AI**（`https://apihub.agnes-ai.com/v1`，OpenAI 兼容格式），key 从环境变量 `AGNES_API_KEY` 读取，默认模型 `agnes-2.5-flash`
+     - **Rust**：`ai.rs` 的 `ai_chat` 命令（reqwest 调用 chat/completions）；Cargo.toml 加 reqwest（rustls-tls 避免 openssl）
+     - **前端**：`stores/ai.ts`（AI store：对话历史/发送/快捷操作/清空）；`components/AISidebar.vue`（overlay + 右侧 380px 面板：对话区/快捷按钮/输入框/发送）
+     - **入口**：AddressBar 右侧蓝色 "AI" 按钮（emit openAi）→ App.vue showAI → AISidebar
+     - **验证**：高哥验收通过（侧边栏打开、对话可用）
+     - **⚠️ Vue 事件名陷阱**：emit 事件名含连续大写（如 `openAI`）会被 Vue 3 转成 `open-a-i`，模板 `@open-ai` 不匹配 → 必须用 `openAi`（避免连续大写）——**这是 AI 按钮点击无响应的根因**
+     - **⚠️ WebKitGTK 面板高度**：flex 子元素 `height: 100%` 不生效（面板只有内容高度）→ 用 `position: fixed; right: 0; height: 100vh` 解决
+     - **⚠️ emoji 按钮点击**：🤖（U+1F916）在 WebKitGTK 渲染异常（hover 正常但 click 不触发）→ 按钮内容改用文字 "AI"
+     - **⚠️ overlay 关闭事件**：`@click.self` 会因 WebKitGTK 点击判定（release 元素触发 click）导致弹窗开了又关 → 去掉 overlay 关闭，只保留 ✕ 按钮（后续可优化）
+     - **⚠️ xdotool 自动化**：`xdotool click`（屏幕坐标）在窗口失焦时无效 → 用 `xdotool click --window $WID`（窗口相对坐标）可靠；窗口激活用 `windowactivate --sync`
 
 ### 8.2 待办（下一步）
 
@@ -401,7 +413,8 @@ let pool = SqlitePoolOptions::new()
 4. **已解决**：~~P1：GroupsDialog 重命名/改色/删除分组验证~~ → 32. 全部验证通过（高哥手动 2026-09-12）
 5. **已解决**：~~P2：设置页面~~ → 33. 已完成（通用/外观/隐私，2026-09-12）
 6. **已解决**：~~P2：工作区 UI~~ → 34. 已完成（独立标签集合，2026-09-12）
-7. **P2**：下载管理实际下载流程（当前只有记录管理，无真实下载触发——需 WebKit download 信号接入）
+7. **已解决**：~~P2：AI 侧边栏~~ → 35. 已完成（AGNES AI 对话，2026-09-12）
+8. **P2**：下载管理实际下载流程（当前只有记录管理，无真实下载触发——需 WebKit download 信号接入）
 5. **已解决**：~~P2：窗口 resize 时同步 Fixed 内 webview 尺寸~~ → 14. 已完成
 6. **已解决**：~~P2：初始化 git 仓库~~ → 15. 已完成
 7. **已解决**：~~窗口最大化后无法还原/调整大小~~ → 17. GtkOverlay 重构已完成
