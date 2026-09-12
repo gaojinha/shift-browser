@@ -322,3 +322,16 @@ Corrections, insights, and knowledge gaps captured during development.
 - **排查**：curl 直测 API——GET /v1/models 正常（模型列表含 agnes-2.5-flash），但 POST 2.5-flash 超时；注意 curl 单引号嵌套会破坏 JSON（返回 400 或挂起）
 - **解决**：默认模型改 agnes-2.0-flash；Rust reqwest 加 90s 超时；设置对话框加模型选择让用户可切换
 - **教训**：AI 功能"没反应"先直测 API（curl），判断是 API 问题还是前端问题；模型可用性要实测（列表里有 ≠ 能用）
+
+## 2026-09-12 21:30 — WebKitGTK 下载信号接入（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser 下载管理真实下载流程
+**要点**:
+- **WebView 无 download 信号**（webkit2gtk-rs 2.0 编译报 E0599）→ 用 `WebContext::connect_download_started`（需 `use WebKitContextExt`）
+- **Download 对象 API**：无 get_suggested_filename / get_uri / get_total_content_length → 用 `request().uri()`（需 URIRequestExt）推断文件名、`response().content_length()`（需 URIResponseExt）拿总字节
+- **重复注册**：每个 webview 创建时都会拿 context → 用 `static AtomicBool` 全局标志防重复注册（同一 context 重复注册会 N 次触发）
+- **id 竞态**：下载开始记录用 `tauri::async_runtime::block_on` 同步插入拿 id，避免进度回调拿不到 id（下载很快时 received_data 可能在异步插入完成前触发）
+- **文件名推断**：URL 最后一段去 query（`u.split('?').next()` + `rsplit('/').next()`）
+- **自动化测试受阻**：WebKitGTK 合成键盘输入（xdotool type/key）在地址栏不可靠（导航不触发）——真人操作正常；下载功能需真人验证
+- **教训**：WebKitGTK 的 API 与文档有差异（信号位置、方法名），编译报错先 grep ~/.cargo/registry 里的 webkit2gtk 源码确认 API

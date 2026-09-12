@@ -1,6 +1,6 @@
 # ShiftBrowser v5.0.0（Tauri 重构）交接文档
 
-> 最后更新：2026-09-12（AI 设置参数完成 ✅：设置对话框加 AI 助手区——模型/API 地址/API Key）
+> 最后更新：2026-09-12（下载管理真实下载流程 ✅：WebKit download 信号接入，下载记录/进度/完成/失败）
 > 交接人：王二狗 → 下任 agent
 
 ---
@@ -411,6 +411,12 @@ let pool = SqlitePoolOptions::new()
      - **前端**：`ai.ts` sendMessage 从 settingsStore 读模型/地址/key 传给 ai_chat
      - **⚠️ 模型实测**：agnes-2.5-flash 在 AGNES 上 POST 超时（60s+ 无响应）不可用，agnes-2.0-flash 正常（~5s 返回）——默认模型用 2.0-flash
      - **⚠️ 安全**：API Key 明文存 settings 表（本地 SQLite，可接受）；任何输出不得泄露 key
+ 37. **下载管理真实下载流程已完成（2026-09-12，commit de574aa）**：
+     - **功能**：网页触发下载（点击下载链接等）→ 自动记录到 downloads 表 + 进度实时更新 + 完成/失败状态
+     - **Rust**：`tabs.rs` 用 `WebContext::connect_download_started`（全局注册一次，static AtomicBool 防重复）——下载开始：从 URL 推断文件名 → 设置目的地 `~/Downloads/<文件名>` → 同步插入记录拿 id（block_on，避免进度回调拿不到 id）→ 注册 received_data（进度更新）/ finished（completed）/ failed 回调 → 每次变更 emit `downloads-updated` 事件
+     - **前端**：`DownloadsDialog.vue` onMounted 监听 `downloads-updated` 事件，弹窗打开时实时刷新列表（进度条/状态）
+     - **⚠️ WebKit 下载 API 要点**：WebView 无 download 信号（webkit2gtk-rs 2.0）→ 用 `WebContext::connect_download_started`（需 use WebContextExt）；Download 对象无 get_suggested_filename/get_uri → 用 `request().uri()`（需 URIRequestExt）推断文件名、`response().content_length()`（需 URIResponseExt）拿总字节
+     - **⚠️ 验证**：自动化测试受阻（地址栏合成键盘输入不可靠，导航不触发）——需高哥真人测试（打开下载页点下载链接）
 
 ### 8.2 待办（下一步）
 
@@ -421,7 +427,8 @@ let pool = SqlitePoolOptions::new()
 5. **已解决**：~~P2：设置页面~~ → 33. 已完成（通用/外观/隐私，2026-09-12）
 6. **已解决**：~~P2：工作区 UI~~ → 34. 已完成（独立标签集合，2026-09-12）
 7. **已解决**：~~P2：AI 侧边栏~~ → 35. 已完成（AGNES AI 对话，2026-09-12）
-8. **P2**：下载管理实际下载流程（当前只有记录管理，无真实下载触发——需 WebKit download 信号接入）
+8. **已解决**：~~P2：下载管理实际下载流程~~ → 37. 已完成（WebKit download 信号接入，2026-09-12，commit de574aa）
+9. **P2**：扩展管理（Chrome 扩展加载，Tauri 支持有限）
 5. **已解决**：~~P2：窗口 resize 时同步 Fixed 内 webview 尺寸~~ → 14. 已完成
 6. **已解决**：~~P2：初始化 git 仓库~~ → 15. 已完成
 7. **已解决**：~~窗口最大化后无法还原/调整大小~~ → 17. GtkOverlay 重构已完成
