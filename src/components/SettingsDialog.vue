@@ -20,6 +20,7 @@ watch(
     if (v) {
       if (!settingsStore.loaded) settingsStore.loadSettings().catch(() => {})
       extensionsStore.loadExtensions().catch(() => {})
+      loadKeywords().catch(() => {})
     }
     await invoke('set_webview_visible', { visible: !v })
   }
@@ -82,6 +83,42 @@ async function onToggleAdblock() {
   const current = settingsStore.get('adblock_enabled') !== 'false'
   await settingsStore.set('adblock_enabled', (!current).toString())
   await invoke('set_adblock_enabled', { enabled: !current })
+}
+
+/** 用户自定义广告关键词 */
+const customKeywords = ref<string[]>([])
+const newKeyword = ref('')
+const kwMsg = ref('')
+
+async function loadKeywords() {
+  try {
+    customKeywords.value = await invoke<string[]>('get_adblock_keywords')
+  } catch {
+    customKeywords.value = []
+  }
+}
+
+async function saveKeywords(list: string[]) {
+  customKeywords.value = list
+  await invoke('set_adblock_keywords', { keywords: list })
+  kwMsg.value = '已保存，刷新页面后生效'
+  setTimeout(() => (kwMsg.value = ''), 2500)
+}
+
+async function onAddKeyword() {
+  const k = newKeyword.value.trim()
+  if (!k) return
+  if (customKeywords.value.includes(k)) {
+    kwMsg.value = '这个词已经加过了'
+    setTimeout(() => (kwMsg.value = ''), 2000)
+    return
+  }
+  newKeyword.value = ''
+  await saveKeywords([...customKeywords.value, k])
+}
+
+async function onRemoveKeyword(k: string) {
+  await saveKeywords(customKeywords.value.filter((x) => x !== k))
 }
 </script>
 
@@ -231,6 +268,26 @@ async function onToggleAdblock() {
               <option value="true">开启</option>
               <option value="false">关闭</option>
             </select>
+          </div>
+          <div class="kw-block" v-if="settingsStore.get('adblock_enabled') !== 'false'">
+            <div class="kw-hint">内置已含「关闭广告 / 头条报 / 推广」等。下面可手工加词，刷新页面后生效。</div>
+            <div class="kw-list" v-if="customKeywords.length > 0">
+              <span v-for="k in customKeywords" :key="k" class="kw-chip">
+                {{ k }}
+                <button class="kw-x" title="删除" @click="onRemoveKeyword(k)">✕</button>
+              </span>
+            </div>
+            <div class="kw-add">
+              <input
+                v-model="newKeyword"
+                type="text"
+                placeholder="输入关键词，回车添加"
+                spellcheck="false"
+                @keyup.enter="onAddKeyword"
+              />
+              <button class="mini-btn primary" @click="onAddKeyword">添加</button>
+            </div>
+            <div v-if="kwMsg" class="cleared-msg">{{ kwMsg }}</div>
           </div>
           <div class="field">
             <label>记录浏览历史</label>
@@ -483,5 +540,64 @@ async function onToggleAdblock() {
 .switch input:checked + .slider::before {
   transform: translateX(16px);
   background: #4a9eff;
+}
+.kw-block {
+  margin: 4px 0 10px 0;
+  padding: 8px 10px;
+  background: #2a2a2a;
+  border-radius: 8px;
+}
+.kw-hint {
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+.kw-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.kw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(74, 158, 255, 0.15);
+  color: #cfe4ff;
+  border-radius: 12px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.kw-x {
+  border: none;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+  line-height: 1;
+}
+.kw-x:hover {
+  color: #ff8a8a;
+}
+.kw-add {
+  display: flex;
+  gap: 8px;
+}
+.kw-add input {
+  flex: 1;
+  border: 1px solid #444;
+  background: #222;
+  color: #e0e0e0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.kw-add input:focus {
+  border-color: #4a9eff;
 }
 </style>

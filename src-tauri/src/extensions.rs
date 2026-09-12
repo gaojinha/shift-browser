@@ -186,8 +186,32 @@ iframe[src*="googlesyndication"], iframe[src*="amazon-adsystem"],
 .ad-content, .ad-item, .ad-list, .ad-grid, .ad-banner-container,
 /* 内容推荐广告 */
 .taboola, .outbrain, .revcontent, .content-ad, .recommend-ad,
-/* 视频广告 */
-.youku-player-ad, .iqiyi-ad, .video-ad, .player-ad, .preroll-ad, .postroll-ad,
+/* 电商联盟/点击追踪（不拦 tmall.com 本体链接，避免购物页全灭） */
+a[href*="uland.taobao"], a[href*="click.tb"], a[href*="s.click.taobao"],
+a[href*="section=ad"], a[href*="ad_id="],
+.tb-ads, .tm-ads, .shop-recommend-ad, .trade-ad, .tb-shop-ad, .shop-ad,
+.jd-ad, .jd-ads, .deal-ad, .pinduoduo-ad, .pdd-ad, .pdd-ads, .vip-ad,
+/* 内容平台广告（知乎/哔哩/豆瓣/小红书/微博） */
+.Pc-word-ad, .Pc-mission-ad, .QuestionAd, .AnswerAd, .Topstory-ad,
+.bili-rich-ad, .video-card-ad, .bili-video-card__info--ad, .feed-ad,
+.douban-ad, .douban-advert, .xiaohongshu-ad, .xhs-ad,
+.weibo-ad, .weibo-ads, .topic-ad, .card-ad, .recommend-card-ad,
+/* 视频平台广告（优酷/爱奇艺/腾讯视频/芒果TV） */
+.yk-player-ad, .yk-vip-ad, .yk-poster-ad, .youku-ad, .youku-ads,
+.iqiyi-player-ad, .iqiyi-vip-ad, .iqiyi-poster-ad, .iqiyi-ad, .iqiyi-ads,
+.tenvideo-player-ad, .qq-video-ad, .video-vip-ad,
+.mgtv-player-ad, .mgtv-ad, .mgtv-vip-ad, .player-vip-ad, .preroll-ad, .postroll-ad,
+/* 弹窗二跳/下载引导 */
+.download-guide, .app-guide, .install-guide, .guide-modal, .guide-overlay,
+.wx-follow, .wechat-guide, .qr-modal, .qr-overlay,
+/* 工具栏/浏览器伴侣 */
+.toolbar-ad, .companion-ad, .assistant-ad, .helper-ad,
+/* 超高 z-index 遮罩（广告弹层常用 2147483647，不拦普通 fixed） */
+div[style*="z-index:2147483647"], div[style*="z-index: 2147483647"],
+/* 通用电商品类页推广 */
+.quick-bar-ad, .flash-ad, .flashbuy-ad, .countdown-ad,
+/* 音频/音乐 */
+.kg-ad, .kugou-ad, .qqmusic-ad, .wangyiyun-ad, .music-ad,
 /* 弹窗/遮罩 */
 .modal-ad, .pop-ad, .layer-ad, .mask-ad, .dialog-ad, .overlay-ad,
 /* 底部浮条 */
@@ -201,34 +225,52 @@ iframe[src*="googlesyndication"], iframe[src*="amazon-adsystem"],
 { display: none !important; }
 "#;
 
-/// 内置广告拦截 JS：按文本特征隐藏广告模块（类名规则覆盖不到的，如"头条报"推广）
-/// 含 MutationObserver 动态拦截（SPA/动态加载广告）+ 节流防性能问题
-const ADBLOCK_JS: &str = r#"
+/// 内置关键词（用户自定义关键词会追加在后面）
+const BUILTIN_KEYWORDS: &[&str] = &[
+    "关闭广告",
+    "关闭推广",
+    "收起广告",
+    "不再显示",
+    "跳过广告",
+    "跳过推广",
+    "头条报",
+    "推广",
+    "赞助",
+    "下载APP",
+    "下载 App",
+    "下载客户端",
+    "广告投放",
+    "广告合作",
+    "广告位",
+    "广告服务",
+];
+
+/// 广告拦截 JS 模板。`__SB_KEYWORDS__` 在注入前替换成完整数组（内置 + 用户自定义）
+const ADBLOCK_JS_TEMPLATE: &str = r#"
 // ShiftBrowser 广告拦截：文本特征规则 + 动态监听
 (function () {
   if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
-  var keywords = ['头条报', '推广', '赞助', '下载APP', '下载 App', '广告投放', '广告合作'];
+  var keywords = __SB_KEYWORDS__;
   var HIDDEN = 'data-sb-hidden';
   function hideByText() {
     var nodes = document.querySelectorAll('div, section, aside');
     for (var i = 0; i < nodes.length; i++) {
       var el = nodes[i];
       if (el.getAttribute(HIDDEN)) continue;
-      if (el.offsetWidth === 0 && el.offsetHeight === 0) continue; // 跳过不可见元素
+      if (el.offsetWidth === 0 && el.offsetHeight === 0) continue;
+      if (el.offsetHeight > 520) continue; // 跳过大块页面区域，避免误杀正文
       var text = el.textContent || '';
-      if (text.length > 5 && text.length < 200) {
-        for (var k = 0; k < keywords.length; k++) {
-          if (text.indexOf(keywords[k]) !== -1) {
-            el.style.display = 'none';
-            el.setAttribute(HIDDEN, '1');
-            break;
-          }
+      if (text.length < 4 || text.length > 400) continue;
+      for (var k = 0; k < keywords.length; k++) {
+        if (keywords[k] && text.indexOf(keywords[k]) !== -1) {
+          el.style.display = 'none';
+          el.setAttribute(HIDDEN, '1');
+          break;
         }
       }
     }
   }
   hideByText();
-  // 动态广告：监听 DOM 变化，节流 500ms 后重新扫描
   var timer = null;
   var observer = new MutationObserver(function () {
     if (timer) return;
@@ -242,6 +284,43 @@ const ADBLOCK_JS: &str = r#"
   }
 })();
 "#;
+
+fn js_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\'', "\\'")
+}
+
+/// 拼装广告拦截 JS：内置关键词 + 用户自定义关键词
+fn build_adblock_js(custom: &[String]) -> String {
+    let mut all: Vec<String> = BUILTIN_KEYWORDS.iter().map(|s| (*s).to_string()).collect();
+    for k in custom {
+        let t = k.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if !all.iter().any(|x| x == t) {
+            all.push(t.to_string());
+        }
+    }
+    let arr = all
+        .iter()
+        .map(|k| format!("'{}'", js_escape(k)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    ADBLOCK_JS_TEMPLATE.replace("__SB_KEYWORDS__", &format!("[{}]", arr))
+}
+
+async fn load_custom_keywords(db: &Db) -> Vec<String> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'adblock_keywords'")
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten();
+    match row {
+        Some((v,)) => serde_json::from_str(&v).unwrap_or_default(),
+        None => Vec::new(),
+    }
+}
 
 /// 读取所有启用扩展的注入内容 + 广告拦截（如开启）
 async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<String>)>, String> {
@@ -264,8 +343,14 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
             .map_err(|e| e.to_string())?;
     let adblock_on = row.map(|r| r.0 == "true").unwrap_or(true); // 默认开启
     if adblock_on {
-        items.push((Some(ADBLOCK_JS.to_string()), Some(ADBLOCK_CSS.to_string())));
-        println!("[extensions] 广告拦截已开启（注入内置规则）");
+        let custom = load_custom_keywords(db).await;
+        let js = build_adblock_js(&custom);
+        println!(
+            "[extensions] 广告拦截已开启（内置 {} 词 + 自定义 {} 词）",
+            BUILTIN_KEYWORDS.len(),
+            custom.len()
+        );
+        items.push((Some(js), Some(ADBLOCK_CSS.to_string())));
     }
     Ok(items)
 }
@@ -300,6 +385,39 @@ pub async fn get_adblock_enabled(db: State<'_, Db>) -> Result<bool, String> {
             .await
             .map_err(|e| e.to_string())?;
     Ok(row.map(|r| r.0 == "true").unwrap_or(true))
+}
+
+/// 读取用户自定义广告关键词（不含内置）
+#[tauri::command]
+pub async fn get_adblock_keywords(db: State<'_, Db>) -> Result<Vec<String>, String> {
+    Ok(load_custom_keywords(&db).await)
+}
+
+/// 保存用户自定义广告关键词并重新注入（立刻对已开标签生效，刷新页面后看到效果）
+#[tauri::command]
+pub async fn set_adblock_keywords(
+    db: State<'_, Db>,
+    app: AppHandle,
+    keywords: Vec<String>,
+) -> Result<(), String> {
+    let cleaned: Vec<String> = keywords
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let json = serde_json::to_string(&cleaned).map_err(|e| e.to_string())?;
+    println!("[extensions] set_adblock_keywords: {} 个自定义词", cleaned.len());
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ('adblock_keywords', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(&json)
+    .execute(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let items = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items);
+    Ok(())
 }
 
 /// 加载扩展（目录或 manifest.json 路径）
@@ -423,5 +541,25 @@ pub async fn re_inject(app: &AppHandle) {
             inject_extensions(app, items);
         }
         Err(e) => println!("[extensions] re_inject 失败: {}", e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_js_includes_builtin_and_custom() {
+        let js = build_adblock_js(&["自定义词".to_string()]);
+        assert!(js.contains("'关闭广告'"), "应包含内置词");
+        assert!(js.contains("'自定义词'"), "应包含自定义词");
+        assert!(!js.contains("__SB_KEYWORDS__"), "模板占位符应被替换");
+    }
+
+    #[test]
+    fn build_js_escapes_quotes_and_dedups() {
+        let js = build_adblock_js(&["it's".to_string(), "关闭广告".to_string()]);
+        assert!(js.contains(r"'it\'s'"), "单引号应转义");
+        assert_eq!(js.matches("'关闭广告'").count(), 1, "内置词不应重复");
     }
 }

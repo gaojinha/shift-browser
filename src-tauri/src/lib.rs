@@ -89,6 +89,8 @@ pub fn run() {
       // 广告拦截
       extensions::set_adblock_enabled,
       extensions::get_adblock_enabled,
+      extensions::get_adblock_keywords,
+      extensions::set_adblock_keywords,
     ])
     .setup(|app| {
       // 初始化数据库（异步）
