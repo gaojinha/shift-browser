@@ -224,3 +224,27 @@ Corrections, insights, and knowledge gaps captured during development.
 - **生产模式从 dist 加载**：`tauri.conf.json` frontendDist 指向 `../dist`，release 版加载的是构建产物，**不是 src/**——改 .vue 后必须 `npm run build`（vue-tsc + vite build）重建 dist，否则改动不生效
 - **验证**：hover 书签 → 出现 × 删除按钮（OCR：`www.qg.com * cn.bing.com`）✓
 - **教训**：改前端代码后先问自己"这是 dev 还是 prod？prod 必须 npm run build"
+
+---
+
+## 2026-09-12 14:00 — 弹窗位置漂移与 xdotool 点击（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser Tauri，分组管理弹窗改色/折叠/删除按钮点击
+**要点**:
+- **弹窗位置不稳定**：520px 宽居中弹窗打开后，位置可能漂移（截图分析 y=394-490，点击时可能已移动）——xdotool 点击前**必须重新截图确认**，否则点击穿透到错误元素（曾误改生活分组颜色）
+- **改色验证成功**：点颜色点 → `update_tab_group` color 生效（#4a9eff → #e53935）
+- **删除验证成功**：点删除按钮 → `delete_tab_group` 生效（分组删除）
+- **折叠/重命名自动化受限**：WebKitGTK 合成点击位置漂移 + 合成键盘不可靠（重命名需输入文字）——这类操作留给高哥手动验证
+- **验证技巧**：破坏性操作（删除）前先备份数据库（`cp shift-browser.db /tmp/xxx.bak`）；点击后用数据库查询确认命令是否生效
+- **xdotool 点击验证链路**：截图 → python 分析按钮位置（#3d3d3d 按钮色 + 列表项 y 段）→ 立即点击 → 查数据库——截图和分析与点击间隔越短越可靠
+
+## 2026-09-12 14:30 — 标签分组持久化与脏数据防护（insight）
+
+**类别**: insight
+**场景**: ShiftBrowser Tauri，标签分组重启后丢失 → sessions JSON 持久化
+**要点**:
+- **方案**：`SessionTab` 加 `groupId` 字段，`saveCurrentSession` 存 groupId，`restoreLastSession` 恢复时按 session 顺序 `assignTabToGroup`（分组 id 是数据库持久自增，重启后不变）
+- **验证**：改 session JSON 给标签设 groupId → 重启 → 会话恢复 → TabBar 组头颜色条显示（border-left 3px 竖条，高 30px，区别于 favicon 的 10px 圆）
+- **脏数据防护**：删除分组后 sessions 残留旧 groupId → 恢复时校验分组存在性（`useGroupsStore().groups.some(g => g.id === groupId)`），不存在则回未分组
+- **TabBar 组头显示逻辑**：`filter((g) => g.tabs.length > 0 || true)` —— `|| true` 导致**所有分组都显示组头**（即使无标签）——验证时不能靠"组头数量"判断分组是否有标签
