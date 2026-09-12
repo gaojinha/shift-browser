@@ -397,3 +397,9 @@ Corrections, insights, and knowledge gaps captured during development.
 - **根因**: tauri-runtime-wry 的 `send_user_message` 在**主线程时直接重入 `handle_user_message`**（非主线程才 proxy.send_event 排队）。在事件循环处理 Task 闭包时重入，可见性变更静默失效。
 - **纠正**: webview 的 show/hide 直接在 async 命令线程调用——它们内部走 proxy 事件队列，入队顺序=执行顺序，天然保证"先 show 新再 hide 旧"。
 - **通用教训**: Tauri 的窗口/webview 操作 API 本身就是线程安全的（内部投递到主线程），**绝不要**再手动包 run_on_main_thread，那是套娃。
+
+## 2026-09-12 flexbox min-width:auto 挤出兄弟元素坑
+- **症状**: 状态栏"只剩 URL"，右侧"X 标签 · v5.0.0"看不到。
+- **根因**: flex 子项默认 `min-width:auto`——长 URL 的 .status-left 即使设了 overflow:hidden+ellipsis 也撑到内容全宽，把 .status-right 挤出容器。
+- **纠正**: 给可收缩的 flex 子项加 `min-width: 0`，ellipsis 才真正生效。
+- **教训**: flex 布局里"文本截断不生效/兄弟元素消失"，第一个查 min-width:0。
