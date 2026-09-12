@@ -1,6 +1,6 @@
 # ShiftBrowser v5.0.0（Tauri 重构）交接文档
 
-> 最后更新：2026-09-12（链接点击修复 + 新标签页 + 书签删除 ✅）
+> 最后更新：2026-09-12（下载管理 + 标签分组持久化 + 分组管理验证 ✅）
 > 交接人：王二狗 → 下任 agent
 
 ---
@@ -358,13 +358,24 @@ let pool = SqlitePoolOptions::new()
  27. **点击链接打开新标签页已实现（2026-09-12）**：`on_new_window` 回调由"当前 webview 导航"改为"**创建新标签页**"：`tauri::async_runtime::spawn` + `create_tab(app, state, url)` + 返回 `Deny`。前端靠 `startPolling()` 轮询（2s）自动显示新标签。**验证**：点新浪链接 → 新标签创建成功 → 标签栏出现新标签（OCR 5 个标签）→ 页面在新标签加载 ✓
  28. **书签删除 UI 已实现**：`BookmarksBar.vue` hover 显示 × 删除按钮。**关键**：改 src/ 里的 .vue 必须 `npm run build` 重建 dist（生产从 dist 加载），否则不生效。**验证**：hover 书签出现 ×（OCR：`www.qg.com * cn.bing.com`）✓
  29. **密码管理完整功能已验证（高哥手动 2026-09-12）**：查看密码 / 删除密码功能正常 ✓
+ 30. **下载管理 UI 已完成（2026-09-12）**：`DownloadsDialog.vue`（列表/进度条/状态标签/删除）+ `stores/downloads.ts` + `types/download.ts`；地址栏加 ⬇ 按钮（App.vue 接入，同密码弹窗：显示时 `set_webview_visible(false)` 隐藏 child webview）。**验证**：点 ⬇ → `get_downloads: 3 条` → 列表渲染（3 条 + 蓝色进度条）→ 点删除 → `delete_download: id=3` → 前端实时刷新 2 条（store filter 生效）→ ✕ 关闭（visible=true）✓
+     - **注意**：列表 `ORDER BY id DESC` 倒序（最新在前），弹窗第一条是最大 id
+     - **弹窗实际位置**：520px 宽居中（x=380-898），高度随内容（3 条记录时 y≈296-548）；xdotool 点击删除按钮用记录中心 y + x≈850
+ 31. **标签分组持久化已完成（2026-09-12）**：`SessionTab` 加 `groupId` 字段，`saveCurrentSession` 存 groupId，`restoreLastSession` 恢复时按顺序 `assignTabToGroup`（分组 id 是数据库持久自增，重启后不变；标签按 session 顺序恢复，顺序一致即可匹配）。**验证**：改 session JSON 给 2 个标签分别归组 生活(2)/娱乐(3) → 重启 → 会话恢复 2 标签 → TabBar 显示 2 个组头颜色条（x=21-32 + x=204-215）✓（commit a35ba0d）
+ 32. **分组管理功能验证（2026-09-12）**：
+     - ✅ **改色**：点娱乐分组红色颜色点 → 数据库 color #4a9eff → #e53935（update_tab_group 生效）
+     - ✅ **删除**：点删除按钮 → 娱乐分组删除（delete_tab_group 生效）
+     - ⏳ **折叠/重命名**：代码已实现（onToggleCollapse/startEdit+saveEdit），WebKitGTK 合成点击/键盘限制 + 弹窗位置漂移，待高哥手动验证
+     - **弹窗位置漂移问题**：分组/下载弹窗打开后位置可能变化（xdotool 点击前必须重新截图确认；改色/删除验证时曾因位置漂移误改生活分组颜色）
+     - **改进**：`restoreLastSession` 恢复时校验分组存在性（useGroupsStore + groups.some），分组已删除则标签回未分组（commit 9036ef3）——避免 sessions 残留脏 groupId
 
 ### 8.2 待办（下一步）
 
 1. **已解决**：~~P1：密码管理 UI 完整功能验证（查看/删除密码）~~ → 29. 高哥手动验证通过（2026-09-12）
-2. **P1**：下载管理 UI（下载记录列表/进度展示）
-3. **P1**：标签分组持久化（groupId 重启后丢失 → 需决定持久化方案：sessions JSON 加字段 or 单独映射表）
-4. **P1**：GroupsDialog 重命名/改色/删除分组验证
+2. **已解决**：~~P1：下载管理 UI（下载记录列表/进度展示）~~ → 30. 已完成（2026-09-12）
+3. **已解决**：~~P1：标签分组持久化（groupId 重启后丢失）~~ → 31. 已完成（sessions JSON 存 groupId，2026-09-12）
+4. **P1**：GroupsDialog 重命名/改色/删除分组验证 → 32. 改色/删除已验证，折叠/重命名待高哥手动
+5. **P2**：下载管理实际下载流程（当前只有记录管理，无真实下载触发——需 WebKit download 信号接入）
 5. **已解决**：~~P2：窗口 resize 时同步 Fixed 内 webview 尺寸~~ → 14. 已完成
 6. **已解决**：~~P2：初始化 git 仓库~~ → 15. 已完成
 7. **已解决**：~~窗口最大化后无法还原/调整大小~~ → 17. GtkOverlay 重构已完成
