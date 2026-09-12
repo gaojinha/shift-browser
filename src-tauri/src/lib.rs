@@ -168,6 +168,21 @@ pub fn run() {
         }
       }
 
+      // 防御：GNOME/Xwayland 偶发把新窗口以 Iconic（最小化）状态挂起，导致窗口不映射上屏。
+      // 启动 1 秒后强制 unminimize + show + focus 一次
+      {
+        let app_win = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+          std::thread::sleep(std::time::Duration::from_millis(1000));
+          if let Some(w) = app_win.get_window("main") {
+            let _ = w.unminimize();
+            let _ = w.show();
+            let _ = w.set_focus();
+            println!("[ShiftBrowser] 窗口已强制恢复/前置");
+          }
+        });
+      }
+
       Ok(())
     })
     .run(tauri::generate_context!())

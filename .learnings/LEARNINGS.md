@@ -403,3 +403,14 @@ Corrections, insights, and knowledge gaps captured during development.
 - **根因**: flex 子项默认 `min-width:auto`——长 URL 的 .status-left 即使设了 overflow:hidden+ellipsis 也撑到内容全宽，把 .status-right 挤出容器。
 - **纠正**: 给可收缩的 flex 子项加 `min-width: 0`，ellipsis 才真正生效。
 - **教训**: flex 布局里"文本截断不生效/兄弟元素消失"，第一个查 min-width:0。
+
+## 2026-09-13 GNOME/Xwayland 桥接挂死：窗口永远不上屏
+- **症状**: 浏览器进程活着、日志正常、X11 窗口存在但 Map State=IsUnMapped/WM_STATE=Iconic；
+  Activities 概览、Alt+Tab、Dock 里都找不到窗口；unminimize/windowmap/wmctrl 全部无效。
+- **误判**: 先怀疑代码（newtab block_on）、库升级（apt webkit）、数据（homepage），对照实验全排除。
+- **根因**: Xwayland 与 mutter 的窗口桥接挂了——Xwayland 不转建新 X11 窗口的 surface。
+  旁证：同期后台启动的 zenity 也起不来，但前台跑能显示（时间点错开的假象）。
+- **纠正**: `kill -9 $(pgrep Xwayland)`，gnome-shell 会在下个 X11 客户端出现时自动重建。
+  重启前用 `xlsclients` 确认没有别的要紧 X11 GUI 应用在跑。
+- **教训**: GUI 应用"进程活着窗口不出现"，先测**任意**新 X11 窗口能否显示（对照），
+  是环境病就别在代码里找原因。
