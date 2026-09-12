@@ -1,6 +1,6 @@
 # ShiftBrowser v5.0.0（Tauri 重构）交接文档
 
-> 最后更新：2026-09-12（AI 侧边栏完成 ✅：AGNES AI 对话 + 总结/翻译/解释当前页）
+> 最后更新：2026-09-12（AI 设置参数完成 ✅：设置对话框加 AI 助手区——模型/API 地址/API Key）
 > 交接人：王二狗 → 下任 agent
 
 ---
@@ -404,6 +404,13 @@ let pool = SqlitePoolOptions::new()
      - **⚠️ emoji 按钮点击**：🤖（U+1F916）在 WebKitGTK 渲染异常（hover 正常但 click 不触发）→ 按钮内容改用文字 "AI"
      - **⚠️ overlay 关闭事件**：`@click.self` 会因 WebKitGTK 点击判定（release 元素触发 click）导致弹窗开了又关 → 去掉 overlay 关闭，只保留 ✕ 按钮（后续可优化）
      - **⚠️ xdotool 自动化**：`xdotool click`（屏幕坐标）在窗口失焦时无效 → 用 `xdotool click --window $WID`（窗口相对坐标）可靠；窗口激活用 `windowactivate --sync`
+ 36. **AI 设置参数已完成（2026-09-12，commit 6c168d3）**：
+     - **功能**：设置对话框（⚙）加"AI 助手"区——模型选择（agnes-2.0-flash 推荐 / agnes-2.5-pro / agnes-2.5-flash 可能超时）、API 地址、API Key（留空用环境变量 AGNES_API_KEY）
+     - **存储**：settings 表新增 ai_model / ai_base_url / ai_api_key（DEFAULT_SETTINGS 有默认值）
+     - **Rust**：`ai_chat` 命令新增 base_url / api_key 可选参数（api_key 优先用传入，否则环境变量；base_url 默认 apihub.agnes-ai.com/v1）
+     - **前端**：`ai.ts` sendMessage 从 settingsStore 读模型/地址/key 传给 ai_chat
+     - **⚠️ 模型实测**：agnes-2.5-flash 在 AGNES 上 POST 超时（60s+ 无响应）不可用，agnes-2.0-flash 正常（~5s 返回）——默认模型用 2.0-flash
+     - **⚠️ 安全**：API Key 明文存 settings 表（本地 SQLite，可接受）；任何输出不得泄露 key
 
 ### 8.2 待办（下一步）
 

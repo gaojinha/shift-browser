@@ -311,3 +311,14 @@ Corrections, insights, and knowledge gaps captured during development.
 - **overlay 关闭**：`@click.self` 会因 WebKitGTK 点击判定（release 元素触发 click？）导致弹窗开了又关 → 去掉 overlay 关闭，只保留 ✕ 按钮
 - **xdotool 自动化**：`xdotool click`（屏幕坐标）在窗口失焦时无效 → 用 `xdotool click --window $WID`（窗口相对坐标）可靠；窗口激活用 `windowactivate --sync`
 - **教训**：WebKitGTK 的 CSS/事件行为与标准浏览器有差异，遇到"渲染正常但交互异常"优先怀疑 WebKitGTK 特性（浮层菜单点击、emoji 渲染、flex 高度、click 判定）
+
+## 2026-09-12 20:15 — AGNES 模型实测（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser AI 侧边栏，聊天功能"没实现"
+**要点**:
+- **症状**：AI 聊天点发送后无回复（前端一直转圈）
+- **根因**：默认模型 agnes-2.5-flash 在 AGNES API 上 POST /chat/completions 超时（60s+ 无响应，HTTP 000）；agnes-2.0-flash 正常（~5s 返回）
+- **排查**：curl 直测 API——GET /v1/models 正常（模型列表含 agnes-2.5-flash），但 POST 2.5-flash 超时；注意 curl 单引号嵌套会破坏 JSON（返回 400 或挂起）
+- **解决**：默认模型改 agnes-2.0-flash；Rust reqwest 加 90s 超时；设置对话框加模型选择让用户可切换
+- **教训**：AI 功能"没反应"先直测 API（curl），判断是 API 问题还是前端问题；模型可用性要实测（列表里有 ≠ 能用）
