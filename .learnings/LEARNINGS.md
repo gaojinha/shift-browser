@@ -248,3 +248,24 @@ Corrections, insights, and knowledge gaps captured during development.
 - **验证**：改 session JSON 给标签设 groupId → 重启 → 会话恢复 → TabBar 组头颜色条显示（border-left 3px 竖条，高 30px，区别于 favicon 的 10px 圆）
 - **脏数据防护**：删除分组后 sessions 残留旧 groupId → 恢复时校验分组存在性（`useGroupsStore().groups.some(g => g.id === groupId)`），不存在则回未分组
 - **TabBar 组头显示逻辑**：`filter((g) => g.tabs.length > 0 || true)` —— `|| true` 导致**所有分组都显示组头**（即使无标签）——验证时不能靠"组头数量"判断分组是否有标签
+
+## 2026-09-12 15:30 — 设置页面：⚙ 按钮位置与 flex 布局（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser Tauri，设置页面 ⚙ 按钮放地址栏左侧导航区点击无效
+**要点**:
+- **⚙ 按钮放地址栏左侧（第 5 个 nav-btn 位置）点击无效**：xdotool 点按钮中心无反应，弹窗不打开；但同一区域的刷新按钮正常、右侧按钮（密码/分组/下载）正常
+- **排查过程**：像素分析找"齿轮图标"→ 实际是地址栏 URL 文字（x=162-187 是 https:// 的灰色像素）；flex 布局中 ⚙ 按钮被地址栏输入框挤压（地址栏输入框从 x=144 开始，⚙ 按钮位置被占）
+- **解决**：把 ⚙ 移到右侧（替换无功能的 ☆ 收藏按钮）→ 点击正常
+- **教训**：地址栏按钮太多时优先放右侧（右侧 4 个 action-btn 点击验证正常）；左侧 nav-btn 区域 flex 布局挤压问题难排查，不如直接换位置
+- **验证技巧**：emoji 按钮（⚙🔑🗂⬇）OCR 识别不了，用像素分析（灰色/彩色图标段）定位；"齿轮图标"和"URL 文字"都是灰色像素，容易混淆——用上下文（前后段间隔）区分
+
+## 2026-09-12 15:40 — 多标签并发加载 WebKit 崩溃（insight）
+
+**类别**: insight
+**场景**: ShiftBrowser Tauri，恢复会话（5 标签并发加载）时崩溃
+**要点**:
+- **症状**：启动后 WebKit 大量 `WebLoaderStrategy::internallyFailedLoadTimerFired` 错误 → 进程崩溃
+- **排查**：网络正常（ping 通）→ 怀疑历史记录逻辑（新增 page_load_finished → record_history）→ 清空 sessions（只加载 1 个标签）→ 正常不崩 → **结论：多标签并发加载触发 WebKit 网络层 bug，与历史记录无关**
+- **应对**：清空 sessions 后应用正常（1 标签）；当前 4 标签 session 也正常——崩溃是偶发（WebKit bug），非必然
+- **教训**：排查崩溃先做对照实验（清空数据 vs 保留数据）；WebKit 网络层错误（WebLoaderStrategy）是已知 bug 类，别急着怀疑自己的代码

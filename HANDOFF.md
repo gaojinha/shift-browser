@@ -1,6 +1,6 @@
 # ShiftBrowser v5.0.0（Tauri 重构）交接文档
 
-> 最后更新：2026-09-12（下载管理 + 分组持久化 + 分组管理全功能验证 ✅）
+> 最后更新：2026-09-12（设置页面完成 ✅：通用/外观/隐私 + 主题切换 + 书签栏显隐 + 历史记录开关）
 > 交接人：王二狗 → 下任 agent
 
 ---
@@ -368,6 +368,17 @@ let pool = SqlitePoolOptions::new()
      - ✅ **折叠/重命名**：高哥手动验证通过（2026-09-12）——分组折叠/展开、重命名正常
      - **弹窗位置漂移问题**：分组/下载弹窗打开后位置可能变化（xdotool 点击前必须重新截图确认；改色/删除验证时曾因位置漂移误改生活分组颜色）
      - **改进**：`restoreLastSession` 恢复时校验分组存在性（useGroupsStore + groups.some），分组已删除则标签回未分组（commit 9036ef3）——避免 sessions 残留脏 groupId
+ 33. **设置页面已完成（2026-09-12，commit ecece8e）**：
+     - **SettingsDialog.vue**：设置弹窗，三节——通用（主页 URL/搜索引擎）、外观（主题/书签栏显隐）、隐私（记录历史开关/清除历史按钮）
+     - **settings store**（`src/stores/settings.ts`）：封装 get_all_settings/set_setting/clear_history，带默认值
+     - **App.vue**：⚙ 设置按钮、弹窗、主题 class 切换（CSS 变量深/浅两套）、书签栏显隐
+     - **AddressBar.vue**：主页按钮用设置的 homepage、地址栏搜索用设置的搜索引擎（bing/baidu/google）
+     - **主题 CSS 变量改造**：TabBar/AddressBar/BookmarksBar/StatusBar 换成 var(--xxx)（弹窗保持深色浮层风格）
+     - **Rust tabs.rs**：page_load_finished 按 record_history 开关记录历史（默认开；关掉则不写 history 表）
+     - **验证**：设置写入数据库（theme=light 等 5 项）→ 重启 → 浅色主题生效（地址栏背景 245,245,245）✓ 书签栏隐藏生效 ✓ 历史记录写入 history 表 ✓ 高哥手动验收通过 ✓
+     - **⚠️ ⚙ 按钮位置教训**：⚙ 放地址栏左侧导航区时点击无效（flex 布局挤压/被输入框盖住）→ 移到右侧（替换无功能的 ☆ 收藏按钮）后正常
+     - **⚠️ 多标签并发崩溃**：恢复会话（5 个标签并发加载）时 WebKit 偶发 WebLoaderStrategy 崩溃（网络层 bug，与历史记录逻辑无关——清空 sessions 后正常）；当前 4 标签 session 正常
+     - **⚠️ "Operation was cancelled" 提示**：WebKitGTK 原生控件干扰提示，功能正常，无需处理
 
 ### 8.2 待办（下一步）
 
@@ -375,7 +386,8 @@ let pool = SqlitePoolOptions::new()
 2. **已解决**：~~P1：下载管理 UI（下载记录列表/进度展示）~~ → 30. 已完成（2026-09-12）
 3. **已解决**：~~P1：标签分组持久化（groupId 重启后丢失）~~ → 31. 已完成（sessions JSON 存 groupId，2026-09-12）
 4. **已解决**：~~P1：GroupsDialog 重命名/改色/删除分组验证~~ → 32. 全部验证通过（高哥手动 2026-09-12）
-5. **P2**：下载管理实际下载流程（当前只有记录管理，无真实下载触发——需 WebKit download 信号接入）
+5. **已解决**：~~P2：设置页面~~ → 33. 已完成（通用/外观/隐私，2026-09-12）
+6. **P2**：下载管理实际下载流程（当前只有记录管理，无真实下载触发——需 WebKit download 信号接入）
 5. **已解决**：~~P2：窗口 resize 时同步 Fixed 内 webview 尺寸~~ → 14. 已完成
 6. **已解决**：~~P2：初始化 git 仓库~~ → 15. 已完成
 7. **已解决**：~~窗口最大化后无法还原/调整大小~~ → 17. GtkOverlay 重构已完成
