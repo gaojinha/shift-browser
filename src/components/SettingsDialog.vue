@@ -1,14 +1,17 @@
 <script setup lang="ts">
-// 设置弹窗（通用 / 外观 / 隐私）
+// 设置弹窗（通用 / 外观 / AI 助手 / 隐私 / 扩展）
 // 设置项存 settings 表（key-value），保存即生效
 import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useSettingsStore } from '../stores/settings'
+import { useExtensionsStore } from '../stores/extensions'
+import type { Extension } from '../types/extension'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const settingsStore = useSettingsStore()
+const extensionsStore = useExtensionsStore()
 
 // 弹窗显示时隐藏所有标签 webview（child 盖在 Vue UI 上），关闭时恢复
 watch(
@@ -16,6 +19,7 @@ watch(
   async (v) => {
     if (v) {
       if (!settingsStore.loaded) settingsStore.loadSettings().catch(() => {})
+      extensionsStore.loadExtensions().catch(() => {})
     }
     await invoke('set_webview_visible', { visible: !v })
   }
@@ -29,6 +33,11 @@ const SEARCH_ENGINES = [
 
 const clearedMsg = ref('')
 
+// 扩展管理：加载路径输入
+const extPath = ref('')
+const extError = ref('')
+const extLoading = ref(false)
+
 async function onSet(key: string, value: string) {
   await settingsStore.set(key, value)
 }
@@ -37,6 +46,35 @@ async function onClearHistory() {
   await settingsStore.clearHistory()
   clearedMsg.value = '历史记录已清除'
   setTimeout(() => (clearedMsg.value = ''), 2000)
+}
+
+/** 加载扩展（目录或 manifest.json 路径） */
+async function onLoadExtension() {
+  const path = extPath.value.trim()
+  if (!path) {
+    extError.value = '请输入扩展目录或 manifest.json 路径'
+    return
+  }
+  extLoading.value = true
+  extError.value = ''
+  try {
+    await extensionsStore.loadExtension(path)
+    extPath.value = ''
+  } catch (e) {
+    extError.value = String(e)
+  } finally {
+    extLoading.value = false
+  }
+}
+
+/** 切换启用状态 */
+async function onToggleExtension(e: Extension) {
+  await extensionsStore.setEnabled(e.id, !e.enabled).catch(() => {})
+}
+
+/** 删除扩展 */
+async function onDeleteExtension(id: number) {
+  await extensionsStore.deleteExtension(id).catch(() => {})
 }
 </script>
 
@@ -133,6 +171,45 @@ async function onClearHistory() {
               @change="onSet('ai_api_key', ($event.target as HTMLInputElement).value.trim())"
             />
           </div>
+        </div>
+
+        <!-- 扩展 -->
+        <div class="section">
+          <div class="section-title">扩展</div>
+          <div class="field ext-load-row">
+            <input
+              v-model="extPath"
+              type="text"
+              placeholder="扩展目录或 manifest.json 路径"
+              spellcheck="false"
+              @keyup.enter="onLoadExtension"
+            />
+            <button class="mini-btn primary" :disabled="extLoading" @click="onLoadExtension">
+              {{ extLoading ? '加载中…' : '加载' }}
+            </button>
+          </div>
+          <div v-if="extError" class="ext-error">{{ extError }}</div>
+          <div class="ext-list" v-if="extensionsStore.list.length > 0">
+            <div v-for="e in extensionsStore.list" :key="e.id" class="ext-item">
+              <div class="ext-info">
+                <span class="ext-name">{{ e.name }}</span>
+                <span class="ext-desc">
+                  {{ e.version ? 'v' + e.version : '' }}
+                  {{ e.description ? '· ' + e.description : '' }}
+                </span>
+              </div>
+              <div class="ext-actions">
+                <span v-if="e.js_count" class="ext-badge">JS</span>
+                <span v-if="e.css_count" class="ext-badge">CSS</span>
+                <label class="switch">
+                  <input type="checkbox" :checked="e.enabled" @change="onToggleExtension(e)" />
+                  <span class="slider"></span>
+                </label>
+                <button class="mini-btn danger" @click="onDeleteExtension(e.id)">删除</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="ext-empty">还没有扩展</div>
         </div>
 
         <!-- 隐私 -->
@@ -235,6 +312,9 @@ async function onClearHistory() {
   padding: 6px 10px;
   font-size: 13px;
   outline: none;
+  /* WebKitGTK 下 select/input 默认用系统白色渲染，强制自定义样式 */
+  -webkit-appearance: none;
+  appearance: none;
 }
 .field input:focus,
 .field select:focus {
@@ -260,5 +340,131 @@ async function onClearHistory() {
 .cleared-msg {
   font-size: 12px;
   color: #43a047;
+}
+.ext-load-row {
+  align-items: stretch;
+}
+.ext-load-row input {
+  flex: 1;
+  max-width: none;
+}
+.ext-error {
+  color: #ff6b6b;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.ext-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.ext-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #2a2a2a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  gap: 8px;
+}
+.ext-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.ext-name {
+  color: #e0e0e0;
+  font-size: 13px;
+  font-weight: 500;
+}
+.ext-desc {
+  color: #888;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ext-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.ext-badge {
+  font-size: 10px;
+  color: #4a9eff;
+  background: rgba(74, 158, 255, 0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.ext-empty {
+  color: #666;
+  font-size: 12px;
+  text-align: center;
+  padding: 8px 0;
+}
+.mini-btn {
+  background: #3d3d3d;
+  color: #ccc;
+  border: none;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mini-btn:hover {
+  background: #4a4a4a;
+}
+.mini-btn.primary {
+  background: #2b5a8a;
+  color: #cfe4ff;
+}
+.mini-btn.primary:hover {
+  background: #3370ab;
+}
+.mini-btn.danger:hover {
+  background: #5c2b2b;
+  color: #ff8a8a;
+}
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: #3d3d3d;
+  border-radius: 9px;
+  transition: 0.2s;
+}
+.slider::before {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  left: 3px;
+  top: 3px;
+  background: #999;
+  border-radius: 50%;
+  transition: 0.2s;
+}
+.switch input:checked + .slider {
+  background: rgba(74, 158, 255, 0.4);
+}
+.switch input:checked + .slider::before {
+  transform: translateX(16px);
+  background: #4a9eff;
 }
 </style>

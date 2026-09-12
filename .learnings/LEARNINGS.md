@@ -348,3 +348,17 @@ Corrections, insights, and knowledge gaps captured during development.
 - **SQLite 写锁竞争**：下载快时 received_data 每秒触发多次，每次都 UPDATE → 写锁排队（UPDATE 卡 1-5 秒，INSERT 直接 database is locked 失败）→ 两个修复：① `SqliteConnectOptions::busy_timeout(10s)` ② 进度节流（`Arc<Mutex<Instant>>` 500ms 内最多写一次）
 - **total 未知**：下载开始时 `response().content_length()` 可能为 0（如百度网盘）→ 进度回调时再取一次，`UPDATE ... total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END`
 - **教训**：异步回调链里"读共享状态再 await"的写法，先提取值再 await，guard 别跨 await 边界
+
+---
+
+## 2026-09-12 14:40 — 杀进程绝不用 pkill -f 匹配项目名（correction，高哥明确批评）
+
+**类别**: correction
+**场景**: 清缓存重启浏览器时 `pkill -9 -f "shift-browser"` 把自己（执行命令的 shell）也杀了，命令中断，重复犯过至少两次
+**要点**:
+- `pkill -f "xxx"` / `ps aux | grep "xxx" | grep -v grep | awk '{print $2}' | xargs kill` 会匹配**执行命令的 bash -c 自身命令行**（命令行里含该字符串）→ 把自己杀死、命令中断
+- **正确做法（记死）**：
+  - `ps -C shift-browser -o pid= | xargs -r kill -9`（按进程名 comm 精确匹配，bash 不匹配）
+  - 或 `pgrep -x shift-browser | xargs -r kill -9`
+- 杀 WebKit 子进程同理：`ps -C WebKitWebProcess -o pid=` 等，绝不 `pkill -f WebKit`
+- 清缓存目录用 rm -rf 时也要先确认路径，别把 ~ 打错

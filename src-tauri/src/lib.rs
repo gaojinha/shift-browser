@@ -1,6 +1,7 @@
 mod db;
 mod tabs;
 mod ai;
+mod extensions;
 
 use db::{bookmarks, downloads, history, passwords, sessions, settings, tab_groups, workspaces, Db};
 use tauri::Manager;
@@ -80,6 +81,11 @@ pub fn run() {
       tabs::update_tab,
       // AI 侧边栏
       ai::ai_chat,
+      // 扩展管理
+      extensions::load_extension,
+      extensions::list_extensions,
+      extensions::set_extension_enabled,
+      extensions::delete_extension,
     ])
     .setup(|app| {
       // 初始化数据库（异步）
@@ -129,6 +135,13 @@ pub fn run() {
           Ok(()) => println!("[ShiftBrowser] GTK 布局初始化成功"),
           Err(e) => eprintln!("[ShiftBrowser] GTK 布局初始化失败: {}", e),
         }
+      }
+
+      // 启动时注入所有启用扩展（UserContentManager 用户脚本/样式）
+      {
+        let app_handle = app.handle().clone();
+        let db_state = app.state::<Db>();
+        extensions::inject_on_startup(&app_handle, &db_state);
       }
 
       Ok(())

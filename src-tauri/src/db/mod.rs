@@ -1,6 +1,7 @@
 // 数据库连接与迁移管理
 pub mod bookmarks;
 pub mod downloads;
+pub mod extensions;
 pub mod history;
 pub mod passwords;
 pub mod sessions;

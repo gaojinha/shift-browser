@@ -141,6 +141,8 @@ function onForward() {
 }
 .address-container {
   flex: 1;
+  /* 限制最大宽度，给右侧按钮腾空间（按钮多时不被挤压隐藏） */
+  max-width: 640px;
   display: flex;
   align-items: center;
   background: var(--bg-secondary);
