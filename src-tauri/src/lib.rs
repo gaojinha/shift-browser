@@ -2,6 +2,7 @@ mod db;
 mod tabs;
 mod ai;
 mod extensions;
+mod newtab;
 
 use db::{bookmarks, downloads, history, passwords, sessions, settings, tab_groups, workspaces, Db};
 use tauri::Manager;
@@ -89,6 +90,9 @@ pub fn run() {
       // 广告拦截
       extensions::set_adblock_enabled,
       extensions::get_adblock_enabled,
+      // 新标签页
+      newtab::refresh_newtab,
+      newtab::get_newtab_url,
       extensions::get_adblock_keywords,
       extensions::set_adblock_keywords,
     ])
@@ -151,6 +155,17 @@ pub fn run() {
         let app_handle = app.handle().clone();
         let db_state = app.state::<Db>();
         extensions::inject_on_startup(&app_handle, &db_state);
+      }
+
+      // 启动时生成新标签页（左侧栏面板生态）
+      {
+        let db_state = app.state::<Db>();
+        if let Some(path) = newtab::newtab_path(app.handle()) {
+            match tauri::async_runtime::block_on(newtab::generate(&db_state, &path)) {
+                Ok(p) => println!("[ShiftBrowser] 新标签页已生成: {}", p),
+                Err(e) => eprintln!("[ShiftBrowser] 新标签页生成失败: {}", e),
+            }
+        }
       }
 
       Ok(())

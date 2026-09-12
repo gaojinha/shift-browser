@@ -10,7 +10,7 @@ interface SettingRow {
 
 // 默认设置（settings 表无记录时生效）
 export const DEFAULT_SETTINGS: Record<string, string> = {
-  homepage: 'https://www.bing.com',
+  homepage: 'newtab', // 'newtab' = 内置新标签页（原版左侧栏面板），也可填任意 URL
   search_engine: 'bing', // bing | baidu | google
   theme: 'dark', // dark | light
   show_bookmarks_bar: 'true',

@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { Tab } from '../types/tab'
 import type { Session, SessionTab } from '../types/session'
 import { useGroupsStore } from './groups'
+import { useSettingsStore } from './settings'
 
 interface TabsState {
   tabs: Tab[]
@@ -44,9 +45,19 @@ actions: {
       if (tab) tab.groupId = groupId
     },
 
-    /** 创建新标签页 */
-    async createTab(url = 'https://www.bing.com') {
-      const tab = await invoke<Tab>('create_tab', { url })
+    /** 创建新标签页（无参时按主页设置解析；'newtab' = 本地新标签页） */
+    async createTab(url?: string) {
+      let target = url || useSettingsStore().get('homepage') || 'newtab'
+      if (target === 'newtab') {
+        try {
+          // 先刷新数据（书签/历史面板），再取 URL
+          await invoke('refresh_newtab').catch(() => {})
+          target = await invoke<string>('get_newtab_url')
+        } catch {
+          target = 'https://www.bing.com'
+        }
+      }
+      const tab = await invoke<Tab>('create_tab', { url: target })
       this.tabs.push(tab)
       // 取消旧标签激活
       for (const t of this.tabs) {

@@ -135,13 +135,13 @@ async function onRemoveKeyword(k: string) {
           <div class="section-title">通用</div>
           <div class="field">
             <label>主页 URL</label>
-            <input
-              type="text"
-              :value="settingsStore.get('homepage')"
-              placeholder="https://www.bing.com"
-              spellcheck="false"
-              @change="onSet('homepage', ($event.target as HTMLInputElement).value.trim())"
-            />
+<input
+               type="text"
+               :value="settingsStore.get('homepage')"
+               placeholder="newtab 或 https://..."
+               spellcheck="false"
+               @change="onSet('homepage', ($event.target as HTMLInputElement).value.trim())"
+             />
           </div>
           <div class="field">
             <label>搜索引擎</label>
