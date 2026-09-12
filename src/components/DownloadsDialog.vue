@@ -2,14 +2,26 @@
 // 下载管理弹窗
 // 注意：child webview 是 GTK 部件盖在 Vue UI 上，弹窗会被页面盖住。
 // 因此显示时隐藏所有标签 webview（同 PasswordsDialog），关闭时恢复。
-import { watch } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { useDownloadsStore } from '../stores/downloads'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const downloadsStore = useDownloadsStore()
+
+// 监听 Rust 侧下载事件（下载开始/进度/完成/失败），弹窗打开时实时刷新
+let unlisten: (() => void) | null = null
+onMounted(async () => {
+  unlisten = await listen('downloads-updated', () => {
+    if (props.show) downloadsStore.loadDownloads().catch(() => {})
+  })
+})
+onUnmounted(() => {
+  unlisten?.()
+})
 
 // 弹窗显示时隐藏所有标签 webview（child 盖在 Vue UI 上），关闭时恢复
 watch(

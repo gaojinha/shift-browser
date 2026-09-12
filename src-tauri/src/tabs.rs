@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl};
 
 use crate::db::{history, Db};
 
@@ -13,7 +13,7 @@ use crate::db::{history, Db};
 use gtk::glib::translate::ToGlibPtr;
 use gtk::prelude::*;
 #[cfg(target_os = "linux")]
-use webkit2gtk::SettingsExt;
+use webkit2gtk::{DownloadExt, SettingsExt, URIRequestExt, URIResponseExt, WebContextExt};
 use webkit2gtk::WebViewExt;
 
 // UI 布局常量（与前端 CSS 保持一致）
@@ -183,7 +183,8 @@ impl TabManager {
     // 解法：把主 webview 和所有 child webview reparent 到 GtkFixed 容器，实现绝对定位叠层。
     #[cfg(target_os = "linux")]
     {
-      Self::fix_gtk_layout(&child, w, h)?;
+      let db = app.state::<Db>();
+      Self::fix_gtk_layout(&child, w, h, db.pool.clone(), app.clone())?;
     }
     Ok(())
   }
@@ -196,6 +197,8 @@ impl TabManager {
     child: &tauri::Webview,
     w: f64,
     h: f64,
+    db_pool: sqlx::SqlitePool,
+    app: AppHandle,
   ) -> Result<(), String> {
     let (tx, rx) = std::sync::mpsc::channel();
     let child = child.clone();
@@ -251,6 +254,117 @@ impl TabManager {
               );
               false.into()
           });
+          // 下载信号：网页触发下载（点击下载链接等）→ 记录到 downloads 表 + 进度/完成/失败更新
+          // WebView 无 download 信号，用 WebContext 的 download_started（全局注册一次）
+          // 下载目的地默认 ~/Downloads/<文件名>
+          static DOWNLOAD_HOOK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+          if let Some(ctx) = child_gtk.context() {
+            if !DOWNLOAD_HOOK.swap(true, std::sync::atomic::Ordering::SeqCst) {
+              let dl_pool = db_pool.clone();
+              let dl_app = app.clone();
+              ctx.connect_download_started(move |_ctx, download| {
+                println!("[downloads] 下载开始信号");
+                // 文件名：从 URL 推断（URL 最后一段，去 query）
+                let url = download
+                  .request()
+                  .and_then(|r| r.uri())
+                  .map(|s| s.to_string());
+                let filename = url
+                  .as_deref()
+                  .map(|u| {
+                    let path = u.split('?').next().unwrap_or(u);
+                    let name = path.rsplit('/').next().unwrap_or("download").to_string();
+                    if name.is_empty() { "download".to_string() } else { name }
+                  })
+                  .unwrap_or_else(|| "download".to_string());
+                let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+                let dest_dir = format!("{}/Downloads", home);
+                let _ = std::fs::create_dir_all(&dest_dir);
+                let dest = format!("{}/{}", dest_dir, filename);
+                download.set_destination(&format!("file://{}", dest));
+                // 总字节：从 response 拿（可能未知为 0）
+                let total = download
+                  .response()
+                  .map(|r| r.content_length() as i64)
+                  .unwrap_or(0);
+
+                // 同步插入记录拿 id（下载开始很快，避免进度回调拿不到 id）
+                let pool0 = dl_pool.clone();
+                let app0 = dl_app.clone();
+                let filename_db = filename.clone();
+                let url_db = url.clone();
+                let dest_db = dest.clone();
+                let id = tauri::async_runtime::block_on(async move {
+                  sqlx::query(
+                    "INSERT INTO downloads (filename, url, path, total_bytes, received_bytes, state) VALUES (?, ?, ?, ?, 0, 'in_progress')",
+                  )
+                  .bind(&filename_db)
+                  .bind(&url_db)
+                  .bind(Some(&dest_db))
+                  .bind(total)
+                  .execute(&pool0)
+                  .await
+                  .map(|r| r.last_insert_rowid())
+                  .unwrap_or(0)
+                });
+                println!("[downloads] 记录 id={} filename={} total={}", id, filename, total);
+                let _ = app0.emit("downloads-updated", ());
+
+                // 进度回调（每次收到数据）
+                let pool2 = dl_pool.clone();
+                let app2 = dl_app.clone();
+                download.connect_received_data(move |dl, _len| {
+                  let received = dl.received_data_length() as i64;
+                  let pool3 = pool2.clone();
+                  let app3 = app2.clone();
+                  tauri::async_runtime::spawn(async move {
+                    let _ = sqlx::query("UPDATE downloads SET received_bytes = ? WHERE id = ?")
+                      .bind(received)
+                      .bind(id)
+                      .execute(&pool3)
+                      .await;
+                    let _ = app3.emit("downloads-updated", ());
+                  });
+                });
+
+                // 完成回调
+                let pool4 = dl_pool.clone();
+                let app4 = dl_app.clone();
+                download.connect_finished(move |dl| {
+                  let received = dl.received_data_length() as i64;
+                  let pool5 = pool4.clone();
+                  let app5 = app4.clone();
+                  tauri::async_runtime::spawn(async move {
+                    let _ = sqlx::query(
+                      "UPDATE downloads SET received_bytes = ?, state = 'completed' WHERE id = ?",
+                    )
+                    .bind(received)
+                    .bind(id)
+                    .execute(&pool5)
+                    .await;
+                    let _ = app5.emit("downloads-updated", ());
+                  });
+                });
+
+                // 失败回调
+                let pool6 = dl_pool.clone();
+                let app6 = dl_app.clone();
+                download.connect_failed(move |_dl, err| {
+                  println!("[downloads] 下载失败: {}", err);
+                  let pool7 = pool6.clone();
+                  let app7 = app6.clone();
+                  tauri::async_runtime::spawn(async move {
+                    let _ = sqlx::query("UPDATE downloads SET state = 'failed' WHERE id = ?")
+                      .bind(id)
+                      .execute(&pool7)
+                      .await;
+                    let _ = app7.emit("downloads-updated", ());
+                  });
+                });
+              });
+              println!("[downloads] download 信号已注册");
+            }
+          }
           child_gtk.show();
           println!(
             "[tabs] child_webview reparent 到 Fixed: pos=(0,{}) size=({:.0},{:.0})",
