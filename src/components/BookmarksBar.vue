@@ -19,6 +19,11 @@ function onClickBookmark(url: string) {
   if (active) tabsStore.navigateTab(active.id, url)
 }
 
+/** 删除书签 */
+async function onDeleteBookmark(id: number) {
+  await bookmarksStore.removeBookmark(id)
+}
+
 /** 收藏当前页 */
 async function onBookmark() {
   const active = tabsStore.activeTab
@@ -39,6 +44,7 @@ async function onBookmark() {
         @click="onClickBookmark(b.url)"
       >
         {{ b.title }}
+        <span class="bm-del" title="删除书签" @click.stop="onDeleteBookmark(b.id)">×</span>
       </button>
     </div>
     <button class="action-btn" title="收藏当前页" @click="onBookmark">☆</button>
@@ -86,6 +92,19 @@ async function onBookmark() {
 .bookmark-item:hover {
   background: #333;
   color: #fff;
+}
+.bm-del {
+  display: none;
+  margin-left: 4px;
+  color: #999;
+  font-size: 12px;
+  line-height: 1;
+}
+.bookmark-item:hover .bm-del {
+  display: inline;
+}
+.bm-del:hover {
+  color: #ff6b6b;
 }
 .empty {
   justify-content: flex-end;

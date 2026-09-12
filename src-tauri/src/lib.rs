@@ -102,6 +102,22 @@ pub fn run() {
       app.manage(tabs::TabManager::new());
       println!("[ShiftBrowser] 标签管理器初始化成功");
 
+      // Linux：手动设置 WebKit web extensions 目录（tauri://localhost 协议依赖 web extension）
+      // Tauri 2 不会自动设置 extensions_path，必须手动指定，否则前端资源加载失败
+      #[cfg(target_os = "linux")]
+      {
+        use webkit2gtk::WebContextExt;
+        use webkit2gtk::WebContext;
+        if let Some(context) = WebContext::default() {
+          if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+              context.set_web_extensions_directory(&dir.display().to_string());
+              println!("[ShiftBrowser] web extensions 目录: {}", dir.display());
+            }
+          }
+        }
+      }
+
       // Linux/GTK：初始化嵌入式 webview 的绝对定位布局（Fixed 容器 + 主 webview reparent）
       #[cfg(target_os = "linux")]
       {

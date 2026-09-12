@@ -8,8 +8,10 @@ use std::sync::Mutex;
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl};
 
 #[cfg(target_os = "linux")]
+use gtk::glib::translate::ToGlibPtr;
 use gtk::prelude::*;
 #[cfg(target_os = "linux")]
+use webkit2gtk::SettingsExt;
 use webkit2gtk::WebViewExt;
 
 // UI 布局常量（与前端 CSS 保持一致）
@@ -112,12 +114,17 @@ impl TabManager {
     let child = window
       .add_child(
         WebviewBuilder::new(label.clone(), WebviewUrl::External(parsed_url))
-          // target=_blank / window.open 新窗口请求：MVP 在当前 webview 导航，不创建新窗口
+          // target=_blank / window.open 新窗口请求：统一创建新标签页打开链接
           .on_new_window(move |url, _features| {
             println!("[tabs] on_new_window: url={}", url);
-            if let Some(wv) = app_handle.get_webview(&label) {
-              let _ = wv.navigate(url.clone());
-            }
+            let app = app_handle.clone();
+            let url_str = url.to_string();
+            tauri::async_runtime::spawn(async move {
+              let state = app.state::<TabManager>();
+              if let Ok(tab) = create_tab(app.clone(), state, url_str).await {
+                println!("[tabs] on_new_window: 新标签创建成功 id={}", tab.id);
+              }
+            });
             tauri::webview::NewWindowResponse::Deny
           })
 .on_page_load(move |_webview, payload| {
@@ -178,16 +185,48 @@ impl TabManager {
           .and_then(|p| p.dynamic_cast::<gtk::Box>().ok())
         {
           let fixed = find_or_create_fixed(&vbox);
-          // gtk-rs 0.18 无 reparent：先从 vbox 移除再放入 Fixed
-          // Fixed 在窗口 (0, CONTENT_TOP_OFFSET)，child 在 Fixed 内 (0,0)
-          vbox.remove(&child_gtk);
-          fixed.put(&child_gtk, 0, 0);
+          // 标准 reparent（gtk_widget_reparent FFI）：正确处理 GDK 窗口/输入窗口跟随新 parent，
+          // 避免 remove+put 导致 WebKitWebView 输入窗口不跟随（链接点击失效）
+          unsafe {
+            gtk::ffi::gtk_widget_reparent(
+              child_gtk.upcast_ref::<gtk::Widget>().to_glib_none().0,
+              fixed.upcast_ref::<gtk::Widget>().to_glib_none().0,
+            );
+          }
           child_gtk.set_size_request(w as i32, h as i32);
           // 允许 JS 自动打开窗口（target=_blank / window.open 触发 create 信号）
-          let settings = webkit2gtk::Settings::builder()
-            .javascript_can_open_windows_automatically(true)
-            .build();
-          child_gtk.set_settings(&settings);
+          // 注意：不能新建 Settings 替换（会丢失 Tauri 默认设置导致链接点击失效），
+          // 只能修改现有 Settings 的属性
+          if let Some(settings) = webkit2gtk::WebViewExt::settings(&child_gtk) {
+            settings.set_javascript_can_open_windows_automatically(true);
+          }
+          // 监听 child webview 的鼠标点击事件
+          child_gtk.connect_button_press_event(|wv, event| {
+              let (x, y) = (event.position().0, event.position().1);
+              println!(
+                  "[tabs] child button_press: button={} pos=({},{})",
+                  event.button(), x, y
+              );
+              // WebKit 需要焦点处理 DOM 点击事件；强制聚焦 child webview
+              wv.grab_focus();
+              // 链接点击修复：WebKit 输入窗口在 reparent 后不处理 DOM 点击（链接不导航），
+              // 用 JS 检查点击位置的链接并 window.open 打开新标签页（触发 on_new_window 创建新 tab）
+              let js = format!(
+                  "(function(){{var el=document.elementFromPoint({},{});var a=el&&el.closest?el.closest('a[href]'):null;if(a&&a.href)window.open(a.href);}})()",
+                  x, y
+              );
+              let _ = wv.run_javascript(&js, None::<&gtk::gio::Cancellable>, |_| {});
+              false.into() // 不拦截，让 webview 处理
+          });
+          child_gtk.connect_button_release_event(|_wv, event| {
+              println!(
+                  "[tabs] child button_release: button={} pos=({},{})",
+                  event.button(),
+                  event.position().0,
+                  event.position().1
+              );
+              false.into()
+          });
           child_gtk.show();
           println!(
             "[tabs] child_webview reparent 到 Fixed: pos=(0,{}) size=({:.0},{:.0})",

@@ -19,7 +19,7 @@ tauri-build = { version = "2.6.3", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.11.3", features = ["unstable"] }
+tauri = { version = "2.11.3", features = ["unstable", "custom-protocol"] }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
@@ -40,4 +40,6 @@ webkit2gtk = { version = "=2.0", features = ["v2_40"] }
 codegen-units = 1
 lto = true
 opt-level = "s"
-strip = true
+# 注意：不能 strip = true！Tauri 2 的 web extension（cdylib）需要保留符号，
+# 否则 WebKit 找不到入口函数，tauri://localhost 协议失效，前端加载失败
+strip = "debuginfo"
