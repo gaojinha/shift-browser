@@ -117,16 +117,23 @@ actions: {
         return false
       }
       for (const t of tabs) {
-        if (t.url) await this.createTab(t.url)
+        if (t.url) {
+          const tab = await this.createTab(t.url)
+          // 恢复分组归属（groupId 是数据库持久 id，按 session 顺序匹配）
+          if (t.groupId != null && tab) {
+            this.assignTabToGroup(tab.id, t.groupId)
+          }
+        }
       }
       return tabs.length > 0
     },
 
-    /** 保存当前会话（标签页快照） */
+    /** 保存当前会话（标签页快照，含分组归属） */
     async saveCurrentSession() {
       const tabs: SessionTab[] = this.tabs.map((t) => ({
         url: t.url,
         title: t.title,
+        groupId: t.groupId ?? null,
       }))
       if (tabs.length === 0) return
       try {

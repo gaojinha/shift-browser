@@ -2,6 +2,8 @@
 export interface SessionTab {
   url: string
   title?: string
+  /** 标签分组归属（持久化；null = 未分组） */
+  groupId?: number | null
 }
 
 export interface Session {
