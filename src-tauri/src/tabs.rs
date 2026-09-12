@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl};
 
+use crate::db::{history, Db};
+
 #[cfg(target_os = "linux")]
 use gtk::glib::translate::ToGlibPtr;
 use gtk::prelude::*;
@@ -139,6 +141,11 @@ impl TabManager {
 
               println!("[tabs] page_load_finished: tab={} title={}", tab_id, title);
 
+              // 按设置记录浏览历史（record_history 开关，默认开）——先 clone，避免 title 被 move
+              let app3 = app_handle2.clone();
+              let url_str = url.to_string();
+              let title_opt = Some(title.clone());
+
               if let Some(state) = app_handle2.try_state::<TabManager>() {
                 let mut tabs = state.tabs.lock().unwrap();
                 if let Some(tab) = tabs.get_mut(&tab_id) {
@@ -146,6 +153,23 @@ impl TabManager {
                   tab.title = title;
                 }
               }
+
+              tauri::async_runtime::spawn(async move {
+                let db = app3.state::<Db>();
+                let enabled: Option<(String,)> = sqlx::query_as(
+                  "SELECT value FROM settings WHERE key = 'record_history'",
+                )
+                .fetch_optional(&db.pool)
+                .await
+                .ok()
+                .flatten();
+                let record = enabled.map(|v| v.0 != "false").unwrap_or(true);
+                if record {
+                  if let Err(e) = history::record_history(db, url_str, title_opt).await {
+                    println!("[tabs] record_history 失败: {}", e);
+                  }
+                }
+              });
             }
           }),
         LogicalPosition::new(0.0, CONTENT_TOP_OFFSET),

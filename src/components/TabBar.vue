@@ -175,7 +175,7 @@ function onFaviconError(e: Event) {
   display: flex;
   align-items: center;
   height: 40px;
-  background: #1a1a1a;
+  background: var(--bg-primary);
   padding: 0 8px;
   flex-shrink: 0;
   user-select: none;
@@ -202,18 +202,18 @@ function onFaviconError(e: Event) {
   height: 32px;
   padding: 0 10px;
   margin-right: 3px;
-  background: #2d2d2d;
+  background: var(--bg-secondary);
   border-radius: 8px 8px 0 0;
   border: 1px solid transparent;
   cursor: pointer;
   transition: background 0.2s, box-shadow 0.2s, color 0.2s, border-color 0.2s;
 }
 .tab:hover {
-  background: #383838;
+  background: var(--bg-hover);
 }
 .tab.active {
-  background: #3d3d3d;
-  border-color: #3d3d3d;
+  background: var(--bg-active);
+  border-color: var(--bg-active);
   box-shadow: inset 0 3px 0 #1a73e8;
 }
 .tab .favicon {
@@ -227,7 +227,7 @@ function onFaviconError(e: Event) {
 .tab .title {
   flex: 1;
   font-size: 12px;
-  color: #ccc;
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -246,7 +246,7 @@ function onFaviconError(e: Event) {
   height: 16px;
   border: none;
   background: transparent;
-  color: #999;
+  color: var(--text-muted);
   border-radius: 3px;
   cursor: pointer;
   font-size: 14px;
@@ -285,7 +285,7 @@ function onFaviconError(e: Event) {
   height: 32px;
   padding: 0 8px;
   margin-right: 3px;
-  background: #242424;
+  background: var(--bg-secondary);
   border-radius: 6px 6px 0 0;
   border-left: 3px solid #4a9eff;
   flex-shrink: 0;
@@ -293,20 +293,20 @@ function onFaviconError(e: Event) {
 }
 .group-name {
   font-size: 12px;
-  color: #bbb;
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 .group-count {
   font-size: 11px;
   color: #777;
-  background: #2e2e2e;
+  background: var(--bg-secondary);
   border-radius: 8px;
   padding: 0 6px;
 }
 .group-toggle {
   border: none;
   background: transparent;
-  color: #888;
+  color: var(--text-muted);
   font-size: 10px;
   cursor: pointer;
   padding: 2px 4px;
@@ -322,7 +322,7 @@ function onFaviconError(e: Event) {
   height: 28px;
   border: none;
   background: transparent;
-  color: #999;
+  color: var(--text-muted);
   border-radius: 6px;
   cursor: pointer;
   font-size: 18px;
@@ -330,7 +330,7 @@ function onFaviconError(e: Event) {
   transition: background 0.15s, color 0.15s;
 }
 .new-tab-btn:hover {
-  background: #3d3d3d;
+  background: var(--bg-active);
   color: #fff;
 }
 
@@ -340,14 +340,14 @@ function onFaviconError(e: Event) {
   z-index: 2000;
   min-width: 160px;
   background: #2a2a2a;
-  border: 1px solid #444;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
 }
 .menu-title {
   font-size: 11px;
-  color: #888;
+  color: var(--text-muted);
   padding: 4px 8px;
 }
 .menu-item {
@@ -356,12 +356,12 @@ function onFaviconError(e: Event) {
   gap: 8px;
   padding: 7px 8px;
   font-size: 13px;
-  color: #ddd;
+  color: var(--text-primary);
   border-radius: 6px;
   cursor: pointer;
 }
 .menu-item:hover {
-  background: #3d3d3d;
+  background: var(--bg-active);
 }
 .menu-item.accent {
   color: #4a9eff;

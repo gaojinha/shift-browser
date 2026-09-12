@@ -9,17 +9,23 @@ import StatusBar from './components/StatusBar.vue'
 import PasswordsDialog from './components/PasswordsDialog.vue'
 import GroupsDialog from './components/GroupsDialog.vue'
 import DownloadsDialog from './components/DownloadsDialog.vue'
+import SettingsDialog from './components/SettingsDialog.vue'
 import { useTabsStore } from './stores/tabs'
 import { useGroupsStore } from './stores/groups'
+import { useSettingsStore } from './stores/settings'
 
 const tabsStore = useTabsStore()
 const groupsStore = useGroupsStore()
+const settingsStore = useSettingsStore()
 const showPasswords = ref(false)
 const showGroups = ref(false)
 const showDownloads = ref(false)
+const showSettings = ref(false)
 let saveTimer: number | null = null
 
 onMounted(async () => {
+  // 设置尽早加载（主页/搜索引擎/主题/书签栏显隐依赖）
+  settingsStore.loadSettings().catch(() => {})
   // 分组尽早加载（不等标签恢复，避免右键菜单/组头迟迟不显示）
   groupsStore.loadGroups().catch(() => {})
   // 启动时恢复标签状态
@@ -53,20 +59,22 @@ watch(
 </script>
 
 <template>
-  <div class="app">
+  <div class="app" :class="{ 'theme-light': settingsStore.isLight }">
     <TabBar />
     <AddressBar
       @open-passwords="showPasswords = true"
       @open-groups="showGroups = true"
       @open-downloads="showDownloads = true"
+      @open-settings="showSettings = true"
     />
-    <BookmarksBar />
+    <BookmarksBar v-if="settingsStore.showBookmarksBar" />
     <!-- 内容区：webview 由 Rust 以 (0, 112) 起盖住此区域 -->
     <div class="content-area" id="contentArea"></div>
     <StatusBar />
     <PasswordsDialog :show="showPasswords" @close="showPasswords = false" />
     <GroupsDialog :show="showGroups" @close="showGroups = false" />
     <DownloadsDialog :show="showDownloads" @close="showDownloads = false" />
+    <SettingsDialog :show="showSettings" @close="showSettings = false" />
   </div>
 </template>
 
@@ -75,12 +83,41 @@ watch(
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #1a1a1a;
+  background: var(--bg-primary, #1a1a1a);
   overflow: hidden;
 }
 .content-area {
   flex: 1;
   position: relative;
-  background: #1a1a1a;
+  background: var(--bg-primary, #1a1a1a);
+}
+</style>
+
+<style>
+/* 主题变量：深色（默认）+ 浅色（.theme-light 覆盖）
+   各组件 scoped 样式引用 var(--xxx)，实现全局深浅色切换 */
+:root {
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #2d2d2d;
+  --bg-hover: #383838;
+  --bg-active: #3d3d3d;
+  --text-primary: #e0e0e0;
+  --text-secondary: #ccc;
+  --text-muted: #999;
+  --border-color: #444;
+  --border-subtle: #333;
+  --accent: #4a9eff;
+}
+.theme-light {
+  --bg-primary: #f5f5f5;
+  --bg-secondary: #ffffff;
+  --bg-hover: #ececec;
+  --bg-active: #e0e0e0;
+  --text-primary: #333333;
+  --text-secondary: #444444;
+  --text-muted: #888888;
+  --border-color: #cccccc;
+  --border-subtle: #dddddd;
+  --accent: #1a73e8;
 }
 </style>

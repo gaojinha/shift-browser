@@ -2,15 +2,25 @@
 // 地址栏（对应 Electron 版 .address-bar 设计）
 import { ref, watch } from 'vue'
 import { useTabsStore } from '../stores/tabs'
+import { useSettingsStore } from '../stores/settings'
 
 const tabsStore = useTabsStore()
+const settingsStore = useSettingsStore()
 const addressInput = ref('')
 
 const emit = defineEmits<{
   (e: 'openPasswords'): void
   (e: 'openGroups'): void
   (e: 'openDownloads'): void
+  (e: 'openSettings'): void
 }>()
+
+// 搜索引擎 URL 模板（与设置弹窗 SEARCH_ENGINES 一致）
+const SEARCH_URLS: Record<string, string> = {
+  bing: 'https://www.bing.com/search?q=',
+  baidu: 'https://www.baidu.com/s?wd=',
+  google: 'https://www.google.com/search?q=',
+}
 
 // 当前活动标签变化时同步地址栏
 watch(
@@ -31,9 +41,11 @@ function onAddressEnter() {
   let url = input
   // 无协议时补全 https://
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(input)) {
-    // 带空格或非域名格式 → 走搜索
+    // 带空格或非域名格式 → 走搜索（用设置的搜索引擎）
     if (/\s/.test(input) || !input.includes('.')) {
-      url = `https://www.bing.com/search?q=${encodeURIComponent(input)}`
+      const engine = settingsStore.get('search_engine') || 'bing'
+      const base = SEARCH_URLS[engine] ?? SEARCH_URLS.bing
+      url = `${base}${encodeURIComponent(input)}`
     } else {
       url = `https://${input}`
     }
@@ -48,7 +60,7 @@ function onRefresh() {
 
 function onHome() {
   const active = tabsStore.activeTab
-  if (active) tabsStore.navigateTab(active.id, 'https://www.bing.com')
+  if (active) tabsStore.navigateTab(active.id, settingsStore.get('homepage') || 'https://www.bing.com')
 }
 
 function onBack() {
@@ -75,10 +87,10 @@ function onForward() {
         @keydown.enter="onAddressEnter"
       />
     </div>
-    <button class="action-btn" title="收藏">☆</button>
     <button class="action-btn" title="密码管理" @click="emit('openPasswords')">🔑</button>
     <button class="action-btn" title="标签分组" @click="emit('openGroups')">🗂</button>
     <button class="action-btn" title="下载管理" @click="emit('openDownloads')">⬇</button>
+    <button class="action-btn" title="设置" @click="emit('openSettings')">⚙</button>
   </div>
 </template>
 
@@ -87,7 +99,7 @@ function onForward() {
   display: flex;
   align-items: center;
   height: 42px;
-  background: #1a1a1a;
+  background: var(--bg-primary);
   padding: 0 8px 4px;
   gap: 4px;
   flex-shrink: 0;
@@ -99,7 +111,7 @@ function onForward() {
   height: 30px;
   border: none;
   background: transparent;
-  color: #999;
+  color: var(--text-muted);
   border-radius: 6px;
   cursor: pointer;
   font-size: 15px;
@@ -108,7 +120,7 @@ function onForward() {
 }
 .nav-btn:hover:not(:disabled),
 .action-btn:hover {
-  background: #3d3d3d;
+  background: var(--bg-active);
   color: #fff;
 }
 .nav-btn:disabled {
@@ -119,7 +131,7 @@ function onForward() {
   flex: 1;
   display: flex;
   align-items: center;
-  background: #2d2d2d;
+  background: var(--bg-secondary);
   border-radius: 16px;
   padding: 0 14px;
   height: 30px;
@@ -129,11 +141,11 @@ function onForward() {
   border: none;
   outline: none;
   background: transparent;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 13px;
   height: 100%;
 }
 .address-container input::placeholder {
-  color: #888;
+  color: var(--text-muted);
 }
 </style>

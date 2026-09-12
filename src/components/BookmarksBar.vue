@@ -60,7 +60,7 @@ async function onBookmark() {
   align-items: center;
   height: 30px;
   background: #222;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-subtle);
   padding: 0 8px;
   gap: 4px;
   flex-shrink: 0;
@@ -82,7 +82,7 @@ async function onBookmark() {
   padding: 3px 8px;
   border: none;
   background: transparent;
-  color: #ccc;
+  color: var(--text-secondary);
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
@@ -96,7 +96,7 @@ async function onBookmark() {
 .bm-del {
   display: none;
   margin-left: 4px;
-  color: #999;
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1;
 }
@@ -114,7 +114,7 @@ async function onBookmark() {
   height: 24px;
   border: none;
   background: transparent;
-  color: #999;
+  color: var(--text-muted);
   border-radius: 4px;
   cursor: pointer;
   font-size: 14px;
@@ -122,7 +122,7 @@ async function onBookmark() {
   transition: background 0.15s, color 0.15s;
 }
 .action-btn:hover {
-  background: #3d3d3d;
+  background: var(--bg-active);
   color: #f0c040;
 }
 </style>

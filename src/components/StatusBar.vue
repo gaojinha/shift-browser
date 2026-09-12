@@ -22,14 +22,14 @@ const tabCount = computed(() => tabsStore.tabs.length)
   align-items: center;
   justify-content: space-between;
   height: 22px;
-  background: #1a1a1a;
-  border-top: 1px solid #333;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-subtle);
   padding: 0 12px;
   flex-shrink: 0;
   user-select: none;
 }
 .status-left {
-  color: #888;
+  color: var(--text-muted);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -38,7 +38,7 @@ const tabCount = computed(() => tabsStore.tabs.length)
   margin-right: 12px;
 }
 .status-right {
-  color: #666;
+  color: var(--text-muted);
   font-size: 11px;
   flex-shrink: 0;
 }
