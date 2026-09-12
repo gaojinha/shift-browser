@@ -2,6 +2,7 @@
 // 对接 AGNES AI（Rust ai_chat 命令，OpenAI 兼容）
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
+import { useSettingsStore } from './settings'
 
 export interface AIMessage {
   role: 'user' | 'assistant'
@@ -42,11 +43,19 @@ export const useAIStore = defineStore('ai', {
         const system = ctx
           ? `你是 ShiftBrowser 内置 AI 助手。当前用户正在浏览的页面：标题「${ctx.title}」，地址 ${ctx.url}。回答要简洁实用，中文回复。`
           : '你是 ShiftBrowser 内置 AI 助手。回答要简洁实用，中文回复。'
+        // 从设置读取 AI 参数（模型/API 地址/API Key）
+        const settingsStore = useSettingsStore()
+        const model = settingsStore.get('ai_model') || 'agnes-2.0-flash'
+        const baseUrl = settingsStore.get('ai_base_url') || ''
+        const apiKey = settingsStore.get('ai_api_key') || ''
         const reply = await invoke<string>('ai_chat', {
           messages: [
             { role: 'system', content: system },
             ...this.messages.map((m) => ({ role: m.role, content: m.content })),
           ],
+          model,
+          baseUrl: baseUrl || undefined,
+          apiKey: apiKey || undefined,
         })
         this.messages.push({ role: 'assistant', content: reply })
       } catch (e) {

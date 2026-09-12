@@ -99,6 +99,42 @@ async function onClearHistory() {
           </div>
         </div>
 
+        <!-- AI 助手 -->
+        <div class="section">
+          <div class="section-title">AI 助手</div>
+          <div class="field">
+            <label>模型</label>
+            <select
+              :value="settingsStore.get('ai_model')"
+              @change="onSet('ai_model', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="agnes-2.0-flash">agnes-2.0-flash（推荐）</option>
+              <option value="agnes-2.5-pro">agnes-2.5-pro</option>
+              <option value="agnes-2.5-flash">agnes-2.5-flash（可能超时）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>API 地址</label>
+            <input
+              type="text"
+              :value="settingsStore.get('ai_base_url')"
+              placeholder="https://apihub.agnes-ai.com/v1"
+              spellcheck="false"
+              @change="onSet('ai_base_url', ($event.target as HTMLInputElement).value.trim())"
+            />
+          </div>
+          <div class="field">
+            <label>API Key</label>
+            <input
+              type="password"
+              :value="settingsStore.get('ai_api_key')"
+              placeholder="留空使用环境变量 AGNES_API_KEY"
+              spellcheck="false"
+              @change="onSet('ai_api_key', ($event.target as HTMLInputElement).value.trim())"
+            />
+          </div>
+        </div>
+
         <!-- 隐私 -->
         <div class="section">
           <div class="section-title">隐私</div>

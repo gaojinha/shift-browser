@@ -26,18 +26,31 @@ struct ChatChoice {
 }
 
 /// AI 对话（AGNES API，OpenAI 兼容）
-/// model：agnes-2.5-flash（默认）/ agnes-2.5-pro / agnes-2.0-flash
+/// model：agnes-2.0-flash（默认，稳定）/ agnes-2.5-pro / agnes-2.5-flash（可能超时）
+/// base_url：API 地址（默认 https://apihub.agnes-ai.com/v1）
+/// api_key：API Key（留空/未传时用环境变量 AGNES_API_KEY）
 /// messages：对话消息（role: system/user/assistant）
 #[tauri::command]
 pub async fn ai_chat(
     messages: Vec<ChatMessage>,
     model: Option<String>,
+    base_url: Option<String>,
+    api_key: Option<String>,
 ) -> Result<String, String> {
-    let api_key = std::env::var("AGNES_API_KEY")
-        .map_err(|_| "未配置 AGNES_API_KEY 环境变量".to_string())?;
-    let model = model.unwrap_or_else(|| "agnes-2.5-flash".to_string());
+    let api_key = api_key
+        .filter(|k| !k.trim().is_empty())
+        .or_else(|| std::env::var("AGNES_API_KEY").ok())
+        .ok_or_else(|| "未配置 API Key（在设置里填写，或设置 AGNES_API_KEY 环境变量）".to_string())?;
+    let model = model.unwrap_or_else(|| "agnes-2.0-flash".to_string());
+    let base_url = base_url
+        .filter(|u| !u.trim().is_empty())
+        .unwrap_or_else(|| "https://apihub.agnes-ai.com/v1".to_string());
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(90))
+        .build()
+        .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
     let req = ChatRequest {
         model,
         messages,
@@ -45,7 +58,7 @@ pub async fn ai_chat(
     };
 
     let resp = client
-        .post("https://apihub.agnes-ai.com/v1/chat/completions")
+        .post(url)
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&req)
         .send()
