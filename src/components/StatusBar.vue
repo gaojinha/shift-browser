@@ -35,6 +35,7 @@ const tabCount = computed(() => tabsStore.tabs.length)
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+  min-width: 0; /* flexbox 默认 min-width:auto 会让长 URL 撑满空间、把 .status-right 挤出可视区 */
   margin-right: 12px;
 }
 .status-right {
