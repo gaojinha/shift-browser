@@ -1,6 +1,6 @@
 # ShiftBrowser v5.0.0（Tauri 重构）交接文档
 
-> 最后更新：2026-09-12（设置页面完成 ✅：通用/外观/隐私 + 主题切换 + 书签栏显隐 + 历史记录开关）
+> 最后更新：2026-09-12（工作区 UI 完成 ✅：独立标签集合，切换/新建/删除）
 > 交接人：王二狗 → 下任 agent
 
 ---
@@ -379,6 +379,19 @@ let pool = SqlitePoolOptions::new()
      - **⚠️ ⚙ 按钮位置教训**：⚙ 放地址栏左侧导航区时点击无效（flex 布局挤压/被输入框盖住）→ 移到右侧（替换无功能的 ☆ 收藏按钮）后正常
      - **⚠️ 多标签并发崩溃**：恢复会话（5 个标签并发加载）时 WebKit 偶发 WebLoaderStrategy 崩溃（网络层 bug，与历史记录逻辑无关——清空 sessions 后正常）；当前 4 标签 session 正常
      - **⚠️ "Operation was cancelled" 提示**：WebKitGTK 原生控件干扰提示，功能正常，无需处理
+ 34. **工作区 UI 已完成（2026-09-12，commit f6824ca）**：
+     - **概念**：浏览器的多工作区（类似 Chrome 配置文件）——每个工作区独立标签集合，切换工作区 = 保存当前标签 → 清空 → 恢复目标工作区标签
+     - **workspaces store**（`src/stores/workspaces.ts`）：load/create（自动命名"工作区 N"）/rename/delete/switchWorkspace
+     - **TabBar.vue**：左侧工作区按钮（☰ 当前工作区名 ▼）+ 工作区弹窗（默认工作区/工作区列表/新建/删除）
+     - **sessions.rs**：save_session 加 workspace_id 参数；load_last_session 按工作区过滤（null=默认工作区）
+     - **tabs.rs**：新增 close_all_tabs 命令（切换工作区清空标签）
+     - **tabs store**：saveCurrentSession/restoreLastSession 带 workspace_id；clearAllTabs
+     - **App.vue**：启动加载工作区列表、恢复当前工作区会话、标签变化按当前工作区保存
+     - **验证**：创建"工作区 1/2"成功（workspaces 表）✓ 切换（close_all_tabs 执行）✓ 会话按工作区隔离（sessions.workspace_id）✓ 高哥验收通过 ✓
+     - **⚠️ WebKitGTK 浮层菜单点击 bug**：position absolute/fixed 的下拉菜单渲染可见但点击事件不响应（xdotool 和真人点击都无效）→ **改用弹窗模式**（overlay + dialog，与设置弹窗一致）后点击可靠
+     - **⚠️ HTML 弹窗被 GTK webview 盖住**：弹窗打开时必须 set_webview_visible(false) 隐藏 webview（HTML overlay 盖不住 GTK 层），关闭时恢复——TabBar watch showWorkspaceDialog 处理
+     - **⚠️ 关闭按钮字符**：×（U+00D7）在 WebKitGTK 可能不渲染 → 统一用 ✕（U+2715，与设置弹窗一致）
+     - **⚠️ release 编译**：Rust 改动必须 `cargo build --release`（运行的是 release 二进制，dev 编译不生效）
 
 ### 8.2 待办（下一步）
 
@@ -387,7 +400,8 @@ let pool = SqlitePoolOptions::new()
 3. **已解决**：~~P1：标签分组持久化（groupId 重启后丢失）~~ → 31. 已完成（sessions JSON 存 groupId，2026-09-12）
 4. **已解决**：~~P1：GroupsDialog 重命名/改色/删除分组验证~~ → 32. 全部验证通过（高哥手动 2026-09-12）
 5. **已解决**：~~P2：设置页面~~ → 33. 已完成（通用/外观/隐私，2026-09-12）
-6. **P2**：下载管理实际下载流程（当前只有记录管理，无真实下载触发——需 WebKit download 信号接入）
+6. **已解决**：~~P2：工作区 UI~~ → 34. 已完成（独立标签集合，2026-09-12）
+7. **P2**：下载管理实际下载流程（当前只有记录管理，无真实下载触发——需 WebKit download 信号接入）
 5. **已解决**：~~P2：窗口 resize 时同步 Fixed 内 webview 尺寸~~ → 14. 已完成
 6. **已解决**：~~P2：初始化 git 仓库~~ → 15. 已完成
 7. **已解决**：~~窗口最大化后无法还原/调整大小~~ → 17. GtkOverlay 重构已完成

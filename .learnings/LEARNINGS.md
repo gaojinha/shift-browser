@@ -269,3 +269,24 @@ Corrections, insights, and knowledge gaps captured during development.
 - **排查**：网络正常（ping 通）→ 怀疑历史记录逻辑（新增 page_load_finished → record_history）→ 清空 sessions（只加载 1 个标签）→ 正常不崩 → **结论：多标签并发加载触发 WebKit 网络层 bug，与历史记录无关**
 - **应对**：清空 sessions 后应用正常（1 标签）；当前 4 标签 session 也正常——崩溃是偶发（WebKit bug），非必然
 - **教训**：排查崩溃先做对照实验（清空数据 vs 保留数据）；WebKit 网络层错误（WebLoaderStrategy）是已知 bug 类，别急着怀疑自己的代码
+
+## 2026-09-12 16:20 — WebKitGTK 浮层菜单点击 bug（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser Tauri，工作区下拉菜单（position absolute/fixed）渲染可见但点击无效
+**要点**:
+- **症状**：下拉菜单（position: absolute/fixed 的浮层）渲染正常（截图可见文字/背景），但点击菜单项完全无效（xdotool 点击无效、hover 无效）；菜单外点击关闭逻辑也不触发
+- **排查**：坐标转换没问题（mousemove --window 正确）；TabBar 其他元素点击正常（标签 switch_tab、书签 create_tab）；AddressBar 无 stacking context；z-index 2000 正常
+- **解决**：**改用弹窗模式**（dialog-overlay fixed 全屏 + dialog 居中，与设置弹窗/分组弹窗一致）——点击立即可靠
+- **教训**：WebKitGTK 对 position absolute/fixed 的浮层菜单点击事件处理有 bug（渲染可见但事件不响应）——**以后所有下拉菜单/浮层交互一律用弹窗模式**（overlay + dialog），不要用 position absolute 的菜单
+- **补充**：弹窗打开时必须 `set_webview_visible(false)` 隐藏 GTK 层 webview（HTML overlay 盖不住 GTK webview）；关闭按钮字符用 ✕（U+2715）不用 ×（U+00D7）
+
+## 2026-09-12 16:30 — release 编译必须 cargo build --release（correction）
+
+**类别**: correction
+**场景**: ShiftBrowser Tauri，代码改动后运行不生效
+**要点**:
+- **症状**：改了 Rust + 前端代码，cargo build（dev profile）通过，但运行 target/release/shift-browser 时 UI 没有新功能
+- **原因**：**一直用 cargo build（dev），但运行的是 release 二进制**——dev 编译的 target/debug 不是运行目标；release 二进制嵌入的是编译时的 dist（Tauri 编译期嵌入前端资源）
+- **解决**：Rust 改动必须 `cargo build --release`（6 分钟左右）；前端改动 npm run build 后也必须重新 cargo build --release（dist 是编译期嵌入）
+- **教训**：**Tauri 项目改代码后必须 build --release**；排查"改动不生效"先看运行的是哪个二进制（ps aux 确认 target/release）
