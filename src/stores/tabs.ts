@@ -107,9 +107,9 @@ actions: {
       }
     },
 
-    /** 恢复最近会话（有会话则逐个恢复标签，返回是否恢复成功） */
-    async restoreLastSession(): Promise<boolean> {
-      const session = await invoke<Session | null>('load_last_session')
+    /** 恢复指定工作区最近会话（有会话则逐个恢复标签，返回是否恢复成功） */
+    async restoreLastSession(workspaceId: number | null = null): Promise<boolean> {
+      const session = await invoke<Session | null>('load_last_session', { workspaceId })
       if (!session) return false
       let tabs: SessionTab[] = []
       try {
@@ -135,8 +135,8 @@ actions: {
       return tabs.length > 0
     },
 
-    /** 保存当前会话（标签页快照，含分组归属） */
-    async saveCurrentSession() {
+    /** 保存当前会话（标签页快照，含分组归属），workspaceId = 所属工作区（null = 默认） */
+    async saveCurrentSession(workspaceId: number | null = null) {
       const tabs: SessionTab[] = this.tabs.map((t) => ({
         url: t.url,
         title: t.title,
@@ -146,11 +146,23 @@ actions: {
       try {
         await invoke<number>('save_session', {
           name: '自动保存',
+          workspaceId,
           tabs,
         })
       } catch (e) {
         console.error('[tabs] 保存会话失败:', e)
       }
+    },
+
+    /** 关闭全部标签（切换工作区时清空用） */
+    async clearAllTabs() {
+      try {
+        await invoke('close_all_tabs')
+      } catch (e) {
+        console.error('[tabs] 清空标签失败:', e)
+      }
+      this.tabs = []
+      this.activeTabId = null
     },
 
     /**

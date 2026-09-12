@@ -529,6 +529,30 @@ pub async fn close_tab(
   Ok(next_id.and_then(|nid| tabs.get(&nid).cloned()))
 }
 
+/// 关闭全部标签（切换工作区时清空用）
+#[tauri::command]
+pub async fn close_all_tabs(
+  app: AppHandle,
+  state: tauri::State<'_, TabManager>,
+) -> Result<(), String> {
+  println!("[tabs] close_all_tabs");
+  let ids: Vec<String> = {
+    let mut tabs = state.tabs.lock().unwrap();
+    let mut order = state.order.lock().unwrap();
+    let mut active = state.active_id.lock().unwrap();
+    let collected: Vec<String> = tabs.keys().cloned().collect();
+    tabs.clear();
+    order.clear();
+    *active = None;
+    collected
+  };
+
+  for id in ids {
+    TabManager::destroy_webview(&app, &id);
+  }
+  Ok(())
+}
+
 /// 切换标签页
 #[tauri::command]
 pub async fn switch_tab(

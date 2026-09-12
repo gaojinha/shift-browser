@@ -1,12 +1,15 @@
 <script setup lang="ts">
 // 标签栏（分组版）：未分组标签 + 各分组（颜色条 + 折叠）+ 右键分配分组
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useTabsStore } from '../stores/tabs'
 import { useGroupsStore } from '../stores/groups'
+import { useWorkspacesStore } from '../stores/workspaces'
+import { invoke } from '@tauri-apps/api/core'
 import type { Tab } from '../types/tab'
 
 const tabsStore = useTabsStore()
 const groupsStore = useGroupsStore()
+const workspacesStore = useWorkspacesStore()
 
 // 默认网站图标（蓝色地球 SVG，与 Electron 版一致）
 const DEFAULT_FAVICON =
@@ -80,6 +83,33 @@ function onNewTab() {
   tabsStore.createTab()
 }
 
+// ---- 工作区 ----
+const showWorkspaceDialog = ref(false)
+
+// 弹窗打开时隐藏 GTK 层 webview（否则 HTML 弹窗被 webview 盖住），关闭时恢复
+watch(showWorkspaceDialog, (v) => {
+  invoke('set_webview_visible', { visible: !v }).catch(() => {})
+})
+
+function toggleWorkspaceMenu() {
+  showWorkspaceDialog.value = !showWorkspaceDialog.value
+}
+
+async function onSwitchWorkspace(id: number | null) {
+  showWorkspaceDialog.value = false
+  await workspacesStore.switchWorkspace(id)
+}
+
+async function onCreateWorkspace() {
+  showWorkspaceDialog.value = false
+  await workspacesStore.createWorkspace()
+}
+
+async function onDeleteWorkspace(e: MouseEvent, id: number) {
+  e.stopPropagation()
+  await workspacesStore.deleteWorkspace(id)
+}
+
 /** favicon 加载失败时移除元素（避免破图） */
 function onFaviconError(e: Event) {
   const el = e.target as HTMLImageElement | null
@@ -89,6 +119,46 @@ function onFaviconError(e: Event) {
 
 <template>
   <div class="tab-bar" @click="closeMenu">
+    <!-- 工作区按钮 -->
+    <button class="workspace-btn" title="切换工作区" @click.stop="toggleWorkspaceMenu">
+      <span class="ws-icon">☰</span>
+      <span class="ws-name">{{ workspacesStore.currentName }}</span>
+      <span class="ws-caret">▼</span>
+    </button>
+
+    <!-- 工作区弹窗（弹窗模式：WebKitGTK 浮层菜单点击有 bug，弹窗点击可靠） -->
+    <div v-if="showWorkspaceDialog" class="ws-overlay" @click.self="showWorkspaceDialog = false">
+      <div class="ws-dialog">
+        <div class="ws-dialog-header">
+          <span>工作区（独立标签集合）</span>
+          <button class="ws-close" title="关闭" @click="showWorkspaceDialog = false">✕</button>
+        </div>
+        <div class="ws-dialog-body">
+          <div
+            class="ws-item"
+            :class="{ active: workspacesStore.currentId === null }"
+            @click="onSwitchWorkspace(null)"
+          >
+            <span class="ws-dot ws-default"></span>默认工作区
+            <span v-if="workspacesStore.currentId === null" class="ws-check">✓</span>
+          </div>
+          <div
+            v-for="w in workspacesStore.workspaces"
+            :key="w.id"
+            class="ws-item"
+            :class="{ active: workspacesStore.currentId === w.id }"
+            @click="onSwitchWorkspace(w.id)"
+          >
+            <span class="ws-dot ws-colored"></span>{{ w.name }}
+            <span v-if="workspacesStore.currentId === w.id" class="ws-check">✓</span>
+            <button class="ws-del" title="删除工作区" @click="onDeleteWorkspace($event, w.id)">×</button>
+          </div>
+          <div class="ws-divider"></div>
+          <div class="ws-item accent" @click="onCreateWorkspace">＋ 新建工作区</div>
+        </div>
+      </div>
+    </div>
+
     <div class="tab-scroll" @contextmenu.prevent>
       <!-- 未分组标签 -->
       <div
@@ -180,6 +250,142 @@ function onFaviconError(e: Event) {
   flex-shrink: 0;
   user-select: none;
   position: relative;
+}
+
+/* 工作区按钮 */
+.workspace-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  margin-right: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.workspace-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.ws-icon {
+  font-size: 13px;
+  color: var(--accent);
+}
+.ws-caret {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+/* 工作区弹窗（弹窗模式：浮层菜单在 WebKitGTK 点击有 bug） */
+.ws-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ws-dialog {
+  width: 320px;
+  background: #222;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.ws-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid #333;
+}
+.ws-close {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.ws-close:hover {
+  background: #e53935;
+  color: #fff;
+}
+.ws-dialog-body {
+  padding: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.ws-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ws-item:hover {
+  background: var(--bg-active);
+}
+.ws-item.active {
+  color: #4a9eff;
+}
+.ws-item.accent {
+  color: #4a9eff;
+}
+.ws-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.ws-default {
+  background: #4a9eff;
+}
+.ws-colored {
+  background: #8e24aa;
+}
+.ws-check {
+  margin-left: auto;
+  color: #4a9eff;
+  font-size: 13px;
+}
+.ws-del {
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 18px;
+  flex-shrink: 0;
+}
+.ws-del:hover {
+  background: #e53935;
+  color: #fff;
+}
+.ws-divider {
+  height: 1px;
+  background: #3a3a3a;
+  margin: 6px 0;
 }
 .tab-scroll {
   display: flex;

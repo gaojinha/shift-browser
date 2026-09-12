@@ -13,10 +13,12 @@ import SettingsDialog from './components/SettingsDialog.vue'
 import { useTabsStore } from './stores/tabs'
 import { useGroupsStore } from './stores/groups'
 import { useSettingsStore } from './stores/settings'
+import { useWorkspacesStore } from './stores/workspaces'
 
 const tabsStore = useTabsStore()
 const groupsStore = useGroupsStore()
 const settingsStore = useSettingsStore()
+const workspacesStore = useWorkspacesStore()
 const showPasswords = ref(false)
 const showGroups = ref(false)
 const showDownloads = ref(false)
@@ -28,11 +30,13 @@ onMounted(async () => {
   settingsStore.loadSettings().catch(() => {})
   // 分组尽早加载（不等标签恢复，避免右键菜单/组头迟迟不显示）
   groupsStore.loadGroups().catch(() => {})
+  // 工作区列表加载（当前工作区 = 默认）
+  await workspacesStore.loadWorkspaces()
   // 启动时恢复标签状态
   await tabsStore.loadTabs()
   if (tabsStore.tabs.length === 0) {
-    // 无标签：先尝试恢复最近会话，失败则创建默认标签
-    const restored = await tabsStore.restoreLastSession()
+    // 无标签：先尝试恢复当前工作区最近会话，失败则创建默认标签
+    const restored = await tabsStore.restoreLastSession(workspacesStore.currentId)
     if (!restored) {
       await tabsStore.createTab()
     }
@@ -46,13 +50,13 @@ onUnmounted(() => {
   if (saveTimer) clearTimeout(saveTimer)
 })
 
-// 标签变化时自动保存会话（防抖 3 秒）
+// 标签变化时自动保存会话（防抖 3 秒，按当前工作区保存）
 watch(
   () => tabsStore.tabs.map((t) => `${t.id}:${t.url}`).join('|'),
   () => {
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = window.setTimeout(() => {
-      tabsStore.saveCurrentSession()
+      tabsStore.saveCurrentSession(workspacesStore.currentId)
     }, 3000)
   }
 )

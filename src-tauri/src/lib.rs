@@ -69,6 +69,7 @@ pub fn run() {
       // 标签页
       tabs::create_tab,
       tabs::close_tab,
+      tabs::close_all_tabs,
       tabs::switch_tab,
       tabs::navigate_tab,
       tabs::go_back,
