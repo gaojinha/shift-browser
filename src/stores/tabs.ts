@@ -4,6 +4,7 @@ import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import type { Tab } from '../types/tab'
 import type { Session, SessionTab } from '../types/session'
+import { useGroupsStore } from './groups'
 
 interface TabsState {
   tabs: Tab[]
@@ -116,12 +117,18 @@ actions: {
       } catch {
         return false
       }
+      // 分组可能已被删除，恢复前确保分组列表已加载（校验 groupId 存在性）
+      const groups = useGroupsStore()
+      if (groups.groups.length === 0) {
+        await groups.loadGroups().catch(() => {})
+      }
       for (const t of tabs) {
         if (t.url) {
           const tab = await this.createTab(t.url)
-          // 恢复分组归属（groupId 是数据库持久 id，按 session 顺序匹配）
+          // 恢复分组归属（groupId 是数据库持久 id，按 session 顺序匹配；分组已删除则回未分组）
           if (t.groupId != null && tab) {
-            this.assignTabToGroup(tab.id, t.groupId)
+            const exists = groups.groups.some((g) => g.id === t.groupId)
+            this.assignTabToGroup(tab.id, exists ? t.groupId : null)
           }
         }
       }
