@@ -76,6 +76,13 @@ async function onToggleExtension(e: Extension) {
 async function onDeleteExtension(id: number) {
   await extensionsStore.deleteExtension(id).catch(() => {})
 }
+
+/** 广告拦截开关 */
+async function onToggleAdblock() {
+  const current = settingsStore.get('adblock_enabled') !== 'false'
+  await settingsStore.set('adblock_enabled', (!current).toString())
+  await invoke('set_adblock_enabled', { enabled: !current })
+}
 </script>
 
 <template>
@@ -215,6 +222,16 @@ async function onDeleteExtension(id: number) {
         <!-- 隐私 -->
         <div class="section">
           <div class="section-title">隐私</div>
+          <div class="field">
+            <label>广告拦截</label>
+            <select
+              :value="settingsStore.get('adblock_enabled') !== 'false' ? 'true' : 'false'"
+              @change="onToggleAdblock"
+            >
+              <option value="true">开启</option>
+              <option value="false">关闭</option>
+            </select>
+          </div>
           <div class="field">
             <label>记录浏览历史</label>
             <select

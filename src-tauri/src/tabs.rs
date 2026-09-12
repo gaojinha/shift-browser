@@ -186,6 +186,13 @@ impl TabManager {
       let db = app.state::<Db>();
       Self::fix_gtk_layout(&child, w, h, db.pool.clone(), app.clone())?;
     }
+
+    // 新标签创建后重新注入扩展 + 广告拦截（新 webview 需要注入）
+    let app_for_inject = app.clone();
+    tauri::async_runtime::spawn(async move {
+      crate::extensions::re_inject(&app_for_inject).await;
+    });
+
     Ok(())
   }
 

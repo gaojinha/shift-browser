@@ -151,7 +151,99 @@ fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>
     });
 }
 
-/// 读取所有启用扩展的注入内容
+/// 内置广告拦截 CSS 规则（精简版，常见广告选择器）
+/// 设置 adblock_enabled=true 时自动注入，优先级低于用户扩展（扩展后注入）
+const ADBLOCK_CSS: &str = r#"
+/* ShiftBrowser 内置广告拦截（精简规则） */
+#ad, #ads, .ad, .ads, .advert, .advertisement, .ad-banner, .ad-container,
+.ad-slot, .ad-wrapper, .adsbygoogle, .banner-ad, .sponsored, .sponsor,
+.promo, .promotion, .google-ads, .ggads, .adv, .advertise, .ad-box,
+[class*="ad-banner"], [class*="ad-container"], [id*="ad-banner"],
+iframe[src*="ad."], iframe[src*="doubleclick"], iframe[src*="googlead"],
+img[src*="ad."], img[src*="advert"], img[src*="doubleclick"],
+ins.adsbygoogle, .ad-placeholder, .advertisement-banner,
+[class*="popup-ad"], [id*="popup-ad"], .ad-modal, .ad-overlay,
+/* 门户/新浪类广告 */
+#ad_right, .ad-left, .ad-top, .ad-bottom, .adbox, .ad-box, .ad_box,
+.adsbox, .ggbox, #sinaads, .sinaads, .ads_global, .ad_global,
+[class*="advert"], [id*="advert"], [class*="sinaads"], [id*="sinaads"],
+[class*="gg_"], [class*="_gg"], [class*="banner"], [id*="banner"],
+iframe[src*="ad"], iframe[src*="ads"], iframe[src*="advert"], iframe[src*="sinaads"],
+iframe[src*="googlesyndication"], iframe[src*="amazon-adsystem"],
+/* 对联/悬浮广告（页面左右两侧） */
+#leftCouplet, #rightCouplet, .leftCouplet, .rightCouplet, .couplet, #couplet,
+.floatAd, .float-ad, .floatAdLeft, .floatAdRight, .leftFloat, .rightFloat,
+#floatAd, .sideAd, .side-ad, .sidebar-ad, .leftAd, .rightAd, .left-ad, .right-ad,
+.left_float, .right_float, .float_left, .float_right, .floatL, .floatR,
+[class*="couplet"], [id*="couplet"], [class*="floatAd"], [class*="float-ad"],
+[class*="float_"], [id*="float_"], [class*="sideAd"], [class*="side-ad"],
+/* 常见广告尺寸规格 */
+.ad-300x250, .ad-728x90, .ad-160x600, .ad-970x90, .ad-970x250,
+.ad-336x280, .ad-300x600, .ad-320x50, .ad-250x250, .ad-468x60,
+/* 广告容器/单元 */
+.adsense, .ad-sense, .advert-slot, .ad-slot-1, .ad-slot-2, .ad-slot,
+.ad-unit, .ad-unit-1, .ad-unit-2, .ad-inner, .ad-outer, .ad-wrap,
+.ad-content, .ad-item, .ad-list, .ad-grid, .ad-banner-container,
+/* 内容推荐广告 */
+.taboola, .outbrain, .revcontent, .content-ad, .recommend-ad,
+/* 视频广告 */
+.youku-player-ad, .iqiyi-ad, .video-ad, .player-ad, .preroll-ad, .postroll-ad,
+/* 弹窗/遮罩 */
+.modal-ad, .pop-ad, .layer-ad, .mask-ad, .dialog-ad, .overlay-ad,
+/* 底部浮条 */
+.bottom-ad, .footer-ad, .float-bottom, .bottom-banner, .footer-banner,
+.bottom-bar-ad, .floating-ad, .sticky-ad,
+/* 移动端/应用推广 */
+.mobile-ad, .app-ad, .app-download, .download-ad, .app-promo,
+/* 各门户广告 */
+.qq_ad, .tx_ad, .netease_ad, .sohu_ad, .sogou_ad, .youku_ad, .tudou_ad,
+#content_right, .ec_ads, .result-op.c-container, .c-container[data-click*="ad"]
+{ display: none !important; }
+"#;
+
+/// 内置广告拦截 JS：按文本特征隐藏广告模块（类名规则覆盖不到的，如"头条报"推广）
+/// 含 MutationObserver 动态拦截（SPA/动态加载广告）+ 节流防性能问题
+const ADBLOCK_JS: &str = r#"
+// ShiftBrowser 广告拦截：文本特征规则 + 动态监听
+(function () {
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  var keywords = ['头条报', '推广', '赞助', '下载APP', '下载 App', '广告投放', '广告合作'];
+  var HIDDEN = 'data-sb-hidden';
+  function hideByText() {
+    var nodes = document.querySelectorAll('div, section, aside');
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      if (el.getAttribute(HIDDEN)) continue;
+      if (el.offsetWidth === 0 && el.offsetHeight === 0) continue; // 跳过不可见元素
+      var text = el.textContent || '';
+      if (text.length > 5 && text.length < 200) {
+        for (var k = 0; k < keywords.length; k++) {
+          if (text.indexOf(keywords[k]) !== -1) {
+            el.style.display = 'none';
+            el.setAttribute(HIDDEN, '1');
+            break;
+          }
+        }
+      }
+    }
+  }
+  hideByText();
+  // 动态广告：监听 DOM 变化，节流 500ms 后重新扫描
+  var timer = null;
+  var observer = new MutationObserver(function () {
+    if (timer) return;
+    timer = setTimeout(function () {
+      timer = null;
+      hideByText();
+    }, 500);
+  });
+  if (document.body) {
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+})();
+"#;
+
+/// 读取所有启用扩展的注入内容 + 广告拦截（如开启）
 async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<String>)>, String> {
     let exts = ext_db::list(db).await.map_err(|e| e.to_string())?;
     let mut items = Vec::new();
@@ -164,7 +256,50 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
             Err(e) => println!("[extensions] 读取扩展 {} 失败: {}", ext.name, e),
         }
     }
+    // 广告拦截（内置系统注入，追加在用户扩展后面）
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'adblock_enabled'")
+            .fetch_optional(&db.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let adblock_on = row.map(|r| r.0 == "true").unwrap_or(true); // 默认开启
+    if adblock_on {
+        items.push((Some(ADBLOCK_JS.to_string()), Some(ADBLOCK_CSS.to_string())));
+        println!("[extensions] 广告拦截已开启（注入内置规则）");
+    }
     Ok(items)
+}
+
+/// 广告拦截开关（存设置 + 重新注入）
+#[tauri::command]
+pub async fn set_adblock_enabled(
+    db: State<'_, Db>,
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    println!("[extensions] set_adblock_enabled: {}", enabled);
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ('adblock_enabled', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(enabled.to_string())
+    .execute(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let items = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items);
+    Ok(())
+}
+
+/// 广告拦截当前状态（给前端初始化用）
+#[tauri::command]
+pub async fn get_adblock_enabled(db: State<'_, Db>) -> Result<bool, String> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'adblock_enabled'")
+            .fetch_optional(&db.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(row.map(|r| r.0 == "true").unwrap_or(true))
 }
 
 /// 加载扩展（目录或 manifest.json 路径）
@@ -276,5 +411,17 @@ pub fn inject_on_startup(app: &AppHandle, db: &Db) {
     if !items.is_empty() {
         println!("[extensions] 启动注入 {} 个启用扩展", items.len());
         inject_extensions(app, items);
+    }
+}
+
+/// 重新注入全部启用扩展 + 广告拦截（新标签创建后调用，确保新 webview 也有扩展）
+pub async fn re_inject(app: &AppHandle) {
+    let db = app.state::<Db>();
+    match collect_enabled_items(&db).await {
+        Ok(items) => {
+            println!("[extensions] re_inject: {} 个注入项", items.len());
+            inject_extensions(app, items);
+        }
+        Err(e) => println!("[extensions] re_inject 失败: {}", e),
     }
 }
