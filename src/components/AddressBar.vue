@@ -9,6 +9,7 @@ const settingsStore = useSettingsStore()
 const addressInput = ref('')
 
 const emit = defineEmits<{
+  (e: 'openAi'): void
   (e: 'openPasswords'): void
   (e: 'openGroups'): void
   (e: 'openDownloads'): void
@@ -87,6 +88,7 @@ function onForward() {
         @keydown.enter="onAddressEnter"
       />
     </div>
+    <button class="action-btn ai-btn" title="AI 助手" @click="emit('openAi')">AI</button>
     <button class="action-btn" title="密码管理" @click="emit('openPasswords')">🔑</button>
     <button class="action-btn" title="标签分组" @click="emit('openGroups')">🗂</button>
     <button class="action-btn" title="下载管理" @click="emit('openDownloads')">⬇</button>
@@ -117,6 +119,16 @@ function onForward() {
   font-size: 15px;
   flex-shrink: 0;
   transition: background 0.15s, color 0.15s;
+}
+.btn-icon {
+  pointer-events: none;
+  display: inline-block;
+}
+.ai-btn {
+  color: #4a9eff;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
 }
 .nav-btn:hover:not(:disabled),
 .action-btn:hover {

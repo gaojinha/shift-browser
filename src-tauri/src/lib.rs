@@ -1,5 +1,6 @@
 mod db;
 mod tabs;
+mod ai;
 
 use db::{bookmarks, downloads, history, passwords, sessions, settings, tab_groups, workspaces, Db};
 use tauri::Manager;
@@ -77,6 +78,8 @@ pub fn run() {
       tabs::get_tabs,
       tabs::set_webview_visible,
       tabs::update_tab,
+      // AI 侧边栏
+      ai::ai_chat,
     ])
     .setup(|app| {
       // 初始化数据库（异步）

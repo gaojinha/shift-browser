@@ -10,6 +10,7 @@ import PasswordsDialog from './components/PasswordsDialog.vue'
 import GroupsDialog from './components/GroupsDialog.vue'
 import DownloadsDialog from './components/DownloadsDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
+import AISidebar from './components/AISidebar.vue'
 import { useTabsStore } from './stores/tabs'
 import { useGroupsStore } from './stores/groups'
 import { useSettingsStore } from './stores/settings'
@@ -23,6 +24,7 @@ const showPasswords = ref(false)
 const showGroups = ref(false)
 const showDownloads = ref(false)
 const showSettings = ref(false)
+const showAI = ref(false)
 let saveTimer: number | null = null
 
 onMounted(async () => {
@@ -70,6 +72,7 @@ watch(
       @open-groups="showGroups = true"
       @open-downloads="showDownloads = true"
       @open-settings="showSettings = true"
+      @open-ai="showAI = true"
     />
     <BookmarksBar v-if="settingsStore.showBookmarksBar" />
     <!-- 内容区：webview 由 Rust 以 (0, 112) 起盖住此区域 -->
@@ -79,6 +82,7 @@ watch(
     <GroupsDialog :show="showGroups" @close="showGroups = false" />
     <DownloadsDialog :show="showDownloads" @close="showDownloads = false" />
     <SettingsDialog :show="showSettings" @close="showSettings = false" />
+    <AISidebar :show="showAI" @close="showAI = false" />
   </div>
 </template>
 
