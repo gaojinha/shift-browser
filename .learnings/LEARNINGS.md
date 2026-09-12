@@ -362,3 +362,17 @@ Corrections, insights, and knowledge gaps captured during development.
   - 或 `pgrep -x shift-browser | xargs -r kill -9`
 - 杀 WebKit 子进程同理：`ps -C WebKitWebProcess -o pid=` 等，绝不 `pkill -f WebKit`
 - 清缓存目录用 rm -rf 时也要先确认路径，别把 ~ 打错
+
+---
+
+## 2026-09-12 15:30 — 扩展注入四大坑（insight，高哥实测通过）
+
+**类别**: insight
+**场景**: ShiftBrowser v5.4.0 扩展管理（WebKitGTK UserContentManager 用户脚本/样式注入）
+**要点**:
+- **前端改动必须重新 cargo build**：Tauri 2 的 `generate_context!` 编译时把 dist 嵌入二进制，光 `npm run build` 不重新 `cargo build`，二进制里还是旧前端（高哥看不到扩展节、输入框白底的根因）
+- **取窗口用 `app.get_window("main")` 不是 `get_webview_window`**：本项目主窗口是 Window 类型，`get_webview_window("main")` 返回 None 导致注入被静默跳过（日志"主窗口不可用"）
+- **`Window::webviews()` 返回 `Vec<Webview>`**（无 label 元组），`WebviewWindow::webviews()` 才返回 `Vec<(&String, Webview)>`，遍历写法不同
+- **注入必须跳过主 webview**（label=="main"，Vue UI）：`remove_all_scripts()` 会误删 Tauri 主 webview 的 UserScript（Vue UI 桥接），导致界面白屏崩溃
+- **allow_list 留空**：WebKitGTK 的 UserScript/UserStyleSheet allow_list 不识别 `"http://*"` 通配符格式，脚本不注入；跳过主 webview 后 child 都是外部网页，allow_list 留空安全
+- **注入只对刷新后的页面生效**：UserScript 在页面加载时执行，已打开的页面需刷新
