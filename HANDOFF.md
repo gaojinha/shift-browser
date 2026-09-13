@@ -818,3 +818,26 @@ tabs store 的 4 个核心操作（createTab/closeTab/switchTab/navigateTab）�
 ### 21.5 遗留事项
 
 - 无阻塞项；后续可选：search_history LIKE 通配符转义、前端组件 UI/UX 进一步优化
+
+## 二十二、2026-09-13 第十三轮完善（AI 接口健壮性 + 全模块体检）
+
+### 22.1 ai.rs 健壮性微调
+
+1. **服务错误响应体截断**：AI 服务返回错误时，响应体可能是一大坨 HTML/JSON，直接透传前端难以阅读。修复：错误正文截断 200 字符。
+2. **结构化日志**：ai 调用成功时记录 model + 回复字符数（不含 key/消息内容），失败记录状态码/截断错误体，方便排查。
+3. **修复编译错误**：model 移入 ChatRequest 后日志借用报错（E0382），用 `model.clone()` 修复。
+
+### 22.2 全模块体检（本轮复查）
+
+4. extensions.rs：adblock 开关/关键词/扩展加载/列表全部正常，失败路径有 warn 日志。
+5. newtab.rs：数据全部转义；world-nav 用 json_script_safe（防 `</script>` 注入）；内联阅读正文经 reader.rs sanitize_html 净化（剥 script/style/iframe/object/embed/svg + on* 属性），外部网页正文插入本地页面无 XSS 风险。
+6. reader.rs：fetch_article 返回前 sanitize_html，安全。
+
+### 22.3 验证结果
+
+- cargo check 0 警告 ✅ / cargo clippy 0 警告 ✅ / cargo test 17 passed ✅
+
+### 22.4 遗留事项
+
+- 无阻塞项；第十二~十三轮改动尚未重启生效（等高哥授权"重启"）
+- 后续可选：search_history LIKE 通配符转义、前端组件 UI/UX 进一步优化

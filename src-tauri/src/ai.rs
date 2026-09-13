@@ -52,7 +52,7 @@ pub async fn ai_chat(
         .build()
         .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
     let req = ChatRequest {
-        model,
+        model: model.clone(),
         messages,
         stream: false,
     };
@@ -68,6 +68,9 @@ pub async fn ai_chat(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
+        // 截断过长错误体（有些网关返回整页 HTML，原样透传会让前端显示一坨）
+        let body = if body.len() > 200 { format!("{}…(截断)", &body[..200]) } else { body };
+        log::error!("[ai] 服务错误 {}: {}", status, body);
         return Err(format!("AI 服务错误 {}: {}", status, body));
     }
 
@@ -76,9 +79,12 @@ pub async fn ai_chat(
         .await
         .map_err(|e| format!("AI 响应解析失败: {}", e))?;
 
-    data.choices
+    let reply = data
+        .choices
         .into_iter()
         .next()
         .map(|c| c.message.content)
-        .ok_or_else(|| "AI 无回复".to_string())
+        .ok_or_else(|| "AI 无回复".to_string())?;
+    log::info!("[ai] 对话成功: model={} 回复 {} 字符", model, reply.chars().count());
+    Ok(reply)
 }
