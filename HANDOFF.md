@@ -987,3 +987,41 @@ tabs store 的 4 个核心操作（createTab/closeTab/switchTab/navigateTab）�
 ### 26.8 遗留事项
 
 - 无阻塞项；`set_bookmarks_bar_visible` 只更新 Rust 侧 top 状态，现有 child webview 的 GTK Fixed 位置在下次 Resize 时才会重算（前端书签栏显隐本身是 DOM 层，偏差可接受）
+
+## 二十七、2026-09-13 第十八轮功能增强（快捷键/拖拽/右键菜单/历史面板/书签栏即时重算）
+
+### 27.1 书签栏即时重算（第二十六章遗留）
+
+1. `set_bookmarks_bar_visible` 现在拿到窗口后直接调整 GTK Fixed 的 `margin_top` 和所有 child webviews 尺寸（按新 top 计算 content_h），不再依赖下次窗口 Resize 才生效。
+
+### 27.2 快捷键增强（浏览器标配）
+
+2. Rust 新增 `reload_tab` 命令（WebKit 原生 `WebViewExt::reload`），已注册；前端 `tabs.ts` 加 `reloadTab()`。
+3. Rust 新增 `reorder_tabs` 命令（拖拽排序用，缺失 id 兜底追加，锁分开不嵌套避免死锁），已注册；前端 `reorderTabs()` 乐观更新 + 失败回滚。
+4. `AddressBar` 加 `inputEl` ref + `focusInput()`（聚焦并全选）并 `defineExpose`。
+5. `App.vue` 全局快捷键：Ctrl+T 新建标签、Ctrl+W 关闭当前标签、Ctrl+R 刷新、Ctrl+L 聚焦地址栏、Ctrl+H 打开历史、Ctrl+Tab / Ctrl+Shift+Tab 切换前后标签；弹窗打开时屏蔽标签类快捷键防误触；Esc 关闭链补历史面板。
+
+### 27.3 标签拖拽排序
+
+6. 未分组 + 分组内两组标签加 `draggable` + dragstart/dragover/drop/dragend；拖拽中 `.tab.dragging` 半透明反馈；同层级排序（跨组移动暂不支持）。
+
+### 27.4 右键菜单增强
+
+7. TabBar 右键菜单顶部加：刷新 / 复制链接（clipboard）/ 新标签打开 / 关闭标签（danger 红色）；下方保留原分组移动功能。
+
+### 27.5 历史管理面板（Ctrl+H）
+
+8. 新组件 `HistoryDialog.vue`：搜索框（300ms 防抖，走 `search_history`）、最近历史列表（200 条，走 `get_recent_history`）、点击条目新标签打开、单条删除（hover 显示）、清空全部（confirm 二次确认）、时间格式化。
+9. 复用全局弹窗公共样式（第二十六章抽取）；沿用隐藏/恢复 child webview 的竞态防护模式（seq 令牌 + finally）。
+
+### 27.6 验证结果
+
+- cargo clippy --all-targets 0 警告 ✅
+- cargo test 19 passed ✅
+- npm run lint 0 错误 ✅ / npm run build（vue-tsc + vite）通过 ✅
+- 中途修复：TabBar `.tab` 样式编辑时括号配平出错（CssSyntaxError），已修复合并 transition
+
+### 27.7 遗留事项
+
+- 无阻塞项；跨组拖拽移动标签暂不支持（可后续做"拖到分组头归组"）
+- 历史面板清空用原生 confirm（WebKitGTK 下可能无显示，后续可换自定义确认）

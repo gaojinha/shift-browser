@@ -8,6 +8,13 @@ import { useSettingsStore } from '../stores/settings'
 const tabsStore = useTabsStore()
 const settingsStore = useSettingsStore()
 const addressInput = ref('')
+const inputEl = ref<HTMLInputElement | null>(null)
+/** 聚焦地址栏并全选（Ctrl+L 快捷键用） */
+function focusInput() {
+  inputEl.value?.focus()
+  inputEl.value?.select()
+}
+defineExpose({ focusInput })
 const isLoading = computed(
   () => !!tabsStore.loadingTabId && tabsStore.loadingTabId === tabsStore.activeTabId,
 )
@@ -131,6 +138,7 @@ async function onReader() {
     <div class="address-container">
       <span v-if="isHttps" class="lock-icon" title="HTTPS 安全连接">🔒</span>
       <input
+        ref="inputEl"
         v-model="addressInput"
         type="text"
         placeholder="输入网址或搜索..."

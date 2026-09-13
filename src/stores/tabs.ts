@@ -167,6 +167,39 @@ export const useTabsStore = defineStore('tabs', {
       }
     },
 
+    /** 拖拽排序：把 fromId 移到 toId 的位置（前端先乐观更新，再通知 Rust） */
+    async reorderTabs(fromId: string, toId: string) {
+      const from = this.tabs.findIndex((t) => t.id === fromId)
+      const to = this.tabs.findIndex((t) => t.id === toId)
+      if (from === -1 || to === -1 || from === to) return
+      const moved = this.tabs.splice(from, 1)[0]
+      this.tabs.splice(to, 0, moved)
+      try {
+        await invoke('reorder_tabs', { ids: this.tabs.map((t) => t.id) })
+      } catch (e) {
+        console.error('[tabs] 排序同步失败:', e)
+        // 失败回滚：重新拉取权威顺序
+        const tabs = await invoke<Tab[]>('get_tabs').catch(() => [])
+        if (tabs.length) this.tabs = tabs.map((t) => ({ ...t, groupId: t.groupId ?? null }))
+      }
+    },
+
+    /** 刷新标签（Ctrl+R） */
+    async reloadTab(id: string) {
+      this._markLoading(id)
+      try {
+        const tab = await invoke<Tab | null>('reload_tab', { id })
+        if (tab) {
+          const idx = this.tabs.findIndex((t) => t.id === id)
+          if (idx !== -1) this.tabs[idx] = tab
+        }
+      } catch (e) {
+        console.error('[tabs] 刷新失败:', e)
+        useToastStore().error('刷新页面失败')
+        if (this.loadingTabId === id) this.loadingTabId = null
+      }
+    },
+
     /** 后退（当前活动标签） */
     async goBack() {
       if (!this.activeTabId || !this.canGoBack) return

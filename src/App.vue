@@ -12,6 +12,7 @@ import GroupsDialog from './components/GroupsDialog.vue'
 import DownloadsDialog from './components/DownloadsDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import AISidebar from './components/AISidebar.vue'
+import HistoryDialog from './components/HistoryDialog.vue'
 import AppToast from './components/AppToast.vue'
 import { useTabsStore } from './stores/tabs'
 import { useGroupsStore } from './stores/groups'
@@ -27,10 +28,52 @@ const showGroups = ref(false)
 const showDownloads = ref(false)
 const showSettings = ref(false)
 const showAI = ref(false)
+const showHistory = ref(false)
+const addressBarRef = ref<InstanceType<typeof AddressBar> | null>(null)
 let saveTimer: number | null = null
 
-/** Esc 关闭最上层弹窗（AI 侧栏优先，再设置/下载/分组/密码） */
+/** Esc 关闭最上层弹窗（AI 侧栏优先，再设置/下载/分组/密码）；Ctrl 组合键为浏览器标配快捷键 */
 function onGlobalKeydown(e: KeyboardEvent) {
+  // Ctrl+Tab / Ctrl+Shift+Tab：切换前后标签
+  if (e.ctrlKey && e.key === 'Tab') {
+    e.preventDefault()
+    const tabs = tabsStore.tabs
+    if (tabs.length < 2) return
+    const idx = tabs.findIndex((t) => t.id === tabsStore.activeTabId)
+    const next = e.shiftKey ? (idx - 1 + tabs.length) % tabs.length : (idx + 1) % tabs.length
+    tabsStore.switchTab(tabs[next].id)
+    return
+  }
+
+  // Ctrl 组合快捷键（不拦截无 Ctrl 的普通按键）
+  if (e.ctrlKey && !e.altKey && !e.metaKey) {
+    const k = e.key.toLowerCase()
+    // Ctrl+L 聚焦地址栏（任何情况下都生效，含输入框内）
+    if (k === 'l') {
+      e.preventDefault()
+      addressBarRef.value?.focusInput()
+      return
+    }
+    // 弹窗打开时，其余标签快捷键不响应（避免误关标签/新建标签）
+    if (showAI.value || showSettings.value || showDownloads.value || showGroups.value || showPasswords.value || showHistory.value) {
+      return
+    }
+    if (k === 't') {
+      e.preventDefault()
+      tabsStore.createTab()
+    } else if (k === 'w') {
+      e.preventDefault()
+      if (tabsStore.activeTabId) tabsStore.closeTab(tabsStore.activeTabId)
+    } else if (k === 'r') {
+      e.preventDefault()
+      if (tabsStore.activeTabId) tabsStore.reloadTab(tabsStore.activeTabId)
+    } else if (k === 'h') {
+      e.preventDefault()
+      showHistory.value = true
+    }
+    return
+  }
+
   if (e.key !== 'Escape') return
   if (showAI.value) {
     showAI.value = false
@@ -42,6 +85,8 @@ function onGlobalKeydown(e: KeyboardEvent) {
     showGroups.value = false
   } else if (showPasswords.value) {
     showPasswords.value = false
+  } else if (showHistory.value) {
+    showHistory.value = false
   }
 }
 
@@ -102,6 +147,7 @@ watch(
   <div class="app" :class="{ 'theme-light': settingsStore.isLight }">
     <TabBar />
     <AddressBar
+      ref="addressBarRef"
       @open-passwords="showPasswords = true"
       @open-groups="showGroups = true"
       @open-downloads="showDownloads = true"
@@ -117,6 +163,7 @@ watch(
     <DownloadsDialog :show="showDownloads" @close="showDownloads = false" />
     <SettingsDialog :show="showSettings" @close="showSettings = false" />
     <AISidebar :show="showAI" @close="showAI = false" />
+    <HistoryDialog :show="showHistory" @close="showHistory = false" />
     <AppToast />
   </div>
 </template>

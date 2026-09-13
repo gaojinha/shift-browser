@@ -84,6 +84,8 @@ pub fn run() {
       tabs::get_tabs,
       tabs::set_webview_visible,
       tabs::update_tab,
+      tabs::reload_tab,
+      tabs::reorder_tabs,
       tabs::set_bookmarks_bar_visible,
       tabs::get_nav_state,
       // AI 侧边栏

@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import { useTabsStore } from '../stores/tabs'
 import { useGroupsStore } from '../stores/groups'
 import { useWorkspacesStore } from '../stores/workspaces'
+import { useToastStore } from '../stores/toast'
 import { invoke } from '@tauri-apps/api/core'
 import type { Tab } from '../types/tab'
 
@@ -66,6 +67,58 @@ async function onNewGroupFromMenu() {
     // store 已 toast 提示，失败则不归组
   }
   closeMenu()
+}
+
+// ---- 右键菜单操作 ----
+function onMenuRefresh() {
+  if (!menu.value) return
+  tabsStore.reloadTab(menu.value.tabId)
+  closeMenu()
+}
+async function onMenuCopyUrl() {
+  if (!menu.value) return
+  const tab = tabsStore.tabs.find((t) => t.id === menu.value!.tabId)
+  if (tab?.url) {
+    try {
+      await navigator.clipboard.writeText(tab.url)
+      useToastStore().success('链接已复制')
+    } catch {
+      useToastStore().error('复制链接失败')
+    }
+  }
+  closeMenu()
+}
+function onMenuOpenNewTab() {
+  if (!menu.value) return
+  const tab = tabsStore.tabs.find((t) => t.id === menu.value!.tabId)
+  tabsStore.createTab(tab?.url || 'newtab')
+  closeMenu()
+}
+function onMenuCloseTab() {
+  if (!menu.value) return
+  tabsStore.closeTab(menu.value.tabId)
+  closeMenu()
+}
+
+// ---- 标签拖拽排序 ----
+const dragTabId = ref<string | null>(null)
+function onDragStart(e: DragEvent, id: string) {
+  dragTabId.value = id
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+}
+function onDragOver(e: DragEvent) {
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+}
+function onDrop(e: DragEvent, id: string) {
+  e.preventDefault()
+  if (dragTabId.value && dragTabId.value !== id) {
+    tabsStore.reorderTabs(dragTabId.value, id)
+  }
+  dragTabId.value = null
+}
+function onDragEnd() {
+  dragTabId.value = null
 }
 
 // ---- 分组操作 ----
@@ -192,10 +245,15 @@ function onFaviconError(e: Event) {
         v-for="tab in groupedTabs.ungrouped"
         :key="tab.id"
         class="tab"
-        :class="{ active: tab.id === tabsStore.activeTabId, pinned: tab.is_pinned }"
+        :class="{ active: tab.id === tabsStore.activeTabId, pinned: tab.is_pinned, dragging: dragTabId === tab.id }"
+        draggable="true"
         @click="onTabClick(tab.id)"
         @auxclick="onTabAuxClick($event, tab.id)"
         @contextmenu="onTabContextMenu($event, tab)"
+        @dragstart="onDragStart($event, tab.id)"
+        @dragover="onDragOver"
+        @drop="onDrop($event, tab.id)"
+        @dragend="onDragEnd"
       >
         <img v-if="tab.favicon" class="favicon" :src="tab.favicon" alt="" @error="onFaviconError" />
         <img
@@ -227,10 +285,15 @@ function onFaviconError(e: Event) {
             v-for="tab in g.tabs"
             :key="tab.id"
             class="tab"
-            :class="{ active: tab.id === tabsStore.activeTabId, pinned: tab.is_pinned }"
+            :class="{ active: tab.id === tabsStore.activeTabId, pinned: tab.is_pinned, dragging: dragTabId === tab.id }"
+            draggable="true"
             @click="onTabClick(tab.id)"
             @auxclick="onTabAuxClick($event, tab.id)"
             @contextmenu="onTabContextMenu($event, tab)"
+            @dragstart="onDragStart($event, tab.id)"
+            @dragover="onDragOver"
+            @drop="onDrop($event, tab.id)"
+            @dragend="onDragEnd"
           >
             <img
               v-if="tab.favicon"
@@ -263,6 +326,11 @@ function onFaviconError(e: Event) {
       :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
       @click.stop
     >
+      <div class="menu-item" @click="onMenuRefresh">↻ 刷新</div>
+      <div class="menu-item" @click="onMenuCopyUrl">🔗 复制链接</div>
+      <div class="menu-item" @click="onMenuOpenNewTab">＋ 新标签打开</div>
+      <div class="menu-item danger" @click="onMenuCloseTab">✕ 关闭标签</div>
+      <div class="menu-divider"></div>
       <div class="menu-title">移动到分组</div>
       <div
         v-for="g in groupsStore.groups"
@@ -454,10 +522,14 @@ function onFaviconError(e: Event) {
   border: 1px solid transparent;
   cursor: pointer;
   transition:
+    opacity 0.15s,
     background 0.2s,
     box-shadow 0.2s,
     color 0.2s,
     border-color 0.2s;
+}
+.tab.dragging {
+  opacity: 0.45;
 }
 .tab:hover {
   background: var(--bg-hover);
@@ -622,6 +694,9 @@ function onFaviconError(e: Event) {
 }
 .menu-item.accent {
   color: var(--accent);
+}
+.menu-item.danger {
+  color: var(--danger);
 }
 .menu-dot {
   width: 10px;

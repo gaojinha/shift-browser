@@ -891,6 +891,57 @@ pub async fn navigate_tab(
   Ok(tab.cloned())
 }
 
+/// 刷新当前标签（Ctrl+R）
+#[tauri::command]
+pub async fn reload_tab(
+  app: AppHandle,
+  state: tauri::State<'_, TabManager>,
+  id: String,
+) -> Result<Option<Tab>, String> {
+  log::info!("[tabs] reload_tab: id={}", id);
+  let window = app
+    .get_window("main")
+    .ok_or_else(|| "主窗口不存在".to_string())?;
+  let label = format!("tab-{}", id);
+  let webview = window
+    .get_webview(&label)
+    .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
+  webview
+    .with_webview(|pwv| {
+      let wv = pwv.inner();
+      webkit2gtk::WebViewExt::reload(&wv);
+    })
+    .map_err(|e| format!("刷新失败: {}", e))?;
+  let tabs = state.tabs.lock().unwrap();
+  Ok(tabs.get(&id).cloned())
+}
+
+/// 更新标签顺序（拖拽排序）；前端传新顺序，缺失的现存标签兜底追加到末尾
+#[tauri::command]
+pub async fn reorder_tabs(
+  state: tauri::State<'_, TabManager>,
+  ids: Vec<String>,
+) -> Result<(), String> {
+  let existing_set: std::collections::HashSet<String> = {
+    let tabs = state.tabs.lock().unwrap();
+    tabs.keys().cloned().collect()
+  };
+  let mut new_order: Vec<String> = ids
+    .iter()
+    .filter(|id| existing_set.contains(*id))
+    .cloned()
+    .collect();
+  let mut order = state.order.lock().unwrap();
+  for id in order.iter() {
+    if !new_order.contains(id) {
+      new_order.push(id.clone());
+    }
+  }
+  *order = new_order;
+  log::info!("[tabs] reorder_tabs: 新顺序 {:?}", order);
+  Ok(())
+}
+
 /// 获取所有标签页（按顺序）
 #[tauri::command]
 pub async fn get_tabs(state: tauri::State<'_, TabManager>) -> Result<Vec<Tab>, String> {
@@ -1018,11 +1069,42 @@ pub async fn update_tab(
 /// 切换书签栏显隐，返回新的 top_offset
 #[tauri::command]
 pub async fn set_bookmarks_bar_visible(
+  app: AppHandle,
   state: tauri::State<'_, TabManager>,
   visible: bool,
 ) -> Result<f64, String> {
   let new_top = state.set_show_bookmarks_bar(visible);
   log::info!("[tabs] 书签栏显隐切换: visible={} 新 top_offset={}", visible, new_top);
+
+  // 即时重算：不依赖下次窗口 Resize，直接调整 GTK Fixed 的 margin_top 与所有 child webviews 尺寸
+  if let Some(window) = app.get_window("main") {
+    let inner = window.inner_size().unwrap_or(tauri::PhysicalSize::new(1280, 800));
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let w = inner.width as f64 / scale;
+    let h = inner.height as f64 / scale;
+    let content_h = (h - new_top - STATUS_BAR_HEIGHT).max(100.0) as i32;
+    let w_i32 = w as i32;
+    let top_i32 = new_top as i32;
+
+    let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
+    for id in ids {
+      let label = format!("tab-{}", id);
+      if let Some(wv) = app.get_webview(&label) {
+        let _ = wv.with_webview(move |pwv| {
+          let gtk_wv = pwv.inner();
+          if let Some(fixed) = gtk_wv
+            .parent()
+            .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
+          {
+            fixed.set_margin_top(top_i32);
+            fixed.set_size_request(w_i32, content_h);
+          }
+          gtk_wv.set_size_request(w_i32, content_h);
+        });
+      }
+    }
+  }
+
   Ok(new_top)
 }
 
