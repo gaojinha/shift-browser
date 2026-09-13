@@ -138,6 +138,7 @@ async function onReveal(path: string | null) {
             </div>
           </div>
         </div>
+        <div v-else-if="downloadsStore.loading" class="empty loading-hint">加载中…</div>
         <div v-else class="empty">还没有下载记录</div>
       </div>
     </div>
@@ -146,44 +147,9 @@ async function onReveal(path: string | null) {
 </template>
 
 <style scoped>
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
+/* 下载弹窗比默认弹窗宽一点（520px） */
 .dialog {
   width: min(520px, calc(100vw - 32px));
-  max-height: 80vh;
-  background: var(--bg-secondary);
-  border-radius: 10px;
-  border: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.dialog-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  color: var(--text-primary);
-  font-size: 14px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.close-btn {
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 14px;
-  cursor: pointer;
-}
-.dialog-body {
-  padding: 12px 16px;
-  overflow-y: auto;
 }
 .list {
   display: flex;

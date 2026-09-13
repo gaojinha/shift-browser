@@ -15,12 +15,18 @@ export interface TabGroup {
 export const useGroupsStore = defineStore('groups', {
   state: () => ({
     groups: [] as TabGroup[],
+    loading: false,
   }),
 
   actions: {
     /** 拉取全部分组 */
     async loadGroups() {
-      this.groups = await invoke<TabGroup[]>('get_tab_groups')
+      this.loading = true
+      try {
+        this.groups = await invoke<TabGroup[]>('get_tab_groups')
+      } finally {
+        this.loading = false
+      }
     },
 
     /** 创建分组，返回新分组 id */

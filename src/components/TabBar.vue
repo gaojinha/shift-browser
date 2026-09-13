@@ -37,7 +37,12 @@ function onTabContextMenu(e: MouseEvent, tab: Tab) {
   if (groupsStore.groups.length === 0) {
     groupsStore.loadGroups().catch(() => {})
   }
-  menu.value = { x: e.clientX, y: e.clientY, tabId: tab.id }
+  // 贴边检测：菜单估算宽 180px，高按分组项数估算，超右/下边界时翻转
+  const menuW = 180
+  const menuH = 100 + groupsStore.groups.length * 30
+  const x = Math.min(e.clientX, window.innerWidth - menuW - 8)
+  const y = Math.min(e.clientY, window.innerHeight - menuH - 8)
+  menu.value = { x: Math.max(8, x), y: Math.max(8, y), tabId: tab.id }
 }
 
 function closeMenu() {
@@ -547,10 +552,11 @@ function onFaviconError(e: Event) {
 }
 .group-count {
   font-size: 11px;
-  color: var(--text-muted);
-  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  background: var(--bg-hover);
   border-radius: 8px;
   padding: 0 6px;
+  line-height: 16px;
 }
 .group-toggle {
   border: none;

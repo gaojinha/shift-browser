@@ -3,6 +3,7 @@
 // 与 Electron 版 electron/tabManager.ts 对应（v4.5.0）
 
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl};
@@ -22,9 +23,11 @@ pub const ADDRESS_BAR_HEIGHT: f64 = 42.0;
 pub const BOOKMARKS_BAR_HEIGHT: f64 = 30.0;
 pub const STATUS_BAR_HEIGHT: f64 = 22.0;
 
-/// 内容区顶部偏移 = 标签栏 + 地址栏 + 书签栏
+/// 内容区顶部偏移（书签栏开启时）= 标签栏 + 地址栏 + 书签栏
 pub const CONTENT_TOP_OFFSET: f64 =
   TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT + BOOKMARKS_BAR_HEIGHT;
+/// 书签栏关闭时的顶部偏移 = 标签栏 + 地址栏
+pub const CONTENT_TOP_OFFSET_NO_BOOKMARKS: f64 = TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT;
 
 /// 标签页元数据（运行时状态，不持久化；会话保存走 sessions 表）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +45,8 @@ pub struct TabManager {
   tabs: Mutex<HashMap<String, Tab>>,
   order: Mutex<Vec<String>>,
   active_id: Mutex<Option<String>>,
+  /// 书签栏是否显示（影响 child webview 的 top 偏移：112 vs 82）
+  show_bookmarks_bar: Mutex<bool>,
 }
 
 impl TabManager {
@@ -50,6 +55,21 @@ impl TabManager {
       tabs: Mutex::new(HashMap::new()),
       order: Mutex::new(Vec::new()),
       active_id: Mutex::new(None),
+      show_bookmarks_bar: Mutex::new(true),
+    }
+  }
+
+  pub fn set_show_bookmarks_bar(&self, visible: bool) -> f64 {
+    *self.show_bookmarks_bar.lock().unwrap() = visible;
+    self.top_offset()
+  }
+
+  /// 当前内容区顶部偏移（随书签栏显隐变化）
+  pub fn top_offset(&self) -> f64 {
+    if *self.show_bookmarks_bar.lock().unwrap() {
+      CONTENT_TOP_OFFSET
+    } else {
+      CONTENT_TOP_OFFSET_NO_BOOKMARKS
     }
   }
 
@@ -67,13 +87,13 @@ impl TabManager {
       .collect()
   }
 
-  /// 根据窗口尺寸计算内容区域大小（逻辑像素）
-  fn content_size(window: &tauri::Window) -> (f64, f64) {
+  /// 根据窗口尺寸计算内容区域大小（逻辑像素）；top 随书签栏显隐变化
+  fn content_size(window: &tauri::Window, top: f64) -> (f64, f64) {
     let inner = window.inner_size().unwrap_or(tauri::PhysicalSize::new(1280, 800));
     let scale = window.scale_factor().unwrap_or(1.0);
     let w = inner.width as f64 / scale;
     let h = inner.height as f64 / scale;
-    (w, (h - CONTENT_TOP_OFFSET - STATUS_BAR_HEIGHT).max(100.0))
+    (w, (h - top - STATUS_BAR_HEIGHT).max(100.0))
   }
 
   /// 创建嵌入式 webview
@@ -90,8 +110,15 @@ impl TabManager {
       .parse::<tauri::Url>()
       .map_err(|e| format!("URL 解析失败: {}", e))?;
 
-    let (w, h) = Self::content_size(&window);
-    log::info!("[tabs] create_webview: inner={:?} content=({:.0},{:.0})", window.inner_size(), w, h);
+    let top = {
+      if let Some(state) = app.try_state::<TabManager>() {
+        state.top_offset()
+      } else {
+        CONTENT_TOP_OFFSET
+      }
+    };
+    let (w, h) = Self::content_size(&window, top);
+    log::info!("[tabs] create_webview: inner={:?} content=({:.0},{:.0}) top={}", window.inner_size(), w, h, top);
 
     // 页面加载完成时同步标题（用 host 作标题，MVP 阶段）
     let app_handle = app.clone();
@@ -160,7 +187,7 @@ impl TabManager {
               });
             }
           }),
-        LogicalPosition::new(0.0, CONTENT_TOP_OFFSET),
+        LogicalPosition::new(0.0, top),
         LogicalSize::new(w, h),
       )
       .map_err(|e| format!("创建 webview 失败: {}", e))?;
@@ -525,6 +552,14 @@ impl TabManager {
 /// 主 webview 在 overlay 主层自动跟随窗口（不手动改 size_request，避免撑大窗口 natural size 导致无法缩小）
 #[cfg(target_os = "linux")]
 pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
+  // 读取书签栏显隐，决定初始 top_offset
+  let top = if let Some(state) = app.try_state::<TabManager>() {
+    state.top_offset()
+  } else {
+    CONTENT_TOP_OFFSET
+  };
+  let fixed_h = (800.0 - top - STATUS_BAR_HEIGHT).max(100.0) as i32;
+
   if let Some(main_wv) = app.get_webview("main") {
     main_wv
       .with_webview(move |pwv| {
@@ -546,15 +581,15 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
           main_gtk.show();
 
           // GtkFixed 放上层：child webviews 绝对定位
-          // 关键：Fixed 用 margin_top 定位到内容区（y=112 起），避免覆盖地址栏拦截点击事件
+          // 关键：Fixed 用 margin_top 定位到内容区（y=top 起），避免覆盖地址栏拦截点击事件
           let fixed = gtk::Fixed::new();
           fixed.set_valign(gtk::Align::Start);
-          fixed.set_margin_top(CONTENT_TOP_OFFSET as i32);
-          fixed.set_size_request(1280, 800 - CONTENT_TOP_OFFSET as i32 - STATUS_BAR_HEIGHT as i32);
+          fixed.set_margin_top(top as i32);
+          fixed.set_size_request(1280, fixed_h);
           overlay.add_overlay(&fixed);
           fixed.show();
 
-          log::info!("[tabs] setup: GtkOverlay 布局初始化完成");
+          log::info!("[tabs] setup: GtkOverlay 布局初始化完成 top={}", top);
         } else {
           log::info!("[tabs] setup: 主 webview 的 parent 不是 GtkBox，跳过 reparent");
         }
@@ -569,13 +604,18 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
       if let tauri::WindowEvent::Resized(size) = event {
         let w = size.width as i32;
         let h = size.height as i32;
-        let content_h = (h as f64 - CONTENT_TOP_OFFSET - STATUS_BAR_HEIGHT).max(100.0) as i32;
+        let top = if let Some(state) = app_handle.try_state::<TabManager>() {
+          state.top_offset()
+        } else {
+          CONTENT_TOP_OFFSET
+        };
+        let content_h = (h as f64 - top - STATUS_BAR_HEIGHT).max(100.0) as i32;
         log::info!(
-          "[tabs] window resized: {}x{} content_h={}",
-          w, h, content_h
+          "[tabs] window resized: {}x{} content_h={} top={}",
+          w, h, content_h, top
         );
 
-        // child webviews：Fixed 内位置 (0,0)，尺寸 (w, content_h)；Fixed 本身在窗口 (0, CONTENT_TOP_OFFSET)
+        // child webviews：Fixed 内位置 (0,0)，尺寸 (w, content_h)；Fixed 本身在窗口 (0, top)
         if let Some(state) = app_handle.try_state::<TabManager>() {
           let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
           for id in ids {
@@ -974,6 +1014,52 @@ pub async fn update_tab(
   }
   Ok(tab.cloned())
 }
+
+/// 切换书签栏显隐，返回新的 top_offset
+#[tauri::command]
+pub async fn set_bookmarks_bar_visible(
+  state: tauri::State<'_, TabManager>,
+  visible: bool,
+) -> Result<f64, String> {
+  let new_top = state.set_show_bookmarks_bar(visible);
+  log::info!("[tabs] 书签栏显隐切换: visible={} 新 top_offset={}", visible, new_top);
+  Ok(new_top)
+}
+
+/// 获取当前活动标签的导航状态（可后退/可前进）
+#[tauri::command]
+pub async fn get_nav_state(
+  app: AppHandle,
+  state: tauri::State<'_, TabManager>,
+) -> Result<serde_json::Value, String> {
+  let id = state.active_id.lock().unwrap().clone();
+  let Some(id) = id else {
+    return Ok(json!({ "canGoBack": false, "canGoForward": false }));
+  };
+  let window = app
+    .get_window("main")
+    .ok_or_else(|| "主窗口不存在".to_string())?;
+  let label = format!("tab-{}", id);
+  let webview = window
+    .get_webview(&label)
+    .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
+
+  // with_webview 闭包要求 'static + Send，用 Arc<Mutex> 捕获结果
+  let nav = Arc::new(Mutex::new((false, false)));
+  let nav_clone = nav.clone();
+  webview
+    .with_webview(move |pwv| {
+      let wv = pwv.inner();
+      let mut guard = nav_clone.lock().unwrap();
+      guard.0 = webkit2gtk::WebViewExt::can_go_back(&wv);
+      guard.1 = webkit2gtk::WebViewExt::can_go_forward(&wv);
+    })
+    .map_err(|e| format!("获取导航状态失败: {}", e))?;
+
+  let (can_go_back, can_go_forward) = *nav.lock().unwrap();
+  Ok(json!({ "canGoBack": can_go_back, "canGoForward": can_go_forward }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

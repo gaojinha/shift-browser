@@ -944,3 +944,46 @@ tabs store 的 4 个核心操作（createTab/closeTab/switchTab/navigateTab）�
 - 书签栏隐藏时 webview 仍从 y=112 起（Rust `CONTENT_TOP_OFFSET`），需 Rust 侧按显隐重算偏移
 - 后退/前进是前端乐观追踪，webview 内链跳靠轮询补 canGoBack，不是 WebKit 原生 can_go_back
 - 弹窗列表加载骨架屏未做（打开即拉数据，空白窗口极短）
+
+## 二十六、2026-09-13 第十七轮可选打磨（书签栏偏移/原生导航/日志/样式抽取）
+
+### 26.1 书签栏偏移动态化（M3，遗留项）
+
+1. `TabManager` 新增 `show_bookmarks_bar: Mutex<bool>`（默认 true）+ `top_offset()`：书签栏显示时 112（标签40+地址42+书签30），隐藏时 82。
+2. 新增常量 `CONTENT_TOP_OFFSET_NO_BOOKMARKS = TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT`；`content_size(window, top)` 改为接收动态 top。
+3. `create_webview` / `setup_gtk_layout` / `on_window_event`（Resized）全部改用动态 top，日志带 `top=` 便于排查。
+4. 新增命令 `set_bookmarks_bar_visible(visible) -> f64`（返回新 top）；前端 `SettingsDialog.onSet` 与 `App.vue` onMounted 初始化时调用同步。
+
+### 26.2 WebKit 原生导航状态（H3+，遗留项）
+
+5. 新增命令 `get_nav_state() -> {canGoBack, canGoForward}`，通过 `WebViewExt::can_go_back/forward()` 直接查原生历史栈（不再依赖前端乐观追踪）。
+6. 注意：`with_webview` 闭包要求 `'static + Send`，不能借用局部变量，用 `Arc<Mutex<(bool,bool)>>` 捕获结果。
+7. 前端 `tabs.ts` 轮询循环每 2s 调 `get_nav_state` 覆盖乐观值，webview 内链跳转/JS history 也能正确反映后退/前进可用性。
+
+### 26.3 ai.rs 失败路径日志
+
+8. ai_chat 入口、HTTP 客户端创建、请求失败、响应体读取、服务错误截断、JSON 解析失败、choices 为空均补 `log::error!/warn!`，排障可定位到具体环节。
+
+### 26.4 启动主题闪变
+
+9. `index.html` 加同步 `<script>`：启动前读 `localStorage.theme`，为 light 则给 `documentElement` 加 `theme-light`，避免浅色用户启动先深后浅闪一下。
+
+### 26.5 弹窗公共样式抽取
+
+10. `.dialog-overlay / .dialog / .dialog-header / .close-btn / .dialog-body` 从 4 个弹窗（密码/分组/下载/设置）提到 `App.vue` 全局 style（非 scoped），组件内只保留宽度覆盖（分组/下载 520px，密码/设置用默认 480px）；新增 `.close-btn:hover` 统一 hover 反馈。CSS 产物 37.48KB → 35.39KB。
+
+### 26.6 其余打磨
+
+11. **右键菜单贴边**：`TabBar.onTabContextMenu` 按估算宽 180px / 高（100 + 分组数×30）翻转，避免点在右下角时菜单溢出窗口。
+12. **组徽章对比度**：`.group-count` 背景 `--bg-secondary` → `--bg-hover`，文字 `--text-muted` → `--text-secondary`，浅色主题下不再与组头融为一体。
+13. **弹窗加载态兜底**：groups/downloads store 加 `loading` 标志；三个弹窗空态前加 `v-else-if="loading"` 显示"加载中…"（本地查询毫秒级，骨架屏收益低，轻量兜底即可）。
+
+### 26.7 验证结果
+
+- cargo check / clippy --all-targets 0 警告 ✅
+- cargo test 19 passed ✅
+- npm run lint 0 错误 ✅ / npm run build（vue-tsc + vite）通过 ✅（CSS 瘦身 2.09KB）
+
+### 26.8 遗留事项
+
+- 无阻塞项；`set_bookmarks_bar_visible` 只更新 Rust 侧 top 状态，现有 child webview 的 GTK Fixed 位置在下次 Resize 时才会重算（前端书签栏显隐本身是 DOM 层，偏差可接受）

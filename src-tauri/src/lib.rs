@@ -84,6 +84,8 @@ pub fn run() {
       tabs::get_tabs,
       tabs::set_webview_visible,
       tabs::update_tab,
+      tabs::set_bookmarks_bar_visible,
+      tabs::get_nav_state,
       // AI 侧边栏
       ai::ai_chat,
       // 扩展管理

@@ -300,6 +300,16 @@ export const useTabsStore = defineStore('tabs', {
           // 避免 poll 的 is_active 覆盖用户刚点的 switchTab/closeTab 结果
           const active = tabs.find((t) => t.is_active)
           if (active && my === this._opSeq) this.activeTabId = active.id
+          // WebKit 原生历史栈状态（覆盖乐观追踪：内链跳转/JS history 也正确反映）
+          try {
+            const nav = await invoke<{ canGoBack: boolean; canGoForward: boolean }>(
+              'get_nav_state'
+            )
+            this.canGoBack = nav.canGoBack
+            this.canGoForward = nav.canGoForward
+          } catch (e) {
+            console.error('[tabs] 轮询导航状态失败:', e)
+          }
         } catch (e) {
           console.error('[tabs] 轮询标签失败:', e)
         }

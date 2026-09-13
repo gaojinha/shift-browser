@@ -70,6 +70,15 @@ const extLoading = ref(false)
 
 async function onSet(key: string, value: string) {
   await settingsStore.set(key, value)
+  // 书签栏显隐切换需同步通知 Rust 侧重算 top_offset
+  if (key === 'show_bookmarks_bar') {
+    try {
+      await invoke('set_bookmarks_bar_visible', { visible: value === 'true' })
+    } catch (e) {
+      console.error('[settings] 书签栏显隐同步失败:', e)
+      useToastStore().error('书签栏切换失败')
+    }
+  }
 }
 
 async function onClearHistory() {
@@ -360,45 +369,6 @@ async function onRemoveKeyword(k: string) {
 </template>
 
 <style scoped>
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-.dialog {
-  width: min(480px, calc(100vw - 32px));
-  max-height: 80vh;
-  background: var(--bg-secondary);
-  border-radius: 10px;
-  border: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.dialog-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  color: var(--text-primary);
-  font-size: 14px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.close-btn {
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 14px;
-  cursor: pointer;
-}
-.dialog-body {
-  padding: 12px 16px;
-  overflow-y: auto;
-}
 .section {
   margin-bottom: 14px;
 }

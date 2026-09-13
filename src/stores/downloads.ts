@@ -6,19 +6,26 @@ import type { Download } from '../types/download'
 
 interface DownloadsState {
   list: Download[]
+  loading: boolean
 }
 
 export const useDownloadsStore = defineStore('downloads', {
   state: (): DownloadsState => ({
     list: [],
+    loading: false,
   }),
 
   actions: {
     /** 拉取全部下载记录 */
     async loadDownloads() {
-      const list = await invoke<Download[]>('get_downloads')
-      this.list = list
-      return list
+      this.loading = true
+      try {
+        const list = await invoke<Download[]>('get_downloads')
+        this.list = list
+        return list
+      } finally {
+        this.loading = false
+      }
     },
 
     /** 记录下载开始 */

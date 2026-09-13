@@ -2,6 +2,7 @@
 // 浏览器主窗口布局
 // 结构：TabBar(40) + AddressBar(42) + BookmarksBar(30) + 内容区(webview) + StatusBar(22)
 import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import TabBar from './components/TabBar.vue'
 import AddressBar from './components/AddressBar.vue'
 import BookmarksBar from './components/BookmarksBar.vue'
@@ -47,7 +48,13 @@ function onGlobalKeydown(e: KeyboardEvent) {
 onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeydown)
   // 设置尽早加载（主页/搜索引擎/主题/书签栏显隐依赖）
-  settingsStore.loadSettings().catch(() => {})
+  await settingsStore.loadSettings()
+  // 同步书签栏显隐到 Rust 侧（初始化 top_offset）
+  try {
+    await invoke('set_bookmarks_bar_visible', { visible: settingsStore.showBookmarksBar })
+  } catch (e) {
+    console.error('[app] 书签栏初始化同步失败:', e)
+  }
   // 分组尽早加载（不等标签恢复，避免右键菜单/组头迟迟不显示）
   groupsStore.loadGroups().catch(() => {})
   try {
@@ -168,6 +175,50 @@ button:focus-visible {
 }
 button:active:not(:disabled) {
   transform: scale(0.97);
+}
+
+/* ===== 弹窗公共样式（各弹窗组件共用，组件内仅覆盖宽度差异） ===== */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-height: 80vh;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  color: var(--text-primary);
+  font-size: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.close-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+.close-btn:hover {
+  color: var(--text-primary);
+}
+.dialog-body {
+  padding: 12px 16px;
+  overflow-y: auto;
 }
 
 /* 弹窗/侧栏开关动画 */
