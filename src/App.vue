@@ -11,6 +11,7 @@ import GroupsDialog from './components/GroupsDialog.vue'
 import DownloadsDialog from './components/DownloadsDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import AISidebar from './components/AISidebar.vue'
+import AppToast from './components/AppToast.vue'
 import { useTabsStore } from './stores/tabs'
 import { useGroupsStore } from './stores/groups'
 import { useSettingsStore } from './stores/settings'
@@ -83,6 +84,7 @@ watch(
     <DownloadsDialog :show="showDownloads" @close="showDownloads = false" />
     <SettingsDialog :show="showSettings" @close="showSettings = false" />
     <AISidebar :show="showAI" @close="showAI = false" />
+    <AppToast />
   </div>
 </template>
 

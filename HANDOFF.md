@@ -687,3 +687,31 @@ let pool = SqlitePoolOptions::new()
 - settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
 - 全项目日志用 println!，如需结构化日志可后续接 log + tauri-plugin-log
 - 运行中的实例仍是旧二进制，第七轮新代码（启动 WAL checkpoint + downloads 清理）需重启生效
+
+## 十七、2026-09-13 第八轮完善（前端统一错误提示 toast）
+
+### 17.1 问题
+
+前端大量 `invoke(...).catch(() => {})` 静默吞错——用户操作（保存设置、增删书签、增删分组、扩展操作、密码保存、删除下载记录、工作区切换）失败时完全无感知，只能查控制台。
+
+### 17.2 修复内容
+
+1. **新增轻量 toast 系统**（不引入第三方库）：
+   - `src/stores/toast.ts`：Pinia store，show/error/success 三种类型，3 秒自动消失
+   - `src/components/AppToast.vue`：右下角固定、TransitionGroup 动画（组件名多词，过 vue/multi-word-component-names）
+   - `App.vue` 挂载 `<AppToast />`
+2. **7 个 store 写操作统一加错误提示**：bookmarks（增/删）、extensions（加载/启停/删除）、groups（增/改/删）、workspaces（建/重命名/删/切换）、settings（保存/清历史）、passwords（保存/删除）、downloads（删除）——失败 toast + console.error
+3. **settings.set 失败回滚**：乐观更新失败时恢复内存原值，避免 UI 显示已保存但实际未入库
+4. **补未捕获异常**：GroupsDialog/TabBar 的 createGroup 调用原无 try/catch（store 失败会 throw），已补 catch（store 已 toast，调用方只做清理）
+
+### 17.3 验证结果
+
+- `npm run lint` 0 错误 ✅ / `npm run build` 通过 ✅ / prettier 格式化新文件 ✅
+- 后端未改动，cargo 侧无需重跑
+
+### 17.4 遗留事项（更新）
+
+- git 历史仍含明文 sudo 密码（旧提交），彻底清除需 `git filter-repo` 重写历史（有风险，暂缓）
+- settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
+- 全项目日志用 println!，如需结构化日志可后续接 log + tauri-plugin-log
+- 运行中的实例仍是旧二进制，第七、八轮新代码（WAL checkpoint/downloads 清理/toast）需重启生效

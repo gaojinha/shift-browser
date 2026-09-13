@@ -1,6 +1,7 @@
 // 密码管理状态（Pinia）
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
+import { useToastStore } from './toast'
 import type { PasswordEntry, PasswordMeta } from '../types/password'
 
 interface PasswordsState {
@@ -29,8 +30,14 @@ export const usePasswordsStore = defineStore('passwords', {
       password: string,
       notes?: string | null,
     ) {
-      await invoke<number>('save_password', { domain, username, password, notes })
-      await this.loadPasswords()
+      try {
+        await invoke<number>('save_password', { domain, username, password, notes })
+        await this.loadPasswords()
+        useToastStore().success('密码已保存')
+      } catch (e) {
+        console.error('[passwords] 保存密码失败:', e)
+        useToastStore().error('保存密码失败')
+      }
     },
 
     /** 获取某域名密码明文 */
@@ -45,8 +52,13 @@ export const usePasswordsStore = defineStore('passwords', {
 
     /** 删除密码 */
     async deletePassword(id: number) {
-      await invoke<void>('delete_password', { id })
-      this.list = this.list.filter((p) => p.id !== id)
+      try {
+        await invoke<void>('delete_password', { id })
+        this.list = this.list.filter((p) => p.id !== id)
+      } catch (e) {
+        console.error('[passwords] 删除密码失败:', e)
+        useToastStore().error('删除密码失败')
+      }
     },
   },
 })

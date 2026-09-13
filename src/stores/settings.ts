@@ -2,6 +2,7 @@
 // 对应 settings 表（key-value），封装 get_all_settings / set_setting / clear_history
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
+import { useToastStore } from './toast'
 
 interface SettingRow {
   key: string
@@ -56,14 +57,26 @@ export const useSettingsStore = defineStore('settings', {
       for (const r of rows) this.settings[r.key] = r.value
       this.loaded = true
     },
-    /** 保存单个设置（内存 + 数据库） */
+    /** 保存单个设置（内存 + 数据库，失败回滚内存值） */
     async set(key: string, value: string) {
-      this.settings[key] = value
-      await invoke('set_setting', { key, value })
+      const prev = this.settings[key]
+      try {
+        this.settings[key] = value
+        await invoke('set_setting', { key, value })
+      } catch (e) {
+        console.error('[settings] 保存设置失败:', e)
+        this.settings[key] = prev
+        useToastStore().error('保存设置失败')
+      }
     },
     /** 清除全部历史记录 */
     async clearHistory() {
-      await invoke('clear_history')
+      try {
+        await invoke('clear_history')
+      } catch (e) {
+        console.error('[settings] 清除历史失败:', e)
+        useToastStore().error('清除历史记录失败')
+      }
     },
   },
 })

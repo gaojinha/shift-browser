@@ -3,6 +3,7 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { useTabsStore } from './tabs'
+import { useToastStore } from './toast'
 
 export interface Workspace {
   id: number
@@ -57,6 +58,7 @@ export const useWorkspacesStore = defineStore('workspaces', {
         return id
       } catch (e) {
         console.error('[workspaces] 创建工作区失败:', e)
+        useToastStore().error('创建工作区失败')
         return null
       }
     },
@@ -68,6 +70,7 @@ export const useWorkspacesStore = defineStore('workspaces', {
         await this.loadWorkspaces()
       } catch (e) {
         console.error('[workspaces] 重命名工作区失败:', e)
+        useToastStore().error('重命名工作区失败')
       }
     },
 
@@ -86,6 +89,7 @@ export const useWorkspacesStore = defineStore('workspaces', {
         await this.loadWorkspaces()
       } catch (e) {
         console.error('[workspaces] 删除工作区失败:', e)
+        useToastStore().error('删除工作区失败')
       }
     },
 
@@ -107,6 +111,7 @@ export const useWorkspacesStore = defineStore('workspaces', {
         await tabs.restoreLastSession(id)
       } catch (e) {
         console.error('[workspaces] 切换工作区失败:', e)
+        useToastStore().error('切换工作区失败')
       } finally {
         this.switching = false
       }

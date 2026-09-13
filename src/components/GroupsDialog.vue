@@ -50,9 +50,15 @@ async function onCreate() {
     errorMsg.value = '分组名称必填'
     return
   }
-  await groupsStore.createGroup(form.value.name.trim(), form.value.color)
-  form.value = { name: '', color: '#4a9eff' }
-  showAdd.value = false
+  try {
+    await groupsStore.createGroup(form.value.name.trim(), form.value.color)
+    form.value = { name: '', color: '#4a9eff' }
+    showAdd.value = false
+  } catch {
+    // store 已 toast 提示，这里清空输入避免残留
+    form.value = { name: '', color: '#4a9eff' }
+    showAdd.value = false
+  }
 }
 
 function startEdit(g: { id: number; name: string }) {

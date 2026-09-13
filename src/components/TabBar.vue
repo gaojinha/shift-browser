@@ -54,8 +54,12 @@ async function onNewGroupFromMenu() {
   if (!menu.value) return
   // WebKitGTK 不显示原生 prompt，直接建默认名分组
   const n = groupsStore.groups.length + 1
-  const id = await groupsStore.createGroup(`新分组 ${n}`)
-  tabsStore.assignTabToGroup(menu.value.tabId, id)
+  try {
+    const id = await groupsStore.createGroup(`新分组 ${n}`)
+    tabsStore.assignTabToGroup(menu.value.tabId, id)
+  } catch {
+    // store 已 toast 提示，失败则不归组
+  }
   closeMenu()
 }
 
