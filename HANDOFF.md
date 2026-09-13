@@ -790,3 +790,31 @@ tabs store 的 4 个核心操作（createTab/closeTab/switchTab/navigateTab）�
 
 - 挂账任务全部处理完毕；当前无阻塞项
 - 后续可选：feed 源内容级质量过滤（已有标题过滤）、前端组件进一步 UI/UX 优化
+
+## 二十一、2026-09-13 第十二轮完善（密码弹窗安全 + 下载文件操作）
+
+### 21.1 PasswordsDialog 安全修复
+
+1. **关闭弹窗未清空已查看明文**：查看密码后关闭弹窗，再次打开密码仍显示在 UI 上。修复：watch 关闭时清空 revealId/revealPassword。
+2. **onReveal 无错误处理**：getPasswordById 失败会抛未捕获异常。修复：加 try/catch + console.error。
+
+### 21.2 DownloadsDialog 功能补全
+
+3. **下载完成后无操作入口**（只有删除）。修复：completed 且带路径的记录显示"打开"（openPath）和"文件夹"（revealItemInDir）按钮，用 tauri-plugin-opener（插件早已注册但未使用，本次补装前端包 @tauri-apps/plugin-opener）。
+
+### 21.3 组件/模块审查（健康，无需改动）
+
+4. BookmarksBar：导航/删除/收藏均正常（store 已有 toast）。
+5. StatusBar：URL/标签数/广告拦截/版本正常。
+6. AddressBar：URL 补全、搜索、阅读模式正常。
+7. history.rs：记录/清理（10000 上限）/查询均正常；search_history 的 LIKE 未转义通配符（影响极低，暂不改）。
+8. bookmarks.rs：结构正常。
+
+### 21.4 验证结果
+
+- npm run lint 0 错误 ✅ / npm run build 通过 ✅
+- 后端未改动
+
+### 21.5 遗留事项
+
+- 无阻塞项；后续可选：search_history LIKE 通配符转义、前端组件 UI/UX 进一步优化

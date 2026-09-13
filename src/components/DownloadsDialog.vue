@@ -5,6 +5,7 @@
 import { onMounted, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener'
 import { useDownloadsStore } from '../stores/downloads'
 
 const props = defineProps<{ show: boolean }>()
@@ -65,6 +66,26 @@ function stateInfo(state: string): { text: string; cls: string } {
 async function onDelete(id: number) {
   await downloadsStore.deleteDownload(id)
 }
+
+/** 打开已下载的文件（completed 状态可用） */
+async function onOpen(path: string | null) {
+  if (!path) return
+  try {
+    await openPath(path)
+  } catch (e) {
+    console.error('[downloads] 打开文件失败:', e)
+  }
+}
+
+/** 在文件管理器中显示（completed 状态可用） */
+async function onReveal(path: string | null) {
+  if (!path) return
+  try {
+    await revealItemInDir(path)
+  } catch (e) {
+    console.error('[downloads] 打开所在文件夹失败:', e)
+  }
+}
 </script>
 
 <template>
@@ -96,6 +117,10 @@ async function onDelete(id: number) {
               <span class="state" :class="stateInfo(d.state).cls">{{
                 stateInfo(d.state).text
               }}</span>
+              <template v-if="d.state === 'completed' && d.path">
+                <button class="mini-btn" @click="onOpen(d.path)">打开</button>
+                <button class="mini-btn" @click="onReveal(d.path)">文件夹</button>
+              </template>
               <button class="mini-btn danger" @click="onDelete(d.id)">删除</button>
             </div>
           </div>

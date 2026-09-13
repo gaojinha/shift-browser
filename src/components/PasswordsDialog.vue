@@ -18,6 +18,10 @@ watch(
   async (v) => {
     if (v) {
       await passwordsStore.loadPasswords()
+    } else {
+      // 关闭时清空已查看的明文，避免再次打开时密码还留在 UI 上
+      revealId.value = null
+      revealPassword.value = ''
     }
     await invoke('set_webview_visible', { visible: !v })
   },
@@ -52,10 +56,14 @@ async function onReveal(id: number) {
     return
   }
   // 按 id 查（同域名多账号时精确定位），不再按域名 LIMIT 1
-  const entry = await passwordsStore.getPasswordById(id)
-  if (entry) {
-    revealId.value = id
-    revealPassword.value = entry.password
+  try {
+    const entry = await passwordsStore.getPasswordById(id)
+    if (entry) {
+      revealId.value = id
+      revealPassword.value = entry.password
+    }
+  } catch (e) {
+    console.error('[passwords] 查看密码失败:', e)
   }
 }
 
