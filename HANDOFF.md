@@ -637,3 +637,30 @@ let pool = SqlitePoolOptions::new()
 - settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
 - 全项目日志用 println!，如需结构化日志可后续接 log + tauri-plugin-log
 - 运行中的实例仍是旧二进制，新代码（feed 去重/编码/下载唯一化/world-nav 修复）需重启生效
+
+## 十五、2026-09-13 第六轮完善（feed 源健康检查 + 失效源替换）
+
+### 15.1 全源健康检查
+
+1. **62 源批量检查**：对 feeds.json 全部源做 HTTP 探测（状态码 + 前 200 字节 XML 标记检测），发现 2 个失效源：
+   - **36氪**（plink.anyfeeder.com/36kr）：anyfeeder 返回 JS 落地页，非 RSS；官方 36kr.com/feed 同样失效（36氪已停止提供 RSS）
+   - **品玩**（plink.anyfeeder.com/pingwest）：404；官方 pingwest.com/feed 同样 404
+2. **替换为活跃源**：36氪 → 新浪科技（rss.sina.com.cn/tech/rollnews.xml，实测正常）；品玩 → 开源中国（oschina.net/news/rss，实测正常）。62 源数量不变。
+3. **复检确认**：替换后全源复检，唯一"异常"为新浪科技长注释头（>200 字节，脚本前 200 字节窗口误报，实际完整 RSS）+ 光明日报单次 SSL 握手超时（重测正常，网络抖动）。62 源实际全部可用。
+
+### 15.2 代码质量检查结论
+
+4. **TODO/FIXME/HACK**：全项目 0 残留。
+5. **日志敏感信息**：println 无 API key/密码/token 泄露；URL 打印为本地日志，可接受。
+6. **密码功能**：AES-256-GCM + 随机 12 字节 nonce + 独立密钥文件 600，加密/解密/迁移测试齐全，无需改动。
+
+### 15.3 验证结果
+
+- `cargo check` 0 警告 ✅ / `cargo clippy` 0 警告 ✅ / `cargo test` 16 passed ✅
+
+### 15.4 遗留事项（更新）
+
+- git 历史仍含明文 sudo 密码（旧提交），彻底清除需 `git filter-repo` 重写历史（有风险，暂缓）
+- settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
+- 全项目日志用 println!，如需结构化日志可后续接 log + tauri-plugin-log
+- 运行中的实例仍是旧二进制，第四~六轮新代码（feed 去重/编码/下载唯一化/world-nav 修复/源替换）需重启生效
