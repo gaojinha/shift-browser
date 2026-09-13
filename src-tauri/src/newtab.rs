@@ -155,20 +155,14 @@ fn render_html(
             .join("")
     };
 
-    let quick_panel = if quick_sites.is_empty() {
-        "<div class=\"empty\">暂无快捷访问</div>".to_string()
-    } else {
-        quick_sites
+    // 快捷访问内置项传给前端 JS（动态面板用）
+    let quick_builtin_json = serde_json::to_string(
+        &quick_sites
             .iter()
-            .map(|(_, n, u)| {
-                format!(
-                    "<a class=\"item\" href=\"{}\"><span class=\"it-title\">⚡ {}</span><span class=\"it-url\">{}</span></a>",
-                    esc(u), esc(n), esc(u)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("")
-    };
+            .map(|(i, n, u)| serde_json::json!({ "i": i, "n": n, "u": u }))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".into());
     let quick_grid = quick_sites
         .iter()
         .map(|(i, n, u)| {
@@ -180,11 +174,11 @@ fn render_html(
         .collect::<Vec<_>>()
         .join("");
 
-    // 资讯数据（紧凑数组 [title, url, source, published]）
+    // 资讯数据（紧凑数组 [title, url, source, published, category]）
     let feed_data: Vec<serde_json::Value> = feed_items
         .iter()
-        .map(|(source, _cat, title, url, published)| {
-            serde_json::json!([title, url, source, published])
+        .map(|(source, category, title, url, published)| {
+            serde_json::json!([title, url, source, published, category])
         })
         .collect();
     let feed_data_json = serde_json::to_string(&feed_data).unwrap_or_else(|_| "[]".into());
@@ -218,6 +212,23 @@ fn render_html(
   .it-url {{ display:block; font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
   .fs-item.read .it-title {{ color:var(--muted); }}
   .feed-toggle {{ display:block; margin:0 0 8px 4px; background:var(--bg3); border:1px solid var(--border); color:var(--accent); border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }}
+  .feed-bar {{ display:flex; flex-wrap:wrap; gap:4px; margin-bottom:8px; }}
+  .feed-cat {{ background:var(--bg3); border:1px solid var(--border); color:var(--muted); border-radius:10px; padding:2px 8px; font-size:11px; cursor:pointer; }}
+  .feed-cat.on {{ background:var(--accent); border-color:var(--accent); color:#fff; }}
+  .q-item {{ display:flex; align-items:center; }}
+  .q-link {{ flex:1; min-width:0; display:block; text-decoration:none; color:inherit; overflow:hidden; }}
+  .q-del {{ border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:12px; flex-shrink:0; visibility:hidden; }}
+  .q-item:hover .q-del {{ visibility:visible; }}
+  .q-del:hover {{ color:#ff6b6b; }}
+  .modal-mask {{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50; align-items:center; justify-content:center; }}
+  .modal-mask.show {{ display:flex; }}
+  .modal-box {{ width:340px; background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:18px; }}
+  .modal-box h3 {{ font-size:15px; margin-bottom:12px; }}
+  .modal-box input {{ width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:8px; color:var(--fg); padding:8px 10px; font-size:13px; margin-bottom:10px; outline:none; }}
+  .modal-actions {{ display:flex; justify-content:flex-end; gap:8px; }}
+  .modal-btn {{ border:none; border-radius:8px; padding:7px 16px; cursor:pointer; font-size:13px; }}
+  .modal-btn.cancel {{ background:var(--bg3); color:var(--fg); }}
+  .modal-btn.ok {{ background:var(--accent); color:#fff; }}
   .empty {{ color:var(--muted); text-align:center; padding:24px 0; font-size:13px; }}
   .todo-panel {{ padding:4px; }}
   .todo-add {{ display:flex; gap:6px; margin-bottom:8px; }}
@@ -273,6 +284,18 @@ fn render_html(
     </form>
     <div class="grid">{quick_grid}</div>
   </div>
+  <div class="modal-mask" id="quickModal">
+    <div class="modal-box">
+      <h3>添加快捷访问</h3>
+      <input id="qName" placeholder="名称（如：永济政府网）" autocomplete="off" spellcheck="false">
+      <input id="qUrl" placeholder="网址（https://...）" autocomplete="off" spellcheck="false">
+      <input id="qIcon" placeholder="图标 emoji（可选，默认 ⭐）" autocomplete="off" spellcheck="false">
+      <div class="modal-actions">
+        <button class="modal-btn cancel" id="qCancel">取消</button>
+        <button class="modal-btn ok" id="qOk">添加</button>
+      </div>
+    </div>
+  </div>
 <script>
 (function() {{
   // 问候语 + 日期（JS 动态生成，省得后端依赖时区库）
@@ -300,10 +323,42 @@ fn render_html(
 
   var SEARCH_BASE = {search_url_json};
   function loadUserFavs() {{ try {{ return JSON.parse(localStorage.getItem('sb_user_favs') || '[]'); }} catch(e) {{ return []; }} }}
-  function userFavHtml() {{
-    return loadUserFavs().map(function(f) {{
-      return '<a class=\"item\" href=\"' + f.url + '\"><span class=\"it-title\">' + (f.icon || '⭐') + ' ' + f.name.replace(/</g,'&lt;') + '</span><span class=\"it-url\">' + f.url + '</span></a>';
-    }}).join('');
+  function saveUserFavs(f) {{ localStorage.setItem('sb_user_favs', JSON.stringify(f)); }}
+  function loadHidden() {{ try {{ return JSON.parse(localStorage.getItem('sb_quick_hidden') || '[]'); }} catch(e) {{ return []; }} }}
+
+  // ---- 快捷访问面板（可增删）----
+  var QUICK_BUILTIN = {quick_builtin_json};
+  function renderQuick() {{
+    var h = '<button class=\"feed-toggle\" id=\"addQuickBtn\">＋ 添加快捷访问</button>';
+    var favs = loadUserFavs();
+    favs.forEach(function(f) {{
+      h += '<div class=\"item q-item\"><a class=\"q-link\" href=\"' + f.url + '\"><span class=\"it-title\">' + (f.icon || '⭐') + ' ' + f.name.replace(/</g,'&lt;') + '</span><span class=\"it-url\">' + f.url + '</span></a><button class=\"q-del\" data-url=\"' + f.url + '\" title=\"删除收藏\">✕</button></div>';
+    }});
+    var hidden = loadHidden();
+    QUICK_BUILTIN.filter(function(b) {{ return hidden.indexOf(b.u) < 0; }}).forEach(function(b) {{
+      h += '<div class=\"item q-item\"><a class=\"q-link\" href=\"' + b.u + '\"><span class=\"it-title\">' + b.i + ' ' + b.n + '</span><span class=\"it-url\">' + b.u + '</span></a><button class=\"q-del\" data-hide=\"' + b.u + '\" title=\"隐藏（不删除收藏，仅收起）\">✕</button></div>';
+    }});
+    if (!favs.length && !QUICK_BUILTIN.filter(function(b) {{ return hidden.indexOf(b.u) < 0; }}).length) h += '<div class="empty">都藏完了，去世界导航 ⭐ 点几个</div>';
+    return h;
+  }}
+  function bindQuick() {{
+    var addBtn = document.getElementById('addQuickBtn');
+    if (addBtn) addBtn.addEventListener('click', function() {{ document.getElementById('quickModal').classList.add('show'); document.getElementById('qName').focus(); }});
+    panelBody.querySelectorAll('.q-del').forEach(function(btn) {{
+      btn.addEventListener('click', function(e) {{
+        e.preventDefault();
+        e.stopPropagation();
+        if (btn.dataset.hide) {{
+          var hidden = loadHidden();
+          hidden.push(btn.dataset.hide);
+          localStorage.setItem('sb_quick_hidden', JSON.stringify(hidden));
+        }} else {{
+          saveUserFavs(loadUserFavs().filter(function(f) {{ return f.url !== btn.dataset.url; }}));
+        }}
+        panelBody.innerHTML = renderQuick();
+        bindQuick();
+      }});
+    }});
   }}
 
   // ---- 资讯面板（已读 localStorage + 只看未读）----
@@ -320,13 +375,26 @@ fn render_html(
     return Math.floor(mins / 1440) + ' 天前';
   }}
   var feedHideRead = false;
+  var feedCat = '';
   function renderFeed() {{
     var read = loadRead();
-    var items = FEED_DATA.filter(function(f) {{ return !feedHideRead || !read[f[1]]; }});
-    if (!items.length) return '<div class="empty">' + (FEED_DATA.length ? '全部已读，关掉筛选看' : '资讯还没抓到，稍等 30 秒刷新本页') + '</div>';
-    var h = '<button class=\"feed-toggle\" id=\"feedHideReadBtn\">' + (feedHideRead ? '显示全部' : '只看未读') + '</button>';
+    var cats = [];
+    FEED_DATA.forEach(function(f) {{ if (f[4] && cats.indexOf(f[4]) < 0) cats.push(f[4]); }});
+    var items = FEED_DATA.filter(function(f) {{
+      if (feedHideRead && read[f[1]]) return false;
+      if (feedCat && f[4] !== feedCat) return false;
+      return true;
+    }});
+    var h = '<div class="feed-bar"><button class=\"feed-cat' + (feedHideRead ? '' : ' on') + '\" id=\"feedHideReadBtn\">' + (feedHideRead ? '全部' : '只看未读') + '</button>';
+    h += '<button class=\"feed-cat' + (!feedCat ? ' on' : '') + '\" data-cat=\"\">全部</button>';
+    cats.forEach(function(c) {{
+      var n = FEED_DATA.filter(function(f) {{ return f[4] === c; }}).length;
+      h += '<button class=\"feed-cat' + (feedCat === c ? ' on' : '') + '\" data-cat=\"' + c + '\">' + c + ' ' + n + '</button>';
+    }});
+    h += '</div>';
+    if (!items.length) return h + '<div class="empty">' + (FEED_DATA.length ? '这个分类都读过了' : '资讯还没抓到，稍等 30 秒刷新本页') + '</div>';
     h += items.map(function(f) {{
-      // f = [title, url, source, published]
+      // f = [title, url, source, published, category]
       var isRead = !!read[f[1]];
       return '<a class=\"item fs-item' + (isRead ? ' read' : '') + '\" href=\"' + f[1] + '\" data-url=\"' + f[1] + '\">' +
         '<span class=\"it-title\">' + f[0].replace(/</g,'&lt;') + '</span>' +
@@ -337,6 +405,9 @@ fn render_html(
   function bindFeed() {{
     var btn = document.getElementById('feedHideReadBtn');
     if (btn) btn.addEventListener('click', function() {{ feedHideRead = !feedHideRead; panelBody.innerHTML = renderFeed(); bindFeed(); }});
+    panelBody.querySelectorAll('.feed-cat[data-cat]').forEach(function(el) {{
+      el.addEventListener('click', function() {{ feedCat = el.dataset.cat; panelBody.innerHTML = renderFeed(); bindFeed(); }});
+    }});
     panelBody.querySelectorAll('.fs-item').forEach(function(el) {{
       el.addEventListener('mousedown', function() {{
         var read = loadRead();
@@ -350,7 +421,7 @@ fn render_html(
   var PANEL_DATA = {{
     bookmark: {{ title: '🔖 书签', html: {bookmark_html_json} }},
     recent: {{ title: '🕘 最近访问', html: {recent_html_json} }},
-    quick: {{ title: '⚡ 快捷访问', html: userFavHtml() + {quick_panel_json} }},
+    quick: {{ title: '⚡ 快捷访问', html: renderQuick(), bind: bindQuick }},
     feed: {{ title: '📰 资讯', html: renderFeed(), bind: bindFeed }}
   }};
   var panel = document.getElementById('sidePanel');
@@ -443,6 +514,27 @@ fn render_html(
   }});
   document.getElementById('panelClose').addEventListener('click', closePanel);
 
+  // ---- 添加快捷访问弹窗 ----
+  document.getElementById('qCancel').addEventListener('click', function() {{ document.getElementById('quickModal').classList.remove('show'); }});
+  document.getElementById('qOk').addEventListener('click', function() {{
+    var n = document.getElementById('qName').value.trim();
+    var u = document.getElementById('qUrl').value.trim();
+    var i = document.getElementById('qIcon').value.trim();
+    if (!n || !u) return;
+    if (!/^https?:\/\//.test(u)) u = 'https://' + u;
+    var favs = loadUserFavs();
+    favs.unshift({{ name: n, url: u, icon: i || '⭐' }});
+    saveUserFavs(favs);
+    document.getElementById('quickModal').classList.remove('show');
+    document.getElementById('qName').value = '';
+    document.getElementById('qUrl').value = '';
+    document.getElementById('qIcon').value = '';
+    if (current === 'quick') {{ panelBody.innerHTML = renderQuick(); bindQuick(); }}
+  }});
+  document.getElementById('quickModal').addEventListener('click', function(e) {{
+    if (e.target === this) this.classList.remove('show');
+  }});
+
   // ---- 主区九宫格追加用户收藏（世界导航页里 ⭐ 过的）----
   (function() {{
     var favs = loadUserFavs();
@@ -474,7 +566,7 @@ fn render_html(
         feed_data_json = feed_data_json,
         bookmark_html_json = serde_json::json!(bookmark_html),
         recent_html_json = serde_json::json!(recent_html),
-        quick_panel_json = serde_json::json!(quick_panel),
+        quick_builtin_json = quick_builtin_json,
         bookmark_count = bookmarks.len(),
         recent_count = recent.len(),
     )
