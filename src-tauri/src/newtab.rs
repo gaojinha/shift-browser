@@ -88,8 +88,11 @@ pub async fn generate(db: &Db, path: &std::path::Path) -> Result<String, String>
         None => default_quick_sites(),
     };
 
+    // ---- 数据：资讯（内置源缓存最新 80 条）----
+    let feed_items = crate::feed::latest_items(db, 80).await;
+
     // ---- 渲染 HTML（启动页 + 世界导航页）----
-    let html = render_html(search_url, &recent, &bookmarks, &quick_sites);
+    let html = render_html(search_url, &recent, &bookmarks, &quick_sites, &feed_items);
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -119,6 +122,7 @@ fn render_html(
     recent: &[(String, String)],
     bookmarks: &[(String, String)],
     quick_sites: &[(String, String, String)],
+    feed_items: &[(String, String, String, String, String)],
 ) -> String {
     let recent_html = if recent.is_empty() {
         "<div class=\"empty\">暂无访问记录</div>".to_string()
@@ -176,6 +180,15 @@ fn render_html(
         .collect::<Vec<_>>()
         .join("");
 
+    // 资讯数据（紧凑数组 [title, url, source, published]）
+    let feed_data: Vec<serde_json::Value> = feed_items
+        .iter()
+        .map(|(source, _cat, title, url, published)| {
+            serde_json::json!([title, url, source, published])
+        })
+        .collect();
+    let feed_data_json = serde_json::to_string(&feed_data).unwrap_or_else(|_| "[]".into());
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="zh-CN">
@@ -203,6 +216,8 @@ fn render_html(
   .item:hover {{ background:var(--bg3); }}
   .it-title {{ display:block; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
   .it-url {{ display:block; font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+  .fs-item.read .it-title {{ color:var(--muted); }}
+  .feed-toggle {{ display:block; margin:0 0 8px 4px; background:var(--bg3); border:1px solid var(--border); color:var(--accent); border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }}
   .empty {{ color:var(--muted); text-align:center; padding:24px 0; font-size:13px; }}
   .todo-panel {{ padding:4px; }}
   .todo-add {{ display:flex; gap:6px; margin-bottom:8px; }}
@@ -290,11 +305,53 @@ fn render_html(
       return '<a class=\"item\" href=\"' + f.url + '\"><span class=\"it-title\">' + (f.icon || '⭐') + ' ' + f.name.replace(/</g,'&lt;') + '</span><span class=\"it-url\">' + f.url + '</span></a>';
     }}).join('');
   }}
+
+  // ---- 资讯面板（已读 localStorage + 只看未读）----
+  var FEED_DATA = {feed_data_json};
+  function loadRead() {{ try {{ return JSON.parse(localStorage.getItem('sb_feed_read') || '{{}}'); }} catch(e) {{ return {{}}; }} }}
+  function timeAgo(s) {{
+    if (!s) return '';
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return '';
+    var mins = Math.floor((Date.now() - d.getTime()) / 60000);
+    if (mins < 1) return '刚刚';
+    if (mins < 60) return mins + ' 分钟前';
+    if (mins < 24 * 60) return Math.floor(mins / 60) + ' 小时前';
+    return Math.floor(mins / 1440) + ' 天前';
+  }}
+  var feedHideRead = false;
+  function renderFeed() {{
+    var read = loadRead();
+    var items = FEED_DATA.filter(function(f) {{ return !feedHideRead || !read[f[1]]; }});
+    if (!items.length) return '<div class="empty">' + (FEED_DATA.length ? '全部已读，关掉筛选看' : '资讯还没抓到，稍等 30 秒刷新本页') + '</div>';
+    var h = '<button class=\"feed-toggle\" id=\"feedHideReadBtn\">' + (feedHideRead ? '显示全部' : '只看未读') + '</button>';
+    h += items.map(function(f) {{
+      // f = [title, url, source, published]
+      var isRead = !!read[f[1]];
+      return '<a class=\"item fs-item' + (isRead ? ' read' : '') + '\" href=\"' + f[1] + '\" data-url=\"' + f[1] + '\">' +
+        '<span class=\"it-title\">' + f[0].replace(/</g,'&lt;') + '</span>' +
+        '<span class=\"it-url\">' + f[2] + (f[3] ? ' · ' + timeAgo(f[3]) : '') + '</span></a>';
+    }}).join('');
+    return h;
+  }}
+  function bindFeed() {{
+    var btn = document.getElementById('feedHideReadBtn');
+    if (btn) btn.addEventListener('click', function() {{ feedHideRead = !feedHideRead; panelBody.innerHTML = renderFeed(); bindFeed(); }});
+    panelBody.querySelectorAll('.fs-item').forEach(function(el) {{
+      el.addEventListener('mousedown', function() {{
+        var read = loadRead();
+        read[el.dataset.url] = 1;
+        localStorage.setItem('sb_feed_read', JSON.stringify(read));
+        el.classList.add('read');
+      }});
+    }});
+  }}
+
   var PANEL_DATA = {{
     bookmark: {{ title: '🔖 书签', html: {bookmark_html_json} }},
     recent: {{ title: '🕘 最近访问', html: {recent_html_json} }},
     quick: {{ title: '⚡ 快捷访问', html: userFavHtml() + {quick_panel_json} }},
-    feed: {{ title: '📰 资讯', html: '<div class="empty">RSS 资讯迁移中，下一版上线</div>' }}
+    feed: {{ title: '📰 资讯', html: renderFeed(), bind: bindFeed }}
   }};
   var panel = document.getElementById('sidePanel');
   var panelTitle = document.getElementById('panelTitle');
@@ -414,6 +471,7 @@ fn render_html(
 </html>"#,
         quick_grid = quick_grid,
         search_url_json = serde_json::json!(search_url),
+        feed_data_json = feed_data_json,
         bookmark_html_json = serde_json::json!(bookmark_html),
         recent_html_json = serde_json::json!(recent_html),
         quick_panel_json = serde_json::json!(quick_panel),

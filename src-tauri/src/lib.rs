@@ -3,6 +3,7 @@ mod tabs;
 mod ai;
 mod extensions;
 mod newtab;
+mod feed;
 
 use db::{bookmarks, downloads, history, passwords, sessions, settings, tab_groups, workspaces, Db};
 use tauri::Manager;
@@ -17,6 +18,8 @@ pub fn run() {
     .plugin(
       tauri_plugin_log::Builder::default()
         .level(log::LevelFilter::Info)
+        // 并发写 SQLite 时 sqlx 慢语句 WARN 刷屏，降到 Error
+        .level_for("sqlx::query", log::LevelFilter::Error)
         .build(),
     )
     .invoke_handler(tauri::generate_handler![
@@ -182,6 +185,9 @@ pub fn run() {
           }
         });
       }
+
+      // 资讯订阅调度器（62 内置源，启动 6 秒后首轮，之后每 30 分钟）
+      feed::start_scheduler(app.handle());
 
       Ok(())
     })

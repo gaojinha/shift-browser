@@ -68,6 +68,10 @@ impl Db {
       1,
       "init_core_tables",
       include_str!("../../migrations/20260905000000_init.sql"),
+    ), (
+      2,
+      "feed_items",
+      include_str!("../../migrations/20260913000000_feeds.sql"),
     )];
 
     for (version, name, sql) in migrations {
