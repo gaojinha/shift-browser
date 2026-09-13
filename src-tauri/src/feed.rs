@@ -57,13 +57,68 @@ fn extract_tag(block: &str, tag: &str) -> Option<String> {
     let open = format!("<{}", tag);
     let start = block.find(&open)?;
     let gt = block[start..].find('>')? + start;
-    // 自闭合（如 atom <link href="..."/>）无内容
-    if block[gt - 1..gt + 1].ends_with("/>") {
+    // 自闭合（如 <link href="..."/>、<link href="..." />）无内容
+    if block[..gt].trim_end().ends_with('/') {
         return None;
     }
     let close = format!("</{}>", tag);
     let end = block[gt + 1..].find(&close)? + gt + 1;
     Some(block[gt + 1..end].to_string())
+}
+
+/// 从 <link .../> 标签段提取 href 属性（支持单/双引号）
+fn extract_href(seg: &str) -> Option<String> {
+    for q in ['"', '\''] {
+        let pat = format!("href={}", q);
+        if let Some(i) = seg.find(&pat) {
+            let val_start = i + pat.len();
+            if let Some(j) = seg[val_start..].find(q) {
+                return Some(seg[val_start..val_start + j].to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 提取条目链接：RSS <link>url</link> 或 Atom <link href="url"/>。
+/// 块内可能有多个 <link>（rel="self"/rel="alternate"/正文链接），
+/// 遍历取第一个 http 开头的，避免拿到 feed 自身地址。
+fn extract_link(block: &str) -> Option<String> {
+    let mut rest = block;
+    while let Some(rel) = rest.find("<link") {
+        let start = rel;
+        let Some(gt_rel) = rest[start..].find('>') else {
+            break;
+        };
+        let gt = start + gt_rel;
+        if rest[..gt].trim_end().ends_with('/') {
+            // Atom 风格：<link href="..."/>
+            let seg = &rest[start..gt + 1];
+            // 跳过 rel="self"（feed 自身地址），继续找正文链接
+            if seg.contains("rel=\"self\"") || seg.contains("rel='self'") {
+                rest = &rest[gt + 1..];
+                continue;
+            }
+            if let Some(href) = extract_href(seg) {
+                let clean = clean_text(&href);
+                if clean.starts_with("http") {
+                    return Some(clean);
+                }
+            }
+        } else {
+            // RSS 风格：<link>url</link>
+            let Some(close_rel) = rest[gt + 1..].find("</link>") else {
+                break;
+            };
+            let end = gt + 1 + close_rel;
+            let url = clean_text(&rest[gt + 1..end]);
+            if url.starts_with("http") {
+                return Some(url);
+            }
+        }
+        rest = &rest[gt + 1..];
+    }
+    None
 }
 
 /// 解析一个 <item>/<entry> 块 → (title, link, published)
@@ -72,19 +127,9 @@ fn parse_entry(block: &str) -> Option<(String, String, String)> {
     if title.is_empty() {
         return None;
     }
-    // RSS: <link>url</link>；Atom: <link href="url"/>
-    let link = extract_tag(block, "link")
-        .map(|s| clean_text(&s))
-        .filter(|s| s.starts_with("http"))
-        .or_else(|| {
-            let open = block.find("<link")?;
-            let seg = &block[open..block[open..].find('>')? + open + 1];
-            let i = seg.find("href=\"")? + 6;
-            let j = seg[i..].find('"')? + i;
-            let url = clean_text(&seg[i..j]);
-            url.starts_with("http").then_some(url)
-        })?;
-    let published = ["pubDate", "published", "updated", "date"]
+    let link = extract_link(block)?;
+    // 时间字段兼容多种命名空间：RSS pubDate / Atom published/updated / DC date
+    let published = ["pubDate", "published", "updated", "date", "dc:date"]
         .iter()
         .find_map(|t| extract_tag(block, t).map(|s| clean_text(&s)))
         .unwrap_or_default();
@@ -121,8 +166,10 @@ async fn fetch_one(client: &reqwest::Client, db: &Db, source: &str, url: &str, c
             return 0;
         }
     };
-    let xml = match resp.text().await {
-        Ok(t) => t,
+    // 用 bytes + lossy 解码：部分源是 GBK/其他编码，text() 会直接失败，
+    // lossy 至少能解析出结构（非 UTF-8 字符显示为 �，比整源失败强）
+    let xml = match resp.bytes().await {
+        Ok(b) => String::from_utf8_lossy(&b).to_string(),
         Err(e) => {
             println!("[feed] {} 读取失败: {}", source, e);
             return 0;
@@ -221,4 +268,88 @@ pub fn start_scheduler(app: &AppHandle) {
             tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_rss_item() {
+        let xml = r#"<?xml version="1.0"?>
+<rss version="2.0"><channel>
+<item>
+  <title>测试标题 &amp; 实体</title>
+  <link>https://example.com/a?x=1</link>
+  <pubDate>Mon, 01 Jan 2026 00:00:00 GMT</pubDate>
+</item>
+<item><title>第二条</title><link>https://example.com/b</link><pubDate>2026-01-02</pubDate></item>
+</channel></rss>"#;
+        let items = parse_feed(xml);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].0, "测试标题 & 实体");
+        assert_eq!(items[0].1, "https://example.com/a?x=1");
+        assert_eq!(items[0].2, "Mon, 01 Jan 2026 00:00:00 GMT");
+        assert_eq!(items[1].1, "https://example.com/b");
+    }
+
+    #[test]
+    fn parse_atom_entry_with_self_link() {
+        // 第一个 link 是 rel="self"（feed 自身地址），应跳过取正文链接
+        let xml = r#"<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<entry>
+  <title><![CDATA[Atom 标题]]></title>
+  <link rel="self" href="https://example.com/feed.xml"/>
+  <link rel="alternate" href="https://example.com/post/1"/>
+  <updated>2026-03-01T10:00:00Z</updated>
+</entry>
+</feed>"#;
+        let items = parse_feed(xml);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].0, "Atom 标题");
+        assert_eq!(items[0].1, "https://example.com/post/1");
+        assert_eq!(items[0].2, "2026-03-01T10:00:00Z");
+    }
+
+    #[test]
+    fn parse_dc_date_and_single_quote_href() {
+        let xml = r#"<rss version="2.0"><channel>
+<item>
+  <title>DC 日期源</title>
+  <link href='https://example.com/c' />
+  <dc:date>2026-05-05T08:00:00+08:00</dc:date>
+</item>
+</channel></rss>"#;
+        let items = parse_feed(xml);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].1, "https://example.com/c");
+        assert_eq!(items[0].2, "2026-05-05T08:00:00+08:00");
+    }
+
+    #[test]
+    fn parse_rss_link_with_attributes() {
+        // RSS 里带属性的 <link rel="alternate" type="text/html">url</link>
+        let xml = r#"<rss version="2.0"><channel>
+<item>
+  <title>带属性 link</title>
+  <link rel="alternate" type="text/html">https://example.com/d</link>
+</item>
+</channel></rss>"#;
+        let items = parse_feed(xml);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].1, "https://example.com/d");
+    }
+
+    #[test]
+    fn skip_empty_and_self_closed_items() {
+        let xml = r#"<rss version="2.0"><channel>
+<item><title>正常</title><link>https://example.com/e</link></item>
+<item/>
+<item><title></title><link>https://example.com/f</link></item>
+</channel></rss>"#;
+        let items = parse_feed(xml);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].0, "正常");
+    }
 }

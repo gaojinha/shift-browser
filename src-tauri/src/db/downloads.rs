@@ -1,6 +1,7 @@
 // 下载记录管理
 use crate::db::{Db, DbResult};
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Download {
@@ -15,6 +16,70 @@ pub struct Download {
     pub created_at: String,
 }
 
+/// 插入下载记录（内部共用：WebKit 下载信号与 create_download 命令走同一入口，避免 SQL 双写）
+pub async fn insert_download(
+    pool: &SqlitePool,
+    filename: &str,
+    url: Option<&str>,
+    path: Option<&str>,
+    total_bytes: i64,
+) -> Result<i64, sqlx::Error> {
+    let result = sqlx::query(
+        "INSERT INTO downloads (filename, url, path, total_bytes, received_bytes, state) VALUES (?, ?, ?, ?, 0, 'in_progress')",
+    )
+    .bind(filename)
+    .bind(url)
+    .bind(path)
+    .bind(total_bytes)
+    .execute(pool)
+    .await?;
+    Ok(result.last_insert_rowid())
+}
+
+/// 更新下载进度（内部共用；下载开始时 total 可能未知为 0，进度回调时补全）
+pub async fn update_download_bytes(
+    pool: &SqlitePool,
+    id: i64,
+    received_bytes: i64,
+    total_bytes: Option<i64>,
+) -> Result<(), sqlx::Error> {
+    if let Some(total) = total_bytes {
+        sqlx::query(
+            "UPDATE downloads SET received_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END WHERE id = ?",
+        )
+        .bind(received_bytes)
+        .bind(total)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    } else {
+        sqlx::query("UPDATE downloads SET received_bytes = ? WHERE id = ?")
+            .bind(received_bytes)
+            .bind(id)
+            .execute(pool)
+            .await?;
+    }
+    Ok(())
+}
+
+/// 更新下载状态（可同时更新已接收字节数，完成/失败回调共用）
+pub async fn update_download_state(
+    pool: &SqlitePool,
+    id: i64,
+    state: &str,
+    received_bytes: Option<i64>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE downloads SET state = ?, received_bytes = COALESCE(?, received_bytes) WHERE id = ?",
+    )
+    .bind(state)
+    .bind(received_bytes)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// 记录下载开始
 #[tauri::command]
 pub async fn create_download(
@@ -24,16 +89,8 @@ pub async fn create_download(
     path: Option<String>,
     total_bytes: i64,
 ) -> DbResult<i64> {
-    let result = sqlx::query(
-        "INSERT INTO downloads (filename, url, path, total_bytes, received_bytes, state) VALUES (?, ?, ?, ?, 0, 'in_progress')",
-    )
-    .bind(&filename)
-    .bind(&url)
-    .bind(&path)
-    .bind(total_bytes)
-    .execute(&db.pool)
-    .await?;
-    Ok(result.last_insert_rowid())
+    let id = insert_download(&db.pool, &filename, url.as_deref(), path.as_deref(), total_bytes).await?;
+    Ok(id)
 }
 
 /// 更新下载进度

@@ -546,3 +546,34 @@ let pool = SqlitePoolOptions::new()
 - 下载保存走 `tabs.rs` 直接 INSERT + `downloads.rs` create_download 双写路径，后续可统一
 - settings 表无 schema 校验，非法键/值可能写入，后续可加白名单
 - feed.rs 手写 XML 解析（无命名空间处理），部分源可能解析失败
+
+## 十二、2026-09-13 第三轮完善（遗留事项收尾）
+
+### 12.1 下载双写路径统一
+
+1. **SQL 单点维护**：`db/downloads.rs` 新增内部函数 `insert_download` / `update_download_bytes` / `update_download_state`，`create_download` 命令与 `tabs.rs` 的 WebKit download_started 信号共用同一套 SQL（原 tabs.rs 直接写 INSERT/UPDATE，两处 SQL 重复、改表结构要改两遍）。`tabs.rs` 四处下载 SQL 全部改为调用共用函数。
+
+### 12.2 settings 白名单校验
+
+2. **写白名单**：`db/settings.rs` 加 `ALLOWED_KEYS`（homepage/search_engine/theme/show_bookmarks_bar/record_history/ai_model/ai_base_url/ai_api_key/adblock_enabled/adblock_keywords 共 10 键）。`set_setting` 未知键报错拒绝；`set_settings_bulk` 未知键静默跳过（批量导入容忍脏数据）。读侧保持敏感键拦截（master_key 不可读、ai_api_key 掩码）。
+
+### 12.3 feed 解析加固
+
+3. **link 提取重写**：`extract_link` 遍历块内所有 `<link>`，跳过 `rel="self"`（feed 自身地址），取第一个 http 开头的正文链接；支持单/双引号 href。原实现只取第一个 `<link>`，Atom 源第一个常是 self 链接导致拿错地址。
+4. **时间字段兼容**：published 提取加 `dc:date` 命名空间变体（原缺 DC 前缀）。
+5. **自闭合判断修正**：`extract_tag` 的 `/>` 判断改为 `block[..gt].trim_end().ends_with('/')`（原 `block[gt-1..gt+1]` 对 `<link ... />` 带空格写法判断错误）。
+6. **编码兜底**：`fetch_one` 的 `resp.text()` 改为 `resp.bytes()` + `from_utf8_lossy`（GBK 等非 UTF-8 源不再整源失败，如"人人都是产品经理""阮一峰"两个源此前报 decoding error）。
+7. **新增 5 个解析单测**：RSS 标准/Atom self 链接跳过/单引号 href + dc:date/带属性 link/空 item 跳过。测试总数 7 → 12。
+
+### 12.4 验证结果
+
+- `cargo check` 0 警告 ✅ / `cargo clippy` 0 警告 ✅ / `cargo test` 12 passed ✅
+- `npm run lint` ✅ / `npm run build` ✅
+- release 编译 ✅，实机启动正常，feed 首轮刷新 873 条 ✅
+
+### 12.5 遗留事项（更新）
+
+- git 历史仍含明文 sudo 密码（旧提交），彻底清除需 `git filter-repo` 重写历史（有风险，暂缓）
+- settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
+- feed 非 UTF-8 源（GBK）lossy 解码后中文显示为 �，如需完美解码可后续接 encoding_rs 自动探测
+- feed 源级去重/质量过滤（部分源标题重复）未做，后续可按需加

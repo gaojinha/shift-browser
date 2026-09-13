@@ -11,9 +11,28 @@ pub struct Setting {
 /// 敏感设置键（禁止返回/写入前端）
 const SENSITIVE_KEYS: &[&str] = &["master_key"];
 
+/// 前端允许读写的设置键白名单（防止非法键写入垃圾数据）
+const ALLOWED_KEYS: &[&str] = &[
+  "homepage",
+  "search_engine",
+  "theme",
+  "show_bookmarks_bar",
+  "record_history",
+  "ai_model",
+  "ai_base_url",
+  "ai_api_key",
+  "adblock_enabled",
+  "adblock_keywords",
+];
+
 /// 是否为敏感设置键
 fn is_sensitive(key: &str) -> bool {
     SENSITIVE_KEYS.contains(&key)
+}
+
+/// 是否为白名单允许的键
+fn is_allowed(key: &str) -> bool {
+    ALLOWED_KEYS.contains(&key)
 }
 
 /// API Key 掩码（保留前 4 后 4，中间 ****；太短则全掩）
@@ -76,6 +95,13 @@ pub async fn set_setting(
       key
     )));
   }
+  // 白名单校验：未知键拒绝写入，防止垃圾数据/错别字键
+  if !is_allowed(&key) {
+    return Err(crate::db::DbError::Other(format!(
+      "设置 {} 不在白名单内，拒绝写入",
+      key
+    )));
+  }
   sqlx::query(
     "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
@@ -107,6 +133,10 @@ pub async fn set_settings_bulk(
   for s in settings {
     // 敏感设置不允许批量写入
     if is_sensitive(&s.key) {
+      continue;
+    }
+    // 白名单校验：未知键跳过（批量导入容忍脏数据，单个 set 才报错）
+    if !is_allowed(&s.key) {
       continue;
     }
     sqlx::query(

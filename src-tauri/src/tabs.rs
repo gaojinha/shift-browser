@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl};
 
-use crate::db::{history, Db};
+use crate::db::{downloads, history, Db};
 
 #[cfg(target_os = "linux")]
 use gtk::glib::translate::ToGlibPtr;
@@ -329,17 +329,15 @@ impl TabManager {
                 let dest_db = dest.clone();
                 let id_state0 = id_state.clone();
                 tauri::async_runtime::spawn(async move {
-                  let res = sqlx::query(
-                    "INSERT INTO downloads (filename, url, path, total_bytes, received_bytes, state) VALUES (?, ?, ?, ?, 0, 'in_progress')",
+                  let res = downloads::insert_download(
+                    &pool0,
+                    &filename_db,
+                    url_db.as_deref(),
+                    Some(&dest_db),
+                    total,
                   )
-                  .bind(&filename_db)
-                  .bind(&url_db)
-                  .bind(Some(&dest_db))
-                  .bind(total)
-                  .execute(&pool0)
                   .await;
-                  if let Ok(r) = res {
-                    let id = r.last_insert_rowid();
+                  if let Ok(id) = res {
                     *id_state0.lock().unwrap() = Some(id);
                     println!("[downloads] 记录 id={} filename={} total={}", id, filename_db, total);
                     let _ = app0.emit("downloads-updated", ());
@@ -386,14 +384,7 @@ impl TabManager {
                       None => wait_download_id(&id_state3).await,
                     };
                     if let Some(id) = id {
-                      let _ = sqlx::query(
-                        "UPDATE downloads SET received_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END WHERE id = ?",
-                      )
-                      .bind(received)
-                      .bind(total_now)
-                      .bind(id)
-                      .execute(&pool3)
-                      .await;
+                      let _ = downloads::update_download_bytes(&pool3, id, received, Some(total_now)).await;
                       let _ = app3.emit("downloads-updated", ());
                     }
                   });
@@ -415,13 +406,7 @@ impl TabManager {
                       None => wait_download_id(&id_state5).await,
                     };
                     if let Some(id) = id {
-                      let _ = sqlx::query(
-                        "UPDATE downloads SET received_bytes = ?, state = 'completed' WHERE id = ?",
-                      )
-                      .bind(received)
-                      .bind(id)
-                      .execute(&pool5)
-                      .await;
+                      let _ = downloads::update_download_state(&pool5, id, "completed", Some(received)).await;
                       let _ = app5.emit("downloads-updated", ());
                     }
                   });
@@ -443,10 +428,7 @@ impl TabManager {
                       None => wait_download_id(&id_state7).await,
                     };
                     if let Some(id) = id {
-                      let _ = sqlx::query("UPDATE downloads SET state = 'failed' WHERE id = ?")
-                        .bind(id)
-                        .execute(&pool7)
-                        .await;
+                      let _ = downloads::update_download_state(&pool7, id, "failed", None).await;
                       let _ = app7.emit("downloads-updated", ());
                     }
                   });
