@@ -430,7 +430,7 @@ fn render_html(
     Array.prototype.forEach.call(cont.querySelectorAll('img'), function(im) {{
       var s = im.getAttribute('data-src') || im.getAttribute('data-original') || im.getAttribute('data-lazy-src') || im.getAttribute('data-echo') || im.getAttribute('src');
       if (!s) return;
-      if (s.charAt(0) === '/' && s.charAt(1) === '/') s = location.protocol + s Orange;
+      if (s.charAt(0) === '/' && s.charAt(1) === '/') s = location.protocol + s;
       if (im.hasAttribute('srcset')) im.removeAttribute('srcset');
       if (im.src === im.baseURI) im.removeAttribute('src');
       im.setAttribute('src', s);
@@ -466,7 +466,7 @@ fn render_html(
     document.getElementById('inlineFsDown').addEventListener('click', function() {{ inlineFs = Math.max(inlineFs - 2, 14); applyInlineFs(); }});
     var content = document.getElementById('content');
     content.style.setProperty('--fs', inlineFs + 'px');
-    imgFix(content nature);
+    imgFix(content);
   }}
   function applyInlineFs() {{
     localStorage.setItem('sb_reader_fs', inlineFs);
