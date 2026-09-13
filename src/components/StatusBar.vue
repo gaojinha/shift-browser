@@ -27,7 +27,11 @@ onMounted(async () => {
   <div class="status-bar">
     <span class="status-left">{{ currentUrl }}</span>
     <span class="status-right">
-      <span class="status-adblock" :class="{ off: !adblockOn }" :title="adblockOn ? '广告拦截：开' : '广告拦截：关'">
+      <span
+        class="status-adblock"
+        :class="{ off: !adblockOn }"
+        :title="adblockOn ? '广告拦截：开' : '广告拦截：关'"
+      >
         🛡 {{ adblockOn ? '开' : '关' }}
       </span>
       <span class="status-sep">·</span>

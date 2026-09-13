@@ -29,7 +29,7 @@ export const useTabsStore = defineStore('tabs', {
     },
   },
 
-actions: {
+  actions: {
     /** 从 Rust 拉取全部标签（启动时调用） */
     async loadTabs() {
       const tabs = await invoke<Tab[]>('get_tabs')

@@ -72,7 +72,9 @@ export const useAIStore = defineStore('ai', {
         this.messages.push({ role: 'assistant', content: '当前没有可分析的页面。' })
         return
       }
-      await this.sendMessage(`请总结当前页面「${ctx.title}」（${ctx.url}）的主要内容，用 5 条以内要点概括。`)
+      await this.sendMessage(
+        `请总结当前页面「${ctx.title}」（${ctx.url}）的主要内容，用 5 条以内要点概括。`,
+      )
     },
 
     /** 快捷操作：翻译当前页标题/简介 */
@@ -92,7 +94,9 @@ export const useAIStore = defineStore('ai', {
         this.messages.push({ role: 'assistant', content: '当前没有可解释的页面。' })
         return
       }
-      await this.sendMessage(`请用通俗易懂的方式解释当前页面「${ctx.title}」（${ctx.url}）讲的是什么、对用户有什么价值。`)
+      await this.sendMessage(
+        `请用通俗易懂的方式解释当前页面「${ctx.title}」（${ctx.url}）讲的是什么、对用户有什么价值。`,
+      )
     },
 
     /** 清空对话 */

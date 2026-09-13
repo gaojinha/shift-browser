@@ -60,7 +60,7 @@ watch(
     saveTimer = window.setTimeout(() => {
       tabsStore.saveCurrentSession(workspacesStore.currentId)
     }, 3000)
-  }
+  },
 )
 </script>
 

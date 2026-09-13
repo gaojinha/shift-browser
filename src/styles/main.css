@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 html,
 body,
@@ -10,9 +10,9 @@ body,
   font-family:
     system-ui,
     -apple-system,
-    "Segoe UI",
-    "PingFang SC",
-    "Microsoft YaHei",
+    'Segoe UI',
+    'PingFang SC',
+    'Microsoft YaHei',
     sans-serif;
 }
 

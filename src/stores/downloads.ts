@@ -25,7 +25,7 @@ export const useDownloadsStore = defineStore('downloads', {
       filename: string,
       url: string | null = null,
       path: string | null = null,
-      totalBytes = 0
+      totalBytes = 0,
     ) {
       const id = await invoke<number>('create_download', { filename, url, path, totalBytes })
       await this.loadDownloads()

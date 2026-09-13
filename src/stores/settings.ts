@@ -32,10 +32,12 @@ export const useSettingsStore = defineStore('settings', {
   }),
   getters: {
     /** 读取设置（无记录时返回默认值） */
-    get: (state) => (key: string): string => {
-      if (state.settings[key] !== undefined) return state.settings[key]
-      return DEFAULT_SETTINGS[key] ?? ''
-    },
+    get:
+      (state) =>
+      (key: string): string => {
+        if (state.settings[key] !== undefined) return state.settings[key]
+        return DEFAULT_SETTINGS[key] ?? ''
+      },
     /** 是否为浅色主题 */
     isLight: (state) => {
       const v = state.settings['theme']

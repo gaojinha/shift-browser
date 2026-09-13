@@ -18,7 +18,16 @@ const editingId = ref<number | null>(null)
 const editName = ref('')
 const errorMsg = ref('')
 
-const COLORS = ['#4a9eff', '#e53935', '#43a047', '#fb8c00', '#8e24aa', '#00acc1', '#6d4c41', '#546e7a']
+const COLORS = [
+  '#4a9eff',
+  '#e53935',
+  '#43a047',
+  '#fb8c00',
+  '#8e24aa',
+  '#00acc1',
+  '#6d4c41',
+  '#546e7a',
+]
 
 // 弹窗显示时隐藏所有标签 webview（child 盖在 Vue UI 上），关闭时恢复
 watch(
@@ -28,7 +37,7 @@ watch(
       await groupsStore.loadGroups()
     }
     await invoke('set_webview_visible', { visible: !v })
-  }
+  },
 )
 
 function tabCount(groupId: number): number {
@@ -139,7 +148,9 @@ async function onDelete(id: number) {
                   @click="onChangeColor(g.id, c)"
                 ></button>
               </div>
-              <button v-if="editingId !== g.id" class="mini-btn" @click="startEdit(g)">重命名</button>
+              <button v-if="editingId !== g.id" class="mini-btn" @click="startEdit(g)">
+                重命名
+              </button>
               <button class="mini-btn danger" @click="onDelete(g.id)">删除</button>
             </div>
           </div>

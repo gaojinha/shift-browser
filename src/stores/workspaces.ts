@@ -32,7 +32,9 @@ export const useWorkspacesStore = defineStore('workspaces', {
     },
     /** 当前工作区显示名（默认工作区显示"默认"） */
     currentName(state): string {
-      return state.currentId === null ? '默认' : (state.workspaces.find((w) => w.id === state.currentId)?.name ?? '默认')
+      return state.currentId === null
+        ? '默认'
+        : (state.workspaces.find((w) => w.id === state.currentId)?.name ?? '默认')
     },
   },
 

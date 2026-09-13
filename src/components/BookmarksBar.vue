@@ -119,7 +119,9 @@ async function onBookmark() {
   cursor: pointer;
   font-size: 14px;
   flex-shrink: 0;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 .action-btn:hover {
   background: var(--bg-active);

@@ -20,7 +20,7 @@ watch(
       await passwordsStore.loadPasswords()
     }
     await invoke('set_webview_visible', { visible: !v })
-  }
+  },
 )
 
 const form = ref({ domain: '', username: '', password: '', notes: '' })
@@ -39,7 +39,7 @@ async function onAdd() {
     form.value.domain,
     form.value.username || null,
     form.value.password,
-    form.value.notes || null
+    form.value.notes || null,
   )
   form.value = { domain: '', username: '', password: '', notes: '' }
   showAdd.value = false

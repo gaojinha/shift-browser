@@ -30,7 +30,7 @@ watch(
   (url) => {
     if (url) addressInput.value = url
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 /** 地址栏回车：输入 URL 或搜索 */
@@ -62,7 +62,8 @@ function onRefresh() {
 
 function onHome() {
   const active = tabsStore.activeTab
-  if (active) tabsStore.navigateTab(active.id, settingsStore.get('homepage') || 'https://www.bing.com')
+  if (active)
+    tabsStore.navigateTab(active.id, settingsStore.get('homepage') || 'https://www.bing.com')
 }
 
 function onBack() {
@@ -112,7 +113,14 @@ async function onReader() {
         @keydown.enter="onAddressEnter"
       />
     </div>
-    <button class="action-btn" :disabled="readerLoading" :title="readerTip || '阅读模式（提取正文大字看）'" @click="onReader">{{ readerLoading ? '⏳' : '📖' }}</button>
+    <button
+      class="action-btn"
+      :disabled="readerLoading"
+      :title="readerTip || '阅读模式（提取正文大字看）'"
+      @click="onReader"
+    >
+      {{ readerLoading ? '⏳' : '📖' }}
+    </button>
     <span v-if="readerTip" class="reader-tip">{{ readerTip }}</span>
     <button class="action-btn ai-btn" title="AI 助手" @click="emit('openAi')">AI</button>
     <button class="action-btn" title="密码管理" @click="emit('openPasswords')">🔑</button>
@@ -144,7 +152,9 @@ async function onReader() {
   cursor: pointer;
   font-size: 15px;
   flex-shrink: 0;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 .action-btn:disabled {
   opacity: 0.5;

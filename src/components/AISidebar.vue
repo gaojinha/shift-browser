@@ -23,7 +23,7 @@ watch(
       const tab = tabsStore.activeTab
       if (tab) aiStore.setPageContext(tab.url, tab.title)
     }
-  }
+  },
 )
 
 // 新消息后滚动到底部
@@ -32,7 +32,7 @@ watch(
   async () => {
     await nextTick()
     if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight
-  }
+  },
 )
 
 async function onSend() {
@@ -94,7 +94,9 @@ function onKeydown(e: KeyboardEvent) {
           rows="2"
           @keydown="onKeydown"
         ></textarea>
-        <button class="ai-send" :disabled="aiStore.loading || !input.trim()" @click="onSend">发送</button>
+        <button class="ai-send" :disabled="aiStore.loading || !input.trim()" @click="onSend">
+          发送
+        </button>
       </div>
       <div class="ai-footer">
         <button class="ai-clear" @click="aiStore.clearConversation()">清空对话</button>

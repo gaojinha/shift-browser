@@ -31,7 +31,7 @@ watch(
       await downloadsStore.loadDownloads()
     }
     await invoke('set_webview_visible', { visible: !v })
-  }
+  },
 )
 
 /** 格式化字节数（B/KB/MB） */
@@ -86,13 +86,16 @@ async function onDelete(id: number) {
                   <div class="progress-fill" :style="{ width: percent(d) + '%' }"></div>
                 </div>
                 <span class="progress-text">
-                  {{ formatBytes(d.received_bytes) }} / {{ formatBytes(d.total_bytes) }}
-                  ({{ percent(d) }}%)
+                  {{ formatBytes(d.received_bytes) }} / {{ formatBytes(d.total_bytes) }} ({{
+                    percent(d)
+                  }}%)
                 </span>
               </div>
             </div>
             <div class="item-actions">
-              <span class="state" :class="stateInfo(d.state).cls">{{ stateInfo(d.state).text }}</span>
+              <span class="state" :class="stateInfo(d.state).cls">{{
+                stateInfo(d.state).text
+              }}</span>
               <button class="mini-btn danger" @click="onDelete(d.id)">删除</button>
             </div>
           </div>

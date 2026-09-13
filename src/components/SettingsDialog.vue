@@ -23,7 +23,7 @@ watch(
       loadKeywords().catch(() => {})
     }
     await invoke('set_webview_visible', { visible: !v })
-  }
+  },
 )
 
 const SEARCH_ENGINES = [
@@ -135,13 +135,13 @@ async function onRemoveKeyword(k: string) {
           <div class="section-title">通用</div>
           <div class="field">
             <label>主页 URL</label>
-<input
-               type="text"
-               :value="settingsStore.get('homepage')"
-               placeholder="newtab 或 https://..."
-               spellcheck="false"
-               @change="onSet('homepage', ($event.target as HTMLInputElement).value.trim())"
-             />
+            <input
+              type="text"
+              :value="settingsStore.get('homepage')"
+              placeholder="newtab 或 https://..."
+              spellcheck="false"
+              @change="onSet('homepage', ($event.target as HTMLInputElement).value.trim())"
+            />
           </div>
           <div class="field">
             <label>搜索引擎</label>
@@ -270,7 +270,9 @@ async function onRemoveKeyword(k: string) {
             </select>
           </div>
           <div class="kw-block" v-if="settingsStore.get('adblock_enabled') !== 'false'">
-            <div class="kw-hint">内置已含「关闭广告 / 头条报 / 推广」等。下面可手工加词，刷新页面后生效。</div>
+            <div class="kw-hint">
+              内置已含「关闭广告 / 头条报 / 推广」等。下面可手工加词，刷新页面后生效。
+            </div>
             <div class="kw-list" v-if="customKeywords.length > 0">
               <span v-for="k in customKeywords" :key="k" class="kw-chip">
                 {{ k }}

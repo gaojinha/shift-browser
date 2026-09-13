@@ -23,7 +23,12 @@ export const usePasswordsStore = defineStore('passwords', {
     },
 
     /** 保存密码（同域名+用户名存在则更新） */
-    async savePassword(domain: string, username: string | null, password: string, notes?: string | null) {
+    async savePassword(
+      domain: string,
+      username: string | null,
+      password: string,
+      notes?: string | null,
+    ) {
       await invoke<number>('save_password', { domain, username, password, notes })
       await this.loadPasswords()
     },

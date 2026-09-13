@@ -499,3 +499,50 @@ let pool = SqlitePoolOptions::new()
 - git 历史含明文密码（旧提交），如需彻底清除用 `git filter-repo` 重写历史（有风险，暂缓）
 - sessions 表自动保存记录无限增长（328 条），建议后续加清理（保留最近 N 条）
 - `reader.rs` 正文未净化（readability 提取 content 直接 innerHTML），建议后续用 ammonia 白名单净化
+
+## 十一、2026-09-13 第二轮完善（P2/P3 收尾）
+
+### 11.1 数据库增长控制（P2）
+
+1. **sessions 表清理**：`db/sessions.rs` 的 `save_session` 插入后自动删除"自动保存"记录中超出最近 100 条的部分（`name = '自动保存'` 限定，手动命名的会话不受影响），解决 sessions 表无限增长（原 328 条）。
+2. **record_history 清理优化**：`db/history.rs` 改为先 `SELECT COUNT(*)`，超过 10000 条才执行清理 DELETE，避免每次访问都跑全表 DELETE OFFSET 10000。
+
+### 11.2 阅读模式加固（P2-20/P2-8）
+
+3. **抓取超时**：`reader.rs` 新增 `scrape_article` 统一封装，`tokio::time::timeout` 20 秒兜底（readability 内部 blocking reqwest 无超时配置，慢站会挂死线程）。
+4. **正文净化**：新增 `sanitize_html`，正则剥离 script/style/iframe/object/embed/svg 整块 + on* 事件属性，`fetch_article` 与 `enter_reader_mode` 输出都过净化，堵住阅读模式 XSS（readability 提取的 content 直接 innerHTML 有注入风险）。
+
+### 11.3 安全与正确性（P2）
+
+5. **数据目录权限 700**：`db/mod.rs` 的 `Db::init` 把整个 app_data_dir 收紧到 700（目录不可进，cookies 等 644 文件同机其他用户也读不到），数据库文件保持 600。
+6. **真 UUID v4**：`tabs.rs` 弃用手写 xorshift+时间种子的伪 uuid（硬编码版本位但随机源弱），换 `uuid` crate 的 `Uuid::new_v4()`，删除无用 `rand_u32`。
+7. **扩展计数真实化**：`extensions.rs` 的 `read_extension_dir` 返回 js/css 文件真实数量（原 `map(|_| 1)` 恒 0/1），`ExtensionDirResult` 扩为 7 元组。
+8. **newtab 字号按钮修复**：`newtab.rs` 的 `applyInlineFs` 删除 `panelBody.innerHTML = panelBody.innerHTML` 重渲染——这行重建 DOM 丢掉 bindInline 绑定的事件，字号按钮点一次就失效；改为只更新 `--fs` 变量。
+9. **TabBar 死代码**：`TabBar.vue` 删除 `.filter((g) => g.tabs.length > 0 || true)`。
+
+### 11.4 工程化（P3）
+
+10. **ESLint + Prettier**：新增 `eslint.config.js`（Vue 官方 flat config 链：pluginVue essential + typescript + prettier skip-formatting）、`.prettierrc.json`（semi:false、singleQuote、100 列）。注意：ESLint 9.39 的 @eslint/config-array 不支持数组嵌套数组，配置里必须 `...` 展开（否则报 "Unexpected array"）。src/ 全部格式化，`npm run lint` 0 错误 0 警告。
+11. **GitHub Actions CI**：`.github/workflows/ci.yml`，前端 npm ci + lint + build，后端 cargo check + clippy（-D warnings）+ test（含 Tauri 系统依赖安装）。仓库未配远程，推 GitHub 后生效。
+12. **数据库备份脚本**：`scripts/backup.sh`，python3 sqlite3 backup API 在线一致性备份（WAL 模式安全，不用停应用），默认保留 14 份，目录 700/文件 600。已实测：796K、integrity_check ok、14 张表完整。可 cron 定时：`0 3 * * * /home/gao/shift-browser-tauri/scripts/backup.sh >> /tmp/sb-backup.log 2>&1`。
+
+### 11.5 新依赖
+
+- Rust：`regex = "1"`、`uuid = { version = "1", features = ["v4"] }`
+- 前端 devDependencies：eslint@^9、eslint-plugin-vue、@vue/eslint-config-typescript、@vue/eslint-config-prettier、prettier
+
+### 11.6 验证结果
+
+- `cargo check` 0 警告 ✅ / `cargo clippy` 0 警告 ✅ / `cargo test` 7 passed ✅
+- `npm run lint` 0 错误 ✅ / `npm run build` ✅ / `npx prettier --check src/` ✅
+- release 编译 ✅，实机启动正常（日志无异常）
+- 数据目录权限 700 生效 ✅，数据库及 -wal/-shm 600 ✅
+- 新标签 uuid 为真 v4（日志可见 `4eca` 版本位）✅
+
+### 11.7 遗留事项（更新）
+
+- git 历史仍含明文 sudo 密码（旧提交），彻底清除需 `git filter-repo` 重写历史（有风险，暂缓）
+- settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
+- 下载保存走 `tabs.rs` 直接 INSERT + `downloads.rs` create_download 双写路径，后续可统一
+- settings 表无 schema 校验，非法键/值可能写入，后续可加白名单
+- feed.rs 手写 XML 解析（无命名空间处理），部分源可能解析失败
