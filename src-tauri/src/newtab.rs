@@ -210,7 +210,10 @@ fn render_html(
   .item:hover {{ background:var(--bg3); }}
   .it-title {{ display:block; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
   .it-url {{ display:block; font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
-  .fs-item.read .it-title {{ color:var(--muted); }}
+  .fs-item {{ position:relative; }}
+  .fs-read {{ position:absolute; right:8px; top:50%; transform:translateY(-50%); z-index:2; width:26px; height:26px; border:none; background:var(--bg3); border:1px solid var(--border); border-radius:7px; cursor:pointer; font-size:13px; display:flex; align-items:center; justify-content:center; color:var(--accent); }}
+  .fs-read:hover {{ background:var(--accent); color:#fff; border-color:var(--accent); }}
+  .fs-item .it-url {{ padding-right:34px; }}  /* 给 📖 让位 */
   .feed-toggle {{ display:block; margin:0 0 8px 4px; background:var(--bg3); border:1px solid var(--border); color:var(--accent); border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }}
   .feed-bar {{ display:flex; flex-wrap:wrap; gap:4px; margin-bottom:8px; }}
   .feed-cat {{ background:var(--bg3); border:1px solid var(--border); color:var(--muted); border-radius:10px; padding:2px 8px; font-size:11px; cursor:pointer; }}
@@ -374,8 +377,8 @@ fn render_html(
     if (mins < 24 * 60) return Math.floor(mins / 60) + ' 小时前';
     return Math.floor(mins / 1440) + ' 天前';
   }}
-  var feedHideRead = false;
-  var feedCat = '';
+  var feedHideRead = localStorage.getItem('sb_feed_hide_read') === '1';
+  var feedCat = localStorage.getItem('sb_feed_cat') || '';
   function renderFeed() {{
     var read = loadRead();
     var cats = [];
@@ -398,15 +401,16 @@ fn render_html(
       var isRead = !!read[f[1]];
       return '<a class=\"item fs-item' + (isRead ? ' read' : '') + '\" href=\"' + f[1] + '\" data-url=\"' + f[1] + '\">' +
         '<span class=\"it-title\">' + f[0].replace(/</g,'&lt;') + '</span>' +
-        '<span class=\"it-url\">' + f[2] + (f[3] ? ' · ' + timeAgo(f[3]) : '') + '</span></a>';
+        '<span class=\"it-url\">' + f[2] + (f[3] ? ' · ' + timeAgo(f[3]) : '') + '</span>' +
+        '<span class=\"fs-read\" data-url=\"' + f[1] + '\" title=\"📖 大字阅读（提取正文，面板内就地看\" onclick=\"event.preventDefault();event.stopPropagation();return showInlineReader(\'' + f[1].replace(/'/g,'\\\'') + '\'),false;\">📖</span></a>';
     }}).join('');
     return h;
   }}
   function bindFeed() {{
     var btn = document.getElementById('feedHideReadBtn');
-    if (btn) btn.addEventListener('click', function() {{ feedHideRead = !feedHideRead; panelBody.innerHTML = renderFeed(); bindFeed(); }});
+    if (btn) btn.addEventListener('click', function() {{ feedHideRead = !feedHideRead; localStorage.setItem('sb_feed_hide_read', feedHideRead ? '1' : ''); panelBody.innerHTML = renderFeed(); bindFeed(); }});
     panelBody.querySelectorAll('.feed-cat[data-cat]').forEach(function(el) {{
-      el.addEventListener('click', function() {{ feedCat = el.dataset.cat; panelBody.innerHTML = renderFeed(); bindFeed(); }});
+      el.addEventListener('click', function() {{ feedCat = el.dataset.cat; localStorage.setItem('sb_feed_cat', feedCat); panelBody.innerHTML = renderFeed(); bindFeed(); }});
     }});
     panelBody.querySelectorAll('.fs-item').forEach(function(el) {{
       el.addEventListener('mousedown', function() {{
@@ -416,6 +420,59 @@ fn render_html(
         el.classList.add('read');
       }});
     }});
+  }}
+
+  // ---- 内联大字阅读：fetch_article（纯 JSON 不落盘）→ panelBody 就地铺大字正文，不跳标签 ----
+  var inlineBackHtml = '';   // 记住原列表 HTML，返回时还原
+  var inlineFs = parseInt(localStorage.getItem('sb_reader_fs') || '19', 10);
+  function imgFix(cont) {{
+    // 图片懒加载修复：data-src/data-original… 提升真 src，剥 srcset，补协议头，滚动出图
+    Array.prototype.forEach.call(cont.querySelectorAll('img'), function(im) {{
+      var s = im.getAttribute('data-src') || im.getAttribute('data-original') || im.getAttribute('data-lazy-src') || im.getAttribute('data-echo') || im.getAttribute('src');
+      if (!s) return;
+      if (s.charAt(0) === '/' && s.charAt(1) === '/') s = location.protocol + s Orange;
+      if (im.hasAttribute('srcset')) im.removeAttribute('srcset');
+      if (im.src === im.baseURI) im.removeAttribute('src');
+      im.setAttribute('src', s);
+      im.setAttribute('loading', 'lazy');
+      im.setAttribute('decoding', 'async');
+      im.style.maxWidth = '100%'; im.style.height = 'auto';
+    }});
+  }}
+  function showInlineReader(f) {{
+    inlineBackHtml = panelBody.innerHTML;
+    panelBody.innerHTML = '<div class="inline-read-loading">📖 正在提取正文…</div>';
+    window.__TAURI_INTERNALS__.invoke('fetch_article', {{ url: f[1] }})
+      .then(function(a) {{
+        panelBody.innerHTML = renderInline(a, f);
+        bindInline();
+      }})
+      .catch(function(e) {{ panelBody.innerHTML = '<div class="inline-read-loading">⚠️ ' + String(e).replace(/</g,'&lt;') + '<br><button id="inlineBack" class="feed-cat on">← 返回列表</button></div>'; document.getElementById('inlineBack').addEventListener('click', function() {{ panelBody.innerHTML = inlineBackHtml; bindFeed(); }}); }});
+  }}
+  function renderInline(a, f) {{
+    // a = {{title, content, text}}; f = [title, url, source, published, category]
+    var h = '<div class="ir-bar">' +
+      '<button id="inlineBack" title="返回资讯列表">←</button>' +
+      '<button class="ir-fs" id="inlineFsDown" title="缩小字号">A−</button>' +
+      '<button class="ir-fs" id="inlineFsUp" title="放大字号">A＋</button>' +
+      '<a href="' + f[1] + '" target="_blank" class="ir-src">看原文 ↗</a>' +
+      '</div>';
+    h += '<div class="ir-art"><h1>' + a.title.replace(/</g,'&lt;') + '</h1><div id="content">' + a.content.replace(/data-src=/g,'src=').replace(/data-original=/g,'src=').replace(/data-lazy-src=/g,'src=') + '</div></div>';
+    return h;
+  }}
+  function bindInline() {{
+    document.getElementById('inlineBack').addEventListener('click', function() {{ panelBody.innerHTML = inlineBackHtml; bindFeed(); }});
+    document.getElementById('inlineFsUp').addEventListener('click', function() {{ inlineFs = Math.min(inlineFs + 2, 30); applyInlineFs(); }});
+    document.getElementById('inlineFsDown').addEventListener('click', function() {{ inlineFs = Math.max(inlineFs - 2, 14); applyInlineFs(); }});
+    var content = document.getElementById('content');
+    content.style.setProperty('--fs', inlineFs + 'px');
+    imgFix(content nature);
+  }}
+  function applyInlineFs() {{
+    localStorage.setItem('sb_reader_fs', inlineFs);
+    panelBody.innerHTML = panelBody.innerHTML;  // 重渲染
+    var c = document.getElementById('content');
+    if (c) c.style.setProperty('--fs', inlineFs + 'px');
   }}
 
   var PANEL_DATA = {{

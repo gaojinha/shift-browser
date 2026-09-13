@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 地址栏（对应 Electron 版 .address-bar 设计）
 import { ref, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useTabsStore } from '../stores/tabs'
 import { useSettingsStore } from '../stores/settings'
 
@@ -71,6 +72,29 @@ function onBack() {
 function onForward() {
   tabsStore.goForward()
 }
+
+/** 阅读模式：提取当前页正文，新标签打开干净版 */
+const readerLoading = ref(false)
+const readerTip = ref('')
+async function onReader() {
+  const active = tabsStore.activeTab
+  if (!active || readerLoading.value) return
+  if (!/^https?:\/\//.test(active.url)) {
+    readerTip.value = '当前页不支持'
+    setTimeout(() => (readerTip.value = ''), 2000)
+    return
+  }
+  readerLoading.value = true
+  try {
+    const url = await invoke<string>('enter_reader_mode', { url: active.url })
+    await tabsStore.createTab(url)
+  } catch (e) {
+    readerTip.value = String(e).replace(/^[^:]*:\s*/, '') || '提取失败'
+    setTimeout(() => (readerTip.value = ''), 4000)
+  } finally {
+    readerLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -88,6 +112,8 @@ function onForward() {
         @keydown.enter="onAddressEnter"
       />
     </div>
+    <button class="action-btn" :disabled="readerLoading" :title="readerTip || '阅读模式（提取正文大字看）'" @click="onReader">{{ readerLoading ? '⏳' : '📖' }}</button>
+    <span v-if="readerTip" class="reader-tip">{{ readerTip }}</span>
     <button class="action-btn ai-btn" title="AI 助手" @click="emit('openAi')">AI</button>
     <button class="action-btn" title="密码管理" @click="emit('openPasswords')">🔑</button>
     <button class="action-btn" title="标签分组" @click="emit('openGroups')">🗂</button>
@@ -119,6 +145,19 @@ function onForward() {
   font-size: 15px;
   flex-shrink: 0;
   transition: background 0.15s, color 0.15s;
+}
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.reader-tip {
+  font-size: 11px;
+  color: #ff9b9b;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .btn-icon {
   pointer-events: none;

@@ -4,6 +4,7 @@ mod ai;
 mod extensions;
 mod newtab;
 mod feed;
+mod reader;
 
 use db::{bookmarks, downloads, history, passwords, sessions, settings, tab_groups, workspaces, Db};
 use tauri::Manager;
@@ -96,6 +97,9 @@ pub fn run() {
       // 新标签页
       newtab::refresh_newtab,
       newtab::get_newtab_url,
+      // 阅读模式
+      reader::enter_reader_mode,
+      reader::fetch_article,
       extensions::get_adblock_keywords,
       extensions::set_adblock_keywords,
     ])
