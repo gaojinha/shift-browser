@@ -715,3 +715,27 @@ let pool = SqlitePoolOptions::new()
 - settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
 - 全项目日志用 println!，如需结构化日志可后续接 log + tauri-plugin-log
 - 运行中的实例仍是旧二进制，第七、八轮新代码（WAL checkpoint/downloads 清理/toast）需重启生效
+
+## 十八、2026-09-13 第九轮完善（tabs 核心操作错误处理）
+
+### 18.1 问题
+
+tabs store 的 4 个核心操作（createTab/closeTab/switchTab/navigateTab）无 try/catch——创建标签、关闭标签、切换标签、导航失败时抛未捕获异常，用户无感知。
+
+### 18.2 修复内容
+
+1. **createTab**：加 try/catch + toast + console.error；返回类型改为 `Promise<Tab | null>`（失败返回 null）。调用方已兼容（restoreLastSession 有判空，App.vue/AddressBar/TabBar 不依赖返回值）。
+2. **closeTab / switchTab / navigateTab**：统一加 try/catch + toast + console.error；switchTab 保持 _switching 合并连点逻辑（catch 后 finally 恢复标记）。
+3. **审查 ai.ts**：sendMessage 已有 error 状态 + 面板显示，系统提示注入页面标题/URL 仅作文本传给 AI，无注入风险，无需改动。
+
+### 18.3 验证结果
+
+- `npm run lint` 0 错误 ✅ / `npm run build` 通过 ✅
+- 后端未改动
+
+### 18.4 遗留事项（更新）
+
+- git 历史仍含明文 sudo 密码（旧提交），彻底清除需 `git filter-repo` 重写历史（有风险，暂缓）
+- settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
+- 全项目日志用 println!，如需结构化日志可后续接 log + tauri-plugin-log
+- 运行中的实例仍是旧二进制，第七~九轮新代码需重启生效

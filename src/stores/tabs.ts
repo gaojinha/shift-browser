@@ -6,6 +6,7 @@ import type { Tab } from '../types/tab'
 import type { Session, SessionTab } from '../types/session'
 import { useGroupsStore } from './groups'
 import { useSettingsStore } from './settings'
+import { useToastStore } from './toast'
 
 interface TabsState {
   tabs: Tab[]
@@ -46,7 +47,7 @@ export const useTabsStore = defineStore('tabs', {
     },
 
     /** 创建新标签页（无参时按主页设置解析；'newtab' = 本地新标签页） */
-    async createTab(url?: string) {
+    async createTab(url?: string): Promise<Tab | null> {
       let target = url || useSettingsStore().get('homepage') || 'newtab'
       if (target === 'newtab') {
         try {
@@ -57,27 +58,38 @@ export const useTabsStore = defineStore('tabs', {
           target = 'https://www.bing.com'
         }
       }
-      const tab = await invoke<Tab>('create_tab', { url: target })
-      this.tabs.push(tab)
-      // 取消旧标签激活
-      for (const t of this.tabs) {
-        if (t.id !== tab.id) t.is_active = false
+      try {
+        const tab = await invoke<Tab>('create_tab', { url: target })
+        this.tabs.push(tab)
+        // 取消旧标签激活
+        for (const t of this.tabs) {
+          if (t.id !== tab.id) t.is_active = false
+        }
+        this.activeTabId = tab.id
+        return tab
+      } catch (e) {
+        console.error('[tabs] 创建标签失败:', e)
+        useToastStore().error('创建标签页失败')
+        return null
       }
-      this.activeTabId = tab.id
-      return tab
     },
 
     /** 关闭标签页 */
     async closeTab(id: string) {
-      const next = await invoke<Tab | null>('close_tab', { id })
-      this.tabs = this.tabs.filter((t) => t.id !== id)
-      if (this.activeTabId === id) {
-        this.activeTabId = next?.id ?? null
-        if (next) {
-          for (const t of this.tabs) {
-            t.is_active = t.id === next.id
+      try {
+        const next = await invoke<Tab | null>('close_tab', { id })
+        this.tabs = this.tabs.filter((t) => t.id !== id)
+        if (this.activeTabId === id) {
+          this.activeTabId = next?.id ?? null
+          if (next) {
+            for (const t of this.tabs) {
+              t.is_active = t.id === next.id
+            }
           }
         }
+      } catch (e) {
+        console.error('[tabs] 关闭标签失败:', e)
+        useToastStore().error('关闭标签页失败')
       }
     },
 
@@ -93,6 +105,9 @@ export const useTabsStore = defineStore('tabs', {
           t.is_active = t.id === id
         }
         this.activeTabId = id
+      } catch (e) {
+        console.error('[tabs] 切换标签失败:', e)
+        useToastStore().error('切换标签页失败')
       } finally {
         this._switching = false
       }
@@ -100,10 +115,15 @@ export const useTabsStore = defineStore('tabs', {
 
     /** 导航到新 URL */
     async navigateTab(id: string, url: string) {
-      const tab = await invoke<Tab | null>('navigate_tab', { id, url })
-      if (tab) {
-        const idx = this.tabs.findIndex((t) => t.id === id)
-        if (idx !== -1) this.tabs[idx] = tab
+      try {
+        const tab = await invoke<Tab | null>('navigate_tab', { id, url })
+        if (tab) {
+          const idx = this.tabs.findIndex((t) => t.id === id)
+          if (idx !== -1) this.tabs[idx] = tab
+        }
+      } catch (e) {
+        console.error('[tabs] 导航失败:', e)
+        useToastStore().error('页面导航失败')
       }
     },
 
