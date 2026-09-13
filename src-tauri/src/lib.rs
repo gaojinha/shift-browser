@@ -111,23 +111,23 @@ pub fn run() {
         .app_data_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
 
-      println!("[ShiftBrowser] app_data_dir = {:?}", app_data_dir);
-      println!("[ShiftBrowser] 目录存在: {}", app_data_dir.exists());
+      log::info!("[ShiftBrowser] app_data_dir = {:?}", app_data_dir);
+      log::info!("[ShiftBrowser] 目录存在: {}", app_data_dir.exists());
 
       let db_handle = tauri::async_runtime::block_on(Db::init(app_data_dir));
       match db_handle {
         Ok(db) => {
           app.manage(db);
-          println!("[ShiftBrowser] 数据库初始化成功");
+          log::info!("[ShiftBrowser] 数据库初始化成功");
         }
         Err(e) => {
-          eprintln!("[ShiftBrowser] 数据库初始化失败: {}", e);
+          log::error!("[ShiftBrowser] 数据库初始化失败: {}", e);
         }
       }
 
       // 初始化标签管理器
       app.manage(tabs::TabManager::new());
-      println!("[ShiftBrowser] 标签管理器初始化成功");
+      log::info!("[ShiftBrowser] 标签管理器初始化成功");
 
       // Linux：手动设置 WebKit web extensions 目录（tauri://localhost 协议依赖 web extension）
       // Tauri 2 不会自动设置 extensions_path，必须手动指定，否则前端资源加载失败
@@ -139,7 +139,7 @@ pub fn run() {
           if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
               context.set_web_extensions_directory(&dir.display().to_string());
-              println!("[ShiftBrowser] web extensions 目录: {}", dir.display());
+              log::info!("[ShiftBrowser] web extensions 目录: {}", dir.display());
             }
           }
           // 注意：不要尝试 set_process_model(SharedSecondaryProcess)——
@@ -153,8 +153,8 @@ pub fn run() {
       #[cfg(target_os = "linux")]
       {
         match tabs::setup_gtk_layout(app) {
-          Ok(()) => println!("[ShiftBrowser] GTK 布局初始化成功"),
-          Err(e) => eprintln!("[ShiftBrowser] GTK 布局初始化失败: {}", e),
+          Ok(()) => log::info!("[ShiftBrowser] GTK 布局初始化成功"),
+          Err(e) => log::error!("[ShiftBrowser] GTK 布局初始化失败: {}", e),
         }
       }
 
@@ -170,8 +170,8 @@ pub fn run() {
         let db_state = app.state::<Db>();
         if let Some(path) = newtab::newtab_path(app.handle()) {
             match tauri::async_runtime::block_on(newtab::generate(&db_state, &path)) {
-                Ok(p) => println!("[ShiftBrowser] 新标签页已生成: {}", p),
-                Err(e) => eprintln!("[ShiftBrowser] 新标签页生成失败: {}", e),
+                Ok(p) => log::info!("[ShiftBrowser] 新标签页已生成: {}", p),
+                Err(e) => log::error!("[ShiftBrowser] 新标签页生成失败: {}", e),
             }
         }
       }
@@ -186,7 +186,7 @@ pub fn run() {
             let _ = w.unminimize();
             let _ = w.show();
             let _ = w.set_focus();
-            println!("[ShiftBrowser] 窗口已强制恢复/前置");
+            log::info!("[ShiftBrowser] 窗口已强制恢复/前置");
           }
         });
       }

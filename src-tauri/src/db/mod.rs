@@ -72,7 +72,7 @@ impl Db {
     // 执行迁移
     Self::run_migrations(&pool).await?;
 
-    println!("[ShiftBrowser] 数据库已初始化: {}", db_path.display());
+    log::info!("[ShiftBrowser] 数据库已初始化: {}", db_path.display());
     Ok(Self {
       pool,
       key_path: app_data_dir.join("master.key"),
@@ -119,7 +119,7 @@ impl Db {
           .execute(&mut *tx)
           .await?;
         tx.commit().await?;
-        println!("[ShiftBrowser] 迁移 v{} {} 完成", version, name);
+        log::info!("[ShiftBrowser] 迁移 v{} {} 完成", version, name);
       }
     }
 

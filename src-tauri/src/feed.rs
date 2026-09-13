@@ -198,7 +198,7 @@ async fn fetch_one(client: &reqwest::Client, db: &Db, source: &str, url: &str, c
     let resp = match client.get(url).send().await {
         Ok(r) => r,
         Err(e) => {
-            println!("[feed] {} 请求失败: {}", source, e);
+            log::error!("[feed] {} 请求失败: {}", source, e);
             return 0;
         }
     };
@@ -217,7 +217,7 @@ async fn fetch_one(client: &reqwest::Client, db: &Db, source: &str, url: &str, c
     let bytes = match resp.bytes().await {
         Ok(b) => b,
         Err(e) => {
-            println!("[feed] {} 读取失败: {}", source, e);
+            log::error!("[feed] {} 读取失败: {}", source, e);
             return 0;
         }
     };
@@ -305,10 +305,10 @@ pub fn start_scheduler(app: &AppHandle) {
         loop {
             let n = {
                 let db = app.state::<Db>();
-                println!("[feed] 开始刷新内置资讯源…");
+                log::info!("[feed] 开始刷新内置资讯源…");
                 refresh_all(&db).await
             };
-            println!("[feed] 刷新完成，共 {} 条", n);
+            log::info!("[feed] 刷新完成，共 {} 条", n);
             // 重新生成新标签页（资讯面板数据更新）
             if let Some(path) = crate::newtab::newtab_path(&app) {
                 let db = app.state::<Db>();

@@ -91,7 +91,7 @@ impl TabManager {
       .map_err(|e| format!("URL 解析失败: {}", e))?;
 
     let (w, h) = Self::content_size(&window);
-    println!("[tabs] create_webview: inner={:?} content=({:.0},{:.0})", window.inner_size(), w, h);
+    log::info!("[tabs] create_webview: inner={:?} content=({:.0},{:.0})", window.inner_size(), w, h);
 
     // 页面加载完成时同步标题（用 host 作标题，MVP 阶段）
     let app_handle = app.clone();
@@ -103,13 +103,13 @@ impl TabManager {
         WebviewBuilder::new(label.clone(), WebviewUrl::External(parsed_url))
           // target=_blank / window.open 新窗口请求：统一创建新标签页打开链接
           .on_new_window(move |url, _features| {
-            println!("[tabs] on_new_window: url={}", url);
+            log::info!("[tabs] on_new_window: url={}", url);
             let app = app_handle.clone();
             let url_str = url.to_string();
             tauri::async_runtime::spawn(async move {
               let state = app.state::<TabManager>();
               if let Ok(tab) = create_tab(app.clone(), state, url_str).await {
-                println!("[tabs] on_new_window: 新标签创建成功 id={}", tab.id);
+                log::info!("[tabs] on_new_window: 新标签创建成功 id={}", tab.id);
               }
             });
             tauri::webview::NewWindowResponse::Deny
@@ -124,7 +124,7 @@ impl TabManager {
                 host
               };
 
-              println!("[tabs] page_load_finished: tab={} title={}", tab_id, title);
+              log::info!("[tabs] page_load_finished: tab={} title={}", tab_id, title);
 
               // 按设置记录浏览历史（record_history 开关，默认开）——先 clone，避免 title 被 move
               let app3 = app_handle2.clone();
@@ -154,7 +154,7 @@ impl TabManager {
                 let record = enabled.map(|v| v.0 != "false").unwrap_or(true);
                 if record {
                   if let Err(e) = history::record_history(db, url_str, title_opt).await {
-                    println!("[tabs] record_history 失败: {}", e);
+                    log::warn!("[tabs] record_history 失败: {}", e);
                   }
                 }
               });
@@ -165,7 +165,7 @@ impl TabManager {
       )
       .map_err(|e| format!("创建 webview 失败: {}", e))?;
 
-    println!("[tabs] child_webview: pos={:?} size={:?}", child.position().unwrap(), child.size().unwrap());
+    log::info!("[tabs] child_webview: pos={:?} size={:?}", child.position().unwrap(), child.size().unwrap());
 
     // GTK 的 vbox 会忽略 add_child 的位置参数并平分空间（webview 落到窗口下半部分）。
     // 解法：把主 webview 和所有 child webview reparent 到 GtkFixed 容器，实现绝对定位叠层。
@@ -252,7 +252,7 @@ impl TabManager {
           // 监听 child webview 的鼠标点击事件
           child_gtk.connect_button_press_event(|wv, event| {
               let (x, y) = (event.position().0, event.position().1);
-              println!(
+              log::info!(
                   "[tabs] child button_press: button={} pos=({},{})",
                   event.button(), x, y
               );
@@ -275,7 +275,7 @@ impl TabManager {
               false.into() // 不拦截，让 webview 处理
           });
           child_gtk.connect_button_release_event(|_wv, event| {
-              println!(
+              log::info!(
                   "[tabs] child button_release: button={} pos=({},{})",
                   event.button(),
                   event.position().0,
@@ -292,7 +292,7 @@ impl TabManager {
               let dl_pool = db_pool.clone();
               let dl_app = app.clone();
               ctx.connect_download_started(move |_ctx, download| {
-                println!("[downloads] 下载开始信号");
+                log::info!("[downloads] 下载开始信号");
                 // 文件名：从 URL 推断（URL 最后一段，去 query）
                 let url = download
                   .request()
@@ -340,10 +340,10 @@ impl TabManager {
                   .await;
                   if let Ok(id) = res {
                     *id_state0.lock().unwrap() = Some(id);
-                    println!("[downloads] 记录 id={} filename={} total={}", id, filename_db, total);
+                    log::info!("[downloads] 记录 id={} filename={} total={}", id, filename_db, total);
                     let _ = app0.emit("downloads-updated", ());
                   } else {
-                    println!("[downloads] 记录插入失败");
+                    log::error!("[downloads] 记录插入失败");
                   }
                 });
 
@@ -418,7 +418,7 @@ impl TabManager {
                 let app6 = dl_app.clone();
                 let id_state6 = id_state.clone();
                 download.connect_failed(move |_dl, err| {
-                  println!("[downloads] 下载失败: {}", err);
+                  log::error!("[downloads] 下载失败: {}", err);
                   let pool7 = pool6.clone();
                   let app7 = app6.clone();
                   let id_state7 = id_state6.clone();
@@ -435,11 +435,11 @@ impl TabManager {
                   });
                 });
               });
-              println!("[downloads] download 信号已注册");
+              log::info!("[downloads] download 信号已注册");
             }
           }
           child_gtk.show();
-          println!(
+          log::info!(
             "[tabs] child_webview reparent 到 Fixed: pos=(0,{}) size=({:.0},{:.0})",
             CONTENT_TOP_OFFSET, w, h
           );
@@ -447,7 +447,7 @@ impl TabManager {
           let child_gtk2 = child_gtk.clone();
           gtk::glib::idle_add_local_once(move || {
             let alloc = child_gtk2.allocation();
-            println!(
+            log::info!(
               "[tabs] child allocation: {}x{} at ({},{})",
               alloc.width(),
               alloc.height(),
@@ -456,7 +456,7 @@ impl TabManager {
             );
           });
         } else {
-          println!("[tabs] child_webview 的 parent 不是 GtkBox，跳过 reparent");
+          log::info!("[tabs] child_webview 的 parent 不是 GtkBox，跳过 reparent");
         }
         let _ = tx.send(());
       })
@@ -554,9 +554,9 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
           overlay.add_overlay(&fixed);
           fixed.show();
 
-          println!("[tabs] setup: GtkOverlay 布局初始化完成");
+          log::info!("[tabs] setup: GtkOverlay 布局初始化完成");
         } else {
-          println!("[tabs] setup: 主 webview 的 parent 不是 GtkBox，跳过 reparent");
+          log::info!("[tabs] setup: 主 webview 的 parent 不是 GtkBox，跳过 reparent");
         }
       })
       .map_err(|e| format!("主 webview 句柄获取失败: {}", e))?;
@@ -570,7 +570,7 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
         let w = size.width as i32;
         let h = size.height as i32;
         let content_h = (h as f64 - CONTENT_TOP_OFFSET - STATUS_BAR_HEIGHT).max(100.0) as i32;
-        println!(
+        log::info!(
           "[tabs] window resized: {}x{} content_h={}",
           w, h, content_h
         );
@@ -663,12 +663,12 @@ pub async fn create_tab(
   state: tauri::State<'_, TabManager>,
   url: String,
 ) -> Result<Tab, String> {
-  println!("[tabs] create_tab: url={}", url);
+  log::info!("[tabs] create_tab: url={}", url);
   let id = TabManager::uuid();
   let title = url.clone();
 
   TabManager::create_webview(&app, &id, &url)?;
-  println!("[tabs] create_tab: webview 创建成功 id={}", id);
+  log::info!("[tabs] create_tab: webview 创建成功 id={}", id);
 
   let tab = Tab {
     id: id.clone(),
@@ -703,7 +703,7 @@ pub async fn close_tab(
   state: tauri::State<'_, TabManager>,
   id: String,
 ) -> Result<Option<Tab>, String> {
-  println!("[tabs] close_tab: id={}", id);
+  log::info!("[tabs] close_tab: id={}", id);
   let mut next_id: Option<String> = None;
 
   {
@@ -755,7 +755,7 @@ pub async fn close_all_tabs(
   app: AppHandle,
   state: tauri::State<'_, TabManager>,
 ) -> Result<(), String> {
-  println!("[tabs] close_all_tabs");
+  log::info!("[tabs] close_all_tabs");
   let ids: Vec<String> = {
     let mut tabs = state.tabs.lock().unwrap();
     let mut order = state.order.lock().unwrap();
@@ -780,7 +780,7 @@ pub async fn switch_tab(
   state: tauri::State<'_, TabManager>,
   id: String,
 ) -> Result<Option<Tab>, String> {
-  println!("[tabs] switch_tab: id={}", id);
+  log::info!("[tabs] switch_tab: id={}", id);
   // 先隐藏当前活动 webview
   let old_active = {
     let mut active = state.active_id.lock().unwrap();
@@ -822,7 +822,7 @@ pub async fn navigate_tab(
   id: String,
   url: String,
 ) -> Result<Option<Tab>, String> {
-  println!("[tabs] navigate_tab: id={} url={}", id, url);
+  log::info!("[tabs] navigate_tab: id={} url={}", id, url);
   let window = app
     .get_window("main")
     .ok_or_else(|| "主窗口不存在".to_string())?;
@@ -893,7 +893,7 @@ pub async fn set_webview_visible(
       count += 1;
     }
   }
-  println!(
+  log::info!(
     "[tabs] set_webview_visible: visible={} count={}",
     visible, count
   );
@@ -910,7 +910,7 @@ pub async fn go_back(
   let Some(id) = id else {
     return Ok(None);
   };
-  println!("[tabs] go_back: tab={}", id);
+  log::info!("[tabs] go_back: tab={}", id);
   let window = app
     .get_window("main")
     .ok_or_else(|| "主窗口不存在".to_string())?;
@@ -935,7 +935,7 @@ pub async fn go_forward(
   let Some(id) = id else {
     return Ok(None);
   };
-  println!("[tabs] go_forward: tab={}", id);
+  log::info!("[tabs] go_forward: tab={}", id);
   let window = app
     .get_window("main")
     .ok_or_else(|| "主窗口不存在".to_string())?;

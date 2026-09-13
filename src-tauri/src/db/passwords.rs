@@ -53,7 +53,7 @@ async fn get_master_key(db: &Db) -> DbResult<[u8; 32]> {
                 sqlx::query("DELETE FROM settings WHERE key = 'master_key'")
                     .execute(&db.pool)
                     .await?;
-                println!("[ShiftBrowser] 主密钥已迁移到独立文件并清理数据库残留");
+                log::info!("[ShiftBrowser] 主密钥已迁移到独立文件并清理数据库残留");
                 let mut key = [0u8; 32];
                 key.copy_from_slice(&bytes);
                 return Ok(key);

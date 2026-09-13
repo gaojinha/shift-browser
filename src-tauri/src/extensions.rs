@@ -119,11 +119,11 @@ fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>
     // 注意：主窗口是 Window 类型（tabs.rs 用 get_window("main")），
     // get_webview_window("main") 会返回 None 导致注入被跳过
     let Some(window) = app.get_window("main") else {
-        println!("[extensions] 主窗口不可用，跳过注入");
+        log::info!("[extensions] 主窗口不可用，跳过注入");
         return;
     };
     let webviews = window.webviews();
-    println!("[extensions] 注入到 {} 个 webview", webviews.len());
+    log::info!("[extensions] 注入到 {} 个 webview", webviews.len());
     let _ = app.run_on_main_thread(move || {
         // 只注入 child 标签页（已跳过主 webview），child 都是 http/https 外部网页，
         // allow_list 留空（全部注入）避免 WebKitGTK 对 "http://*" 通配符格式不识别导致不注入
@@ -166,7 +166,7 @@ fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>
                 }
             });
         }
-        println!("[extensions] 注入完成: {} 个扩展", items.len());
+        log::info!("[extensions] 注入完成: {} 个扩展", items.len());
     });
 }
 
@@ -354,7 +354,7 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
         }
         match read_extension_dir(&ext.path) {
             Ok((_, _, _, js, css, _, _)) => items.push((js, css)),
-            Err(e) => println!("[extensions] 读取扩展 {} 失败: {}", ext.name, e),
+            Err(e) => log::warn!("[extensions] 读取扩展 {} 失败: {}", ext.name, e),
         }
     }
     // 广告拦截（内置系统注入，追加在用户扩展后面）
@@ -367,7 +367,7 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
     if adblock_on {
         let custom = load_custom_keywords(db).await;
         let js = build_adblock_js(&custom);
-        println!(
+        log::info!(
             "[extensions] 广告拦截已开启（内置 {} 词 + 自定义 {} 词）",
             BUILTIN_KEYWORDS.len(),
             custom.len()
@@ -384,7 +384,7 @@ pub async fn set_adblock_enabled(
     app: AppHandle,
     enabled: bool,
 ) -> Result<(), String> {
-    println!("[extensions] set_adblock_enabled: {}", enabled);
+    log::info!("[extensions] set_adblock_enabled: {}", enabled);
     sqlx::query(
         "INSERT INTO settings (key, value) VALUES ('adblock_enabled', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -428,7 +428,7 @@ pub async fn set_adblock_keywords(
         .filter(|s| !s.is_empty())
         .collect();
     let json = serde_json::to_string(&cleaned).map_err(|e| e.to_string())?;
-    println!("[extensions] set_adblock_keywords: {} 个自定义词", cleaned.len());
+    log::info!("[extensions] set_adblock_keywords: {} 个自定义词", cleaned.len());
     sqlx::query(
         "INSERT INTO settings (key, value) VALUES ('adblock_keywords', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -449,10 +449,10 @@ pub async fn load_extension(
     app: AppHandle,
     path: String,
 ) -> Result<ExtensionInfo, String> {
-    println!("[extensions] load_extension: path={}", path);
+    log::info!("[extensions] load_extension: path={}", path);
     let (name, version, description, js, css, js_count, css_count) = read_extension_dir(&path)?;
     let id = ext_db::create(&db, &name, &path).await.map_err(|e| e.to_string())?;
-    println!(
+    log::info!(
         "[extensions] 已加载扩展: id={} name={} js={} css={}",
         id,
         name,
@@ -479,14 +479,14 @@ pub async fn load_extension(
 #[tauri::command]
 pub async fn list_extensions(db: State<'_, Db>) -> Result<Vec<ExtensionInfo>, String> {
     let exts = ext_db::list(&db).await.map_err(|e| e.to_string())?;
-    println!("[extensions] list_extensions: {} 条", exts.len());
+    log::info!("[extensions] list_extensions: {} 条", exts.len());
     let mut infos = Vec::new();
     for ext in exts {
         let (version, description, js_count, css_count) =
             match read_extension_dir(&ext.path) {
                 Ok((_, v, d, _, _, jc, cc)) => (v, d, jc, cc),
                 Err(e) => {
-                    println!("[extensions] 读取扩展 {} 失败: {}", ext.name, e);
+                    log::warn!("[extensions] 读取扩展 {} 失败: {}", ext.name, e);
                     (None, None, 0, 0)
                 }
             };
@@ -513,7 +513,7 @@ pub async fn set_extension_enabled(
     id: i64,
     enabled: bool,
 ) -> Result<(), String> {
-    println!("[extensions] set_extension_enabled: id={} enabled={}", id, enabled);
+    log::info!("[extensions] set_extension_enabled: id={} enabled={}", id, enabled);
     ext_db::set_enabled(&db, id, enabled).await.map_err(|e| e.to_string())?;
     let items = collect_enabled_items(&db).await?;
     inject_extensions(&app, items);
@@ -527,7 +527,7 @@ pub async fn delete_extension(
     app: AppHandle,
     id: i64,
 ) -> Result<(), String> {
-    println!("[extensions] delete_extension: id={}", id);
+    log::info!("[extensions] delete_extension: id={}", id);
     ext_db::delete(&db, id).await.map_err(|e| e.to_string())?;
     let items = collect_enabled_items(&db).await?;
     inject_extensions(&app, items);
@@ -539,12 +539,12 @@ pub fn inject_on_startup(app: &AppHandle, db: &Db) {
     let items = match tauri::async_runtime::block_on(collect_enabled_items(db)) {
         Ok(items) => items,
         Err(e) => {
-            println!("[extensions] 启动注入失败: {}", e);
+            log::error!("[extensions] 启动注入失败: {}", e);
             return;
         }
     };
     if !items.is_empty() {
-        println!("[extensions] 启动注入 {} 个启用扩展", items.len());
+        log::info!("[extensions] 启动注入 {} 个启用扩展", items.len());
         inject_extensions(app, items);
     }
 }
@@ -554,10 +554,10 @@ pub async fn re_inject(app: &AppHandle) {
     let db = app.state::<Db>();
     match collect_enabled_items(&db).await {
         Ok(items) => {
-            println!("[extensions] re_inject: {} 个注入项", items.len());
+            log::info!("[extensions] re_inject: {} 个注入项", items.len());
             inject_extensions(app, items);
         }
-        Err(e) => println!("[extensions] re_inject 失败: {}", e),
+        Err(e) => log::error!("[extensions] re_inject 失败: {}", e),
     }
 }
 

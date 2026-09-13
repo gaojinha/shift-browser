@@ -739,3 +739,29 @@ tabs store 的 4 个核心操作（createTab/closeTab/switchTab/navigateTab）�
 - settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
 - 全项目日志用 println!，如需结构化日志可后续接 log + tauri-plugin-log
 - 运行中的实例仍是旧二进制，第七~九轮新代码需重启生效
+
+## 十九、2026-09-13 挂账任务处理（git 历史密码清理 + 结构化日志）
+
+### 19.1 git 历史明文密码清理
+
+1. **排查**：`git log -S` 定位含明文 sudo 密码的提交——`7c2df83`（v5.0.0 Phase 1 引入）、`ddd98c8`（security 提交移除），中间历史仍含明文。
+2. **执行**：仓库无远程（纯本地，无 force push 风险），`git filter-repo --force --replace-text` 重写全部 50 个提交，明文密码 → `***REMOVED***`。
+3. **验证**：
+   - `git log -S'密码' --all` → 0 匹配 ✅
+   - 工作区文件 grep → 0 匹配 ✅
+   - `git fsck --full` 健康 ✅
+   - 含旧密码的 bundle 备份已删除（避免旧历史残留磁盘）
+4. 注意：历史重写后所有 commit hash 已变（HEAD 18ae666），无远程不受影响。
+
+### 19.2 结构化日志（println! → log）
+
+1. **基础设施**：tauri-plugin-log 已注册（Info 级别，sqlx::query 降 Error 防刷屏），log crate 已在依赖。
+2. **替换**：65 个 `println!`/`eprintln!` → `log::info!`/`log::error!`，覆盖 lib.rs、db/mod.rs、db/downloads.rs、db/passwords.rs、feed.rs、extensions.rs、tabs.rs 共 7 个文件。
+3. **级别划分**：普通信息 info；失败类升级——feed 请求/读取失败、扩展启动注入失败、下载失败、记录插入失败 → error，扩展读取失败、record_history 失败 → warn。
+4. **踩坑记录**：sed 先替换 `println!` 会把 `eprintln!` 变成 `elog::info!`（子串匹配），需二次修复 `elog::info!` → `log::error!`。
+5. **验证**：cargo check 0 警告 / clippy 0 警告 / 17 测试全过 / release 编译完成。
+
+### 19.3 遗留事项（更新）
+
+- 挂账任务已全部处理完毕 ✅
+- 运行中的实例仍是旧二进制，第七~十轮新代码（WAL checkpoint/downloads 清理/toast/tabs 错误处理/日志改造/历史清理）需重启生效

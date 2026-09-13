@@ -136,7 +136,7 @@ pub async fn get_downloads(
     .fetch_all(&db.pool)
     .await?;
 
-    println!("[downloads] get_downloads: {} 条", rows.len());
+    log::info!("[downloads] get_downloads: {} 条", rows.len());
 
     Ok(rows
         .into_iter()
@@ -156,7 +156,7 @@ pub async fn get_downloads(
 /// 删除下载记录
 #[tauri::command]
 pub async fn delete_download(db: tauri::State<'_, Db>, id: i64) -> DbResult<()> {
-    println!("[downloads] delete_download: id={}", id);
+    log::info!("[downloads] delete_download: id={}", id);
     sqlx::query("DELETE FROM downloads WHERE id = ?")
         .bind(id)
         .execute(&db.pool)
