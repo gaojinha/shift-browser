@@ -124,7 +124,8 @@ fn extract_link(block: &str) -> Option<String> {
 /// 解析一个 <item>/<entry> 块 → (title, link, published)
 fn parse_entry(block: &str) -> Option<(String, String, String)> {
     let title = clean_text(&extract_tag(block, "title")?);
-    if title.is_empty() {
+    // 质量过滤：标题过短（<2 字符）或纯标点/空白（无字母数字）的剔除
+    if title.len() < 2 || !title.chars().any(|c| c.is_alphanumeric()) {
         return None;
     }
     let link = extract_link(block)?;

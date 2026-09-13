@@ -610,3 +610,30 @@ let pool = SqlitePoolOptions::new()
 - settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
 - 全项目日志用 println!，如需结构化日志可后续接 log + tauri-plugin-log
 - feed 源级质量过滤（标题过短/纯广告源）未做，可按需加
+
+## 十四、2026-09-13 第五轮完善（world-nav 漏洞修复 + feed 质量过滤）
+
+### 14.1 world-nav XSS 修复（防御纵深）
+
+1. **world-nav JSON 注入转义**：`newtab.rs` 的 `render_worldnav_html` 原用 `tpl.replace("__WORLDAV_DATA__", WORLDNAV_JSON)` 直接嵌入原始 JSON，未过 `json_script_safe`——若数据含 `</script>` 会提前闭合标签导致 HTML 注入。已改为先 `serde_json::from_str` 再 `json_script_safe`（`<` → `\u003c`），与启动页保持一致。worldnav.json 虽是内置可信资源，但按防御纵深原则补齐。
+
+### 14.2 feed 质量过滤
+
+2. **标题质量过滤**：`feed.rs` 的 `parse_entry` 增加标题过滤——长度 <2 字符或纯标点（无任何字母数字）的条目剔除，避免资讯面板出现垃圾标题。
+
+### 14.3 检查结论
+
+3. **world-nav 页面**：已有 meta CSP + esc() 转义所有动态内容，功能正常，仅 JSON 注入点补齐。
+4. **数据库迁移机制**：`db/mod.rs` 的 `run_migrations` 版本号 + 事务 + 记录表结构规范，无需改动。
+
+### 14.4 验证结果
+
+- `cargo check` 0 警告 ✅ / `cargo clippy` 0 警告 ✅ / `cargo test` 16 passed ✅
+- `npm run lint` ✅ / `npm run build` ✅ / release 编译 ✅
+
+### 14.5 遗留事项（更新）
+
+- git 历史仍含明文 sudo 密码（旧提交），彻底清除需 `git filter-repo` 重写历史（有风险，暂缓）
+- settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
+- 全项目日志用 println!，如需结构化日志可后续接 log + tauri-plugin-log
+- 运行中的实例仍是旧二进制，新代码（feed 去重/编码/下载唯一化/world-nav 修复）需重启生效

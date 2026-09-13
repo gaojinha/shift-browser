@@ -837,7 +837,14 @@ fn render_worldnav_html() -> String {
 </script>
 </body>
 </html>"#;
-    tpl.replace("__WORLDAV_DATA__", WORLDNAV_JSON)
+    tpl.replace(
+        "__WORLDAV_DATA__",
+        // worldnav.json 是内置可信资源，但防御纵深：与启动页一致，JSON 过 json_script_safe
+        // （若数据含 </script> 会提前闭合标签导致 HTML 注入）
+        &serde_json::from_str::<serde_json::Value>(WORLDNAV_JSON)
+            .map(|v| json_script_safe(&v))
+            .unwrap_or_else(|_| "[]".to_string()),
+    )
 }
 
 /// 生成/刷新新标签页（改设置或数据变化后可调，前端也可定时刷）
