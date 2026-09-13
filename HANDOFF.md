@@ -897,3 +897,18 @@ tabs store 的 4 个核心操作（createTab/closeTab/switchTab/navigateTab）�
 
 - 第十四轮改动尚未编译重启（等高哥授权"重启"）
 - 后续可选：search_history LIKE 通配符转义、前端组件 UI/UX 进一步优化
+
+## 二十四、2026-09-13 第十五轮收尾（search_history 通配符转义）
+
+### 24.1 修复内容
+
+1. **search_history LIKE 通配符转义**（第十三/十四轮遗留技术债）：用户搜索历史时，输入含 `%` 或 `_` 的字符（如 "100%_off"）会被 SQL LIKE 当作通配符，导致误匹配无关记录。修复：查询前对 `\`、`%`、`_` 做转义，SQL 加 `ESCAPE '\'` 子句，按字面量匹配。
+
+### 24.2 验证结果
+
+- cargo clippy --all-targets 0 警告 ✅
+- cargo test 19 passed ✅（新增 test_search_history_escapes_like_wildcards）
+
+### 24.3 遗留事项
+
+- 无阻塞项；前端组件 UI/UX 进一步优化（可选）

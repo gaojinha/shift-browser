@@ -83,10 +83,17 @@ pub async fn search_history(
   limit: Option<i64>,
 ) -> DbResult<Vec<HistoryEntry>> {
   let limit = limit.unwrap_or(50).min(500);
-  let like = format!("%{}%", query);
+  // LIKE 通配符转义：% 和 _ 是 SQL LIKE 的通配符，用户输入含这些字符时按字面量匹配
+  // （先转义反斜杠本身，再转义 % 和 _，配合 ESCAPE '\' 使用）
+  let escaped = query
+    .replace('\\', "\\\\")
+    .replace('%', "\\%")
+    .replace('_', "\\_");
+  let like = format!("%{}%", escaped);
   let rows = sqlx::query_as::<_, (i64, String, Option<String>, i64, String)>(
     "SELECT id, url, title, visit_count, last_visit_at FROM history
-     WHERE url LIKE ? OR title LIKE ? ORDER BY last_visit_at DESC LIMIT ?",
+     WHERE url LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'
+     ORDER BY last_visit_at DESC LIMIT ?",
   )
   .bind(&like)
   .bind(&like)
@@ -237,5 +244,47 @@ mod tests {
       .await
       .unwrap();
     assert_eq!(total, 2);
+  }
+
+  /// 对 pool 执行 search_history 的核心 SQL（命令签名带 tauri::State，测试里不便构造）
+  async fn search(pool: &SqlitePool, query: &str) -> Vec<String> {
+    let escaped = query
+      .replace('\\', "\\\\")
+      .replace('%', "\\%")
+      .replace('_', "\\_");
+    let like = format!("%{}%", escaped);
+    let rows: Vec<(String,)> = sqlx::query_as(
+      "SELECT url FROM history
+       WHERE url LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'
+       ORDER BY last_visit_at DESC",
+    )
+    .bind(&like)
+    .bind(&like)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    rows.into_iter().map(|r| r.0).collect()
+  }
+
+  #[tokio::test]
+  async fn test_search_history_escapes_like_wildcards() {
+    let (_dir, pool) = temp_pool().await;
+    // 造数据：URL 含 % 和 _ 字面量，以及普通 URL
+    upsert(&pool, "https://example.com/100%_off", Some("打折 100%_off")).await.unwrap();
+    upsert(&pool, "https://example.com/plain", Some("普通页面")).await.unwrap();
+
+    // 搜 "100" 应命中含 % 的那条（% 按字面量，不吞掉 100 后面的内容）
+    let r = search(&pool, "100").await;
+    assert!(r.iter().any(|u| u.contains("100%_off")), "搜 100 应命中 100%_off");
+    assert_eq!(r.len(), 1, "通配符不应让 100 匹配到无关行");
+
+    // 搜 "off" 命中含 _ 字面量的那条（_ 不当作单字符通配符）
+    let r = search(&pool, "off").await;
+    assert!(r.iter().any(|u| u.contains("100%_off")), "off 是 _off 的字面量部分");
+
+    // 搜 "plain" 命中普通行
+    let r = search(&pool, "plain").await;
+    assert_eq!(r.len(), 1);
+    assert!(r[0].contains("plain"));
   }
 }
