@@ -112,8 +112,42 @@ function onDragOver(e: DragEvent) {
 }
 function onDrop(e: DragEvent, id: string) {
   e.preventDefault()
-  if (dragTabId.value && dragTabId.value !== id) {
-    tabsStore.reorderTabs(dragTabId.value, id)
+  const fromId = dragTabId.value
+  if (!fromId || fromId === id) {
+    dragTabId.value = null
+    return
+  }
+  const fromTab = tabsStore.tabs.find((t) => t.id === fromId)
+  const toTab = tabsStore.tabs.find((t) => t.id === id)
+  if (fromTab && toTab && fromTab.groupId !== toTab.groupId) {
+    // 跨组拖拽：先归组，再排序到目标位置
+    tabsStore.assignTabToGroup(fromId, toTab.groupId)
+    tabsStore.reorderTabs(fromId, id)
+  } else {
+    tabsStore.reorderTabs(fromId, id)
+  }
+  dragTabId.value = null
+}
+
+/** 拖到分组头：归组到该分组 */
+const dragOverGroupId = ref<number | null>(null)
+function onDragOverGroup(e: DragEvent, groupId: number) {
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dragOverGroupId.value = groupId
+}
+function onDragLeaveGroup(groupId: number) {
+  if (dragOverGroupId.value === groupId) dragOverGroupId.value = null
+}
+function onDropToGroup(e: DragEvent, groupId: number) {
+  e.preventDefault()
+  dragOverGroupId.value = null
+  const fromId = dragTabId.value
+  if (fromId) {
+    const fromTab = tabsStore.tabs.find((t) => t.id === fromId)
+    if (fromTab && fromTab.groupId !== groupId) {
+      tabsStore.assignTabToGroup(fromId, groupId)
+    }
   }
   dragTabId.value = null
 }
@@ -269,7 +303,14 @@ function onFaviconError(e: Event) {
 
       <!-- 分组 -->
       <template v-for="g in groupedTabs.groups" :key="g.group.id">
-        <div class="group-head" :style="{ borderLeftColor: g.group.color }">
+        <div
+          class="group-head"
+          :class="{ 'drop-target': dragOverGroupId === g.group.id }"
+          :style="{ borderLeftColor: g.group.color }"
+          @dragover="onDragOverGroup($event, g.group.id)"
+          @dragleave="onDragLeaveGroup(g.group.id)"
+          @drop="onDropToGroup($event, g.group.id)"
+        >
           <span class="group-name">{{ g.group.name }}</span>
           <span class="group-count">{{ g.tabs.length }}</span>
           <button
@@ -616,6 +657,14 @@ function onFaviconError(e: Event) {
   border-left: 3px solid var(--accent);
   flex-shrink: 0;
   cursor: default;
+  transition: box-shadow 0.15s;
+}
+.group-head[dragging] {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.group-head.drop-target {
+  box-shadow: 0 0 0 2px var(--accent);
+  background: var(--bg-active);
 }
 .group-name {
   font-size: 12px;

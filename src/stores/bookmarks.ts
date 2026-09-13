@@ -46,5 +46,30 @@ export const useBookmarksStore = defineStore('bookmarks', {
         useToastStore().error('删除书签失败')
       }
     },
+
+    /** 更新书签（标题/URL） */
+    async updateBookmark(id: number, title?: string, url?: string) {
+      try {
+        await invoke<void>('update_bookmark', { id, title: title ?? null, url: url ?? null, folderId: null })
+        await this.loadBookmarks()
+      } catch (e) {
+        console.error('[bookmarks] 更新书签失败:', e)
+        useToastStore().error('更新书签失败')
+      }
+    },
+
+    /** 新建文件夹 */
+    async createFolder(name: string): Promise<number | null> {
+      try {
+        const id = await invoke<number>('create_bookmark_folder', {
+          input: { name, parent_id: null },
+        })
+        return id
+      } catch (e) {
+        console.error('[bookmarks] 新建文件夹失败:', e)
+        useToastStore().error('新建文件夹失败')
+        return null
+      }
+    },
   },
 })

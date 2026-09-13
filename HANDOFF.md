@@ -1025,3 +1025,38 @@ tabs store 的 4 个核心操作（createTab/closeTab/switchTab/navigateTab）�
 
 - 无阻塞项；跨组拖拽移动标签暂不支持（可后续做"拖到分组头归组"）
 - 历史面板清空用原生 confirm（WebKitGTK 下可能无显示，后续可换自定义确认）
+
+## 第二十八章（第十九轮）：搜索建议 + 书签管理 + 跨组拖拽归组
+
+### 28.1 地址栏搜索建议下拉
+
+- 输入防抖 200ms 并发调 `search_bookmarks`（前 5 条）+ `search_history`（前 8 条），合并显示
+- 书签带 🔖 图标、历史带 🕘 图标；标题 + URL 两栏展示
+- 键盘导航：↓/↑ 移动选中（循环）、Enter 打开选中项、Esc 关闭；无选中时 Enter 走原 URL/搜索逻辑
+- 失焦 150ms 延迟关闭（保证 mousedown 点击建议生效）；`@mousedown.prevent` 避免抢焦点
+- 下拉样式：`position: absolute` 挂在 .address-container 下，top 34px，max-height 320px 可滚动
+
+### 28.2 书签管理面板
+
+- BookmarksBar 右键菜单（`position: fixed` 贴边翻转，复用 TabBar 模式）：
+  - 书签项右键：＋ 新标签打开 / 🔗 复制链接 / ✏ 编辑 / ✕ 删除（danger）
+  - 栏空白右键：☆ 收藏当前页 / 📁 新建文件夹（默认名"日期 文件夹"）
+- 编辑弹窗：复用全局 .dialog-overlay/.dialog 公共样式，改标题 + 网址，空值拦截
+- bookmarks store 新增 `updateBookmark(id, title?, url?)`（走 `update_bookmark` 命令）与 `createFolder(name)`（走 `create_bookmark_folder` 命令）
+
+### 28.3 跨组拖拽归组
+
+- onDrop 判断来源/目标 tab 的 groupId：不同 → 先 `assignTabToGroup` 归组，再 `reorderTabs` 排序到目标位置；相同 → 原排序逻辑
+- 分组头加 dragover/dragleave/drop：拖到分组头归组到该组（不强制排序）
+- 分组头 drop-target 高亮（accent 外框 + bg-active），拖离恢复
+
+### 28.4 验证
+
+- npm run build ✅ / npm run lint ✅
+- cargo clippy 0 警告 ✅ / cargo test 19 passed ✅
+- 版本 5.5.0；CSS 产物 39.96KB
+
+### 28.5 遗留事项
+
+- 历史清空仍用原生 window.confirm（WebKitGTK 下可能无显示，后续可换自定义确认弹窗）
+- 书签文件夹当前仅支持创建（无展开/嵌套 UI），书签栏只显示顶层书签

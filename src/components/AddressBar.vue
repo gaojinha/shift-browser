@@ -5,6 +5,22 @@ import { invoke } from '@tauri-apps/api/core'
 import { useTabsStore } from '../stores/tabs'
 import { useSettingsStore } from '../stores/settings'
 
+interface Bookmark {
+  id: number
+  title: string
+  url: string
+  folder_id: number | null
+  sort_order: number
+  created_at: string
+}
+interface HistoryEntry {
+  id: number
+  url: string
+  title: string | null
+  visit_count: number
+  last_visit_at: string
+}
+
 const tabsStore = useTabsStore()
 const settingsStore = useSettingsStore()
 const addressInput = ref('')
@@ -43,6 +59,102 @@ watch(
   },
   { immediate: true },
 )
+
+// ===== 搜索建议下拉（历史 + 书签） =====
+interface Suggestion {
+  type: 'bookmark' | 'history'
+  title: string
+  url: string
+  id: number
+  visitCount?: number
+}
+const suggestions = ref<Suggestion[]>([])
+const selectedIndex = ref(-1)
+const showSuggestions = ref(false)
+
+/** 输入防抖拉建议：书签优先（精确匹配度高），再补历史 */
+let suggestTimer: number | null = null
+function onInput() {
+  if (suggestTimer) clearTimeout(suggestTimer)
+  suggestTimer = window.setTimeout(async () => {
+    const q = addressInput.value.trim()
+    if (!q) {
+      suggestions.value = []
+      showSuggestions.value = false
+      return
+    }
+    try {
+      const [bks, his] = await Promise.all([
+        invoke<Bookmark[]>('search_bookmarks', { query: q }).catch(() => [] as Bookmark[]),
+        invoke<HistoryEntry[]>('search_history', { query: q, limit: 20 }).catch(
+          () => [] as HistoryEntry[],
+        ),
+      ])
+      const merged: Suggestion[] = [
+        ...bks.slice(0, 5).map((b) => ({ type: 'bookmark' as const, title: b.title, url: b.url, id: b.id })),
+        ...his.slice(0, 8).map((h) => ({
+          type: 'history' as const,
+          title: h.title || h.url,
+          url: h.url,
+          id: h.id,
+          visitCount: h.visit_count,
+        })),
+      ]
+      suggestions.value = merged
+      selectedIndex.value = -1
+      showSuggestions.value = merged.length > 0
+    } catch (e) {
+      console.error('[address] 拉取建议失败:', e)
+    }
+  }, 200)
+}
+
+/** 打开建议项（当前标签导航） */
+function openSuggestion(s: Suggestion) {
+  const active = tabsStore.activeTab
+  if (!active) return
+  tabsStore.navigateTab(active.id, s.url)
+  closeSuggestions()
+}
+
+function closeSuggestions() {
+  showSuggestions.value = false
+  suggestions.value = []
+  selectedIndex.value = -1
+}
+
+/** 键盘导航：↓ 上移 ↑ 下移 Enter 打开选中 Esc 关闭 */
+function onKeydown(e: KeyboardEvent) {
+  if (showSuggestions.value && suggestions.value.length > 0) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      selectedIndex.value = (selectedIndex.value + 1) % suggestions.value.length
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      selectedIndex.value =
+        (selectedIndex.value - 1 + suggestions.value.length) % suggestions.value.length
+      return
+    }
+    if (e.key === 'Escape') {
+      closeSuggestions()
+      return
+    }
+    if (e.key === 'Enter' && selectedIndex.value >= 0) {
+      e.preventDefault()
+      openSuggestion(suggestions.value[selectedIndex.value])
+      return
+    }
+  }
+  // 无选中建议时 Enter 走原逻辑
+  if (e.key === 'Enter') onAddressEnter()
+}
+
+/** 失焦关闭（延迟让点击建议生效） */
+function onBlur() {
+  window.setTimeout(closeSuggestions, 150)
+}
 
 /** 判断输入是否像 URL（域名/含点/localhost/IP/host:port），而不是搜索词 */
 function looksLikeUrl(input: string): boolean {
@@ -143,9 +255,24 @@ async function onReader() {
         type="text"
         placeholder="输入网址或搜索..."
         spellcheck="false"
-        @keydown.enter="onAddressEnter"
+        @input="onInput"
+        @keydown="onKeydown"
+        @blur="onBlur"
       />
       <div v-if="isLoading" class="load-bar"></div>
+      <div v-if="showSuggestions" class="suggest-dropdown">
+        <div
+          v-for="(s, i) in suggestions"
+          :key="s.type + s.id"
+          class="suggest-item"
+          :class="{ selected: i === selectedIndex }"
+          @mousedown.prevent="openSuggestion(s)"
+        >
+          <span class="suggest-icon">{{ s.type === 'bookmark' ? '🔖' : '🕘' }}</span>
+          <span class="suggest-title">{{ s.title }}</span>
+          <span class="suggest-url">{{ s.url }}</span>
+        </div>
+      </div>
     </div>
     <button
       class="action-btn"
@@ -297,5 +424,56 @@ async function onReader() {
 }
 .address-container input::placeholder {
   color: var(--text-muted);
+}
+.suggest-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 34px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  overflow: hidden;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.suggest-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: background 0.1s;
+}
+.suggest-item.selected {
+  background: var(--bg-active);
+}
+.suggest-item:hover {
+  background: var(--bg-hover);
+}
+.suggest-icon {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.suggest-title {
+  flex-shrink: 0;
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.suggest-url {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: right;
 }
 </style>
