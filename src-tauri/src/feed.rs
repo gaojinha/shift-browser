@@ -157,6 +157,41 @@ pub fn parse_feed(xml: &str) -> Vec<(String, String, String)> {
     items
 }
 
+/// 解码 feed 响应字节为字符串（自动探测编码）：
+/// BOM 优先 → 显式 charset → 严格 UTF-8 → GBK 兜底（中文源最常见）
+fn decode_feed_bytes(bytes: &[u8], charset: Option<&str>) -> String {
+    // BOM
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        return String::from_utf8_lossy(&bytes[3..]).to_string();
+    }
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        return encoding_rs::UTF_16LE
+            .decode_without_bom_handling(&bytes[2..])
+            .0
+            .to_string();
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        return encoding_rs::UTF_16BE
+            .decode_without_bom_handling(&bytes[2..])
+            .0
+            .to_string();
+    }
+    // 响应头显式 charset
+    if let Some(cs) = charset {
+        if let Some(enc) = encoding_rs::Encoding::for_label(cs.as_bytes()) {
+            let (text, _, _) = enc.decode(bytes);
+            return text.to_string();
+        }
+    }
+    // 严格 UTF-8（能过说明是标准 UTF-8）
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+    // 非 UTF-8：GBK 兜底（中文源最常见）
+    let (text, _, _) = encoding_rs::GBK.decode(bytes);
+    text.to_string()
+}
+
 /// 抓单个源并入库；返回条目数
 async fn fetch_one(client: &reqwest::Client, db: &Db, source: &str, url: &str, category: &str) -> usize {
     let resp = match client.get(url).send().await {
@@ -166,15 +201,26 @@ async fn fetch_one(client: &reqwest::Client, db: &Db, source: &str, url: &str, c
             return 0;
         }
     };
-    // 用 bytes + lossy 解码：部分源是 GBK/其他编码，text() 会直接失败，
-    // lossy 至少能解析出结构（非 UTF-8 字符显示为 �，比整源失败强）
-    let xml = match resp.bytes().await {
-        Ok(b) => String::from_utf8_lossy(&b).to_string(),
+    // 先取响应头 charset（bytes() 会消费 resp）
+    let charset = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|ct| {
+            ct.split(';').find_map(|p| {
+                let p = p.trim();
+                p.strip_prefix("charset=")
+                    .map(|c| c.trim().trim_matches('"').to_string())
+            })
+        });
+    let bytes = match resp.bytes().await {
+        Ok(b) => b,
         Err(e) => {
             println!("[feed] {} 读取失败: {}", source, e);
             return 0;
         }
     };
+    let xml = decode_feed_bytes(&bytes, charset.as_deref());
     let items = parse_feed(&xml);
     let mut count = 0;
     // 单事务批量写：避免 62 源并发逐条 INSERT 抢 SQLite 写锁
@@ -237,10 +283,12 @@ pub async fn refresh_all(db: &Db) -> usize {
     total
 }
 
-/// 启动页渲染用的最新条目（混源，按抓取时间倒序）
+/// 启动页渲染用的最新条目（混源，按抓取时间倒序，按 url 去重——转载文章不重复显示）
 pub async fn latest_items(db: &Db, limit: i64) -> Vec<(String, String, String, String, String)> {
     sqlx::query_as(
-        "SELECT source, category, title, url, published_at FROM feed_items ORDER BY id DESC LIMIT ?",
+        "SELECT source, category, title, url, published_at FROM feed_items
+         WHERE id IN (SELECT MAX(id) FROM feed_items GROUP BY url)
+         ORDER BY id DESC LIMIT ?",
     )
     .bind(limit)
     .fetch_all(&db.pool)
@@ -351,5 +399,31 @@ mod tests {
         let items = parse_feed(xml);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].0, "正常");
+    }
+
+    #[test]
+    fn decode_utf8_and_bom() {
+        let s = "中文标题";
+        assert_eq!(decode_feed_bytes(s.as_bytes(), None), s);
+        let mut bom = vec![0xEF, 0xBB, 0xBF];
+        bom.extend_from_slice(s.as_bytes());
+        assert_eq!(decode_feed_bytes(&bom, None), s);
+    }
+
+    #[test]
+    fn decode_gbk_without_charset() {
+        // GBK 编码无 charset 声明 → 严格 UTF-8 失败 → GBK 兜底
+        let (gbk, _, _) = encoding_rs::GBK.encode("中文标题");
+        assert_eq!(decode_feed_bytes(&gbk, None), "中文标题");
+    }
+
+    #[test]
+    fn decode_with_explicit_charset() {
+        // GBK 字节 + charset=gbk 显式声明
+        let (gbk, _, _) = encoding_rs::GBK.encode("标题");
+        assert_eq!(decode_feed_bytes(&gbk, Some("gbk")), "标题");
+        // charset 大小写/引号容忍
+        let (gbk, _, _) = encoding_rs::GBK.encode("测试");
+        assert_eq!(decode_feed_bytes(&gbk, Some("GBK")), "测试");
     }
 }

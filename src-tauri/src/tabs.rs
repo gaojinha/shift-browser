@@ -309,7 +309,8 @@ impl TabManager {
                 let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
                 let dest_dir = format!("{}/Downloads", home);
                 let _ = std::fs::create_dir_all(&dest_dir);
-                let dest = format!("{}/{}", dest_dir, filename);
+                // 同名文件已存在时加 (1)(2) 后缀，避免覆盖
+                let dest = unique_download_path(&dest_dir, &filename);
                 download.set_destination(&format!("file://{}", dest));
                 // 总字节：从 response 拿（可能未知为 0）
                 let total = download
@@ -599,6 +600,26 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
   }
 
   Ok(())
+}
+
+/// 下载目标路径唯一化：同名文件已存在时加 (1)(2)... 后缀，避免覆盖
+fn unique_download_path(dir: &str, filename: &str) -> String {
+    let candidate = format!("{}/{}", dir, filename);
+    if !std::path::Path::new(&candidate).exists() {
+        return candidate;
+    }
+    let (stem, ext) = match filename.rfind('.') {
+        Some(i) if i > 0 => (&filename[..i], &filename[i..]),
+        _ => (filename, ""),
+    };
+    let mut n = 1;
+    loop {
+        let c = format!("{}/{}({}){}", dir, stem, n, ext);
+        if !std::path::Path::new(&c).exists() {
+            return c;
+        }
+        n += 1;
+    }
 }
 
 /// 从 vbox 查找 GtkOverlay 里的 GtkFixed 容器，不存在则创建并挂到 vbox（兜底）
@@ -948,4 +969,38 @@ pub async fn update_tab(
     }
   }
   Ok(tab.cloned())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unique_path_adds_suffix_when_exists() {
+        let dir = std::env::temp_dir().join("sb-unique-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let dir = dir.to_str().unwrap();
+
+        // 不存在 → 原文件名
+        let p1 = unique_download_path(dir, "a.pdf");
+        assert_eq!(p1, format!("{}/a.pdf", dir));
+
+        // 创建后 → a(1).pdf
+        std::fs::write(&p1, "x").unwrap();
+        let p2 = unique_download_path(dir, "a.pdf");
+        assert_eq!(p2, format!("{}/a(1).pdf", dir));
+
+        // 再创建 → a(2).pdf
+        std::fs::write(&p2, "x").unwrap();
+        let p3 = unique_download_path(dir, "a.pdf");
+        assert_eq!(p3, format!("{}/a(2).pdf", dir));
+
+        // 无扩展名
+        let p4 = unique_download_path(dir, "noext");
+        assert_eq!(p4, format!("{}/noext", dir));
+        std::fs::write(&p4, "x").unwrap();
+        let p5 = unique_download_path(dir, "noext");
+        assert_eq!(p5, format!("{}/noext(1)", dir));
+
+        let _ = std::fs::remove_dir_all(std::env::temp_dir().join("sb-unique-test"));
+    }
 }

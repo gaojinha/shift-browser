@@ -577,3 +577,36 @@ let pool = SqlitePoolOptions::new()
 - settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
 - feed 非 UTF-8 源（GBK）lossy 解码后中文显示为 �，如需完美解码可后续接 encoding_rs 自动探测
 - feed 源级去重/质量过滤（部分源标题重复）未做，后续可按需加
+
+## 十三、2026-09-13 第四轮完善（feed 质量 + 下载体验）
+
+### 13.1 feed 源级去重
+
+1. **latest_items 按 url 去重**：`feed.rs` 查询改为 `id IN (SELECT MAX(id) FROM feed_items GROUP BY url)`，转载文章（不同源同一 url）不再重复显示，启动页资讯面板更干净。
+
+### 13.2 feed 编码完美解码
+
+2. **encoding_rs 自动探测**：`feed.rs` 新增 `decode_feed_bytes`——BOM（UTF-8/UTF-16LE/BE）优先 → 响应头 charset 显式解码 → 严格 UTF-8 → GBK 兜底（中文源最常见）。此前 `resp.text()` 对 GBK 源整源失败（"人人都是产品经理""阮一峰"），lossy 方案又会让中文变 �，现在 GBK 源能正确显示中文。新依赖 `encoding_rs = "0.8"`。
+
+### 13.3 下载文件名冲突处理
+
+3. **unique_download_path**：`tabs.rs` 下载目标同名文件已存在时自动加 `(1)(2)` 后缀（保留扩展名），不再静默覆盖。新增单测覆盖。
+
+### 13.4 检查结论
+
+4. **ai.rs**：90s 超时、API key 处理、错误返回均正常，无需改动。
+5. **extensions.rs**：注入/启停/删除逻辑正常，已有单测。
+6. **newtab weather**：WMO 映射表固定字符串 + 数字渲染，无注入面。
+
+### 13.5 验证结果
+
+- `cargo check` 0 警告 ✅ / `cargo clippy` 0 警告 ✅ / `cargo test` 16 passed ✅（新增编码 3 个 + 下载路径 1 个）
+- `npm run lint` ✅ / release 编译 ✅
+- 注：运行中的实例仍是旧二进制，新代码（feed 去重/编码/下载唯一化）需重启生效
+
+### 13.6 遗留事项（更新）
+
+- git 历史仍含明文 sudo 密码（旧提交），彻底清除需 `git filter-repo` 重写历史（有风险，暂缓）
+- settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
+- 全项目日志用 println!，如需结构化日志可后续接 log + tauri-plugin-log
+- feed 源级质量过滤（标题过短/纯广告源）未做，可按需加

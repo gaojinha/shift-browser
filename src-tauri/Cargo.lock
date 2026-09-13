@@ -4372,6 +4372,7 @@ version = "5.5.0"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
+ "encoding_rs",
  "gtk",
  "log",
  "rand 0.8.8",
