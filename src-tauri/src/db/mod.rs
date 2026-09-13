@@ -25,6 +25,14 @@ impl Db {
     std::fs::create_dir_all(&app_data_dir)?;
     let db_path = app_data_dir.join("shift-browser.db");
 
+    // 安全：应用数据目录权限收紧到 700（含数据库/密钥/cookies 等敏感文件，
+    // 目录不可进则同机其他用户无法读取内部任何文件）
+    #[cfg(unix)]
+    {
+      use std::os::unix::fs::PermissionsExt;
+      let _ = std::fs::set_permissions(&app_data_dir, std::fs::Permissions::from_mode(0o700));
+    }
+
     // 安全：数据库含加密密码/设置，权限收紧到 600（仅当前用户可读写）
     // 注意：WAL 模式下 -wal/-shm 文件会随 db 权限创建，此处只收紧主文件；
     // 若文件已存在且权限过宽，也一并修正

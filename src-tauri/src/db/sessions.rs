@@ -39,6 +39,15 @@ pub async fn save_session(
     .bind(&data)
     .execute(&db.pool)
     .await?;
+    // 自动保存记录只保留最近 100 条，防止 sessions 表无限增长
+    // （手动命名的会话不受影响）
+    sqlx::query(
+        "DELETE FROM sessions WHERE name = '自动保存' AND id NOT IN (
+           SELECT id FROM sessions WHERE name = '自动保存' ORDER BY id DESC LIMIT 100
+         )",
+    )
+    .execute(&db.pool)
+    .await?;
     Ok(result.last_insert_rowid())
 }
 

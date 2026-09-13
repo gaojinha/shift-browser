@@ -4376,6 +4376,7 @@ dependencies = [
  "log",
  "rand 0.8.8",
  "readability",
+ "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -4390,6 +4391,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "uuid",
  "webkit2gtk",
 ]
 

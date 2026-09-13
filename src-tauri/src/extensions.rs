@@ -46,8 +46,16 @@ struct ContentScript {
     css: Vec<String>,
 }
 
-/// 扩展目录解析结果：(name, version, description, 合并后的 js, 合并后的 css)
-type ExtensionDirResult = (String, Option<String>, Option<String>, Option<String>, Option<String>);
+/// 扩展目录解析结果：(name, version, description, 合并后的 js, 合并后的 css, js 文件数, css 文件数)
+type ExtensionDirResult = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    usize,
+    usize,
+);
 
 /// 读取扩展目录内容
 fn read_extension_dir(path: &str) -> Result<ExtensionDirResult, String> {
@@ -94,7 +102,15 @@ fn read_extension_dir(path: &str) -> Result<ExtensionDirResult, String> {
         Some(css_sources.join("\n"))
     };
 
-    Ok((manifest.name, manifest.version, manifest.description, js, css))
+    Ok((
+        manifest.name,
+        manifest.version,
+        manifest.description,
+        js,
+        css,
+        js_sources.len(),
+        css_sources.len(),
+    ))
 }
 
 /// 在主线程把所有 child webview 的 UserContentManager 清空并注入扩展
@@ -337,7 +353,7 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
             continue;
         }
         match read_extension_dir(&ext.path) {
-            Ok((_, _, _, js, css)) => items.push((js, css)),
+            Ok((_, _, _, js, css, _, _)) => items.push((js, css)),
             Err(e) => println!("[extensions] 读取扩展 {} 失败: {}", ext.name, e),
         }
     }
@@ -434,7 +450,7 @@ pub async fn load_extension(
     path: String,
 ) -> Result<ExtensionInfo, String> {
     println!("[extensions] load_extension: path={}", path);
-    let (name, version, description, js, css) = read_extension_dir(&path)?;
+    let (name, version, description, js, css, js_count, css_count) = read_extension_dir(&path)?;
     let id = ext_db::create(&db, &name, &path).await.map_err(|e| e.to_string())?;
     println!(
         "[extensions] 已加载扩展: id={} name={} js={} css={}",
@@ -453,8 +469,8 @@ pub async fn load_extension(
         enabled: true,
         version,
         description,
-        js_count: js.as_ref().map(|_| 1).unwrap_or(0),
-        css_count: css.as_ref().map(|_| 1).unwrap_or(0),
+        js_count,
+        css_count,
         created_at: String::new(),
     })
 }
@@ -468,12 +484,7 @@ pub async fn list_extensions(db: State<'_, Db>) -> Result<Vec<ExtensionInfo>, St
     for ext in exts {
         let (version, description, js_count, css_count) =
             match read_extension_dir(&ext.path) {
-                Ok((_, v, d, js, css)) => (
-                    v,
-                    d,
-                    js.as_ref().map(|_| 1).unwrap_or(0),
-                    css.as_ref().map(|_| 1).unwrap_or(0),
-                ),
+                Ok((_, v, d, _, _, jc, cc)) => (v, d, jc, cc),
                 Err(e) => {
                     println!("[extensions] 读取扩展 {} 失败: {}", ext.name, e);
                     (None, None, 0, 0)

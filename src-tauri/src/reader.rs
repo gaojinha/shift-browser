@@ -3,19 +3,50 @@
 // 绝不能跑在 async 线程/主线程上
 use tauri::{AppHandle, Manager};
 
+/// 抓正文超时（readability 内部 reqwest 无超时配置，外层兜底）
+const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// 抓取并解析正文（带超时 + 净化）
+async fn scrape_article(url: &str) -> Result<readability::extractor::Product, String> {
+    let url = url.to_string();
+    tokio::time::timeout(FETCH_TIMEOUT, tokio::task::spawn_blocking(move || {
+        readability::extractor::scrape(&url)
+    }))
+    .await
+    .map_err(|_| "抓取正文超时（20 秒），可能是慢站或网络问题".to_string())?
+    .map_err(|e| e.to_string())?
+    .map_err(|_| "提取不出正文（可能是动态页或内容太短）".to_string())
+}
+
+/// 移除正文中的危险标签与事件属性（防 XSS）：
+/// script/style/iframe/object/embed/svg 整块删除，on* 事件属性剥掉
+fn sanitize_html(html: &str) -> String {
+    let re_script = regex::Regex::new(r"(?is)<script\b[^>]*>.*?</script>").unwrap();
+    let re_style = regex::Regex::new(r"(?is)<style\b[^>]*>.*?</style>").unwrap();
+    let re_iframe = regex::Regex::new(r"(?is)<iframe\b[^>]*>.*?</iframe>").unwrap();
+    let re_object = regex::Regex::new(r"(?is)<object\b[^>]*>.*?</object>").unwrap();
+    let re_embed = regex::Regex::new(r"(?is)<embed\b[^>]*/?>").unwrap();
+    let re_svg = regex::Regex::new(r"(?is)<svg\b[^>]*>.*?</svg>").unwrap();
+    let re_events = regex::Regex::new(r#"(?i)\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)"#).unwrap();
+    let mut s = html.to_string();
+    for re in [&re_script, &re_style, &re_iframe, &re_object, &re_embed, &re_svg] {
+        s = re.replace_all(&s, "").to_string();
+    }
+    s = re_events.replace_all(&s, "").to_string();
+    s
+}
+
 /// 抓正文返回 JSON（不写文件）——供资讯面板"📖 内联阅读"用
 #[tauri::command]
 pub async fn fetch_article(url: String) -> Result<serde_json::Value, String> {
-    let product = tokio::task::spawn_blocking(move || readability::extractor::scrape(&url))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|_| "提取不出正文（可能是动态页或内容太短）".to_string())?;
+    let product = scrape_article(&url).await?;
     if product.content.len() < 200 {
         return Err("内容太短，可能不是文章页".to_string());
     }
+    let content = sanitize_html(&product.content);
     Ok(serde_json::json!({
         "title": product.title,
-        "content": product.content,
+        "content": content,
         "text": product.text,
     }))
 }
@@ -26,11 +57,7 @@ pub async fn enter_reader_mode(app: AppHandle, url: String) -> Result<String, St
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("只支持普通网页".to_string());
     }
-    let target = url.clone();
-    let product = tokio::task::spawn_blocking(move || readability::extractor::scrape(&target))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|_| "这个页面提取不出正文（可能是动态页或内容太短）".to_string())?;
+    let product = scrape_article(&url).await?;
 
     if product.content.len() < 500 {
         return Err("提取内容太短，可能不是文章页".to_string());
@@ -59,7 +86,8 @@ pub async fn enter_reader_mode(app: AppHandle, url: String) -> Result<String, St
         .map(|d| d.as_millis())
         .unwrap_or(0);
     let path = dir.join(format!("r{}.html", ts));
-    let html = render_reader_html(&product.title, &url, &product.content);
+    let content = sanitize_html(&product.content);
+    let html = render_reader_html(&product.title, &url, &content);
     std::fs::write(&path, html).map_err(|e| e.to_string())?;
     Ok(format!("file://{}", path.display()))
 }

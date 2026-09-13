@@ -15,18 +15,16 @@ const workspacesStore = useWorkspacesStore()
 const DEFAULT_FAVICON =
   'data:image/svg+xml;utf8,' +
   encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="#4a9eff"/><ellipse cx="8" cy="8" rx="3" ry="6.5" fill="none" stroke="#fff" stroke-width="0.8"/><path d="M1.5 8h13" stroke="#fff" stroke-width="0.8"/></svg>'
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="#4a9eff"/><ellipse cx="8" cy="8" rx="3" ry="6.5" fill="none" stroke="#fff" stroke-width="0.8"/><path d="M1.5 8h13" stroke="#fff" stroke-width="0.8"/></svg>',
   )
 
 // 分组后的标签结构
 const groupedTabs = computed(() => {
   const ungrouped = tabsStore.tabs.filter((t) => t.groupId == null)
-  const groups = groupsStore.groups
-    .map((g) => ({
-      group: g,
-      tabs: tabsStore.tabs.filter((t) => t.groupId === g.id),
-    }))
-    .filter((g) => g.tabs.length > 0 || true)
+  const groups = groupsStore.groups.map((g) => ({
+    group: g,
+    tabs: tabsStore.tabs.filter((t) => t.groupId === g.id),
+  }))
   return { ungrouped, groups }
 })
 
@@ -151,7 +149,9 @@ function onFaviconError(e: Event) {
           >
             <span class="ws-dot ws-colored"></span>{{ w.name }}
             <span v-if="workspacesStore.currentId === w.id" class="ws-check">✓</span>
-            <button class="ws-del" title="删除工作区" @click="onDeleteWorkspace($event, w.id)">×</button>
+            <button class="ws-del" title="删除工作区" @click="onDeleteWorkspace($event, w.id)">
+              ×
+            </button>
           </div>
           <div class="ws-divider"></div>
           <div class="ws-item accent" @click="onCreateWorkspace">＋ 新建工作区</div>
@@ -169,14 +169,13 @@ function onFaviconError(e: Event) {
         @click="onTabClick(tab.id)"
         @contextmenu="onTabContextMenu($event, tab)"
       >
+        <img v-if="tab.favicon" class="favicon" :src="tab.favicon" alt="" @error="onFaviconError" />
         <img
-          v-if="tab.favicon"
-          class="favicon"
-          :src="tab.favicon"
+          v-else-if="!tab.is_pinned"
+          class="favicon favicon-default"
+          :src="DEFAULT_FAVICON"
           alt=""
-          @error="onFaviconError"
         />
-        <img v-else-if="!tab.is_pinned" class="favicon favicon-default" :src="DEFAULT_FAVICON" alt="" />
         <span v-else class="pin-icon" title="已固定">📌</span>
         <span class="title">{{ tab.title || '启动页' }}</span>
         <button class="close-btn" title="关闭标签" @click="onTabClose($event, tab.id)">×</button>
@@ -187,7 +186,11 @@ function onFaviconError(e: Event) {
         <div class="group-head" :style="{ borderLeftColor: g.group.color }">
           <span class="group-name">{{ g.group.name }}</span>
           <span class="group-count">{{ g.tabs.length }}</span>
-          <button class="group-toggle" :title="g.group.collapsed ? '展开' : '折叠'" @click="onToggleCollapse(g.group.id)">
+          <button
+            class="group-toggle"
+            :title="g.group.collapsed ? '展开' : '折叠'"
+            @click="onToggleCollapse(g.group.id)"
+          >
             {{ g.group.collapsed ? '▶' : '▼' }}
           </button>
         </div>
@@ -207,10 +210,17 @@ function onFaviconError(e: Event) {
               alt=""
               @error="onFaviconError"
             />
-            <img v-else-if="!tab.is_pinned" class="favicon favicon-default" :src="DEFAULT_FAVICON" alt="" />
+            <img
+              v-else-if="!tab.is_pinned"
+              class="favicon favicon-default"
+              :src="DEFAULT_FAVICON"
+              alt=""
+            />
             <span v-else class="pin-icon" title="已固定">📌</span>
             <span class="title">{{ tab.title || '启动页' }}</span>
-            <button class="close-btn" title="关闭标签" @click="onTabClose($event, tab.id)">×</button>
+            <button class="close-btn" title="关闭标签" @click="onTabClose($event, tab.id)">
+              ×
+            </button>
           </div>
         </template>
       </template>
@@ -267,7 +277,9 @@ function onFaviconError(e: Event) {
   cursor: pointer;
   font-size: 12px;
   flex-shrink: 0;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 .workspace-btn:hover {
   background: var(--bg-hover);
@@ -412,7 +424,11 @@ function onFaviconError(e: Event) {
   border-radius: 8px 8px 0 0;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background 0.2s, box-shadow 0.2s, color 0.2s, border-color 0.2s;
+  transition:
+    background 0.2s,
+    box-shadow 0.2s,
+    color 0.2s,
+    border-color 0.2s;
 }
 .tab:hover {
   background: var(--bg-hover);
@@ -459,7 +475,9 @@ function onFaviconError(e: Event) {
   line-height: 16px;
   margin-left: 4px;
   flex-shrink: 0;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 .tab:hover .close-btn {
   display: block;
@@ -533,7 +551,9 @@ function onFaviconError(e: Event) {
   cursor: pointer;
   font-size: 18px;
   flex-shrink: 0;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 .new-tab-btn:hover {
   background: var(--bg-active);

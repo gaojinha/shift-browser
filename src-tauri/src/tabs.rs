@@ -53,24 +53,9 @@ impl TabManager {
     }
   }
 
-  /// 生成简单 UUID（避免额外依赖）
-  /// 注意：{:08x} 强制补零，保证 s 恰好 32 字符，避免切片越界
+  /// 生成 UUID v4（真随机，crypto 级）
   fn uuid() -> String {
-    let s = format!(
-      "{:08x}{:08x}{:08x}{:08x}",
-      rand_u32(),
-      rand_u32(),
-      rand_u32(),
-      rand_u32()
-    );
-    format!(
-      "{}-{}-4{}-{}-{}",
-      &s[0..8],
-      &s[8..12],
-      &s[12..15],
-      &s[15..19],
-      &s[19..31]
-    )
+    uuid::Uuid::new_v4().to_string()
   }
 
   fn all_tabs(&self) -> Vec<Tab> {
@@ -666,19 +651,6 @@ fn find_or_create_fixed(vbox: &gtk::Box) -> gtk::Fixed {
   vbox.pack_start(&f, true, true, 0);
   f.show();
   f
-}
-
-/// 随机数（简单 xorshift，够用即可）
-fn rand_u32() -> u32 {
-  use std::time::{SystemTime, UNIX_EPOCH};
-  let nanos = SystemTime::now()
-    .duration_since(UNIX_EPOCH)
-    .map(|d| d.subsec_nanos())
-    .unwrap_or(0);
-  let mut x = nanos.wrapping_mul(0x9E3779B9).wrapping_add(0x85EBCA6B);
-  x ^= x >> 13;
-  x = x.wrapping_mul(0xC2B2AE35);
-  x ^ (x >> 16)
 }
 
 /// 创建新标签页

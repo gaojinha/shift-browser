@@ -42,14 +42,19 @@ pub async fn record_history(
       .await?;
   }
 
-  // 清理超过 10000 条的旧记录
-  sqlx::query(
-    "DELETE FROM history WHERE id IN (
-      SELECT id FROM history ORDER BY last_visit_at DESC LIMIT -1 OFFSET 10000
-    )",
-  )
-  .execute(&db.pool)
-  .await?;
+  // 超过 10000 条才清理旧记录（避免每次访问都跑全表 DELETE）
+  let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history")
+    .fetch_one(&db.pool)
+    .await?;
+  if count > 10_000 {
+    sqlx::query(
+      "DELETE FROM history WHERE id IN (
+        SELECT id FROM history ORDER BY last_visit_at DESC LIMIT -1 OFFSET 10000
+      )",
+    )
+    .execute(&db.pool)
+    .await?;
+  }
 
   Ok(())
 }

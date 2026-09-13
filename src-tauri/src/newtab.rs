@@ -472,7 +472,8 @@ fn render_html(
   }}
   function applyInlineFs() {{
     localStorage.setItem('sb_reader_fs', inlineFs);
-    panelBody.innerHTML = panelBody.innerHTML;  // 重渲染
+    // 注意：不能 panelBody.innerHTML = panelBody.innerHTML 重渲染，
+    // 会重建 DOM 丢掉 bindInline 绑定的事件（字号按钮点一次就失效）
     var c = document.getElementById('content');
     if (c) c.style.setProperty('--fs', inlineFs + 'px');
   }}
