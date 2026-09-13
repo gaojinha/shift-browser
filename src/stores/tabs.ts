@@ -14,6 +14,8 @@ interface TabsState {
   pollTimer: number | null
   /** 切换中标记（合并连点，防消息排队） */
   _switching: boolean
+  /** 用户操作自增令牌：close/switch 与轮询并发时，过期回调不回写 activeTabId */
+  _opSeq: number
 }
 
 export const useTabsStore = defineStore('tabs', {
@@ -22,6 +24,7 @@ export const useTabsStore = defineStore('tabs', {
     activeTabId: null,
     pollTimer: null,
     _switching: false,
+    _opSeq: 0,
   }),
 
   getters: {
@@ -31,13 +34,18 @@ export const useTabsStore = defineStore('tabs', {
   },
 
   actions: {
-    /** 从 Rust 拉取全部标签（启动时调用） */
+    /** 从 Rust 拉取全部标签（启动时调用），失败不抛（App.vue 初始化链依赖此方法不炸） */
     async loadTabs() {
-      const tabs = await invoke<Tab[]>('get_tabs')
-      // Rust 返回的 Tab 无 groupId 字段，补默认值（未分组）
-      this.tabs = tabs.map((t) => ({ ...t, groupId: t.groupId ?? null }))
-      const active = tabs.find((t) => t.is_active)
-      this.activeTabId = active?.id ?? null
+      try {
+        const tabs = await invoke<Tab[]>('get_tabs')
+        // Rust 返回的 Tab 无 groupId 字段，补默认值（未分组）
+        this.tabs = tabs.map((t) => ({ ...t, groupId: t.groupId ?? null }))
+        const active = tabs.find((t) => t.is_active)
+        this.activeTabId = active?.id ?? null
+      } catch (e) {
+        console.error('[tabs] 加载标签失败:', e)
+        useToastStore().error('加载标签页失败')
+      }
     },
 
     /** 分配标签到分组（groupId = null 表示取消分组） */
@@ -76,10 +84,14 @@ export const useTabsStore = defineStore('tabs', {
 
     /** 关闭标签页 */
     async closeTab(id: string) {
+      const my = ++this._opSeq
       try {
         const next = await invoke<Tab | null>('close_tab', { id })
+        // 标签确实关了，列表总是同步（Rust 是权威）
         this.tabs = this.tabs.filter((t) => t.id !== id)
-        if (this.activeTabId === id) {
+        // 但 activeTabId 归属只在没有更新的用户操作时回写，
+        // 否则会覆盖用户刚点的 switchTab 结果
+        if (my === this._opSeq && this.activeTabId === id) {
           this.activeTabId = next?.id ?? null
           if (next) {
             for (const t of this.tabs) {
@@ -98,9 +110,11 @@ export const useTabsStore = defineStore('tabs', {
       // 合并连点：上一次切换未返回时忽略新点击（快速连点会让主线程消息排队逐个重绘，越切越卡）
       if (this._switching) return
       this._switching = true
+      const my = ++this._opSeq
       try {
         const tab = await invoke<Tab | null>('switch_tab', { id })
-        if (!tab) return
+        // 过期回调：期间用户又关了/切了别的标签，不回写激活状态
+        if (!tab || my !== this._opSeq) return
         for (const t of this.tabs) {
           t.is_active = t.id === id
         }
@@ -130,13 +144,22 @@ export const useTabsStore = defineStore('tabs', {
     /** 后退（当前活动标签） */
     async goBack() {
       if (!this.activeTabId) return
-      await invoke<Tab | null>('go_back')
+      try {
+        await invoke<Tab | null>('go_back')
+      } catch (e) {
+        // 无历史可退属正常交互，静默忽略；其余错误记录
+        console.error('[tabs] 后退失败:', e)
+      }
     },
 
     /** 前进（当前活动标签） */
     async goForward() {
       if (!this.activeTabId) return
-      await invoke<Tab | null>('go_forward')
+      try {
+        await invoke<Tab | null>('go_forward')
+      } catch (e) {
+        console.error('[tabs] 前进失败:', e)
+      }
     },
 
     /** 同步标签元数据（标题/图标） */
@@ -150,7 +173,14 @@ export const useTabsStore = defineStore('tabs', {
 
     /** 恢复指定工作区最近会话（有会话则逐个恢复标签，返回是否恢复成功） */
     async restoreLastSession(workspaceId: number | null = null): Promise<boolean> {
-      const session = await invoke<Session | null>('load_last_session', { workspaceId })
+      let session: Session | null = null
+      try {
+        session = await invoke<Session | null>('load_last_session', { workspaceId })
+      } catch (e) {
+        // 容错：会话加载失败不向上抛（工作区切换流程依赖此方法不炸）
+        console.error('[tabs] 加载会话失败:', e)
+        return false
+      }
       if (!session) return false
       let tabs: SessionTab[] = []
       try {
@@ -215,12 +245,15 @@ export const useTabsStore = defineStore('tabs', {
       if (this.pollTimer) return
       this.pollTimer = window.setInterval(async () => {
         try {
+          const my = this._opSeq
           const tabs = await invoke<Tab[]>('get_tabs')
           // 保留前端运行时 groupId（Rust 侧无此字段）
           const prevGroups = new Map(this.tabs.map((t) => [t.id, t.groupId]))
           this.tabs = tabs.map((t) => ({ ...t, groupId: prevGroups.get(t.id) ?? null }))
+          // activeTabId 只在轮询期间无用户操作时回写（_opSeq 未变），
+          // 避免 poll 的 is_active 覆盖用户刚点的 switchTab/closeTab 结果
           const active = tabs.find((t) => t.is_active)
-          if (active) this.activeTabId = active.id
+          if (active && my === this._opSeq) this.activeTabId = active.id
         } catch (e) {
           console.error('[tabs] 轮询标签失败:', e)
         }

@@ -19,7 +19,9 @@ async fn scrape_article(url: &str) -> Result<readability::extractor::Product, St
 }
 
 /// 移除正文中的危险标签与事件属性（防 XSS）：
-/// script/style/iframe/object/embed/svg 整块删除，on* 事件属性剥掉
+/// script/style/iframe/object/embed/svg 整块删除，on* 事件属性剥掉，
+/// javascript:/vbscript:/data:text/html 协议的 href/src/action 剥掉，
+/// <base> 删除（防相对链接被劫持）
 fn sanitize_html(html: &str) -> String {
     let re_script = regex::Regex::new(r"(?is)<script\b[^>]*>.*?</script>").unwrap();
     let re_style = regex::Regex::new(r"(?is)<style\b[^>]*>.*?</style>").unwrap();
@@ -27,12 +29,27 @@ fn sanitize_html(html: &str) -> String {
     let re_object = regex::Regex::new(r"(?is)<object\b[^>]*>.*?</object>").unwrap();
     let re_embed = regex::Regex::new(r"(?is)<embed\b[^>]*/?>").unwrap();
     let re_svg = regex::Regex::new(r"(?is)<svg\b[^>]*>.*?</svg>").unwrap();
+    let re_base = regex::Regex::new(r"(?is)<base\b[^>]*/?>").unwrap();
     let re_events = regex::Regex::new(r#"(?i)\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)"#).unwrap();
+    // 危险协议的 URL 属性（javascript:/vbscript:/data:text/html 可执行代码）
+    let re_danger_uri = regex::Regex::new(
+        r#"(?i)\s(href|src|action|xlink:href)\s*=\s*("|')(javascript|vbscript|data:text/html)[^"']*("|')"#,
+    )
+    .unwrap();
     let mut s = html.to_string();
-    for re in [&re_script, &re_style, &re_iframe, &re_object, &re_embed, &re_svg] {
+    for re in [
+        &re_script,
+        &re_style,
+        &re_iframe,
+        &re_object,
+        &re_embed,
+        &re_svg,
+        &re_base,
+    ] {
         s = re.replace_all(&s, "").to_string();
     }
     s = re_events.replace_all(&s, "").to_string();
+    s = re_danger_uri.replace_all(&s, "").to_string();
     s
 }
 
@@ -99,6 +116,9 @@ fn render_reader_html(title: &str, source: &str, content: &str) -> String {
 <head>
 <meta charset="utf-8">
 <title>__TITLE__</title>
+<!-- 阅读页是 file:// 加载，tauri.conf.json 的全局 CSP 不生效，必须自带 meta CSP。
+     正文是外部网页内容（已过 sanitize_html），此处纵深防御：禁 connect/frame/form/base。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: http: data:; media-src https: http: data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <style>
   :root { --fs: 19px; }
   body { background:#1c1c1e; color:#d8d8d8; margin:0; font:var(--fs)/1.9 -apple-system,"PingFang SC","Microsoft YaHei",serif; }

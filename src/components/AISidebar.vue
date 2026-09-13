@@ -36,6 +36,8 @@ watch(
 )
 
 async function onSend() {
+  // loading 期不发送也不清输入框，避免用户打了一半的内容被丢弃
+  if (aiStore.loading) return
   const text = input.value
   if (!text.trim()) return
   input.value = ''

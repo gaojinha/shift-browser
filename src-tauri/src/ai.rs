@@ -39,6 +39,9 @@ pub async fn ai_chat(
 ) -> Result<String, String> {
     let api_key = api_key
         .filter(|k| !k.trim().is_empty())
+        // 掩码（前4后4 ****）不是真 key：get_all_settings 对 ai_api_key 返回掩码，
+        // 前端若误把掩码回传，这里忽略并回退环境变量，避免用无效 key 请求
+        .filter(|k| !k.contains("****"))
         .or_else(|| std::env::var("AGNES_API_KEY").ok())
         .ok_or_else(|| "未配置 API Key（在设置里填写，或设置 AGNES_API_KEY 环境变量）".to_string())?;
     let model = model.unwrap_or_else(|| "agnes-2.0-flash".to_string());
@@ -69,7 +72,13 @@ pub async fn ai_chat(
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         // 截断过长错误体（有些网关返回整页 HTML，原样透传会让前端显示一坨）
-        let body = if body.len() > 200 { format!("{}…(截断)", &body[..200]) } else { body };
+        // 注意按字符截断而非字节切片——中文等多字节字符的字节边界会 panic
+        let body = if body.chars().count() > 200 {
+            let truncated: String = body.chars().take(200).collect();
+            format!("{}…(截断)", truncated)
+        } else {
+            body
+        };
         log::error!("[ai] 服务错误 {}: {}", status, body);
         return Err(format!("AI 服务错误 {}: {}", status, body));
     }

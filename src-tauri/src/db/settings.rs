@@ -36,12 +36,16 @@ fn is_allowed(key: &str) -> bool {
 }
 
 /// API Key 掩码（保留前 4 后 4，中间 ****；太短则全掩）
+/// 按字符操作而非字节切片——多字节字符（中文等）在字节边界切片会 panic
 fn mask_api_key(v: &str) -> String {
     let v = v.trim();
-    if v.len() <= 8 {
+    let cs: Vec<char> = v.chars().collect();
+    if cs.len() <= 8 {
         "****".to_string()
     } else {
-        format!("{}****{}", &v[..4], &v[v.len() - 4..])
+        let head: String = cs[..4].iter().collect();
+        let tail: String = cs[cs.len() - 4..].iter().collect();
+        format!("{}****{}", head, tail)
     }
 }
 
@@ -57,7 +61,14 @@ pub async fn get_setting(db: tauri::State<'_, Db>, key: String) -> DbResult<Opti
       .bind(&key)
       .fetch_optional(&db.pool)
       .await?;
-  Ok(row.map(|r| r.0))
+  // 与 get_all_settings 的脱敏契约一致：ai_api_key 返回掩码，明文 key 不出库
+  Ok(row.map(|r| {
+    if key == "ai_api_key" && !r.0.is_empty() {
+      mask_api_key(&r.0)
+    } else {
+      r.0
+    }
+  }))
 }
 
 /// 获取所有设置（敏感项脱敏：master_key 不返回，ai_api_key 返回掩码）

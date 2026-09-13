@@ -78,8 +78,8 @@ export const useWorkspacesStore = defineStore('workspaces', {
     async deleteWorkspace(id: number) {
       try {
         await invoke('delete_workspace', { id })
+        // 删除成功后，若删的是当前工作区 → 保存当前标签到默认工作区，清空标签，恢复默认会话
         if (this.currentId === id) {
-          // 当前工作区被删 → 保存当前标签到默认工作区，清空标签，恢复默认工作区会话
           const tabs = useTabsStore()
           await tabs.saveCurrentSession(null)
           await tabs.clearAllTabs()
@@ -96,21 +96,30 @@ export const useWorkspacesStore = defineStore('workspaces', {
     /**
      * 切换到目标工作区
      * 流程：保存当前标签到当前工作区 → 清空全部标签 → 恢复目标工作区标签
+     * currentId 在恢复完成后才提交（restoreLastSession 内部已容错），
+     * 失败时回滚到原工作区，避免空快照覆盖目标工作区会话
      */
     async switchWorkspace(id: number | null) {
       if (this.switching || id === this.currentId) return
       this.switching = true
+      const prev = this.currentId
       try {
         const tabs = useTabsStore()
-        // 1. 保存当前标签到当前工作区
+        // 1. 保存当前标签到当前工作区（内部容错，失败不阻断）
         await tabs.saveCurrentSession(this.currentId)
         // 2. 清空全部标签
         await tabs.clearAllTabs()
-        // 3. 恢复目标工作区标签
-        this.currentId = id
+        // 3. 恢复目标工作区标签（内部容错）
         await tabs.restoreLastSession(id)
+        // 4. 恢复完成后才提交 currentId
+        this.currentId = id
       } catch (e) {
         console.error('[workspaces] 切换工作区失败:', e)
+        // 回滚：清空可能恢复一半的标签，回到原工作区
+        const tabs = useTabsStore()
+        await tabs.clearAllTabs().catch(() => {})
+        await tabs.restoreLastSession(prev).catch(() => {})
+        this.currentId = prev
         useToastStore().error('切换工作区失败')
       } finally {
         this.switching = false

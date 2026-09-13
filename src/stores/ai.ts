@@ -48,14 +48,18 @@ export const useAIStore = defineStore('ai', {
         const model = settingsStore.get('ai_model') || 'agnes-2.0-flash'
         const baseUrl = settingsStore.get('ai_base_url') || ''
         const apiKey = settingsStore.get('ai_api_key') || ''
+        // get_all_settings 返回的是掩码（前4后4 ****），不是真 key：
+        // 不回传（避免网络层泄露），后端也会忽略掩码并回退环境变量
+        const realKey = apiKey.includes('****') ? '' : apiKey
         const reply = await invoke<string>('ai_chat', {
           messages: [
             { role: 'system', content: system },
-            ...this.messages.map((m) => ({ role: m.role, content: m.content })),
+            // 只回传最近 20 条历史，长对话 payload 不会无限膨胀（省 token、防超时）
+            ...this.messages.slice(-20).map((m) => ({ role: m.role, content: m.content })),
           ],
           model,
           baseUrl: baseUrl || undefined,
-          apiKey: apiKey || undefined,
+          apiKey: realKey || undefined,
         })
         this.messages.push({ role: 'assistant', content: reply })
       } catch (e) {

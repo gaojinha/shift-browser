@@ -7,6 +7,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener'
 import { useDownloadsStore } from '../stores/downloads'
+import { useToastStore } from '../stores/toast'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -25,13 +26,24 @@ onUnmounted(() => {
 })
 
 // 弹窗显示时隐藏所有标签 webview（child 盖在 Vue UI 上），关闭时恢复
+// 竞态防护：seq 令牌丢弃过期回调；加载失败也必须在 finally 里恢复/隐藏 webview
+let seq = 0
 watch(
   () => props.show,
   async (v) => {
-    if (v) {
-      await downloadsStore.loadDownloads()
+    const my = ++seq
+    try {
+      if (v) {
+        await downloadsStore.loadDownloads()
+      }
+    } catch (e) {
+      console.error('[downloads] 加载失败:', e)
+      useToastStore().error('加载下载记录失败')
+    } finally {
+      if (my === seq) {
+        await invoke('set_webview_visible', { visible: !v }).catch(() => {})
+      }
     }
-    await invoke('set_webview_visible', { visible: !v })
   },
 )
 

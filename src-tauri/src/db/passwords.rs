@@ -26,17 +26,34 @@ fn write_key_file(path: &Path, encoded: &str) -> DbResult<()> {
 /// 获取主密钥（不存在则生成随机 32 字节并写入独立密钥文件）
 /// 迁移兼容：旧版本主密钥存在 settings 表（key=master_key），首次启动时
 /// 自动迁移到密钥文件并删除数据库里的明文残留。
+/// 注意：密钥文件存在但损坏/无法读取时**绝不静默覆盖**——否则存量密码全部不可解密。
 async fn get_master_key(db: &Db) -> DbResult<[u8; 32]> {
-    // 1. 优先从密钥文件读取
-    if let Ok(encoded) = std::fs::read_to_string(&db.key_path) {
+    // 1. 优先从密钥文件读取；文件存在但非法 → 报错停用，不重新生成
+    if db.key_path.exists() {
+        let encoded = std::fs::read_to_string(&db.key_path).map_err(|e| {
+            DbError::Other(format!(
+                "主密钥文件读取失败（{}），密码功能已停用。请检查 {} 权限或从备份恢复",
+                e,
+                db.key_path.display()
+            ))
+        })?;
         let encoded = encoded.trim();
-        if let Ok(bytes) = BASE64.decode(encoded) {
-            if bytes.len() == 32 {
-                let mut key = [0u8; 32];
-                key.copy_from_slice(&bytes);
-                return Ok(key);
-            }
+        let bytes = BASE64.decode(encoded).map_err(|_| {
+            DbError::Other(format!(
+                "主密钥文件格式损坏，密码功能已停用。请从备份恢复 {}",
+                db.key_path.display()
+            ))
+        })?;
+        if bytes.len() != 32 {
+            return Err(DbError::Other(format!(
+                "主密钥文件内容非法（长度 {}），密码功能已停用。请从备份恢复 {}",
+                bytes.len(),
+                db.key_path.display()
+            )));
         }
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&bytes);
+        return Ok(key);
     }
 
     // 2. 文件不存在 → 尝试迁移旧值（settings 表 master_key）

@@ -221,6 +221,11 @@ async fn fetch_one(client: &reqwest::Client, db: &Db, source: &str, url: &str, c
             return 0;
         }
     };
+    // 安全：响应体上限 4MB——个别聚合源可达数 MB，62 源并发时无上限会让内存峰值失控
+    if bytes.len() > 4 * 1024 * 1024 {
+        log::warn!("[feed] {} 响应体过大（{} 字节），跳过", source, bytes.len());
+        return 0;
+    }
     let xml = decode_feed_bytes(&bytes, charset.as_deref());
     let items = parse_feed(&xml);
     let mut count = 0;
@@ -257,19 +262,27 @@ async fn fetch_one(client: &reqwest::Client, db: &Db, source: &str, url: &str, c
     count
 }
 
-/// 全量刷新（并发 62 源，单请求 15s 超时）
+/// 全量刷新（并发抓取，单请求 15s 超时）
+/// 并发限流：信号量压到 16 路——62 源全开 + 失败重试翻倍会与 UI 命令抢 SQLite
+/// 连接池（5 连接）和写锁，导致启动后半小时内历史/会话保存偶发卡顿
 pub async fn refresh_all(db: &Db) -> usize {
     let sources = load_sources();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
-        .user_agent("ShiftBrowser/5.6 (RSS reader)")
+        .user_agent(format!("ShiftBrowser/{} (RSS reader)", env!("CARGO_PKG_VERSION")))
         .build()
         .unwrap_or_default();
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(16));
     let mut set = tokio::task::JoinSet::new();
     for (name, url, category) in sources {
         let client = client.clone();
         let pool = db.pool.clone();
+        let sem = sem.clone();
         set.spawn(async move {
+            // 信号量只在被 close 时 acquire 失败（本应用不会发生），失败直接放弃该源
+            let Ok(_permit) = sem.acquire_owned().await else {
+                return 0;
+            };
             // fetch_one 只使用 pool，key_path 用临时空值（密码相关操作不会走到这里）
             let db_owned = Db { pool, key_path: std::path::PathBuf::new() };
             let n = fetch_one(&client, &db_owned, &name, &url, &category).await;

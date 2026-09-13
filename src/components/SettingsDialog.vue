@@ -5,6 +5,7 @@ import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useSettingsStore } from '../stores/settings'
 import { useExtensionsStore } from '../stores/extensions'
+import { useToastStore } from '../stores/toast'
 import type { Extension } from '../types/extension'
 
 const props = defineProps<{ show: boolean }>()
@@ -13,16 +14,44 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const settingsStore = useSettingsStore()
 const extensionsStore = useExtensionsStore()
 
+// AI Key 输入框：不回显掩码（get_all_settings 返回前4后4掩码），
+// 留空 = 保持原值；输入新值才保存。hasAiKey 判断是否已配置（掩码非空即已配置）
+const aiKeyInput = ref('')
+const hasAiKey = () => {
+  const v = settingsStore.get('ai_api_key')
+  return v !== '' && v !== undefined
+}
+async function onAiKeyChange() {
+  const v = aiKeyInput.value.trim()
+  if (v) {
+    await settingsStore.set('ai_api_key', v)
+  }
+  aiKeyInput.value = ''
+}
+
 // 弹窗显示时隐藏所有标签 webview（child 盖在 Vue UI 上），关闭时恢复
+// 竞态防护：seq 令牌丢弃过期回调；加载失败也必须在 finally 里恢复/隐藏 webview
+let seq = 0
 watch(
   () => props.show,
   async (v) => {
-    if (v) {
-      if (!settingsStore.loaded) settingsStore.loadSettings().catch(() => {})
-      extensionsStore.loadExtensions().catch(() => {})
-      loadKeywords().catch(() => {})
+    const my = ++seq
+    try {
+      if (v) {
+        if (!settingsStore.loaded) settingsStore.loadSettings().catch(() => {})
+        extensionsStore.loadExtensions().catch(() => {})
+        loadKeywords().catch(() => {})
+        // 打开时清空 AI Key 输入框：不回显掩码，避免用户无意把掩码写回库
+        aiKeyInput.value = ''
+      }
+    } catch (e) {
+      console.error('[settings] 加载失败:', e)
+      useToastStore().error('加载设置失败')
+    } finally {
+      if (my === seq) {
+        await invoke('set_webview_visible', { visible: !v }).catch(() => {})
+      }
     }
-    await invoke('set_webview_visible', { visible: !v })
   },
 )
 
@@ -78,11 +107,17 @@ async function onDeleteExtension(id: number) {
   await extensionsStore.deleteExtension(id).catch(() => {})
 }
 
-/** 广告拦截开关 */
+/** 广告拦截开关：settings 表是唯一状态源，set_adblock_enabled 只负责把开关同步给注入器 */
 async function onToggleAdblock() {
   const current = settingsStore.get('adblock_enabled') !== 'false'
-  await settingsStore.set('adblock_enabled', (!current).toString())
-  await invoke('set_adblock_enabled', { enabled: !current })
+  const next = (!current).toString()
+  await settingsStore.set('adblock_enabled', next)
+  try {
+    await invoke('set_adblock_enabled', { enabled: next === 'true' })
+  } catch (e) {
+    console.error('[settings] 广告拦截同步失败:', e)
+    useToastStore().error('广告拦截切换失败')
+  }
 }
 
 /** 用户自定义广告关键词 */
@@ -99,10 +134,18 @@ async function loadKeywords() {
 }
 
 async function saveKeywords(list: string[]) {
+  const prev = customKeywords.value
   customKeywords.value = list
-  await invoke('set_adblock_keywords', { keywords: list })
-  kwMsg.value = '已保存，刷新页面后生效'
-  setTimeout(() => (kwMsg.value = ''), 2500)
+  try {
+    await invoke('set_adblock_keywords', { keywords: list })
+    kwMsg.value = '已保存，刷新页面后生效'
+    setTimeout(() => (kwMsg.value = ''), 2500)
+  } catch (e) {
+    console.error('[settings] 保存关键词失败:', e)
+    // 回滚，避免 UI 与数据库不一致
+    customKeywords.value = prev
+    useToastStore().error('保存关键词失败')
+  }
 }
 
 async function onAddKeyword() {
@@ -123,7 +166,7 @@ async function onRemoveKeyword(k: string) {
 </script>
 
 <template>
-  <div class="dialog-overlay" v-if="props.show" @click.self="emit('close')">
+  <div class="dialog-overlay" v-if="props.show">
     <div class="dialog">
       <div class="dialog-header">
         <span>⚙ 设置</span>
@@ -209,10 +252,10 @@ async function onRemoveKeyword(k: string) {
             <label>API Key</label>
             <input
               type="password"
-              :value="settingsStore.get('ai_api_key')"
-              placeholder="留空使用环境变量 AGNES_API_KEY"
+              v-model="aiKeyInput"
+              :placeholder="hasAiKey() ? '已配置（不回显），留空保持不变' : '留空使用环境变量 AGNES_API_KEY'"
               spellcheck="false"
-              @change="onSet('ai_api_key', ($event.target as HTMLInputElement).value.trim())"
+              @change="onAiKeyChange"
             />
           </div>
         </div>

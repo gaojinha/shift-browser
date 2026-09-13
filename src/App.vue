@@ -33,18 +33,26 @@ onMounted(async () => {
   settingsStore.loadSettings().catch(() => {})
   // 分组尽早加载（不等标签恢复，避免右键菜单/组头迟迟不显示）
   groupsStore.loadGroups().catch(() => {})
-  // 工作区列表加载（当前工作区 = 默认）
-  await workspacesStore.loadWorkspaces()
-  // 启动时恢复标签状态
-  await tabsStore.loadTabs()
-  if (tabsStore.tabs.length === 0) {
-    // 无标签：先尝试恢复当前工作区最近会话，失败则创建默认标签
-    const restored = await tabsStore.restoreLastSession(workspacesStore.currentId)
-    if (!restored) {
-      await tabsStore.createTab()
+  try {
+    // 工作区列表加载（当前工作区 = 默认）
+    await workspacesStore.loadWorkspaces()
+    // 启动时恢复标签状态（loadTabs 内部已容错）
+    await tabsStore.loadTabs()
+    if (tabsStore.tabs.length === 0) {
+      // 无标签：先尝试恢复当前工作区最近会话，失败则创建默认标签
+      const restored = await tabsStore.restoreLastSession(workspacesStore.currentId)
+      if (!restored) {
+        await tabsStore.createTab()
+      }
+    }
+  } catch (e) {
+    console.error('[app] 启动初始化失败:', e)
+    // 兜底：至少保证有一个标签可用
+    if (tabsStore.tabs.length === 0) {
+      await tabsStore.createTab().catch(() => {})
     }
   }
-  // 启动标题/URL 轮询（Rust 侧 on_page_load 更新，前端定时同步）
+  // 无论初始化成功失败，轮询都要启动（Rust 侧状态可能在初始化期间已变化）
   tabsStore.startPolling()
 })
 

@@ -78,14 +78,25 @@ fn read_extension_dir(path: &str) -> Result<ExtensionDirResult, String> {
 
     let mut js_sources: Vec<String> = Vec::new();
     let mut css_sources: Vec<String> = Vec::new();
+    // 安全：manifest 里的脚本/样式路径必须解析后仍落在扩展目录内，
+    // 防止恶意/被篡改的 manifest 声明 "../../../.ssh/id_rsa" 之类路径越界读任意文件
+    let base = std::path::Path::new(&base_dir);
     for cs in &manifest.content_scripts {
         for js in &cs.js {
-            let content = std::fs::read_to_string(format!("{}/{}", base_dir, js))
+            let p = base.join(js);
+            if !p.starts_with(base) {
+                return Err(format!("脚本路径越界（拒绝）: {}", js));
+            }
+            let content = std::fs::read_to_string(&p)
                 .map_err(|e| format!("读取脚本 {} 失败: {}", js, e))?;
             js_sources.push(content);
         }
         for css in &cs.css {
-            let content = std::fs::read_to_string(format!("{}/{}", base_dir, css))
+            let p = base.join(css);
+            if !p.starts_with(base) {
+                return Err(format!("样式路径越界（拒绝）: {}", css));
+            }
+            let content = std::fs::read_to_string(&p)
                 .map_err(|e| format!("读取样式 {} 失败: {}", css, e))?;
             css_sources.push(content);
         }
@@ -273,6 +284,9 @@ const ADBLOCK_JS_TEMPLATE: &str = r#"
   var HIDDEN = 'data-sb-hidden';
   function hideByText() {
     var nodes = document.querySelectorAll('div, section, aside');
+    // 性能保护：超大 DOM（几十万节点的重型 SPA）全扫会卡主线程，超过 3000 节点直接放弃文本扫描
+    // （CSS [class*=ad]/[id*=ad] 规则仍会生效，只是文本特征词兜底失效，可接受）
+    if (nodes.length > 3000) return;
     for (var i = 0; i < nodes.length; i++) {
       var el = nodes[i];
       if (el.getAttribute(HIDDEN)) continue;

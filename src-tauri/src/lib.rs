@@ -13,9 +13,8 @@ use tauri::Manager;
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_opener::init())
-    .plugin(tauri_plugin_shell::init())
-    .plugin(tauri_plugin_dialog::init())
-    .plugin(tauri_plugin_fs::init())
+    // 注意：不再注册 shell/dialog/fs 插件——前端只用到 opener，
+    // 多余插件只增加攻击面与二进制体积（安全最小化原则）
     .plugin(
       tauri_plugin_log::Builder::default()
         .level(log::LevelFilter::Info)
@@ -165,15 +164,19 @@ pub fn run() {
         extensions::inject_on_startup(&app_handle, &db_state);
       }
 
-      // 启动时生成新标签页（左侧栏面板生态）
+      // 启动时生成新标签页（左侧栏面板生态）——异步生成，不阻塞主线程首绘
+      // 前端 newtab_url 在文件不存在时会自行触发 generate（newtab.rs），有兜底
       {
-        let db_state = app.state::<Db>();
-        if let Some(path) = newtab::newtab_path(app.handle()) {
-            match tauri::async_runtime::block_on(newtab::generate(&db_state, &path)) {
-                Ok(p) => log::info!("[ShiftBrowser] 新标签页已生成: {}", p),
-                Err(e) => log::error!("[ShiftBrowser] 新标签页生成失败: {}", e),
+        let app_handle = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+          let db_state = app_handle.state::<Db>();
+          if let Some(path) = newtab::newtab_path(&app_handle) {
+            match newtab::generate(&db_state, &path).await {
+              Ok(p) => log::info!("[ShiftBrowser] 新标签页已生成: {}", p),
+              Err(e) => log::error!("[ShiftBrowser] 新标签页生成失败: {}", e),
             }
-        }
+          }
+        });
       }
 
       // 防御：GNOME/Xwayland 偶发把新窗口以 Iconic（最小化）状态挂起，导致窗口不映射上屏。
@@ -181,7 +184,8 @@ pub fn run() {
       {
         let app_win = app.handle().clone();
         tauri::async_runtime::spawn(async move {
-          std::thread::sleep(std::time::Duration::from_millis(1000));
+          // 用 tokio 异步 sleep，不占用阻塞线程（std::thread::sleep 会占一个 worker）
+          tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
           if let Some(w) = app_win.get_window("main") {
             let _ = w.unminimize();
             let _ = w.show();

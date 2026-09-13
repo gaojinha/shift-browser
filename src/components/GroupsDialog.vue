@@ -5,6 +5,7 @@ import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useGroupsStore } from '../stores/groups'
 import { useTabsStore } from '../stores/tabs'
+import { useToastStore } from '../stores/toast'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -30,13 +31,24 @@ const COLORS = [
 ]
 
 // 弹窗显示时隐藏所有标签 webview（child 盖在 Vue UI 上），关闭时恢复
+// 竞态防护：seq 令牌丢弃过期回调；加载失败也必须在 finally 里恢复/隐藏 webview
+let seq = 0
 watch(
   () => props.show,
   async (v) => {
-    if (v) {
-      await groupsStore.loadGroups()
+    const my = ++seq
+    try {
+      if (v) {
+        await groupsStore.loadGroups()
+      }
+    } catch (e) {
+      console.error('[groups] 加载失败:', e)
+      useToastStore().error('加载分组失败')
+    } finally {
+      if (my === seq) {
+        await invoke('set_webview_visible', { visible: !v }).catch(() => {})
+      }
     }
-    await invoke('set_webview_visible', { visible: !v })
   },
 )
 
@@ -73,16 +85,36 @@ async function saveEdit(id: number) {
 }
 
 async function onChangeColor(id: number, color: string) {
-  await groupsStore.updateGroup(id, { color })
+  // 乐观更新 + 失败回滚：双击换色时第二次读到的是新值，不会重复发相同颜色
+  const g = groupsStore.groups.find((x) => x.id === id)
+  const prev = g?.color
+  if (g) g.color = color
+  try {
+    await groupsStore.updateGroup(id, { color })
+  } catch {
+    if (g) g.color = prev ?? g.color
+  }
 }
 
 async function onToggleCollapse(g: { id: number; collapsed: boolean }) {
-  await groupsStore.updateGroup(g.id, { collapsed: !g.collapsed })
+  // 乐观翻转 + 失败回滚：双击折叠时第二次读到新值，不会重复发相同目标值
+  const next = !g.collapsed
+  g.collapsed = next
+  try {
+    await groupsStore.updateGroup(g.id, { collapsed: next })
+  } catch {
+    g.collapsed = !next
+  }
 }
 
 async function onDelete(id: number) {
   // WebKitGTK 不显示原生 confirm，直接删除（组内标签回未分组）
-  await groupsStore.deleteGroup(id)
+  // 删除失败时不清标签归属，避免 UI 与数据库脱节（分组还在但标签已清出组）
+  try {
+    await groupsStore.deleteGroup(id)
+  } catch {
+    return
+  }
   for (const t of tabsStore.tabs) {
     if (t.groupId === id) tabsStore.assignTabToGroup(t.id, null)
   }

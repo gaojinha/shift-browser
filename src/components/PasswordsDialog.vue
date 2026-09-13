@@ -5,25 +5,39 @@
 import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { usePasswordsStore } from '../stores/passwords'
+import { useToastStore } from '../stores/toast'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const passwordsStore = usePasswordsStore()
+const toastStore = useToastStore()
 
 // 弹窗显示时隐藏所有标签 webview（child 盖在 Vue UI 上），关闭时恢复
 // 注意：不能用 onMounted——组件在 App.vue 里始终挂载，onMounted 只在应用启动时执行一次
+// 竞态防护：seq 令牌丢弃过期回调；加载失败也必须在 finally 里恢复/隐藏 webview，
+// 否则弹窗被 child 盖住且遮罩拦截点击，形成死锁
+let seq = 0
 watch(
   () => props.show,
   async (v) => {
-    if (v) {
-      await passwordsStore.loadPasswords()
-    } else {
-      // 关闭时清空已查看的明文，避免再次打开时密码还留在 UI 上
-      revealId.value = null
-      revealPassword.value = ''
+    const my = ++seq
+    try {
+      if (v) {
+        await passwordsStore.loadPasswords()
+      } else {
+        // 关闭时清空已查看的明文，避免再次打开时密码还留在 UI 上
+        revealId.value = null
+        revealPassword.value = ''
+      }
+    } catch (e) {
+      console.error('[passwords] 加载失败:', e)
+      toastStore.error('加载密码失败')
+    } finally {
+      if (my === seq) {
+        await invoke('set_webview_visible', { visible: !v }).catch(() => {})
+      }
     }
-    await invoke('set_webview_visible', { visible: !v })
   },
 )
 

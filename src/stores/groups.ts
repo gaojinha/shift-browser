@@ -36,7 +36,7 @@ export const useGroupsStore = defineStore('groups', {
       }
     },
 
-    /** 更新分组（名字/颜色/折叠） */
+    /** 更新分组（名字/颜色/折叠），失败向上抛（调用方乐观更新需回滚） */
     async updateGroup(id: number, patch: { name?: string; color?: string; collapsed?: boolean }) {
       try {
         await invoke('update_tab_group', { id, ...patch })
@@ -44,10 +44,11 @@ export const useGroupsStore = defineStore('groups', {
       } catch (e) {
         console.error('[groups] 更新分组失败:', e)
         useToastStore().error('更新分组失败')
+        throw e
       }
     },
 
-    /** 删除分组 */
+    /** 删除分组（失败向上抛，调用方决定是否继续清标签归属） */
     async deleteGroup(id: number) {
       try {
         await invoke('delete_tab_group', { id })
@@ -55,6 +56,7 @@ export const useGroupsStore = defineStore('groups', {
       } catch (e) {
         console.error('[groups] 删除分组失败:', e)
         useToastStore().error('删除分组失败')
+        throw e
       }
     },
   },

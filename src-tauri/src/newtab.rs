@@ -543,7 +543,7 @@ fn render_html(
     var h2 = '<div class="item"><span class="it-title">📚 书签 ' + {bookmark_count} + ' 条</span></div>';
     h2 += '<div class="item"><span class="it-title">🕘 历史 ' + {recent_count} + ' 条</span></div>';
     h2 += '<div class="item"><span class="it-title">📝 待办未完成 ' + open + ' 条</span></div>';
-    h2 += '<div class="item"><span class="it-title">🌐 ShiftBrowser v5.5.0</span></div>';
+    h2 += '<div class="item"><span class="it-title">🌐 ShiftBrowser v{sb_version}</span></div>';
     return h2;
   }}
 
@@ -632,6 +632,7 @@ fn render_html(
             .collect::<Vec<_>>())),
         bookmark_count = bookmarks.len(),
         recent_count = recent.len(),
+        sb_version = env!("CARGO_PKG_VERSION"),
     )
 }
 

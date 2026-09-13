@@ -42,6 +42,9 @@ export const useExtensionsStore = defineStore('extensions', {
         if (item) item.enabled = enabled
       } catch (e) {
         console.error('[extensions] 切换扩展状态失败:', e)
+        // 回写原值触发重渲染，避免 checkbox 视觉状态与 store 脱节
+        const item = this.list.find((e) => e.id === id)
+        if (item) item.enabled = !enabled
         useToastStore().error('切换扩展状态失败')
       }
     },

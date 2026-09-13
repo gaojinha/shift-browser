@@ -33,15 +33,6 @@ impl Db {
       let _ = std::fs::set_permissions(&app_data_dir, std::fs::Permissions::from_mode(0o700));
     }
 
-    // 安全：数据库含加密密码/设置，权限收紧到 600（仅当前用户可读写）
-    // 注意：WAL 模式下 -wal/-shm 文件会随 db 权限创建，此处只收紧主文件；
-    // 若文件已存在且权限过宽，也一并修正
-    #[cfg(unix)]
-    {
-      use std::os::unix::fs::PermissionsExt;
-      let _ = std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600));
-    }
-
     // 注意：sqlx 的 create_if_missing 默认是 false，
     // 不加 create_if_missing(true) 时，文件不存在会报 SQLITE_CANTOPEN (code 14)
     let options = SqliteConnectOptions::new()
@@ -56,6 +47,15 @@ impl Db {
       .max_connections(5)
       .connect_with(options)
       .await?;
+
+    // 安全：数据库含加密密码/设置，权限收紧到 600（仅当前用户可读写）。
+    // 必须在 connect_with（此时才 create_if_missing 建文件）之后执行，
+    // 否则首次运行时文件尚未创建，收紧不生效、以 umask 默认权限落盘
+    #[cfg(unix)]
+    {
+      use std::os::unix::fs::PermissionsExt;
+      let _ = std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600));
+    }
 
     // 开启 WAL 与外键约束
     sqlx::query("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
@@ -101,6 +101,14 @@ impl Db {
       2,
       "feed_items",
       include_str!("../../migrations/20260913000000_feeds.sql"),
+    ), (
+      3,
+      "history_url_uniq",
+      include_str!("../../migrations/20260913000001_history_uniq.sql"),
+    ), (
+      4,
+      "drop_dead_feed_index",
+      include_str!("../../migrations/20260913000002_drop_dead_index.sql"),
     )];
 
     for (version, name, sql) in migrations {

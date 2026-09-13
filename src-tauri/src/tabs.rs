@@ -781,7 +781,15 @@ pub async fn switch_tab(
   id: String,
 ) -> Result<Option<Tab>, String> {
   log::info!("[tabs] switch_tab: id={}", id);
-  // 先隐藏当前活动 webview
+  // 先校验标签存在，再写 active_id（否则 active_id 会指向不存在的标签，
+  // 导致 go_back/go_forward 报"标签不存在"、UI 显示与实际不符）
+  {
+    let tabs = state.tabs.lock().unwrap();
+    if !tabs.contains_key(&id) {
+      return Ok(None);
+    }
+  }
+  // 隐藏当前活动 webview
   let old_active = {
     let mut active = state.active_id.lock().unwrap();
     let old = active.clone();
@@ -792,10 +800,6 @@ pub async fn switch_tab(
   // 更新激活状态
   {
     let mut tabs = state.tabs.lock().unwrap();
-    let exists = tabs.contains_key(&id);
-    if !exists {
-      return Ok(None);
-    }
     for t in tabs.values_mut() {
       t.is_active = t.id == id;
     }

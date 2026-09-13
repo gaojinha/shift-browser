@@ -24,14 +24,24 @@ const SEARCH_URLS: Record<string, string> = {
   google: 'https://www.google.com/search?q=',
 }
 
-// 当前活动标签变化时同步地址栏
+// 当前活动标签变化时同步地址栏（空 URL 也清空，避免残留上一个标签的地址）
 watch(
   () => tabsStore.activeTab?.url,
   (url) => {
-    if (url) addressInput.value = url
+    addressInput.value = url ?? ''
   },
   { immediate: true },
 )
+
+/** 判断输入是否像 URL（域名/含点/localhost/IP/host:port），而不是搜索词 */
+function looksLikeUrl(input: string): boolean {
+  return (
+    input.includes('.') ||
+    /^localhost(:\d+)?$/i.test(input) ||
+    /^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(input) ||
+    /^[a-zA-Z0-9-]+:\d+$/.test(input)
+  )
+}
 
 /** 地址栏回车：输入 URL 或搜索 */
 function onAddressEnter() {
@@ -43,8 +53,8 @@ function onAddressEnter() {
   let url = input
   // 无协议时补全 https://
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(input)) {
-    // 带空格或非域名格式 → 走搜索（用设置的搜索引擎）
-    if (/\s/.test(input) || !input.includes('.')) {
+    // 带空格或不像 URL → 走搜索（用设置的搜索引擎）
+    if (/\s/.test(input) || !looksLikeUrl(input)) {
       const engine = settingsStore.get('search_engine') || 'bing'
       const base = SEARCH_URLS[engine] ?? SEARCH_URLS.bing
       url = `${base}${encodeURIComponent(input)}`

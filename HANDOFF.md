@@ -841,3 +841,59 @@ tabs store 的 4 个核心操作（createTab/closeTab/switchTab/navigateTab）�
 
 - 无阻塞项；第十二~十三轮改动尚未重启生效（等高哥授权"重启"）
 - 后续可选：search_history LIKE 通配符转义、前端组件 UI/UX 进一步优化
+
+## 二十三、2026-09-13 第十四轮体检修复（高危 2 + 中危 11 + 低危 15）
+
+> 背景：第十三轮重启后，按高哥要求做了一次全面代码体检（4 个并行探查代理 + 交叉验证），
+> 输出报告 2 高危 / 11 中危 / 8 低危（低危展开 15 项），高哥批示"按照建议修复"，本轮全部落地。
+
+### 23.1 高危（2/2）
+
+1. **H1 AI Key 掩码被当真 key 回传（AI 功能失效）**：设置页保存 key 时把掩码回写数据库，请求时把 `sk-xxx****xxxx` 当真实 key 发给服务商。修复三处：
+   - `ai.rs`：api_key 参数含 `****` 视为未配置，回退环境变量。
+   - `ai.ts`：`realKey = apiKey.includes('****') ? '' : apiKey`，掩码不上网络。
+   - `SettingsDialog.vue`：AI Key 输入框改为"已配置（不回显），留空保持不变"，不再写回掩码。
+2. **H2 master.key 损坏静默重新生成（存量密码全废）**：`db/passwords.rs` 原来文件无法读取时重新生成新主密钥，导致已存密码全部无法解密。修复：区分"文件不存在（首次生成/迁移）"与"文件存在但损坏/读不了（报错停用，绝不覆盖）"。
+
+### 23.2 中危（11/11）
+
+3. **M1 ai.rs 错误体字节切片 panic**：错误正文截断改按字符（`chars().take(200)`），中文不再 panic。
+4. **M2 弹窗 watch 竞态（Passwords/Groups/Downloads/Settings）**：统一加 `seq` 令牌丢弃过期回调 + try/catch/finally 保证 `set_webview_visible` 必执行 + 加载失败弹 toast。
+5. **M3 扩展路径穿越**：`extensions.rs` 读 manifest 引用的 js/css 前校验落在扩展目录内（`base.join` + `starts_with`）。
+6. **M4 switch_tab 悬空 active**：`tabs.rs` 先校验标签存在再写 active_id。
+7. **M5 history 重复行**：新增迁移 v3 `20260913000001_history_uniq.sql`（合并重复行保留 MAX(id)、visit_count 累加、建 UNIQUE 索引），`record_history` 改 UPSERT（`ON CONFLICT(url)`）。
+8. **M6 feed 响应体无上限 + 无并发限制**：`feed.rs` 响应体 4MB 上限；`refresh_all` 信号量压到 16 路并发。
+9. **M7 阅读页 XSS**：`reader.rs` sanitize_html 增加剥 `<base>` + 剥 `href/src/action/xlink:href` 的 `javascript:/vbscript:/data:text/html` 协议；阅读页补 meta CSP（`default-src 'none'`）。
+10. **M8 未用插件**：删除 shell/dialog/fs 三个插件（lib.rs 注册、Cargo.toml 依赖、capabilities 权限），只留 `core:default + opener:default`。
+11. **M9 启动 block_on 阻塞**：newtab 生成改 `tauri::async_runtime::spawn`，不再阻塞主线程。
+12. **M10 tabs 竞态**：`tabs.ts` 加 `_opSeq` 令牌，closeTab/switchTab/poll 过期回调不回写 activeTabId；goBack/goForward 补 try/catch。
+13. **M11 工作区切换失败无回滚**：`workspaces.ts` currentId 在恢复完成后才提交，失败回滚原工作区；`restoreLastSession` 内部容错返回 false。
+
+### 23.3 低危（15/15）
+
+14. settings.rs 掩码改按字符（防中文 key 字节切片 panic）+ `get_setting` 对 ai_api_key 也掩码。
+15. db/mod.rs 数据库权限 600 时序修正：移到 `connect_with`（建库）之后执行，首次运行才真正生效。
+16. 广告拦截 JS 文本扫描节点上限：超过 3000 节点放弃文本特征词扫描（CSS 规则仍生效），防超大 DOM 卡主线程。
+17. lib.rs 窗口恢复 `thread::sleep` → `tokio::time::sleep`，不占阻塞线程。
+18. 版本漂移：feed.rs UA 硬编码"5.6" → `env!("CARGO_PKG_VERSION")`；newtab.rs 硬编码 v5.5.0 → format 参数 `{sb_version}`。
+19. 死索引清理：迁移 v4 `20260913000002_drop_dead_index.sql` 删 `idx_feed_items_fetched`（无查询使用，纯写开销）。
+20. CSP 收紧（tauri.conf.json）：删 `script-src 'unsafe-inline'`、connect-src 去掉 `https: http: ws:` 通配（AI 请求走后端 Rust）、加 `object-src 'none'` + `base-uri 'self'`。
+21. SettingsDialog 广告开关双写 + saveKeywords 失败回滚 + toast。
+22. GroupsDialog 删除分组失败不清标签归属（deleteGroup 失败 rethrow）；折叠/换色乐观更新 + 失败回滚（双击竞态）。
+23. AddressBar：空 URL 清空地址栏（不残留旧标签地址）；localhost/IP/host:port 识别为 URL 而非搜索词。
+24. ai.ts 消息历史只回传最近 20 条（长对话 payload 不膨胀）。
+25. App.vue 启动初始化加 try/catch 兜底（至少一个标签可用）+ loadTabs 内部容错 + startPolling 无论如何都启动。
+26. extensions.ts 开关失败回写原值（checkbox 视觉与 store 一致）。
+27. AISidebar loading 期不发送不清输入（不丢用户输入）。
+28. SettingsDialog 移除 `@click.self` 关闭（与其余弹窗统一，防误触）。
+
+### 23.4 验证结果
+
+- cargo clippy --all-targets 0 警告 ✅
+- cargo test 18 passed ✅（新增 test_history_upsert_dedupes_and_counts）
+- npm run lint 0 错误 ✅ / npm run build（vue-tsc + vite）通过 ✅
+
+### 23.5 遗留事项
+
+- 第十四轮改动尚未编译重启（等高哥授权"重启"）
+- 后续可选：search_history LIKE 通配符转义、前端组件 UI/UX 进一步优化
