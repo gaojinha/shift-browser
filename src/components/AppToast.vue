@@ -43,19 +43,19 @@ const toastStore = useToastStore()
   word-break: break-word;
 }
 .toast-item.error {
-  background: #3d1d1d;
-  border: 1px solid #e53935;
-  color: #ffcdd2;
+  background: var(--bg-secondary);
+  border: 1px solid var(--danger);
+  color: var(--text-primary);
 }
 .toast-item.success {
-  background: #1d3d2a;
-  border: 1px solid #43a047;
-  color: #c8e6c9;
+  background: var(--bg-secondary);
+  border: 1px solid var(--success);
+  color: var(--text-primary);
 }
 .toast-item.info {
-  background: #1e2a3d;
-  border: 1px solid #4a9eff;
-  color: #bbdefb;
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent);
+  color: var(--text-primary);
 }
 .toast-icon {
   flex-shrink: 0;
@@ -74,5 +74,8 @@ const toastStore = useToastStore()
 .toast-leave-to {
   opacity: 0;
   transform: translateX(24px);
+}
+.toast-move {
+  transition: transform 0.25s ease;
 }
 </style>

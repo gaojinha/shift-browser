@@ -42,6 +42,8 @@ async function onSend() {
   if (!text.trim()) return
   input.value = ''
   await aiStore.sendMessage(text)
+  // 发送失败把原文填回，用户不用重打
+  if (aiStore.error) input.value = text
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -53,12 +55,13 @@ function onKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div v-if="props.show" class="ai-overlay">
+  <Transition name="slide">
+  <div v-if="props.show" class="ai-overlay" @click.self="emit('close')">
     <div class="ai-sidebar">
       <!-- 头部 -->
       <div class="ai-header">
         <span class="ai-title">🤖 AI 助手</span>
-        <button class="ai-close" title="关闭" @click="emit('close')">✕</button>
+        <button class="ai-close" title="关闭" aria-label="关闭" @click="emit('close')">✕</button>
       </div>
 
       <!-- 快捷操作 -->
@@ -82,7 +85,7 @@ function onKeydown(e: KeyboardEvent) {
           <div class="ai-bubble">{{ m.content }}</div>
         </div>
         <div v-if="aiStore.loading" class="ai-msg assistant">
-          <div class="ai-bubble ai-thinking">思考中…</div>
+          <div class="ai-bubble ai-thinking"><span class="spinner"></span> 思考中…</div>
         </div>
         <div v-if="aiStore.error" class="ai-error">{{ aiStore.error }}</div>
       </div>
@@ -106,6 +109,7 @@ function onKeydown(e: KeyboardEvent) {
       </div>
     </div>
   </div>
+  </Transition>
 </template>
 
 <style scoped>
@@ -121,11 +125,11 @@ function onKeydown(e: KeyboardEvent) {
   position: fixed;
   right: 0;
   top: 0;
-  width: 380px;
+  width: min(380px, 100vw);
   height: 100vh;
   max-height: 100vh;
-  background: #1e1e1e;
-  border-left: 1px solid #333;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
@@ -135,46 +139,46 @@ function onKeydown(e: KeyboardEvent) {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .ai-title {
   font-size: 14px;
   font-weight: 600;
-  color: #e0e0e0;
+  color: var(--text-primary);
 }
 .ai-close {
   width: 24px;
   height: 24px;
   border: none;
   background: transparent;
-  color: #999;
+  color: var(--text-muted);
   font-size: 14px;
   cursor: pointer;
   border-radius: 4px;
 }
 .ai-close:hover {
   background: #e53935;
-  color: #fff;
+  color: var(--text-primary);
 }
 .ai-actions {
   display: flex;
   gap: 6px;
   padding: 10px 12px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--bg-secondary);
   flex-wrap: wrap;
 }
 .ai-action {
   padding: 5px 10px;
   font-size: 12px;
-  color: #4a9eff;
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  color: var(--accent);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 14px;
   cursor: pointer;
   transition: background 0.15s;
 }
 .ai-action:hover {
-  background: #383838;
+  background: var(--bg-hover);
 }
 .ai-list {
   flex: 1;
@@ -185,7 +189,7 @@ function onKeydown(e: KeyboardEvent) {
   gap: 8px;
 }
 .ai-empty {
-  color: #777;
+  color: var(--text-muted);
   font-size: 13px;
   text-align: center;
   padding: 24px 12px;
@@ -210,18 +214,21 @@ function onKeydown(e: KeyboardEvent) {
   word-break: break-word;
 }
 .ai-msg.user .ai-bubble {
-  background: #4a9eff;
-  color: #fff;
+  background: var(--accent);
+  color: var(--text-primary);
   border-bottom-right-radius: 2px;
 }
 .ai-msg.assistant .ai-bubble {
-  background: #2d2d2d;
-  color: #e0e0e0;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   border-bottom-left-radius: 2px;
 }
 .ai-thinking {
-  color: #999;
+  color: var(--text-muted);
   font-style: italic;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .ai-error {
   color: #e53935;
@@ -234,17 +241,17 @@ function onKeydown(e: KeyboardEvent) {
   display: flex;
   gap: 8px;
   padding: 10px 12px;
-  border-top: 1px solid #2a2a2a;
+  border-top: 1px solid var(--bg-secondary);
   align-items: flex-end;
 }
 .ai-input {
   flex: 1;
   min-height: 40px;
   max-height: 100px;
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 13px;
   padding: 8px 10px;
   resize: none;
@@ -252,13 +259,13 @@ function onKeydown(e: KeyboardEvent) {
   font-family: inherit;
 }
 .ai-input:focus {
-  border-color: #4a9eff;
+  border-color: var(--accent);
 }
 .ai-send {
   height: 38px;
   padding: 0 14px;
-  background: #4a9eff;
-  color: #fff;
+  background: var(--accent);
+  color: var(--text-primary);
   border: none;
   border-radius: 8px;
   font-size: 13px;
@@ -278,7 +285,7 @@ function onKeydown(e: KeyboardEvent) {
 .ai-clear {
   border: none;
   background: transparent;
-  color: #777;
+  color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
 }
@@ -286,7 +293,7 @@ function onKeydown(e: KeyboardEvent) {
   color: #e53935;
 }
 .ai-hint {
-  color: #555;
+  color: var(--text-muted);
   font-size: 11px;
 }
 </style>

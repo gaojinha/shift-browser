@@ -16,6 +16,11 @@ interface TabsState {
   _switching: boolean
   /** 用户操作自增令牌：close/switch 与轮询并发时，过期回调不回写 activeTabId */
   _opSeq: number
+  /** 正在加载的标签 id（地址栏刷新按钮转圈/进度条用） */
+  loadingTabId: string | null
+  /** 当前活动标签是否可后退/前进（前端乐观追踪，webview 内链跳也会在轮询里补 back） */
+  canGoBack: boolean
+  canGoForward: boolean
 }
 
 export const useTabsStore = defineStore('tabs', {
@@ -25,6 +30,9 @@ export const useTabsStore = defineStore('tabs', {
     pollTimer: null,
     _switching: false,
     _opSeq: 0,
+    loadingTabId: null,
+    canGoBack: false,
+    canGoForward: false,
   }),
 
   getters: {
@@ -74,6 +82,9 @@ export const useTabsStore = defineStore('tabs', {
           if (t.id !== tab.id) t.is_active = false
         }
         this.activeTabId = tab.id
+        this._markLoading(tab.id)
+        this.canGoBack = false
+        this.canGoForward = false
         return tab
       } catch (e) {
         console.error('[tabs] 创建标签失败:', e)
@@ -119,6 +130,9 @@ export const useTabsStore = defineStore('tabs', {
           t.is_active = t.id === id
         }
         this.activeTabId = id
+        // 切标签时历史栈未知：乐观允许后退（用户刚从别的页切回来多半能退），前进关掉
+        this.canGoBack = true
+        this.canGoForward = false
       } catch (e) {
         console.error('[tabs] 切换标签失败:', e)
         useToastStore().error('切换标签页失败')
@@ -127,8 +141,19 @@ export const useTabsStore = defineStore('tabs', {
       }
     },
 
+    /** 标记标签加载中，8 秒兜底关掉（同 URL 刷新时轮询可能看不出变化） */
+    _markLoading(id: string) {
+      this.loadingTabId = id
+      window.setTimeout(() => {
+        if (this.loadingTabId === id) this.loadingTabId = null
+      }, 8000)
+    },
+
     /** 导航到新 URL */
     async navigateTab(id: string, url: string) {
+      this._markLoading(id)
+      this.canGoBack = true
+      this.canGoForward = false
       try {
         const tab = await invoke<Tab | null>('navigate_tab', { id, url })
         if (tab) {
@@ -138,27 +163,34 @@ export const useTabsStore = defineStore('tabs', {
       } catch (e) {
         console.error('[tabs] 导航失败:', e)
         useToastStore().error('页面导航失败')
+        if (this.loadingTabId === id) this.loadingTabId = null
       }
     },
 
     /** 后退（当前活动标签） */
     async goBack() {
-      if (!this.activeTabId) return
+      if (!this.activeTabId || !this.canGoBack) return
+      this._markLoading(this.activeTabId)
+      this.canGoForward = true
       try {
         await invoke<Tab | null>('go_back')
       } catch (e) {
         // 无历史可退属正常交互，静默忽略；其余错误记录
         console.error('[tabs] 后退失败:', e)
+        if (this.loadingTabId === this.activeTabId) this.loadingTabId = null
       }
     },
 
     /** 前进（当前活动标签） */
     async goForward() {
-      if (!this.activeTabId) return
+      if (!this.activeTabId || !this.canGoForward) return
+      this._markLoading(this.activeTabId)
+      this.canGoBack = true
       try {
         await invoke<Tab | null>('go_forward')
       } catch (e) {
         console.error('[tabs] 前进失败:', e)
+        if (this.loadingTabId === this.activeTabId) this.loadingTabId = null
       }
     },
 
@@ -249,7 +281,21 @@ export const useTabsStore = defineStore('tabs', {
           const tabs = await invoke<Tab[]>('get_tabs')
           // 保留前端运行时 groupId（Rust 侧无此字段）
           const prevGroups = new Map(this.tabs.map((t) => [t.id, t.groupId]))
+          const prevUrls = new Map(this.tabs.map((t) => [t.id, t.url]))
+          const prevTitles = new Map(this.tabs.map((t) => [t.id, t.title]))
           this.tabs = tabs.map((t) => ({ ...t, groupId: prevGroups.get(t.id) ?? null }))
+          // 页面加载完成（URL/标题变化）→ 关掉加载指示；webview 内链跳视为可后退
+          if (this.loadingTabId) {
+            const lid = this.loadingTabId
+            const t = tabs.find((x) => x.id === lid)
+            if (
+              t &&
+              (t.url !== prevUrls.get(lid) || t.title !== prevTitles.get(lid))
+            ) {
+              this.loadingTabId = null
+              this.canGoBack = true
+            }
+          }
           // activeTabId 只在轮询期间无用户操作时回写（_opSeq 未变），
           // 避免 poll 的 is_active 覆盖用户刚点的 switchTab/closeTab 结果
           const active = tabs.find((t) => t.is_active)

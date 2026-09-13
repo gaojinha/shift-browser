@@ -101,11 +101,12 @@ async function onReveal(path: string | null) {
 </script>
 
 <template>
+  <Transition name="fade">
   <div class="dialog-overlay" v-if="props.show">
     <div class="dialog">
       <div class="dialog-header">
         <span>下载管理</span>
-        <button class="close-btn" @click="emit('close')">✕</button>
+        <button class="close-btn" aria-label="关闭" @click="emit('close')">✕</button>
       </div>
 
       <div class="dialog-body">
@@ -141,6 +142,7 @@ async function onReveal(path: string | null) {
       </div>
     </div>
   </div>
+  </Transition>
 </template>
 
 <style scoped>
@@ -154,11 +156,11 @@ async function onReveal(path: string | null) {
   z-index: 1000;
 }
 .dialog {
-  width: 520px;
+  width: min(520px, calc(100vw - 32px));
   max-height: 80vh;
-  background: #222;
+  background: var(--bg-secondary);
   border-radius: 10px;
-  border: 1px solid #444;
+  border: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -168,14 +170,14 @@ async function onReveal(path: string | null) {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 14px;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .close-btn {
   border: none;
   background: transparent;
-  color: #999;
+  color: var(--text-muted);
   font-size: 14px;
   cursor: pointer;
 }
@@ -192,7 +194,7 @@ async function onReveal(path: string | null) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #2a2a2a;
+  background: var(--bg-secondary);
   border-radius: 8px;
   padding: 10px 12px;
   gap: 10px;
@@ -205,7 +207,7 @@ async function onReveal(path: string | null) {
   flex: 1;
 }
 .item-name {
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
@@ -213,7 +215,7 @@ async function onReveal(path: string | null) {
   text-overflow: ellipsis;
 }
 .item-url {
-  color: #888;
+  color: var(--text-muted);
   font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
@@ -227,18 +229,18 @@ async function onReveal(path: string | null) {
 .progress-track {
   flex: 1;
   height: 6px;
-  background: #1e1e1e;
+  background: var(--bg-secondary);
   border-radius: 3px;
   overflow: hidden;
 }
 .progress-fill {
   height: 100%;
-  background: #4a9eff;
+  background: var(--accent);
   border-radius: 3px;
   transition: width 0.3s;
 }
 .progress-text {
-  color: #888;
+  color: var(--text-muted);
   font-size: 11px;
   flex-shrink: 0;
 }
@@ -254,7 +256,7 @@ async function onReveal(path: string | null) {
   border-radius: 4px;
 }
 .state-run {
-  color: #4a9eff;
+  color: var(--accent);
   background: rgba(74, 158, 255, 0.15);
 }
 .state-done {
@@ -266,12 +268,12 @@ async function onReveal(path: string | null) {
   background: rgba(255, 107, 107, 0.15);
 }
 .state-cancel {
-  color: #999;
+  color: var(--text-muted);
   background: rgba(153, 153, 153, 0.15);
 }
 .mini-btn {
-  background: #3d3d3d;
-  color: #ccc;
+  background: var(--bg-active);
+  color: var(--text-secondary);
   border: none;
   border-radius: 4px;
   padding: 4px 8px;
@@ -279,14 +281,14 @@ async function onReveal(path: string | null) {
   cursor: pointer;
 }
 .mini-btn:hover {
-  background: #4a4a4a;
+  background: var(--text-secondary);
 }
 .mini-btn.danger:hover {
   background: #5c2b2b;
   color: #ff8a8a;
 }
 .empty {
-  color: #666;
+  color: var(--text-muted);
   font-size: 13px;
   text-align: center;
   padding: 24px 0;

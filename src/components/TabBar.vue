@@ -15,7 +15,7 @@ const workspacesStore = useWorkspacesStore()
 const DEFAULT_FAVICON =
   'data:image/svg+xml;utf8,' +
   encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="#4a9eff"/><ellipse cx="8" cy="8" rx="3" ry="6.5" fill="none" stroke="#fff" stroke-width="0.8"/><path d="M1.5 8h13" stroke="#fff" stroke-width="0.8"/></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="var(--accent)"/><ellipse cx="8" cy="8" rx="3" ry="6.5" fill="none" stroke="#fff" stroke-width="0.8"/><path d="M1.5 8h13" stroke="#fff" stroke-width="0.8"/></svg>',
   )
 
 // 分组后的标签结构
@@ -81,6 +81,15 @@ function onTabClose(e: MouseEvent, id: string) {
   tabsStore.closeTab(id)
 }
 
+/** 鼠标中键关闭标签（auxclick button===1） */
+function onTabAuxClick(e: MouseEvent, id: string) {
+  if (e.button === 1) {
+    e.preventDefault()
+    e.stopPropagation()
+    tabsStore.closeTab(id)
+  }
+}
+
 function onNewTab() {
   tabsStore.createTab()
 }
@@ -129,11 +138,19 @@ function onFaviconError(e: Event) {
     </button>
 
     <!-- 工作区弹窗（弹窗模式：WebKitGTK 浮层菜单点击有 bug，弹窗点击可靠） -->
+    <Transition name="fade">
     <div v-if="showWorkspaceDialog" class="ws-overlay" @click.self="showWorkspaceDialog = false">
       <div class="ws-dialog">
         <div class="ws-dialog-header">
           <span>工作区（独立标签集合）</span>
-          <button class="ws-close" title="关闭" @click="showWorkspaceDialog = false">✕</button>
+          <button
+            class="ws-close"
+            title="关闭"
+            aria-label="关闭"
+            @click="showWorkspaceDialog = false"
+          >
+            ✕
+          </button>
         </div>
         <div class="ws-dialog-body">
           <div
@@ -162,6 +179,7 @@ function onFaviconError(e: Event) {
         </div>
       </div>
     </div>
+    </Transition>
 
     <div class="tab-scroll" @contextmenu.prevent>
       <!-- 未分组标签 -->
@@ -171,6 +189,7 @@ function onFaviconError(e: Event) {
         class="tab"
         :class="{ active: tab.id === tabsStore.activeTabId, pinned: tab.is_pinned }"
         @click="onTabClick(tab.id)"
+        @auxclick="onTabAuxClick($event, tab.id)"
         @contextmenu="onTabContextMenu($event, tab)"
       >
         <img v-if="tab.favicon" class="favicon" :src="tab.favicon" alt="" @error="onFaviconError" />
@@ -205,6 +224,7 @@ function onFaviconError(e: Event) {
             class="tab"
             :class="{ active: tab.id === tabsStore.activeTabId, pinned: tab.is_pinned }"
             @click="onTabClick(tab.id)"
+            @auxclick="onTabAuxClick($event, tab.id)"
             @contextmenu="onTabContextMenu($event, tab)"
           >
             <img
@@ -310,7 +330,7 @@ function onFaviconError(e: Event) {
 }
 .ws-dialog {
   width: 320px;
-  background: #222;
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
@@ -324,7 +344,7 @@ function onFaviconError(e: Event) {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .ws-close {
   width: 24px;
@@ -338,7 +358,7 @@ function onFaviconError(e: Event) {
 }
 .ws-close:hover {
   background: #e53935;
-  color: #fff;
+  color: var(--text-primary);
 }
 .ws-dialog-body {
   padding: 8px;
@@ -359,10 +379,10 @@ function onFaviconError(e: Event) {
   background: var(--bg-active);
 }
 .ws-item.active {
-  color: #4a9eff;
+  color: var(--accent);
 }
 .ws-item.accent {
-  color: #4a9eff;
+  color: var(--accent);
 }
 .ws-dot {
   width: 10px;
@@ -371,14 +391,14 @@ function onFaviconError(e: Event) {
   flex-shrink: 0;
 }
 .ws-default {
-  background: #4a9eff;
+  background: var(--accent);
 }
 .ws-colored {
   background: #8e24aa;
 }
 .ws-check {
   margin-left: auto;
-  color: #4a9eff;
+  color: var(--accent);
   font-size: 13px;
 }
 .ws-del {
@@ -396,11 +416,11 @@ function onFaviconError(e: Event) {
 }
 .ws-del:hover {
   background: #e53935;
-  color: #fff;
+  color: var(--text-primary);
 }
 .ws-divider {
   height: 1px;
-  background: #3a3a3a;
+  background: var(--border-color);
   margin: 6px 0;
 }
 .tab-scroll {
@@ -440,7 +460,7 @@ function onFaviconError(e: Event) {
 .tab.active {
   background: var(--bg-active);
   border-color: var(--bg-active);
-  box-shadow: inset 0 3px 0 #1a73e8;
+  box-shadow: inset 0 3px 0 var(--accent);
 }
 .tab .favicon {
   width: 16px;
@@ -459,7 +479,7 @@ function onFaviconError(e: Event) {
   text-overflow: ellipsis;
 }
 .tab.active .title {
-  color: #fff;
+  color: var(--text-primary);
 }
 .tab .pin-icon {
   font-size: 13px;
@@ -483,12 +503,13 @@ function onFaviconError(e: Event) {
     background 0.15s,
     color 0.15s;
 }
-.tab:hover .close-btn {
+.tab:hover .close-btn,
+.tab.active .close-btn {
   display: block;
 }
 .tab .close-btn:hover {
   background: #e53935;
-  color: #fff;
+  color: var(--text-primary);
 }
 .tab.pinned {
   min-width: 32px;
@@ -515,7 +536,7 @@ function onFaviconError(e: Event) {
   margin-right: 3px;
   background: var(--bg-secondary);
   border-radius: 6px 6px 0 0;
-  border-left: 3px solid #4a9eff;
+  border-left: 3px solid var(--accent);
   flex-shrink: 0;
   cursor: default;
 }
@@ -526,7 +547,7 @@ function onFaviconError(e: Event) {
 }
 .group-count {
   font-size: 11px;
-  color: #777;
+  color: var(--text-muted);
   background: var(--bg-secondary);
   border-radius: 8px;
   padding: 0 6px;
@@ -541,8 +562,8 @@ function onFaviconError(e: Event) {
   border-radius: 4px;
 }
 .group-toggle:hover {
-  background: #333;
-  color: #fff;
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .new-tab-btn {
@@ -561,7 +582,7 @@ function onFaviconError(e: Event) {
 }
 .new-tab-btn:hover {
   background: var(--bg-active);
-  color: #fff;
+  color: var(--text-primary);
 }
 
 /* 右键菜单 */
@@ -569,7 +590,7 @@ function onFaviconError(e: Event) {
   position: fixed;
   z-index: 2000;
   min-width: 160px;
-  background: #2a2a2a;
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 6px;
@@ -594,7 +615,7 @@ function onFaviconError(e: Event) {
   background: var(--bg-active);
 }
 .menu-item.accent {
-  color: #4a9eff;
+  color: var(--accent);
 }
 .menu-dot {
   width: 10px;
@@ -604,7 +625,7 @@ function onFaviconError(e: Event) {
 }
 .menu-divider {
   height: 1px;
-  background: #3a3a3a;
+  background: var(--border-color);
   margin: 4px 0;
 }
 </style>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 地址栏（对应 Electron 版 .address-bar 设计）
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useTabsStore } from '../stores/tabs'
 import { useSettingsStore } from '../stores/settings'
@@ -8,6 +8,10 @@ import { useSettingsStore } from '../stores/settings'
 const tabsStore = useTabsStore()
 const settingsStore = useSettingsStore()
 const addressInput = ref('')
+const isLoading = computed(
+  () => !!tabsStore.loadingTabId && tabsStore.loadingTabId === tabsStore.activeTabId,
+)
+const isHttps = computed(() => /^https:\/\//i.test(addressInput.value))
 
 const emit = defineEmits<{
   (e: 'openAi'): void
@@ -110,11 +114,22 @@ async function onReader() {
 
 <template>
   <div class="address-bar">
-    <button class="nav-btn" title="后退" @click="onBack">←</button>
-    <button class="nav-btn" title="前进" @click="onForward">→</button>
-    <button class="nav-btn" title="刷新" @click="onRefresh">↻</button>
+    <button class="nav-btn" title="后退" :disabled="!tabsStore.canGoBack" @click="onBack">←</button>
+    <button class="nav-btn" title="前进" :disabled="!tabsStore.canGoForward" @click="onForward">
+      →
+    </button>
+    <button
+      class="nav-btn"
+      :class="{ spinning: isLoading }"
+      title="刷新"
+      :disabled="isLoading"
+      @click="onRefresh"
+    >
+      ↻
+    </button>
     <button class="nav-btn" title="主页" @click="onHome">⌂</button>
     <div class="address-container">
+      <span v-if="isHttps" class="lock-icon" title="HTTPS 安全连接">🔒</span>
       <input
         v-model="addressInput"
         type="text"
@@ -122,6 +137,7 @@ async function onReader() {
         spellcheck="false"
         @keydown.enter="onAddressEnter"
       />
+      <div v-if="isLoading" class="load-bar"></div>
     </div>
     <button
       class="action-btn"
@@ -131,7 +147,7 @@ async function onReader() {
     >
       {{ readerLoading ? '⏳' : '📖' }}
     </button>
-    <span v-if="readerTip" class="reader-tip">{{ readerTip }}</span>
+    <span v-if="readerTip" class="reader-tip" :title="readerTip">{{ readerTip }}</span>
     <button class="action-btn ai-btn" title="AI 助手" @click="emit('openAi')">AI</button>
     <button class="action-btn" title="密码管理" @click="emit('openPasswords')">🔑</button>
     <button class="action-btn" title="标签分组" @click="emit('openGroups')">🗂</button>
@@ -150,6 +166,7 @@ async function onReader() {
   gap: 4px;
   flex-shrink: 0;
   user-select: none;
+  position: relative;
 }
 .nav-btn,
 .action-btn {
@@ -171,20 +188,28 @@ async function onReader() {
   cursor: wait;
 }
 .reader-tip {
+  position: absolute;
+  right: 8px;
+  top: 42px;
   font-size: 11px;
   color: #ff9b9b;
-  max-width: 150px;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 2px 8px;
+  z-index: 20;
+  pointer-events: none;
 }
 .btn-icon {
   pointer-events: none;
   display: inline-block;
 }
 .ai-btn {
-  color: #4a9eff;
+  color: var(--accent);
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.5px;
@@ -192,7 +217,7 @@ async function onReader() {
 .nav-btn:hover:not(:disabled),
 .action-btn:hover {
   background: var(--bg-active);
-  color: #fff;
+  color: var(--text-primary);
 }
 .nav-btn:disabled {
   opacity: 0.4;
@@ -208,6 +233,50 @@ async function onReader() {
   border-radius: 16px;
   padding: 0 14px;
   height: 30px;
+  position: relative;
+}
+.address-container:focus-within {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 0;
+}
+.lock-icon {
+  font-size: 11px;
+  margin-right: 6px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.load-bar {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  animation: load-slide 1.2s ease-in-out infinite;
+  transform-origin: left;
+}
+@keyframes load-slide {
+  0% {
+    transform: scaleX(0.15);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(0.15);
+    opacity: 0.6;
+  }
+}
+.spinning {
+  animation: nav-spin 0.8s linear infinite;
+}
+@keyframes nav-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .address-container input {
   flex: 1;

@@ -23,9 +23,9 @@ body,
   --ui-font: 12px;
 }
 
-/* 深色主题默认值 */
+/* 主题色跟 App.vue 的 CSS 变量走（启动瞬间用深色兜底，避免闪白） */
 body {
-  background: #1a1a1a;
-  color: #e0e0e0;
+  background: var(--bg-primary, #1a1a1a);
+  color: var(--text-primary, #e0e0e0);
   user-select: none;
 }

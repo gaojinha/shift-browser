@@ -91,11 +91,12 @@ async function onDelete(id: number) {
 </script>
 
 <template>
+  <Transition name="fade">
   <div class="dialog-overlay" v-if="props.show">
     <div class="dialog">
       <div class="dialog-header">
         <span>密码管理</span>
-        <button class="close-btn" @click="emit('close')">✕</button>
+        <button class="close-btn" aria-label="关闭" @click="emit('close')">✕</button>
       </div>
 
       <div class="dialog-body">
@@ -133,6 +134,7 @@ async function onDelete(id: number) {
       </div>
     </div>
   </div>
+  </Transition>
 </template>
 
 <style scoped>
@@ -146,11 +148,11 @@ async function onDelete(id: number) {
   z-index: 1000;
 }
 .dialog {
-  width: 480px;
+  width: min(480px, calc(100vw - 32px));
   max-height: 80vh;
-  background: #222;
+  background: var(--bg-secondary);
   border-radius: 10px;
-  border: 1px solid #444;
+  border: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -160,14 +162,14 @@ async function onDelete(id: number) {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 14px;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .close-btn {
   border: none;
   background: transparent;
-  color: #999;
+  color: var(--text-muted);
   font-size: 14px;
   cursor: pointer;
 }
@@ -179,8 +181,8 @@ async function onDelete(id: number) {
   margin-bottom: 10px;
 }
 .add-btn {
-  background: #3d3d3d;
-  color: #e0e0e0;
+  background: var(--bg-active);
+  color: var(--text-primary);
   border: none;
   border-radius: 6px;
   padding: 6px 12px;
@@ -188,36 +190,36 @@ async function onDelete(id: number) {
   cursor: pointer;
 }
 .add-btn:hover {
-  background: #4a4a4a;
+  background: var(--text-secondary);
 }
 .add-form {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: #2a2a2a;
+  background: var(--bg-secondary);
   border-radius: 8px;
   padding: 12px;
   margin-bottom: 12px;
 }
 .add-form input {
-  border: 1px solid #444;
-  background: #1e1e1e;
-  color: #e0e0e0;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 13px;
   outline: none;
 }
 .add-form input:focus {
-  border-color: #4a9eff;
+  border-color: var(--accent);
 }
 .form-error {
   color: #ff6b6b;
   font-size: 12px;
 }
 .save-btn {
-  background: #4a9eff;
-  color: #fff;
+  background: var(--accent);
+  color: var(--text-primary);
   border: none;
   border-radius: 6px;
   padding: 8px;
@@ -236,7 +238,7 @@ async function onDelete(id: number) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #2a2a2a;
+  background: var(--bg-secondary);
   border-radius: 8px;
   padding: 10px 12px;
 }
@@ -247,12 +249,12 @@ async function onDelete(id: number) {
   min-width: 0;
 }
 .item-domain {
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 500;
 }
 .item-username {
-  color: #888;
+  color: var(--text-muted);
   font-size: 12px;
 }
 .item-actions {
@@ -262,7 +264,7 @@ async function onDelete(id: number) {
   flex-shrink: 0;
 }
 .revealed {
-  color: #4a9eff;
+  color: var(--accent);
   font-size: 12px;
   font-family: monospace;
   max-width: 140px;
@@ -270,8 +272,8 @@ async function onDelete(id: number) {
   text-overflow: ellipsis;
 }
 .mini-btn {
-  background: #3d3d3d;
-  color: #ccc;
+  background: var(--bg-active);
+  color: var(--text-secondary);
   border: none;
   border-radius: 4px;
   padding: 4px 8px;
@@ -279,14 +281,14 @@ async function onDelete(id: number) {
   cursor: pointer;
 }
 .mini-btn:hover {
-  background: #4a4a4a;
+  background: var(--text-secondary);
 }
 .mini-btn.danger:hover {
   background: #5c2b2b;
   color: #ff8a8a;
 }
 .empty {
-  color: #666;
+  color: var(--text-muted);
   font-size: 13px;
   text-align: center;
   padding: 24px 0;

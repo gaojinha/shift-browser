@@ -72,7 +72,7 @@ onMounted(async () => {
   white-space: nowrap;
 }
 .status-adblock {
-  color: #43a047;
+  color: var(--success);
 }
 .status-adblock.off {
   color: var(--text-muted);

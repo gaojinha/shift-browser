@@ -912,3 +912,35 @@ tabs store 的 4 个核心操作（createTab/closeTab/switchTab/navigateTab）�
 ### 24.3 遗留事项
 
 - 无阻塞项；前端组件 UI/UX 进一步优化（可选）
+
+## 二十五、2026-09-13 第十六轮前端 UI/UX 优化
+
+### 25.1 主题一致性（H1）
+
+1. 5 个弹窗 + AI 侧栏 + 工作区弹窗/右键菜单 + 书签栏：硬编码暗色（`#222/#2a2a2a/#e0e0e0/#444/#4a9eff` 等）批量替换为 CSS 变量（`--bg-* / --text-* / --border-* / --accent`），浅色主题切过去弹窗不再是深色块。
+2. 新增语义色 `--success` / `--danger`；StatusBar 广告拦截绿、Toast 边框跟变量走。
+3. `main.css` body 背景/文字改走变量。
+
+### 25.2 交互反馈
+
+4. **弹窗动画**：密码/分组/下载/设置 + 工作区弹窗用 fade；AI 侧栏用 slide。
+5. **全局按钮**：`focus-visible` 焦点环 + `:active` 按压缩放。
+6. **加载指示**：`tabs` store 加 `loadingTabId`；刷新按钮转圈、地址栏底部 2px 进度条；8 秒兜底关掉（同 URL 刷新轮询看不出变化）。
+7. **后退/前进置灰**：`canGoBack` / `canGoForward` 乐观追踪（导航后可退、后退后可进、切标签重置）。
+8. **Esc 关闭弹窗**（AI → 设置 → 下载 → 分组 → 密码优先级）；关闭按钮补 `aria-label`；AI 遮罩点击关闭。
+9. **激活标签关闭按钮常显** + 鼠标中键关闭。
+10. **AI 思考中**显示 spinner；发送失败把原文填回输入框。
+11. 弹窗宽度 `min(480~520px, calc(100vw - 32px))`；设置页 select 补自绘下拉箭头。
+12. 地址栏 HTTPS 锁图标、focus-within 描边；阅读模式 tip 改为绝对定位不挤按钮。
+13. Toast 补 `.toast-move` 过渡，颜色改走主题变量。
+
+### 25.3 验证结果
+
+- npm run lint 0 错误 ✅ / npm run build（vue-tsc + vite）通过 ✅
+- 后端未改动（无需 cargo test）
+
+### 25.4 遗留事项
+
+- 书签栏隐藏时 webview 仍从 y=112 起（Rust `CONTENT_TOP_OFFSET`），需 Rust 侧按显隐重算偏移
+- 后退/前进是前端乐观追踪，webview 内链跳靠轮询补 canGoBack，不是 WebKit 原生 can_go_back
+- 弹窗列表加载骨架屏未做（打开即拉数据，空白窗口极短）

@@ -59,7 +59,7 @@ async function onBookmark() {
   display: flex;
   align-items: center;
   height: 30px;
-  background: #222;
+  background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-subtle);
   padding: 0 8px;
   gap: 4px;
@@ -90,8 +90,8 @@ async function onBookmark() {
   transition: background 0.15s;
 }
 .bookmark-item:hover {
-  background: #333;
-  color: #fff;
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 .bm-del {
   display: none;

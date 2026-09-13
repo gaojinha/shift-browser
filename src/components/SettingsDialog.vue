@@ -166,11 +166,12 @@ async function onRemoveKeyword(k: string) {
 </script>
 
 <template>
+  <Transition name="fade">
   <div class="dialog-overlay" v-if="props.show">
     <div class="dialog">
       <div class="dialog-header">
         <span>⚙ 设置</span>
-        <button class="close-btn" @click="emit('close')">✕</button>
+        <button class="close-btn" aria-label="关闭" @click="emit('close')">✕</button>
       </div>
       <div class="dialog-body">
         <!-- 通用 -->
@@ -355,6 +356,7 @@ async function onRemoveKeyword(k: string) {
       </div>
     </div>
   </div>
+  </Transition>
 </template>
 
 <style scoped>
@@ -368,11 +370,11 @@ async function onRemoveKeyword(k: string) {
   z-index: 1000;
 }
 .dialog {
-  width: 480px;
+  width: min(480px, calc(100vw - 32px));
   max-height: 80vh;
-  background: #222;
+  background: var(--bg-secondary);
   border-radius: 10px;
-  border: 1px solid #444;
+  border: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -382,14 +384,14 @@ async function onRemoveKeyword(k: string) {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 14px;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .close-btn {
   border: none;
   background: transparent;
-  color: #999;
+  color: var(--text-muted);
   font-size: 14px;
   cursor: pointer;
 }
@@ -402,10 +404,10 @@ async function onRemoveKeyword(k: string) {
 }
 .section-title {
   font-size: 12px;
-  color: #4a9eff;
+  color: var(--accent);
   font-weight: 600;
   margin-bottom: 8px;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-subtle);
   padding-bottom: 4px;
 }
 .field {
@@ -417,16 +419,16 @@ async function onRemoveKeyword(k: string) {
 }
 .field label {
   font-size: 13px;
-  color: #ccc;
+  color: var(--text-secondary);
   flex-shrink: 0;
 }
 .field input,
 .field select {
   flex: 1;
   max-width: 260px;
-  border: 1px solid #444;
-  background: #2a2a2a;
-  color: #e0e0e0;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 13px;
@@ -435,9 +437,16 @@ async function onRemoveKeyword(k: string) {
   -webkit-appearance: none;
   appearance: none;
 }
+.field select {
+  padding-right: 26px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='%23999' d='M2.5 4.5L6 8l3.5-3.5'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px;
+}
 .field input:focus,
 .field select:focus {
-  border-color: #4a9eff;
+  border-color: var(--accent);
 }
 .history-actions {
   display: flex;
@@ -445,7 +454,7 @@ async function onRemoveKeyword(k: string) {
   gap: 8px;
 }
 .danger-btn {
-  background: #3d3d3d;
+  background: var(--bg-active);
   color: #e53935;
   border: 1px solid #5a2a2a;
   border-radius: 6px;
@@ -482,7 +491,7 @@ async function onRemoveKeyword(k: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #2a2a2a;
+  background: var(--bg-secondary);
   border-radius: 8px;
   padding: 8px 10px;
   gap: 8px;
@@ -495,12 +504,12 @@ async function onRemoveKeyword(k: string) {
   flex: 1;
 }
 .ext-name {
-  color: #e0e0e0;
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 500;
 }
 .ext-desc {
-  color: #888;
+  color: var(--text-muted);
   font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
@@ -514,20 +523,20 @@ async function onRemoveKeyword(k: string) {
 }
 .ext-badge {
   font-size: 10px;
-  color: #4a9eff;
+  color: var(--accent);
   background: rgba(74, 158, 255, 0.15);
   padding: 2px 6px;
   border-radius: 4px;
 }
 .ext-empty {
-  color: #666;
+  color: var(--text-muted);
   font-size: 12px;
   text-align: center;
   padding: 8px 0;
 }
 .mini-btn {
-  background: #3d3d3d;
-  color: #ccc;
+  background: var(--bg-active);
+  color: var(--text-secondary);
   border: none;
   border-radius: 4px;
   padding: 5px 10px;
@@ -535,7 +544,7 @@ async function onRemoveKeyword(k: string) {
   cursor: pointer;
 }
 .mini-btn:hover {
-  background: #4a4a4a;
+  background: var(--text-secondary);
 }
 .mini-btn.primary {
   background: #2b5a8a;
@@ -564,7 +573,7 @@ async function onRemoveKeyword(k: string) {
   position: absolute;
   cursor: pointer;
   inset: 0;
-  background: #3d3d3d;
+  background: var(--bg-active);
   border-radius: 9px;
   transition: 0.2s;
 }
@@ -575,7 +584,7 @@ async function onRemoveKeyword(k: string) {
   height: 12px;
   left: 3px;
   top: 3px;
-  background: #999;
+  background: var(--text-muted);
   border-radius: 50%;
   transition: 0.2s;
 }
@@ -584,17 +593,17 @@ async function onRemoveKeyword(k: string) {
 }
 .switch input:checked + .slider::before {
   transform: translateX(16px);
-  background: #4a9eff;
+  background: var(--accent);
 }
 .kw-block {
   margin: 4px 0 10px 0;
   padding: 8px 10px;
-  background: #2a2a2a;
+  background: var(--bg-secondary);
   border-radius: 8px;
 }
 .kw-hint {
   font-size: 11px;
-  color: #888;
+  color: var(--text-muted);
   margin-bottom: 8px;
   line-height: 1.4;
 }
@@ -617,7 +626,7 @@ async function onRemoveKeyword(k: string) {
 .kw-x {
   border: none;
   background: transparent;
-  color: #999;
+  color: var(--text-muted);
   cursor: pointer;
   font-size: 11px;
   padding: 0;
@@ -632,9 +641,9 @@ async function onRemoveKeyword(k: string) {
 }
 .kw-add input {
   flex: 1;
-  border: 1px solid #444;
-  background: #222;
-  color: #e0e0e0;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 13px;
@@ -643,6 +652,6 @@ async function onRemoveKeyword(k: string) {
   appearance: none;
 }
 .kw-add input:focus {
-  border-color: #4a9eff;
+  border-color: var(--accent);
 }
 </style>

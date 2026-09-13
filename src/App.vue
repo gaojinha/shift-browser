@@ -28,7 +28,24 @@ const showSettings = ref(false)
 const showAI = ref(false)
 let saveTimer: number | null = null
 
+/** Esc 关闭最上层弹窗（AI 侧栏优先，再设置/下载/分组/密码） */
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  if (showAI.value) {
+    showAI.value = false
+  } else if (showSettings.value) {
+    showSettings.value = false
+  } else if (showDownloads.value) {
+    showDownloads.value = false
+  } else if (showGroups.value) {
+    showGroups.value = false
+  } else if (showPasswords.value) {
+    showPasswords.value = false
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener('keydown', onGlobalKeydown)
   // 设置尽早加载（主页/搜索引擎/主题/书签栏显隐依赖）
   settingsStore.loadSettings().catch(() => {})
   // 分组尽早加载（不等标签恢复，避免右键菜单/组头迟迟不显示）
@@ -57,6 +74,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', onGlobalKeydown)
   tabsStore.stopPolling()
   if (saveTimer) clearTimeout(saveTimer)
 })
@@ -125,6 +143,8 @@ watch(
   --border-color: #444;
   --border-subtle: #333;
   --accent: #4a9eff;
+  --success: #43a047;
+  --danger: #e53935;
 }
 .theme-light {
   --bg-primary: #f5f5f5;
@@ -137,5 +157,54 @@ watch(
   --border-color: #cccccc;
   --border-subtle: #dddddd;
   --accent: #1a73e8;
+  --success: #2e7d32;
+  --danger: #c62828;
+}
+
+/* 全局按钮反馈 */
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* 弹窗/侧栏开关动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.18s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+.slide-enter-active,
+.slide-leave-active {
+  transition:
+    transform 0.22s ease,
+    opacity 0.22s ease;
+}
+.slide-enter-from,
+.slide-leave-to {
+  transform: translateX(40px);
+  opacity: 0;
+}
+
+/* 通用加载转圈（弹窗/AI 思考共用） */
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+  vertical-align: middle;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>
