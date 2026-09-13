@@ -33,6 +33,11 @@ export const usePasswordsStore = defineStore('passwords', {
       return await invoke<PasswordEntry | null>('get_password', { domain })
     },
 
+    /** 按 id 获取密码明文（同域名多账号时精确定位） */
+    async getPasswordById(id: number): Promise<PasswordEntry | null> {
+      return await invoke<PasswordEntry | null>('get_password_by_id', { id })
+    },
+
     /** 删除密码 */
     async deletePassword(id: number) {
       await invoke<void>('delete_password', { id })

@@ -279,7 +279,14 @@ impl TabManager {
                   "(function(){{var el=document.elementFromPoint({},{});var a=el&&el.closest?el.closest('a[href]'):null;if(a&&a.href)window.open(a.href);}})()",
                   x, y
               );
-              let _ = wv.run_javascript(&js, None::<&gtk::gio::Cancellable>, |_| {});
+              // WebKit 2.40+ 弃用 run_javascript，改用 evaluate_javascript
+              wv.evaluate_javascript(
+                  &js,
+                  None,
+                  None,
+                  None::<&gtk::gio::Cancellable>,
+                  |_| {},
+              );
               false.into() // 不拦截，让 webview 处理
           });
           child_gtk.connect_button_release_event(|_wv, event| {
@@ -606,7 +613,7 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
           for id in ids {
             let label = format!("tab-{}", id);
             if let Some(wv) = app_handle.get_webview(&label) {
-              wv.with_webview(move |pwv| {
+              let _ = wv.with_webview(move |pwv| {
                 let gtk_wv = pwv.inner();
                 if let Some(fixed) = gtk_wv
                   .parent()
@@ -635,13 +642,13 @@ fn find_or_create_fixed(vbox: &gtk::Box) -> gtk::Fixed {
     .children()
     .iter()
     .find(|c| c.type_().name() == "GtkOverlay")
-    .and_then(|c| c.dynamic_cast_ref::<gtk::Overlay>().map(|o| o.clone()))
+    .and_then(|c| c.dynamic_cast_ref::<gtk::Overlay>().cloned())
   {
     if let Some(f) = overlay
       .children()
       .iter()
       .find(|c| c.type_().name() == "GtkFixed")
-      .and_then(|c| c.dynamic_cast_ref::<gtk::Fixed>().map(|f| f.clone()))
+      .and_then(|c| c.dynamic_cast_ref::<gtk::Fixed>().cloned())
     {
       return f;
     }
@@ -651,7 +658,7 @@ fn find_or_create_fixed(vbox: &gtk::Box) -> gtk::Fixed {
     .children()
     .iter()
     .find(|c| c.type_().name() == "GtkFixed")
-    .and_then(|c| c.dynamic_cast_ref::<gtk::Fixed>().map(|f| f.clone()))
+    .and_then(|c| c.dynamic_cast_ref::<gtk::Fixed>().cloned())
   {
     return f;
   }
@@ -731,16 +738,18 @@ pub async fn close_tab(
 
     let was_active = *active == Some(id.clone());
     let removed = tabs.remove(&id);
-    if let Some(pos) = order.iter().position(|x| x == &id) {
+    // 记录被删标签在 order 中的位置（删除后同位置即右邻）
+    let removed_pos = order.iter().position(|x| x == &id);
+    if let Some(pos) = removed_pos {
       order.remove(pos);
     }
 
     if was_active {
-      // 优先切到右边的标签，没有则切左边
-      if let Some(pos) = order.iter().position(|x| x == &id) {
-        let _ = pos;
-      }
-      next_id = order.last().cloned();
+      // 优先切右边的标签（删除后同位置即右邻），没有则切左边（最后一个）
+      next_id = match removed_pos {
+        Some(p) if p < order.len() => order.get(p).cloned(),
+        _ => order.last().cloned(),
+      };
       if let Some(nid) = &next_id {
         if let Some(t) = tabs.get_mut(nid) {
           t.is_active = true;
@@ -887,7 +896,7 @@ pub async fn set_webview_visible(
     let label = format!("tab-{}", id);
     if let Some(wv) = window.get_webview(&label) {
       let wv2 = wv.clone();
-      wv.with_webview(move |pwv| {
+      let _ = wv.with_webview(move |pwv| {
         let gtk_wv = pwv.inner();
         // 同时隐藏/显示 Fixed 容器：Fixed 覆盖内容区会拦截弹窗点击，必须一起隐藏
         if let Some(fixed) = gtk_wv
@@ -901,9 +910,9 @@ pub async fn set_webview_visible(
           }
         }
         if visible {
-          wv2.show();
+          let _ = wv2.show();
         } else {
-          wv2.hide();
+          let _ = wv2.hide();
         }
       });
       count += 1;

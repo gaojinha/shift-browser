@@ -74,11 +74,12 @@ export const useWorkspacesStore = defineStore('workspaces', {
       try {
         await invoke('delete_workspace', { id })
         if (this.currentId === id) {
-          // 当前工作区被删 → 保存当前标签到默认工作区，然后清空标签
+          // 当前工作区被删 → 保存当前标签到默认工作区，清空标签，恢复默认工作区会话
           const tabs = useTabsStore()
           await tabs.saveCurrentSession(null)
           await tabs.clearAllTabs()
           this.currentId = null
+          await tabs.restoreLastSession(null)
         }
         await this.loadWorkspaces()
       } catch (e) {

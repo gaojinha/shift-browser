@@ -16,6 +16,9 @@ pub struct Session {
 pub struct SessionTab {
     pub url: String,
     pub title: Option<String>,
+    /// 标签分组归属（持久化；null = 未分组）。serde(default) 兼容旧快照无此字段
+    #[serde(default, rename = "groupId")]
+    pub group_id: Option<i64>,
 }
 
 /// 保存当前会话（标签页快照）
@@ -32,7 +35,7 @@ pub async fn save_session(
         "INSERT INTO sessions (name, workspace_id, data) VALUES (?, ?, ?)",
     )
     .bind(&name)
-    .bind(&workspace_id)
+    .bind(workspace_id)
     .bind(&data)
     .execute(&db.pool)
     .await?;

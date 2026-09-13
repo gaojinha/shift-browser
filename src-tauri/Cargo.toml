@@ -1,6 +1,6 @@
 [package]
 name = "shift-browser"
-version = "5.0.0-alpha.1"
+version = "5.5.0"
 description = "Shift Browser - AI 增强型浏览器（Tauri 重构版）"
 authors = ["OpenClaw Team"]
 license = ""
@@ -37,6 +37,9 @@ readability = "0.3.0"
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", features = ["v3_24"] }
 webkit2gtk = { version = "=2.0", features = ["v2_40"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [profile.release]
 codegen-units = 1

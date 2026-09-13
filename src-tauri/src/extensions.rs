@@ -46,8 +46,11 @@ struct ContentScript {
     css: Vec<String>,
 }
 
-/// 读取扩展目录内容：返回 (name, version, description, 合并后的 js, 合并后的 css)
-fn read_extension_dir(path: &str) -> Result<(String, Option<String>, Option<String>, Option<String>, Option<String>), String> {
+/// 扩展目录解析结果：(name, version, description, 合并后的 js, 合并后的 css)
+type ExtensionDirResult = (String, Option<String>, Option<String>, Option<String>, Option<String>);
+
+/// 读取扩展目录内容
+fn read_extension_dir(path: &str) -> Result<ExtensionDirResult, String> {
     // path 可以是目录（含 manifest.json）或 manifest.json 文件本身
     let manifest_path = if path.ends_with("manifest.json") {
         path.to_string()
@@ -116,7 +119,7 @@ fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>
                 continue;
             }
             let items_clone = items.clone();
-            wv.with_webview(move |pwv| {
+            let _ = wv.with_webview(move |pwv| {
                 let child_gtk = pwv.inner();
                 let Some(manager) = child_gtk.user_content_manager() else {
                     return;
@@ -286,7 +289,10 @@ const ADBLOCK_JS_TEMPLATE: &str = r#"
 "#;
 
 fn js_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('\'', "\\'")
+    s.replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 /// 拼装广告拦截 JS：内置关键词 + 用户自定义关键词

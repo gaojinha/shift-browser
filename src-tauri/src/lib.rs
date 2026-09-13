@@ -70,6 +70,7 @@ pub fn run() {
       // 密码（AES-256-GCM 加密存储）
       passwords::save_password,
       passwords::get_password,
+      passwords::get_password_by_id,
       passwords::get_passwords_for_domain,
       passwords::list_passwords,
       passwords::delete_password,

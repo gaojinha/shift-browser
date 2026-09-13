@@ -89,8 +89,8 @@ pub async fn create_bookmark(
   )
   .bind(&input.title)
   .bind(&input.url)
-  .bind(&input.folder_id)
-  .bind(&input.folder_id)
+  .bind(input.folder_id)
+  .bind(input.folder_id)
   .execute(&db.pool)
   .await?;
 
@@ -108,8 +108,8 @@ pub async fn create_bookmark_folder(
      COALESCE((SELECT MAX(sort_order) + 1 FROM bookmark_folders WHERE parent_id IS ?), 0))",
   )
   .bind(&input.name)
-  .bind(&input.parent_id)
-  .bind(&input.parent_id)
+  .bind(input.parent_id)
+  .bind(input.parent_id)
   .execute(&db.pool)
   .await?;
 
@@ -117,6 +117,8 @@ pub async fn create_bookmark_folder(
 }
 
 /// 更新书签
+/// 更新书签
+/// folder_id：Some(id) 移到指定文件夹；Some(0) 移出文件夹（置 NULL）；None 不修改
 #[tauri::command]
 pub async fn update_bookmark(
   db: tauri::State<'_, Db>,
@@ -139,12 +141,20 @@ pub async fn update_bookmark(
       .execute(&db.pool)
       .await?;
   }
-  if let Some(folder_id) = folder_id {
-    sqlx::query("UPDATE bookmarks SET folder_id = ? WHERE id = ?")
-      .bind(folder_id)
-      .bind(id)
-      .execute(&db.pool)
-      .await?;
+  if let Some(fid) = folder_id {
+    if fid == 0 {
+      // 移出文件夹（置 NULL）
+      sqlx::query("UPDATE bookmarks SET folder_id = NULL WHERE id = ?")
+        .bind(id)
+        .execute(&db.pool)
+        .await?;
+    } else {
+      sqlx::query("UPDATE bookmarks SET folder_id = ? WHERE id = ?")
+        .bind(fid)
+        .bind(id)
+        .execute(&db.pool)
+        .await?;
+    }
   }
   Ok(())
 }

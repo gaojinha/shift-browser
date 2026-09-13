@@ -18,8 +18,6 @@ struct FeedCategory {
 struct FeedSource {
     t: String,
     u: String,
-    #[serde(default)]
-    d: String,
 }
 
 fn load_sources() -> Vec<(String, String, String)> {
@@ -178,7 +176,8 @@ pub async fn refresh_all(db: &Db) -> usize {
         let client = client.clone();
         let pool = db.pool.clone();
         set.spawn(async move {
-            let db_owned = Db { pool };
+            // fetch_one 只使用 pool，key_path 用临时空值（密码相关操作不会走到这里）
+            let db_owned = Db { pool, key_path: std::path::PathBuf::new() };
             fetch_one(&client, &db_owned, &name, &url, &category).await
         });
     }

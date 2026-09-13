@@ -60,20 +60,3 @@ pub async fn delete(db: &Db, id: i64) -> DbResult<()> {
         .await?;
     Ok(())
 }
-
-/// 查询单个扩展（不存在返回 None）
-pub async fn get(db: &Db, id: i64) -> DbResult<Option<Extension>> {
-    let row = sqlx::query_as::<_, (i64, String, String, i64, String)>(
-        "SELECT id, name, path, enabled, created_at FROM extensions WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_optional(&db.pool)
-    .await?;
-    Ok(row.map(|(id, name, path, enabled, created_at)| Extension {
-        id,
-        name,
-        path,
-        enabled: enabled != 0,
-        created_at,
-    }))
-}

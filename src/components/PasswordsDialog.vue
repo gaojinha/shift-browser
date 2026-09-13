@@ -45,13 +45,14 @@ async function onAdd() {
   showAdd.value = false
 }
 
-async function onReveal(domain: string, id: number) {
+async function onReveal(id: number) {
   if (revealId.value === id) {
     revealId.value = null
     revealPassword.value = ''
     return
   }
-  const entry = await passwordsStore.getPassword(domain)
+  // 按 id 查（同域名多账号时精确定位），不再按域名 LIMIT 1
+  const entry = await passwordsStore.getPasswordById(id)
   if (entry) {
     revealId.value = id
     revealPassword.value = entry.password
@@ -99,7 +100,7 @@ async function onDelete(id: number) {
             </div>
             <div class="item-actions">
               <span v-if="revealId === p.id" class="revealed">{{ revealPassword }}</span>
-              <button class="mini-btn" @click="onReveal(p.domain, p.id)">
+              <button class="mini-btn" @click="onReveal(p.id)">
                 {{ revealId === p.id ? '隐藏' : '查看' }}
               </button>
               <button class="mini-btn danger" @click="onDelete(p.id)">删除</button>
