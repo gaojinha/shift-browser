@@ -15,6 +15,8 @@ use std::path::PathBuf;
 /// 全局数据库连接池（Tauri State 管理）
 pub struct Db {
   pub pool: SqlitePool,
+  /// 密码主密钥文件路径（独立于数据库，权限 600）
+  pub key_path: PathBuf,
 }
 
 impl Db {
@@ -22,6 +24,15 @@ impl Db {
   pub async fn init(app_data_dir: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&app_data_dir)?;
     let db_path = app_data_dir.join("shift-browser.db");
+
+    // 安全：数据库含加密密码/设置，权限收紧到 600（仅当前用户可读写）
+    // 注意：WAL 模式下 -wal/-shm 文件会随 db 权限创建，此处只收紧主文件；
+    // 若文件已存在且权限过宽，也一并修正
+    #[cfg(unix)]
+    {
+      use std::os::unix::fs::PermissionsExt;
+      let _ = std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600));
+    }
 
     // 注意：sqlx 的 create_if_missing 默认是 false，
     // 不加 create_if_missing(true) 时，文件不存在会报 SQLITE_CANTOPEN (code 14)
@@ -47,7 +58,10 @@ impl Db {
     Self::run_migrations(&pool).await?;
 
     println!("[ShiftBrowser] 数据库已初始化: {}", db_path.display());
-    Ok(Self { pool })
+    Ok(Self {
+      pool,
+      key_path: app_data_dir.join("master.key"),
+    })
   }
 
   /// 执行 SQL 迁移文件
@@ -105,8 +119,6 @@ pub enum DbError {
   Sqlx(#[from] sqlx::Error),
   #[error("序列化错误: {0}")]
   Json(#[from] serde_json::Error),
-  #[error("记录未找到")]
-  NotFound,
   #[error("其他错误: {0}")]
   Other(String),
 }

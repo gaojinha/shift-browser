@@ -213,7 +213,7 @@ setsid nohup env XDG_RUNTIME_DIR=/run/user/1000 DISPLAY=:0 WAYLAND_DISPLAY=wayla
 2. **迁移系统自建**：不用 sqlx-migrate 宏，用 `include_str!` + `_migrations` 表手动管理版本，简单可控。
 3. **标签页管理**：Tauri 不像 Electron 能轻松嵌入多个 webview。每个标签页可能需要独立的 `WebviewWindow`，用 Tauri 多窗口 API 管理。**这是 Phase 1 最大的技术挑战**。
 4. **Wayland 环境**：高哥的系统用 Wayland，需要 `GDK_BACKEND=wayland` 环境变量。截图工具受限（import/gnome-screenshot 不可用）。
-5. **sudo 密码**：`***REMOVED***`（仅 Electron 版部署用，Tauri 开发不需要）
+5. **sudo 密码**：不写入文档（安全铁律）。凭据在权限 600 的本地文件，需要时问二狗/高哥本人。
 
 ---
 
@@ -462,4 +462,40 @@ let pool = SqlitePoolOptions::new()
 - **语言**：所有输出用中文（代码/变量名除外）
 - **安全**：sudo 密码、API key、数据库密码不向输出透露
 - **测试**：Wayland 下截图受限，验证窗口效果主要靠日志 + 进程状态
-- **Git**：Tauri 项目目前没有 git 仓库（Electron 版有），可以考虑初始化
+- **Git**：Tauri 项目已有 git 仓库（master 分支，39+ commits）
+
+---
+
+## 十、2026-09-13 安全体检修复（二狗执行）
+
+### 10.1 安全（P0/P1）
+
+1. **密码主密钥移出数据库**：`db/passwords.rs` 的 `get_master_key` 改为从独立密钥文件（`app_data/master.key`，权限 600）读取；旧版本存在 settings 表的 `master_key` 首次使用时自动迁移到文件并删除残留。`db/mod.rs` 的 `Db` 加 `key_path` 字段，数据库文件启动时权限收紧到 600。
+2. **get_all_settings 脱敏**：`db/settings.rs` 加敏感键保护——`master_key` 前端永远拿不到（get_setting/set_setting/set_settings_bulk 三层拦截），`ai_api_key` 返回掩码（前4后4中间****）。
+3. **newtab XSS 修复**：`newtab.rs` 加 `json_script_safe()`（`<` → `\u003c`），所有嵌入 `<script>` 的 JSON（feed_data/快捷访问/书签/最近访问）统一转义；serde_json 默认不转义 `<`，RSS 标题含 `</script>` 可注入任意 JS。
+4. **CSP 配置**：`tauri.conf.json` 配完整 CSP；newtab/world-nav 两个 file:// 页面加 meta CSP（Tauri 的 CSP 对 file:// 不生效，必须 meta）。
+5. **HANDOFF.md 移除明文 sudo 密码**（git 历史里仍有，如需彻底清除需 filter-repo 重写历史）。
+
+### 10.2 功能修复（P1/P2）
+
+6. **标签分组持久化接通**：`db/sessions.rs` 的 `SessionTab` 加 `group_id` 字段（`#[serde(default, rename = "groupId")]`）。此前前端 save/restore 都传了 groupId，但 Rust 侧没有该字段，serde 静默忽略——"以为做了，实际没接上"。
+7. **close_tab 切相邻标签**：`tabs.rs` 改为删除前记录位置，优先切右邻、没有切左邻（原代码 `order.last()` 永远切最右 + 死代码）。
+8. **update_bookmark 支持移出文件夹**：`folder_id=0` 置 NULL。
+9. **密码查看按 id 精确定位**：新增 `get_password_by_id` 命令，PasswordsDialog 同域名多账号不再显示错。
+10. **deleteWorkspace 恢复默认工作区会话**：删当前工作区后不再只清空标签。
+11. **adblock 关键词转义补全**：`js_escape` 补换行/回车（原只转义 `\` 和 `'`，关键词含换行会生成非法 JS）。
+12. **版本号统一 5.5.0**：Cargo.toml 从 5.0.0-alpha.1 对齐 package.json/tauri.conf.json。
+13. **clippy 全绿**：21 个警告清零（含弃用 `run_javascript` → `evaluate_javascript`、死代码清理、未处理 Result 等）。
+14. **测试增至 7 个**：新增主密钥迁移集成测试（旧值迁移沿用/新值生成/文件权限 600/settings 无残留）。
+
+### 10.3 验证结果
+
+- `cargo check` ✅ / `cargo clippy` 0 警告 ✅ / `cargo test` 7 passed ✅ / `npm run build` ✅
+- release 编译 ✅，程序启动正常（日志无异常）
+- 数据库权限已 600；settings 表 `master_key` 待用户下次使用密码功能时自动迁移（懒触发，符合设计）
+
+### 10.4 遗留事项
+
+- git 历史含明文密码（旧提交），如需彻底清除用 `git filter-repo` 重写历史（有风险，暂缓）
+- sessions 表自动保存记录无限增长（328 条），建议后续加清理（保留最近 N 条）
+- `reader.rs` 正文未净化（readability 提取 content 直接 innerHTML），建议后续用 ammonia 白名单净化

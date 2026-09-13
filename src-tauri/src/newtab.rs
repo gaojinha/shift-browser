@@ -117,6 +117,15 @@ fn esc(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// 把 JSON 序列化成可安全嵌入 <script> 的字符串。
+/// serde_json 默认不转义 `<`，若数据含 `</script>` 会提前闭合标签导致 HTML 注入/XSS，
+/// 这里把 `<` 转成 `\u003c`（JS 解析结果不变，但不会再闭合 script 标签）。
+fn json_script_safe(v: &serde_json::Value) -> String {
+    serde_json::to_string(v)
+        .unwrap_or_else(|_| "[]".into())
+        .replace('<', "\\u003c")
+}
+
 fn render_html(
     search_url: &str,
     recent: &[(String, String)],
@@ -156,13 +165,6 @@ fn render_html(
     };
 
     // 快捷访问内置项传给前端 JS（动态面板用）
-    let quick_builtin_json = serde_json::to_string(
-        &quick_sites
-            .iter()
-            .map(|(i, n, u)| serde_json::json!({ "i": i, "n": n, "u": u }))
-            .collect::<Vec<_>>(),
-    )
-    .unwrap_or_else(|_| "[]".into());
     let quick_grid = quick_sites
         .iter()
         .map(|(i, n, u)| {
@@ -181,7 +183,6 @@ fn render_html(
             serde_json::json!([title, url, source, published, category])
         })
         .collect();
-    let feed_data_json = serde_json::to_string(&feed_data).unwrap_or_else(|_| "[]".into());
 
     format!(
         r#"<!DOCTYPE html>
@@ -189,6 +190,7 @@ fn render_html(
 <head>
 <meta charset="utf-8">
 <title>新标签页</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: http: data:; connect-src https: http: ipc: http://ipc.localhost; frame-src https: http:">
 <style>
   :root {{ --bg:#1a1a1a; --bg2:#232323; --bg3:#2a2a2a; --fg:#e0e0e0; --muted:#888; --accent:#4a9eff; --border:#333; }}
   * {{ box-sizing:border-box; margin:0; padding:0; }}
@@ -619,11 +621,14 @@ fn render_html(
 </body>
 </html>"#,
         quick_grid = quick_grid,
-        search_url_json = serde_json::json!(search_url),
-        feed_data_json = feed_data_json,
-        bookmark_html_json = serde_json::json!(bookmark_html),
-        recent_html_json = serde_json::json!(recent_html),
-        quick_builtin_json = quick_builtin_json,
+        search_url_json = json_script_safe(&serde_json::json!(search_url)),
+        feed_data_json = json_script_safe(&serde_json::json!(feed_data)),
+        bookmark_html_json = json_script_safe(&serde_json::json!(bookmark_html)),
+        recent_html_json = json_script_safe(&serde_json::json!(recent_html)),
+        quick_builtin_json = json_script_safe(&serde_json::json!(quick_sites
+            .iter()
+            .map(|(i, n, u)| serde_json::json!({ "i": i, "n": n, "u": u }))
+            .collect::<Vec<_>>())),
         bookmark_count = bookmarks.len(),
         recent_count = recent.len(),
     )
@@ -636,6 +641,7 @@ fn render_worldnav_html() -> String {
 <head>
 <meta charset="utf-8">
 <title>世界导航</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: http: data:; connect-src https: http: ipc: http://ipc.localhost; frame-src https: http:">
 <style>
   :root { --bg:#1a1a1a; --bg2:#232323; --bg3:#2a2a2a; --fg:#e0e0e0; --muted:#888; --accent:#4a9eff; --border:#333; }
   * { box-sizing:border-box; margin:0; padding:0; }
