@@ -664,3 +664,26 @@ let pool = SqlitePoolOptions::new()
 - settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
 - 全项目日志用 println!，如需结构化日志可后续接 log + tauri-plugin-log
 - 运行中的实例仍是旧二进制，第四~六轮新代码（feed 去重/编码/下载唯一化/world-nav 修复/源替换）需重启生效
+
+## 十六、2026-09-13 第七轮完善（数据库运维修复）
+
+### 16.1 修复内容
+
+1. **WAL 文件膨胀**：体检发现 -wal 文件（1497KB）比主库（796KB）还大——大量写入（feed 刷新 1103 条）后 WAL 未收缩。修复：启动时执行 `PRAGMA wal_checkpoint(TRUNCATE)` 把已提交内容合并回主库并截断 WAL。实测：1497KB → 0KB，busy=0 无阻塞。运行中 WAL 超 4MB 由 SQLite 自动 checkpoint 兜底，不会无限增长。
+2. **downloads 表无限增长**：下载记录无清理机制（get_downloads 只取最近 100 条，但表会一直涨）。修复：insert_download 插入后自动清理，只保留最近 500 条（与 sessions 100 条、history 10000 条上限同思路）。新增测试验证：插入 505 条后剩 500 条，最早 5 条被删。
+
+### 16.2 其他体检结论
+
+3. 表索引齐全（bookmarks/history/passwords/feed_items 均有索引），downloads 按主键排序无需额外索引。
+4. 数据库现状：history 76 / sessions 100（清理生效）/ feed_items 1103（每源 50 上限）/ bookmarks 4 / passwords 1 / workspaces 2，无异常增长。
+
+### 16.3 验证结果
+
+- `cargo check` 0 警告 ✅ / `cargo clippy` 0 警告 ✅ / `cargo test` 17 passed（新增 downloads 清理测试）✅ / release 编译 ✅
+
+### 16.4 遗留事项（更新）
+
+- git 历史仍含明文 sudo 密码（旧提交），彻底清除需 `git filter-repo` 重写历史（有风险，暂缓）
+- settings 表 `master_key` 残留待用户首次使用密码功能时懒迁移（符合设计）
+- 全项目日志用 println!，如需结构化日志可后续接 log + tauri-plugin-log
+- 运行中的实例仍是旧二进制，第七轮新代码（启动 WAL checkpoint + downloads 清理）需重启生效

@@ -62,6 +62,13 @@ impl Db {
       .execute(&pool)
       .await?;
 
+    // 启动时收缩 WAL：上次运行大量写入（如 feed 刷新）后 -wal 文件可能膨胀，
+    // 这里把已提交内容合并回主库并截断 WAL（TRUNCATE），保持磁盘整洁。
+    // 运行中 WAL 超 4MB 会由 SQLite 自动 checkpoint，不会无限增长。
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE);")
+      .execute(&pool)
+      .await?;
+
     // 执行迁移
     Self::run_migrations(&pool).await?;
 
