@@ -272,7 +272,16 @@ pub async fn refresh_all(db: &Db) -> usize {
         set.spawn(async move {
             // fetch_one 只使用 pool，key_path 用临时空值（密码相关操作不会走到这里）
             let db_owned = Db { pool, key_path: std::path::PathBuf::new() };
-            fetch_one(&client, &db_owned, &name, &url, &category).await
+            let n = fetch_one(&client, &db_owned, &name, &url, &category).await;
+            if n == 0 {
+                // 失败重试一次：anyfeeder 偶发限流/网络抖动会让单个源整轮丢失，
+                // 等 30 分钟下一轮太久，延迟 2 秒补抓一次
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                log::warn!("[feed] {} 首次抓取失败，2 秒后重试", name);
+                fetch_one(&client, &db_owned, &name, &url, &category).await
+            } else {
+                n
+            }
         });
     }
     let mut total = 0;
