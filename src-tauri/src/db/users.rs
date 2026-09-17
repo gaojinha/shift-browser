@@ -77,14 +77,43 @@ macro_rules! db_try {
   };
 }
 
-// ===== 密码哈希（PBKDF2，10 万次迭代 SHA-512）=====
+// ===== 密码哈希（PBKDF2-SHA512，迭代次数版本化）=====
+//
+// hash_algo 字段记录参数，便于日后升级迭代次数而不锁死老用户：
+// - 历史值 'pbkdf2'（第二十轮及更早）→ 按 10 万次校验
+// - 当前值 'pbkdf2-sha512-210000' → 21 万次（OWASP 2023 对 PBKDF2-SHA512 的建议下限）
+// 校验成功后若发现是旧参数，用当前参数重算并透明升级落库。
+//
+// 为什么不再调高：本应用是本地锁屏/登录，迭代次数直接等于用户等待时间。
+// release 用 opt-level="s"（体积优化），实测 60 万次要接近 1 秒，交互明显卡顿；
+// 21 万次约 0.2-0.4 秒，在本地离线介质（数据库文件权限 600）威胁模型下足够。
 
-fn hash_password(password: &str, salt: &str) -> String {
+/// 当前迭代次数
+const PBKDF2_ITER: u32 = 210_000;
+/// 历史迭代次数（老哈希只有 'pbkdf2' 标记）
+const LEGACY_PBKDF2_ITER: u32 = 100_000;
+/// 当前算法标记（写入 users.hash_algo）
+const HASH_ALGO_CURRENT: &str = "pbkdf2-sha512-210000";
+
+fn hash_password_with_iter(password: &str, salt: &str, iter: u32) -> String {
   use pbkdf2::pbkdf2_hmac;
   use sha2::Sha512;
   let mut out = [0u8; 64];
-  pbkdf2_hmac::<Sha512>(password.as_bytes(), salt.as_bytes(), 100_000, &mut out);
+  pbkdf2_hmac::<Sha512>(password.as_bytes(), salt.as_bytes(), iter, &mut out);
   hex::encode(out)
+}
+
+/// 按当前参数计算哈希（新注册/改密码用）
+fn hash_password(password: &str, salt: &str) -> String {
+  hash_password_with_iter(password, salt, PBKDF2_ITER)
+}
+
+/// 从 hash_algo 解析校验所需迭代次数（未知值按历史参数兜底）
+fn iterations_for_algo(algo: &str) -> u32 {
+  algo
+    .strip_prefix("pbkdf2-sha512-")
+    .and_then(|n| n.parse::<u32>().ok())
+    .unwrap_or(LEGACY_PBKDF2_ITER)
 }
 
 fn generate_salt() -> String {
@@ -276,11 +305,12 @@ pub async fn user_register(
   let res = db_try!(
     sqlx::query(
       "INSERT INTO users (username, password_hash, salt, hash_algo, nickname, avatar, signature)
-       VALUES (?, ?, ?, 'pbkdf2', ?, '🦊', '这个人很懒，什么都没写')",
+       VALUES (?, ?, ?, ?, ?, '🦊', '这个人很懒，什么都没写')",
     )
     .bind(&name)
     .bind(&hash)
     .bind(&salt)
+    .bind(HASH_ALGO_CURRENT)
     .bind(&name)
     .execute(&db.pool)
   );
@@ -310,22 +340,40 @@ pub async fn user_register(
 }
 
 /// 纯密码验证（供启动锁屏等非 IPC 场景使用，不写会话、不触发防爆破）
+/// 按存储的 hash_algo 选迭代次数校验；成功后若是旧参数则透明升级到当前参数
 pub async fn verify_password(db: &Db, username: &str, password: &str) -> Result<bool, String> {
   let name = username.trim().to_string();
   if name.is_empty() || password.is_empty() {
     return Ok(false);
   }
-  let row: Option<(String, String)> = sqlx::query_as::<_, (String, String)>(
-    "SELECT password_hash, salt FROM users WHERE username = ?",
+  let row: Option<(String, String, String)> = sqlx::query_as::<_, (String, String, String)>(
+    "SELECT password_hash, salt, hash_algo FROM users WHERE username = ?",
   )
   .bind(&name)
   .fetch_optional(&db.pool)
   .await
   .map_err(|e| e.to_string())?;
-  let Some((stored_hash, salt)) = row else {
+  let Some((stored_hash, salt, algo)) = row else {
     return Ok(false);
   };
-  Ok(hash_password(password, &salt) == stored_hash)
+  let iter = iterations_for_algo(&algo);
+  if hash_password_with_iter(password, &salt, iter) != stored_hash {
+    return Ok(false);
+  }
+  // 透明升级：旧参数（如 'pbkdf2' 10 万次）→ 当前参数（60 万次）
+  if algo != HASH_ALGO_CURRENT {
+    let new_hash = hash_password(password, &salt);
+    let _ = sqlx::query("UPDATE users SET password_hash = ?, hash_algo = ? WHERE username = ?")
+      .bind(&new_hash)
+      .bind(HASH_ALGO_CURRENT)
+      .bind(&name)
+      .execute(&db.pool)
+      .await
+      .map(|_| {
+        log::info!("[users] 密码哈希已升级: {} → {}", algo, HASH_ALGO_CURRENT);
+      });
+  }
+  Ok(true)
 }
 
 /// 登录
@@ -344,23 +392,34 @@ pub async fn user_login(
     let remain = (locked_until - now_ms()) / 1000 + 1;
     return Ok(UserResult::err(format!("尝试次数过多，请 {} 秒后再试", remain)));
   }
-  let row: Option<(i64, String, String)> = db_try!(
-    sqlx::query_as::<_, (i64, String, String)>(
-      "SELECT id, password_hash, salt FROM users WHERE username = ?",
+  let row: Option<(i64, String, String, String)> = db_try!(
+    sqlx::query_as::<_, (i64, String, String, String)>(
+      "SELECT id, password_hash, salt, hash_algo FROM users WHERE username = ?",
     )
     .bind(&name)
     .fetch_optional(&db.pool)
   );
-  let Some((uid, stored_hash, salt)) = row else {
+  let Some((uid, stored_hash, salt, algo)) = row else {
     return Ok(UserResult::err("账号不存在，请先注册"));
   };
-  if hash_password(&password, &salt) != stored_hash {
+  if hash_password_with_iter(&password, &salt, iterations_for_algo(&algo)) != stored_hash {
     guard_record_failure(&name);
     let (f, _) = guard_get(&name);
     if f == 0 {
       return Ok(UserResult::err("密码错误次数过多，已锁定 30 秒"));
     }
     return Ok(UserResult::err(format!("密码错误（还剩 {} 次机会）", MAX_LOGIN_FAILURES - f)));
+  }
+  // 透明升级旧迭代参数
+  if algo != HASH_ALGO_CURRENT {
+    let new_hash = hash_password(&password, &salt);
+    let _ = sqlx::query("UPDATE users SET password_hash = ?, hash_algo = ? WHERE id = ?")
+      .bind(&new_hash)
+      .bind(HASH_ALGO_CURRENT)
+      .bind(uid)
+      .execute(&db.pool)
+      .await
+      .map(|_| log::info!("[users] 密码哈希已升级: {} → {}", algo, HASH_ALGO_CURRENT));
   }
   guard_clear(&name);
   set_session(&db, Some(uid)).await;
@@ -467,25 +526,26 @@ pub async fn user_change_password(
   if new_password.chars().count() < 6 {
     return Ok(UserResult::err("新密码至少 6 位"));
   }
-  let row: Option<(String, String)> = db_try!(
-    sqlx::query_as::<_, (String, String)>(
-      "SELECT password_hash, salt FROM users WHERE id = ?",
+  let row: Option<(String, String, String)> = db_try!(
+    sqlx::query_as::<_, (String, String, String)>(
+      "SELECT password_hash, salt, hash_algo FROM users WHERE id = ?",
     )
     .bind(uid)
     .fetch_optional(&db.pool)
   );
-  let Some((stored_hash, salt)) = row else {
+  let Some((stored_hash, salt, algo)) = row else {
     return Ok(UserResult::err("账号不存在"));
   };
-  if hash_password(&old_password, &salt) != stored_hash {
+  if hash_password_with_iter(&old_password, &salt, iterations_for_algo(&algo)) != stored_hash {
     return Ok(UserResult::err("旧密码错误"));
   }
   let new_salt = generate_salt();
   let new_hash = hash_password(&new_password, &new_salt);
   db_try!(
-    sqlx::query("UPDATE users SET password_hash = ?, salt = ?, hash_algo = 'pbkdf2' WHERE id = ?")
+    sqlx::query("UPDATE users SET password_hash = ?, salt = ?, hash_algo = ? WHERE id = ?")
       .bind(&new_hash)
       .bind(&new_salt)
+      .bind(HASH_ALGO_CURRENT)
       .bind(uid)
       .execute(&db.pool)
   );
@@ -504,17 +564,17 @@ pub async fn user_delete(
   if name.is_empty() || password.is_empty() {
     return Ok(UserResult::err("用户名和密码不能为空"));
   }
-  let row: Option<(i64, String, String)> = db_try!(
-    sqlx::query_as::<_, (i64, String, String)>(
-      "SELECT id, password_hash, salt FROM users WHERE username = ?",
+  let row: Option<(i64, String, String, String)> = db_try!(
+    sqlx::query_as::<_, (i64, String, String, String)>(
+      "SELECT id, password_hash, salt, hash_algo FROM users WHERE username = ?",
     )
     .bind(&name)
     .fetch_optional(&db.pool)
   );
-  let Some((uid, stored_hash, salt)) = row else {
+  let Some((uid, stored_hash, salt, algo)) = row else {
     return Ok(UserResult::err("账号不存在"));
   };
-  if hash_password(&password, &salt) != stored_hash {
+  if hash_password_with_iter(&password, &salt, iterations_for_algo(&algo)) != stored_hash {
     return Ok(UserResult::err("密码错误，无法删除"));
   }
   let was_current = current_user_id(&db).await == Some(uid);
@@ -571,25 +631,12 @@ pub async fn user_update_prefs(
 }
 
 /// 导出账号备份（JSON 文件，含密码哈希，提示妥善保管）
+/// 安全：只能导出当前登录用户自己的数据——不接受任意用户名参数，
+/// 防止未登录/他人调用导出任意账号的哈希+盐（离线爆破面）
 #[tauri::command]
-pub async fn user_export(
-  db: tauri::State<'_, Db>,
-  username: Option<String>,
-) -> Result<UserResult, String> {
-  let name = username.unwrap_or_default().trim().to_string();
-  let uid = if name.is_empty() {
-    current_user_id(&db).await
-  } else {
-    let row: Option<(i64,)> = sqlx::query_as::<_, (i64,)>("SELECT id FROM users WHERE username = ?")
-      .bind(&name)
-      .fetch_optional(&db.pool)
-      .await
-      .ok()
-      .flatten();
-    row.map(|r| r.0)
-  };
-  let Some(uid) = uid else {
-    return Ok(UserResult::err("账号不存在"));
+pub async fn user_export(db: tauri::State<'_, Db>) -> Result<UserResult, String> {
+  let Some(uid) = current_user_id(&db).await else {
+    return Ok(UserResult::err("请先登录后再导出"));
   };
   let row: Option<(String, String, String, String, String, String, String)> = db_try!(
     sqlx::query_as::<_, (String, String, String, String, String, String, String)>(
@@ -683,6 +730,12 @@ pub async fn user_import(db: tauri::State<'_, Db>) -> Result<UserResult, String>
     .ok_or_else(|| "备份文件缺少盐值".to_string())?
     .to_string();
   let nickname = acct.get("nickname").and_then(|u| u.as_str()).unwrap_or(&uname).to_string();
+  // 备份文件里的算法标记：旧备份无此字段 → 按历史参数 'pbkdf2'（10 万次）导入，登录时自动升级
+  let algo = acct
+    .get("hashAlgo")
+    .and_then(|u| u.as_str())
+    .unwrap_or("pbkdf2")
+    .to_string();
   let avatar = acct.get("avatar").and_then(|u| u.as_str()).unwrap_or("🦊").to_string();
   let signature = acct
     .get("signature")
@@ -700,11 +753,12 @@ pub async fn user_import(db: tauri::State<'_, Db>) -> Result<UserResult, String>
   db_try!(
     sqlx::query(
       "INSERT INTO users (username, password_hash, salt, hash_algo, nickname, avatar, signature)
-       VALUES (?, ?, ?, 'pbkdf2', ?, ?, ?)",
+       VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&uname)
     .bind(&pwd_hash)
     .bind(&salt)
+    .bind(&algo)
     .bind(&nickname)
     .bind(&avatar)
     .bind(&signature)
@@ -770,4 +824,117 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
   let d = doy - (153 * mp + 2) / 5 + 1;
   let m = if mp < 10 { mp + 3 } else { mp - 9 };
   (if m <= 2 { y + 1 } else { y }, (m as i64), (d as i64))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+  /// 建一个带 users 表的临时库（用生产迁移建表，保证字段一致）
+  async fn temp_db() -> (tempfile::TempDir, Db) {
+    let dir = tempfile::tempdir().unwrap();
+    let options = SqliteConnectOptions::new()
+      .filename(dir.path().join("test.db"))
+      .create_if_missing(true);
+    let pool = SqlitePoolOptions::new()
+      .max_connections(1)
+      .connect_with(options)
+      .await
+      .unwrap();
+    sqlx::raw_sql(include_str!("../../migrations/20260914000000_users.sql"))
+      .execute(&pool)
+      .await
+      .unwrap();
+    let key_path = dir.path().join("master.key");
+    (dir, Db { pool, key_path })
+  }
+
+  /// 按指定算法标记插入一个用户（模拟历史数据）
+  async fn insert_user(db: &Db, name: &str, pwd: &str, algo: &str) {
+    let salt = generate_salt();
+    let iter = iterations_for_algo(algo);
+    let hash = hash_password_with_iter(pwd, &salt, iter);
+    sqlx::query(
+      "INSERT INTO users (username, password_hash, salt, hash_algo, nickname, avatar, signature)
+       VALUES (?, ?, ?, ?, ?, (char(129418)), (char(36825)))",
+    )
+    .bind(name)
+    .bind(&hash)
+    .bind(&salt)
+    .bind(algo)
+    .bind(name)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+  }
+
+  async fn algo_of(db: &Db, name: &str) -> String {
+    sqlx::query_scalar::<_, String>("SELECT hash_algo FROM users WHERE username = ?")
+      .bind(name)
+      .fetch_one(&db.pool)
+      .await
+      .unwrap()
+  }
+
+  #[test]
+  fn test_iterations_for_algo_parsing() {
+    // 当前格式
+    assert_eq!(iterations_for_algo(HASH_ALGO_CURRENT), PBKDF2_ITER);
+    assert_eq!(iterations_for_algo("pbkdf2-sha512-210000"), 210_000);
+    // 历史标记 / 未知值都按旧参数兜底（老用户仍能登录）
+    assert_eq!(iterations_for_algo("pbkdf2"), LEGACY_PBKDF2_ITER);
+    assert_eq!(iterations_for_algo(""), LEGACY_PBKDF2_ITER);
+    assert_eq!(iterations_for_algo("bcrypt"), LEGACY_PBKDF2_ITER);
+    assert_eq!(iterations_for_algo("pbkdf2-sha512-abc"), LEGACY_PBKDF2_ITER);
+  }
+
+  #[tokio::test]
+  async fn test_verify_upgrades_legacy_hash() {
+    let (_dir, db) = temp_db().await;
+    // 旧版用户：hash_algo = pbkdf2（10 万次）
+    insert_user(&db, "testuser", "test-pass-42", "pbkdf2").await;
+    assert_eq!(algo_of(&db, "testuser").await, "pbkdf2");
+
+    // 正确密码通过，且哈希被透明升级到当前算法
+    assert!(verify_password(&db, "testuser", "test-pass-42").await.unwrap());
+    assert_eq!(algo_of(&db, "testuser").await, HASH_ALGO_CURRENT);
+
+    // 升级后仍能用同一密码登录（参数一致）
+    assert!(verify_password(&db, "testuser", "test-pass-42").await.unwrap());
+  }
+
+  #[tokio::test]
+  async fn test_verify_rejects_wrong_password_without_upgrade() {
+    let (_dir, db) = temp_db().await;
+    // 用小迭代标记（1000 次）只是为了跑得快：失败路径与迭代次数无关
+    insert_user(&db, "testuser", "test-pass-42", "pbkdf2-sha512-1000").await;
+
+    assert!(!verify_password(&db, "testuser", "wrong-pass").await.unwrap());
+    // 失败不改哈希（否则等于把账号锁死）
+    assert_eq!(algo_of(&db, "testuser").await, "pbkdf2-sha512-1000");
+    // 空密码/不存在用户也不通过
+    assert!(!verify_password(&db, "testuser", "").await.unwrap());
+    assert!(!verify_password(&db, "nobody", "test-pass-42").await.unwrap());
+  }
+
+  #[tokio::test]
+  async fn test_new_password_uses_current_algo() {
+    let (_dir, db) = temp_db().await;
+    let salt = generate_salt();
+    let hash = hash_password("abc12345", &salt);
+    sqlx::query(
+      "INSERT INTO users (username, password_hash, salt, hash_algo, nickname) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("newbie")
+    .bind(&hash)
+    .bind(&salt)
+    .bind(HASH_ALGO_CURRENT)
+    .bind("newbie")
+    .execute(&db.pool)
+    .await
+    .unwrap();
+    assert_eq!(algo_of(&db, "newbie").await, HASH_ALGO_CURRENT);
+    assert!(verify_password(&db, "newbie", "abc12345").await.unwrap());
+  }
 }

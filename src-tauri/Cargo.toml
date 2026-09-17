@@ -35,9 +35,13 @@ tokio = { version = "1", features = ["full"] }
 thiserror = "2"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 readability = "0.3.0"
-regex = "1"
 encoding_rs = "0.8"
 uuid = { version = "1", features = ["v4"] }
+# HTML 净化（阅读模式正文防 XSS）：基于 html5ever 真解析器，白名单模式，
+# 替代原正则方案（正则可被 <svg/onload=> 等无闭合写法绕过）
+ammonia = "4"
+# URL 解析（ai.rs SSRF 防护：校验 base_url 协议/主机）
+url = "2"
 # 系统文件对话框（XDG portal，走 DBus，不依赖 GTK 主线程）
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
 

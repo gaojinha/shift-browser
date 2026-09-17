@@ -34,6 +34,20 @@ impl Db {
       let _ = std::fs::set_permissions(&app_data_dir, std::fs::Permissions::from_mode(0o700));
     }
 
+    // 安全：预创建数据库文件并直接以 600 落盘。sqlx 的 create_if_missing 会按 umask
+    // 建文件（常见 644），到下面 chmod 之间存在窗口期；这里先占位即可消除。
+    // 失败不致命（后续 connect_with 仍会尝试创建），故忽略错误。
+    #[cfg(unix)]
+    {
+      use std::os::unix::fs::OpenOptionsExt;
+      let _ = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(&db_path);
+    }
+
     // 注意：sqlx 的 create_if_missing 默认是 false，
     // 不加 create_if_missing(true) 时，文件不存在会报 SQLITE_CANTOPEN (code 14)
     let options = SqliteConnectOptions::new()
@@ -114,6 +128,10 @@ impl Db {
       5,
       "users_account_system",
       include_str!("../../migrations/20260914000000_users.sql"),
+    ), (
+      6,
+      "history_last_visit_index",
+      include_str!("../../migrations/20260918000000_history_last_visit_index.sql"),
     )];
 
     for (version, name, sql) in migrations {

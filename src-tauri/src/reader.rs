@@ -18,39 +18,38 @@ async fn scrape_article(url: &str) -> Result<readability::extractor::Product, St
     .map_err(|_| "提取不出正文（可能是动态页或内容太短）".to_string())
 }
 
-/// 移除正文中的危险标签与事件属性（防 XSS）：
-/// script/style/iframe/object/embed/svg 整块删除，on* 事件属性剥掉，
-/// javascript:/vbscript:/data:text/html 协议的 href/src/action 剥掉，
-/// <base> 删除（防相对链接被劫持）
+/// 净化正文 HTML（防 XSS）：用 ammonia（html5ever 真解析器）白名单模式。
+/// 正则方案可被 `<svg/onload=alert(1)>`（无闭合、/on* 前无空白）绕过，
+/// ammonia 按 HTML5 规范解析后只保留白名单标签/属性，on* 事件与危险协议一律剥离。
 fn sanitize_html(html: &str) -> String {
-    let re_script = regex::Regex::new(r"(?is)<script\b[^>]*>.*?</script>").unwrap();
-    let re_style = regex::Regex::new(r"(?is)<style\b[^>]*>.*?</style>").unwrap();
-    let re_iframe = regex::Regex::new(r"(?is)<iframe\b[^>]*>.*?</iframe>").unwrap();
-    let re_object = regex::Regex::new(r"(?is)<object\b[^>]*>.*?</object>").unwrap();
-    let re_embed = regex::Regex::new(r"(?is)<embed\b[^>]*/?>").unwrap();
-    let re_svg = regex::Regex::new(r"(?is)<svg\b[^>]*>.*?</svg>").unwrap();
-    let re_base = regex::Regex::new(r"(?is)<base\b[^>]*/?>").unwrap();
-    let re_events = regex::Regex::new(r#"(?i)\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)"#).unwrap();
-    // 危险协议的 URL 属性（javascript:/vbscript:/data:text/html 可执行代码）
-    let re_danger_uri = regex::Regex::new(
-        r#"(?i)\s(href|src|action|xlink:href)\s*=\s*("|')(javascript|vbscript|data:text/html)[^"']*("|')"#,
-    )
-    .unwrap();
-    let mut s = html.to_string();
-    for re in [
-        &re_script,
-        &re_style,
-        &re_iframe,
-        &re_object,
-        &re_embed,
-        &re_svg,
-        &re_base,
-    ] {
-        s = re.replace_all(&s, "").to_string();
-    }
-    s = re_events.replace_all(&s, "").to_string();
-    s = re_danger_uri.replace_all(&s, "").to_string();
-    s
+    use std::collections::{HashMap, HashSet};
+    let mut builder = ammonia::Builder::default();
+    builder
+        .tags(HashSet::from([
+            // 块级
+            "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li",
+            "blockquote", "pre", "hr", "br", "table", "thead", "tbody", "tr", "td", "th",
+            "figure", "figcaption", "section", "article", "header", "footer", "main", "aside",
+            // 行内
+            "span", "a", "img", "strong", "em", "b", "i", "u", "s", "small", "code",
+            "sub", "sup", "mark", "abbr", "cite", "q", "time",
+            // 媒体（src 仅 http/https，data: 一律不放行）
+            "video", "audio", "source", "picture",
+        ]))
+        .tag_attributes(HashMap::from([
+            ("a", HashSet::from(["href", "title"])),
+            ("img", HashSet::from(["src", "alt", "title", "width", "height"])),
+            ("td", HashSet::from(["colspan", "rowspan"])),
+            ("th", HashSet::from(["colspan", "rowspan"])),
+            ("video", HashSet::from(["src", "controls", "poster"])),
+            ("audio", HashSet::from(["src", "controls"])),
+            ("source", HashSet::from(["src", "type"])),
+        ]))
+        .add_generic_attributes(HashSet::from(["class", "title"]))
+        // 只允许 http/https URL（剥 javascript:/vbscript:/data:text/html 等可执行协议）
+        .url_schemes(HashSet::from(["http", "https"]))
+        .clean(html)
+        .to_string()
 }
 
 /// 抓正文返回 JSON（不写文件）——供资讯面板"📖 内联阅读"用
@@ -199,4 +198,58 @@ fn esc_attr(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('"', "&quot;")
         .replace('<', "&lt;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_blocks_script_and_svg() {
+        // 正则方案被绕过的用例：无闭合 svg + onload
+        let s = sanitize_html(r#"<p>hi</p><svg/onload=alert(1)>"#);
+        assert!(!s.contains("svg"));
+        assert!(!s.contains("onload"));
+        assert!(s.contains("hi"));
+        // 完整 script 块删除
+        let s = sanitize_html(r#"<p>a</p><script>alert(1)</script><p>b</p>"#);
+        assert!(!s.contains("script"));
+        assert!(s.contains("a"));
+        assert!(s.contains("b"));
+    }
+
+    #[test]
+    fn sanitize_strips_events_and_danger_uris() {
+        // onerror 事件剥掉
+        let s = sanitize_html(r#"<img src="https://x.com/a.png" onerror="alert(1)">"#);
+        assert!(!s.contains("onerror"));
+        assert!(s.contains("https://x.com/a.png"));
+        // javascript: href 剥掉
+        let s = sanitize_html(r#"<a href="javascript:alert(1)">点我</a>"#);
+        assert!(!s.contains("javascript:"));
+        assert!(s.contains("点我"));
+        // data:text/html src 剥掉（url_schemes 只放 http/https）
+        let s = sanitize_html(r#"<img src="data:text/html,<script>alert(1)</script>">"#);
+        assert!(!s.contains("data:"));
+        // 正常 https 链接保留
+        let s = sanitize_html(r#"<a href="https://ok.com/x">链接</a>"#);
+        assert!(s.contains("https://ok.com/x"));
+        // iframe/object/embed 删除
+        let s = sanitize_html(r#"<p>a</p><iframe src="https://evil.com"></iframe><object data="x"></object><embed src="y">"#);
+        assert!(!s.contains("iframe"));
+        assert!(!s.contains("object"));
+        assert!(!s.contains("embed"));
+        // base 删除（防相对链接劫持）
+        let s = sanitize_html(r#"<base href="https://evil.com/"><p>a</p>"#);
+        assert!(!s.contains("base"));
+    }
+
+    #[test]
+    fn sanitize_keeps_normal_content() {
+        let s = sanitize_html(r#"<h1>标题</h1><p>正文 <strong>粗体</strong> <a href="https://x.com">链接</a></p><ul><li>项</li></ul>"#);
+        assert!(s.contains("标题"));
+        assert!(s.contains("粗体"));
+        assert!(s.contains("链接"));
+        assert!(s.contains("<li>"));
+    }
 }

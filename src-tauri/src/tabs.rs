@@ -23,6 +23,24 @@ pub const ADDRESS_BAR_HEIGHT: f64 = 42.0;
 pub const BOOKMARKS_BAR_HEIGHT: f64 = 30.0;
 pub const STATUS_BAR_HEIGHT: f64 = 22.0;
 
+/// 净化下载文件名（防路径穿越）：
+/// 剥掉 / \ 路径分隔符、空字节/控制字符、首尾点段（防 ../ 与隐藏文件），限长 200 字符
+fn sanitize_filename(name: &str) -> String {
+  let cleaned: String = name
+    .chars()
+    .filter(|c| !matches!(c, '/' | '\\' | '\0' | '\n' | '\r' | '\t'))
+    .collect();
+  let cleaned = cleaned.trim().trim_matches('.').trim().to_string();
+  if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+    return "download".to_string();
+  }
+  let mut s: String = cleaned.chars().take(200).collect();
+  if s.is_empty() {
+    s = "download".to_string();
+  }
+  s
+}
+
 /// 内容区顶部偏移（书签栏开启时）= 标签栏 + 地址栏 + 书签栏
 pub const CONTENT_TOP_OFFSET: f64 =
   TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT + BOOKMARKS_BAR_HEIGHT;
@@ -189,6 +207,8 @@ impl TabManager {
               let state = app.state::<TabManager>();
               if let Ok(tab) = create_tab(app.clone(), state, url_str).await {
                 log::info!("[tabs] on_new_window: 新标签创建成功 id={}", tab.id);
+                // 页面内 window.open 建的新标签，前端不知情 → 通知同步
+                let _ = app.emit("tabs-updated", ());
               }
             });
             tauri::webview::NewWindowResponse::Deny
@@ -205,7 +225,7 @@ impl TabManager {
 
               log::info!("[tabs] page_load_finished: tab={} title={}", tab_id, title);
 
-              // 提取 favicon 并更新 tab（前端每 2s 轮询 get_tabs 自动同步）
+              // 提取 favicon 并更新 tab（更新后 emit 通知前端同步）
               let app_fav = app_handle2.clone();
               let tab_id_fav = tab_id.clone();
               let _ = webview.with_webview(move |pwv| {
@@ -219,11 +239,21 @@ impl TabManager {
                     if let Ok(v) = res {
                       let fav = v.to_string();
                       if !fav.is_empty() && !fav.starts_with("about:") {
-                        log::info!("[tabs] favicon: tab={} {}", tab_id_fav, fav);
-                        let state = app_fav.state::<TabManager>();
-                        let mut tabs = state.tabs.lock().unwrap();
-                        if let Some(t) = tabs.get_mut(&tab_id_fav) {
-                          t.favicon = fav;
+                        log::debug!("[tabs] favicon: tab={} {}", tab_id_fav, fav);
+                        let updated = {
+                          let state = app_fav.state::<TabManager>();
+                          let mut tabs = state.tabs.lock().unwrap();
+                          match tabs.get_mut(&tab_id_fav) {
+                            Some(t) if t.favicon != fav => {
+                              t.favicon = fav;
+                              true
+                            }
+                            _ => false,
+                          }
+                        };
+                        // favicon 更新 → 通知前端同步
+                        if updated {
+                          let _ = app_fav.emit("tabs-updated", ());
                         }
                       }
                     }
@@ -246,6 +276,8 @@ impl TabManager {
                   }
                 }
               }
+              // 页面加载完成（URL/标题变化）→ 通知前端同步（替代 2s 轮询）
+              let _ = app_handle2.emit("tabs-updated", ());
 
               tauri::async_runtime::spawn(async move {
                 let db = app3.state::<Db>();
@@ -295,12 +327,23 @@ impl TabManager {
             if title.is_empty() {
               return;
             }
-            if let Some(state) = app2.try_state::<TabManager>() {
-              if let Some(tab) = state.tabs.lock().unwrap().get_mut(&tab_id) {
-                if tab.title != title {
-                  tab.title = title;
+            // 标题变化 → 更新内存态；仅在真的变化时通知前端（防高频重复 emit）
+            let changed = {
+              if let Some(state) = app2.try_state::<TabManager>() {
+                let mut tabs = state.tabs.lock().unwrap();
+                match tabs.get_mut(&tab_id) {
+                  Some(tab) if tab.title != title => {
+                    tab.title = title;
+                    true
+                  }
+                  _ => false,
                 }
+              } else {
+                false
               }
+            };
+            if changed {
+              let _ = app2.emit("tabs-updated", ());
             }
           }
         });
@@ -362,7 +405,8 @@ impl TabManager {
           // 监听 child webview 的鼠标点击事件
           child_gtk.connect_button_press_event(|wv, event| {
               let (x, y) = (event.position().0, event.position().1);
-              log::info!(
+              // 高频事件（每次点击/滚动都触发）→ debug 级，避免刷屏（RUST_LOG=debug 可开）
+              log::debug!(
                   "[tabs] child button_press: button={} pos=({},{})",
                   event.button(), x, y
               );
@@ -386,7 +430,7 @@ impl TabManager {
               false.into() // 不拦截，让 webview 处理
           });
           child_gtk.connect_button_release_event(|_wv, event| {
-              log::info!(
+              log::debug!(
                   "[tabs] child button_release: button={} pos=({},{})",
                   event.button(),
                   event.position().0,
@@ -398,7 +442,8 @@ impl TabManager {
           // DOM 滚动可能不生效（与链接点击同源的输入窗口问题）。滚动时强制聚焦 + 记录日志诊断。
           child_gtk.connect_scroll_event(|wv, event| {
               let (dx, dy) = event.delta();
-              log::info!(
+              // 滚轮事件最密集 → debug 级（每次滚动都 info 会刷爆日志）
+              log::debug!(
                   "[tabs] child scroll: delta=({:.2},{:.2}) dir={:?}",
                   dx, dy, event.direction()
               );
@@ -414,7 +459,7 @@ impl TabManager {
                     None::<&gtk::gio::Cancellable>,
                     move |res| {
                       if let Ok(v) = res {
-                        log::info!("[tabs] 滚动诊断: {}", v);
+                        log::debug!("[tabs] 滚动诊断: {}", v);
                       }
                     },
                 );
@@ -432,6 +477,8 @@ impl TabManager {
               ctx.connect_download_started(move |_ctx, download| {
                 log::info!("[downloads] 下载开始信号");
                 // 文件名：从 URL 推断（URL 最后一段，去 query）
+                // 安全：用 url crate 解析取解码后的 path（%2e%2e/%2f 会被解码成 ../），
+                // 再经 sanitize_filename 剥离路径分隔符/点段/控制字符，防路径穿越
                 let url = download
                   .request()
                   .and_then(|r| r.uri())
@@ -439,9 +486,11 @@ impl TabManager {
                 let filename = url
                   .as_deref()
                   .map(|u| {
-                    let path = u.split('?').next().unwrap_or(u);
+                    let path = url::Url::parse(u)
+                      .map(|p| p.path().to_string())
+                      .unwrap_or_else(|_| u.split('?').next().unwrap_or(u).to_string());
                     let name = path.rsplit('/').next().unwrap_or("download").to_string();
-                    if name.is_empty() { "download".to_string() } else { name }
+                    sanitize_filename(&name)
                   })
                   .unwrap_or_else(|| "download".to_string());
                 let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
@@ -1368,5 +1417,27 @@ mod tests {
         assert_eq!(p5, format!("{}/noext(1)", dir));
 
         let _ = std::fs::remove_dir_all(std::env::temp_dir().join("sb-unique-test"));
+    }
+
+    #[test]
+    fn sanitize_filename_blocks_path_traversal() {
+        // 路径分隔符剥离
+        assert_eq!(sanitize_filename("a/../b.txt"), "a..b.txt");
+        assert_eq!(sanitize_filename("..\\evil.txt"), "evil.txt");
+        // 纯穿越段 → 默认名
+        assert_eq!(sanitize_filename(".."), "download");
+        assert_eq!(sanitize_filename("."), "download");
+        assert_eq!(sanitize_filename(""), "download");
+        // 空字节/控制字符剥离
+        assert_eq!(sanitize_filename("a\0b.txt"), "ab.txt");
+        assert_eq!(sanitize_filename("a\nb.txt"), "ab.txt");
+        // 正常名保留
+        assert_eq!(sanitize_filename("report.pdf"), "report.pdf");
+        // 首尾点段剥离（防隐藏文件）
+        assert_eq!(sanitize_filename(".secret"), "secret");
+        assert_eq!(sanitize_filename("..hidden"), "hidden");
+        // 超长截断
+        let long = "x".repeat(500);
+        assert_eq!(sanitize_filename(&long).len(), 200);
     }
 }

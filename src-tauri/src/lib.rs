@@ -10,6 +10,16 @@ mod translate;
 use db::{bookmarks, downloads, history, passwords, sessions, settings, tab_groups, users, workspaces, Db};
 use tauri::Manager;
 
+/// shift:// 自定义协议页面的 CSP（主窗口/新标签页/世界导航页统一）
+/// 注意：Tauri 的 security.csp 只注入 tauri:// 与 http://asset.localhost，
+/// 自定义协议（shift://）不走注入，必须在这里手动加响应头。
+/// script-src 允许 'unsafe-inline'：newtab/world-nav 是本地生成的可信内联脚本；
+/// object-src 'none' + base-uri 'self' + connect-src 收紧 防注入面。
+const SHIFT_CSP: &str = "default-src 'self' shift: data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:; media-src 'self' https: http:; frame-src 'self' https: http:; object-src 'none'; base-uri 'self'";
+
+/// 整页翻译注入脚本（编译期嵌入，运行时 eval 到 child webview）
+const WHOLE_PAGE_TRANSLATE_JS: &str = include_str!("whole_page_translate.js");
+
 /// 简易 percent-decode（处理 shift:// query 参数，避免引入 url crate）
 /// 注意：只处理 %XX 和 + → 空格，满足 shift:// 内部用
 fn percent_decode(s: &str) -> String {
@@ -205,6 +215,7 @@ pub fn run() {
             let html = html.replace("__INVOKE_KEY_PLACEHOLDER__", app.invoke_key());
             return tauri::http::Response::builder()
               .header(tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
+              .header(tauri::http::header::CONTENT_SECURITY_POLICY, SHIFT_CSP)
               .body(html.into_bytes())
               .unwrap();
           }
@@ -259,17 +270,62 @@ pub fn run() {
               "[translate] 整页翻译 request: label={} callback={}",
               webview_label, callback
             );
-            let url = params.get("url").cloned().unwrap_or_default();
+            // 注入整页翻译脚本：脚本在页面内收集文本节点 → 分批调 /batch → 回填 DOM
+            // （eval 是单向的，收集结果通过 /batch 的 shift:// 请求与回调变量回传）
+            let wv_label = webview_label.clone();
             tauri::async_runtime::spawn(async move {
-              // 整页翻译简化版：先 eval 收集文本节点，再分块翻译，再 eval 回填
-              // 这里先返回"开始翻译"状态——具体逻辑后续扩展
-              let payload = serde_json::json!({
-                "translated": 0u32,
-                "total": 0u32,
-                "note": "整页翻译链路已接通，待实现 DOM 收集/回填"
-              });
+              if let Some(wv) = app_clone.get_webview(&wv_label) {
+                if let Err(e) = wv.eval(WHOLE_PAGE_TRANSLATE_JS) {
+                  log::warn!("[translate] 整页翻译脚本注入失败: {}", e);
+                  let payload = serde_json::json!({ "error": format!("脚本注入失败: {}", e) });
+                  write_translate_result(&app_clone, &wv_label, &callback, &payload);
+                } else {
+                  log::info!("[translate] 整页翻译脚本已注入: {}", wv_label);
+                }
+              } else {
+                log::warn!("[translate] 找不到 webview: {}", wv_label);
+              }
+            });
+          }
+          "/batch" => {
+            // 批量翻译（整页翻译脚本调用）：texts 是 JSON 数组，逐段翻（并发 5）
+            let texts_json = params.get("texts").cloned().unwrap_or_default();
+            log::info!(
+              "[translate] 批量翻译 request: label={} bytes={}",
+              webview_label, texts_json.len()
+            );
+            tauri::async_runtime::spawn(async move {
+              let texts: Vec<String> = match serde_json::from_str(&texts_json) {
+                Ok(v) => v,
+                Err(e) => {
+                  let payload = serde_json::json!({ "error": format!("参数解析失败: {}", e) });
+                  write_translate_result(&app_clone, &webview_label, &callback, &payload);
+                  return;
+                }
+              };
+              let mut out: Vec<String> = vec![String::new(); texts.len()];
+              // 分批并发（每批 5 段），保持顺序
+              for chunk_start in (0..texts.len()).step_by(5) {
+                let chunk_end = (chunk_start + 5).min(texts.len());
+                let mut handles = Vec::new();
+                for (offset, t) in texts[chunk_start..chunk_end].iter().enumerate() {
+                  let i = chunk_start + offset;
+                  let t = t.clone();
+                  handles.push((
+                    i,
+                    tauri::async_runtime::spawn(async move {
+                      translate::translate_google(&t, "zh-CN").await
+                    }),
+                  ));
+                }
+                for (i, h) in handles {
+                  if let Ok(Ok(t)) = h.await {
+                    out[i] = t;
+                  }
+                }
+              }
+              let payload = serde_json::json!({ "texts": out });
               write_translate_result(&app_clone, &webview_label, &callback, &payload);
-              let _ = url; // 暂未用
             });
           }
           "/remove-auto-site" => {
@@ -322,6 +378,7 @@ pub fn run() {
         let html = html.replace("__INVOKE_KEY_PLACEHOLDER__", app.invoke_key());
         tauri::http::Response::builder()
           .header(tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
+          .header(tauri::http::header::CONTENT_SECURITY_POLICY, SHIFT_CSP)
           .body(html.into_bytes())
           .unwrap()
       } else {
@@ -455,18 +512,6 @@ pub fn run() {
       // 初始化标签管理器
       app.manage(tabs::TabManager::new());
       log::info!("[ShiftBrowser] 标签管理器初始化成功");
-
-      // 预生成新标签页 HTML（确保 shift:// 加载时文件就绪，避免时序竞态）
-      {
-        let app_handle = app.handle();
-        if let Some(path) = newtab::newtab_path(app_handle) {
-          let db = app_handle.state::<Db>();
-          match tauri::async_runtime::block_on(newtab::generate(&db, &path)) {
-            Ok(_) => log::info!("[ShiftBrowser] 新标签页预生成: {}", path.display()),
-            Err(e) => log::error!("[ShiftBrowser] 新标签页预生成失败: {}", e),
-          }
-        }
-      }
 
       // Linux：手动设置 WebKit web extensions 目录（tauri://localhost 协议依赖 web extension）
       // Tauri 2 不会自动设置 extensions_path，必须手动指定，否则前端资源加载失败

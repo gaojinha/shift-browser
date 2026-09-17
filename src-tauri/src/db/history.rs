@@ -11,6 +11,10 @@ pub struct HistoryEntry {
   pub last_visit_at: String,
 }
 
+/// 访问计数：每 64 次记录才做一次上限检查。
+/// 原先每次导航都跑全表 COUNT(*)，记录近万条时每跳一个页面都有可感开销。
+static RECORD_TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// 记录一次访问
 #[tauri::command]
 pub async fn record_history(
@@ -31,7 +35,20 @@ pub async fn record_history(
   .execute(&db.pool)
   .await?;
 
-  // 超过 10000 条才清理旧记录（避免每次访问都跑全表 DELETE）
+  // 上限检查降频：每 64 次访问才查一次（清理本身是低频兜底，不必每次导航都做）
+  let tick = RECORD_TICK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+  if tick % 64 != 0 {
+    return Ok(());
+  }
+
+  // 快速短路：id 自增，max(id) 不超过上限时行数必然不超上限（走主键索引，比 COUNT 快）
+  let max_id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM history")
+    .fetch_one(&db.pool)
+    .await?;
+  if max_id <= 10_000 {
+    return Ok(());
+  }
+
   let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history")
     .fetch_one(&db.pool)
     .await?;
@@ -198,6 +215,11 @@ mod tests {
     .await
     .unwrap();
     sqlx::query("CREATE UNIQUE INDEX idx_history_url_uniq ON history(url)")
+      .execute(&pool)
+      .await
+      .unwrap();
+    // 与生产迁移 v6 保持一致（get_recent_history 排序/清理用）
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_history_last_visit ON history(last_visit_at DESC)")
       .execute(&pool)
       .await
       .unwrap();

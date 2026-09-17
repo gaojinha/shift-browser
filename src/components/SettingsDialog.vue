@@ -48,9 +48,20 @@ watch(
     const my = ++seq
     try {
       if (v) {
-        if (!settingsStore.loaded) settingsStore.loadSettings().catch(() => {})
-        extensionsStore.loadExtensions().catch(() => {})
-        loadKeywords().catch(() => {})
+        if (!settingsStore.loaded) {
+          settingsStore.loadSettings().catch((e) => {
+            console.error('[settings] 加载设置失败:', e)
+            useToastStore().error('加载设置失败')
+          })
+        }
+        extensionsStore.loadExtensions().catch((e) => {
+          console.error('[settings] 加载扩展失败:', e)
+          useToastStore().error('加载扩展失败')
+        })
+        loadKeywords().catch((e) => {
+          console.error('[settings] 加载搜索引擎失败:', e)
+          useToastStore().error('加载搜索引擎失败')
+        })
         // 打开时清空 AI Key 输入框：不回显掩码，避免用户无意把掩码写回库
         aiKeyInput.value = ''
       }
@@ -126,12 +137,22 @@ async function onLoadExtension() {
 
 /** 切换启用状态 */
 async function onToggleExtension(e: Extension) {
-  await extensionsStore.setEnabled(e.id, !e.enabled).catch(() => {})
+  try {
+    await extensionsStore.setEnabled(e.id, !e.enabled)
+  } catch (err) {
+    console.error('[settings] 切换扩展状态失败:', err)
+    useToastStore().error('切换扩展状态失败')
+  }
 }
 
 /** 删除扩展 */
 async function onDeleteExtension(id: number) {
-  await extensionsStore.deleteExtension(id).catch(() => {})
+  try {
+    await extensionsStore.deleteExtension(id)
+  } catch (err) {
+    console.error('[settings] 删除扩展失败:', err)
+    useToastStore().error('删除扩展失败')
+  }
 }
 
 /** 广告拦截开关：settings 表是唯一状态源，set_adblock_enabled 只负责把开关同步给注入器 */

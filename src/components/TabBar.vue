@@ -46,7 +46,9 @@ function onTabContextMenu(e: MouseEvent, tab: Tab) {
   e.preventDefault()
   // 兜底：菜单打开前确保分组已加载（App 启动时 loadGroups 可能还没完成）
   if (groupsStore.groups.length === 0) {
-    groupsStore.loadGroups().catch(() => {})
+    groupsStore.loadGroups().catch((e) => {
+      console.error('[tabbar] 加载分组失败:', e)
+    })
   }
   // 贴边检测：菜单估算宽 200px，高按分组项数估算，超右/下边界时翻转
   const menuW = 200

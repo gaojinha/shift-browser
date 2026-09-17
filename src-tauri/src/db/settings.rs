@@ -138,9 +138,24 @@ pub async fn set_setting(
   Ok(())
 }
 
+/// 校验键是否允许前端删除（敏感键 + 白名单双重把关）
+fn check_deletable(key: &str) -> Result<(), String> {
+  if is_sensitive(key) {
+    return Err(format!("设置 {} 受保护，不允许通过前端删除", key));
+  }
+  if !is_allowed(key) {
+    return Err(format!("设置 {} 不在白名单内，拒绝删除", key));
+  }
+  Ok(())
+}
+
 /// 删除设置
+///
+/// 安全：与 set_setting 同样做白名单校验。原先无任何检查，前端（或注入的脚本）
+/// 可删除任意键——包括 master_key（会切断已存密码的解密链）和未知系统键。
 #[tauri::command]
 pub async fn delete_setting(db: tauri::State<'_, Db>, key: String) -> DbResult<()> {
+  check_deletable(&key).map_err(crate::db::DbError::Other)?;
   sqlx::query("DELETE FROM settings WHERE key = ?")
     .bind(&key)
     .execute(&db.pool)
@@ -175,4 +190,36 @@ pub async fn set_settings_bulk(
   }
   tx.commit().await?;
   Ok(())
+}
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// P3-3：删除设置的白名单/敏感键校验
+  #[test]
+  fn test_check_deletable() {
+    // 白名单内的普通键：可删
+    assert!(check_deletable("homepage").is_ok());
+    assert!(check_deletable("theme_color").is_ok());
+    assert!(check_deletable("adblock_keywords").is_ok());
+
+    // 敏感键：即使将来误加进 ALLOWED_KEYS 也必须拒绝
+    assert!(check_deletable("master_key").is_err());
+
+    // 未知键 / 空键 / 疑似注入：拒绝
+    assert!(check_deletable("__evil__").is_err());
+    assert!(check_deletable("").is_err());
+    assert!(check_deletable("homepage; DROP TABLE settings").is_err());
+  }
+
+  /// API Key 掩码：多字节字符不应 panic，且不泄露中段
+  #[test]
+  fn test_mask_api_key() {
+    assert_eq!(mask_api_key(""), "****");
+    assert_eq!(mask_api_key("short"), "****");
+    assert_eq!(mask_api_key("12345678"), "****");
+    assert_eq!(mask_api_key("sk-1234567890abcd"), "sk-1****abcd");
+    // 中文/多字节：不应 panic
+    assert_eq!(mask_api_key("密钥密钥密钥密钥密钥"), "密钥密钥****密钥密钥");
+  }
 }

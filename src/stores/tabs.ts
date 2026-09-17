@@ -2,6 +2,7 @@
 // 对应 Electron 版 renderer 的 tabs 状态 + TabManager 命令调用
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import type { Tab } from '../types/tab'
 import type { Session, SessionTab } from '../types/session'
 import { useGroupsStore } from './groups'
@@ -12,6 +13,8 @@ interface TabsState {
   tabs: Tab[]
   activeTabId: string | null
   pollTimer: number | null
+  /** tabs-updated 事件取消监听句柄 */
+  _unlisten: (() => void) | null
   /** 切换中标记（合并连点，防消息排队） */
   _switching: boolean
   /** 用户操作自增令牌：close/switch 与轮询并发时，过期回调不回写 activeTabId */
@@ -28,6 +31,7 @@ export const useTabsStore = defineStore('tabs', {
     tabs: [],
     activeTabId: null,
     pollTimer: null,
+    _unlisten: null,
     _switching: false,
     _opSeq: 0,
     loadingTabId: null,
@@ -68,7 +72,9 @@ export const useTabsStore = defineStore('tabs', {
       if (target === 'newtab') {
         try {
           // 先刷新数据（书签/历史面板），再取 URL
-          await invoke('refresh_newtab').catch(() => {})
+          await invoke('refresh_newtab').catch((e) => {
+            console.error('[tabs] 刷新新标签页数据失败:', e)
+          })
           target = await invoke<string>('get_newtab_url')
         } catch {
           target = 'https://www.bing.com'
@@ -275,6 +281,11 @@ export const useTabsStore = defineStore('tabs', {
         return false
       }
       if (!session) return false
+      return this.restoreSession(session)
+    },
+
+    /** 恢复指定会话快照（会话管理弹窗用，返回恢复的标签数） */
+    async restoreSession(session: Session): Promise<boolean> {
       let tabs: SessionTab[] = []
       try {
         tabs = JSON.parse(session.data) as SessionTab[]
@@ -284,7 +295,9 @@ export const useTabsStore = defineStore('tabs', {
       // 分组可能已被删除，恢复前确保分组列表已加载（校验 groupId 存在性）
       const groups = useGroupsStore()
       if (groups.groups.length === 0) {
-        await groups.loadGroups().catch(() => {})
+        await groups.loadGroups().catch((e) => {
+          console.error('[tabs] 恢复会话前加载分组失败:', e)
+        })
       }
       for (const t of tabs) {
         if (t.url) {
@@ -297,6 +310,22 @@ export const useTabsStore = defineStore('tabs', {
         }
       }
       return tabs.length > 0
+    },
+
+    /** 保存为命名会话（会话管理弹窗用，返回新会话 id） */
+    async saveNamedSession(name: string, workspaceId: number | null = null): Promise<number | null> {
+      const tabs: SessionTab[] = this.tabs.map((t) => ({
+        url: t.url,
+        title: t.title,
+        groupId: t.groupId ?? null,
+      }))
+      if (tabs.length === 0) return null
+      try {
+        return await invoke<number>('save_session', { name, workspaceId, tabs })
+      } catch (e) {
+        console.error('[tabs] 保存命名会话失败:', e)
+        return null
+      }
     },
 
     /** 保存当前会话（标签页快照，含分组归属），workspaceId = 所属工作区（null = 默认） */
@@ -329,59 +358,81 @@ export const useTabsStore = defineStore('tabs', {
       this.activeTabId = null
     },
 
-    /**
-     * 启动标题/URL 轮询（Rust 侧 on_page_load 更新状态，前端定时拉取同步）
-     * 说明：Tauri 2 内置无 event listen 插件（tauri-plugin-event 不存在于 crates.io），
-     * 事件方案走不通，改用轮询。
-     */
-    startPolling(interval = 2000) {
-      if (this.pollTimer) return
-      this.pollTimer = window.setInterval(async () => {
-        try {
-          const my = this._opSeq
-          const tabs = await invoke<Tab[]>('get_tabs')
-          // 保留前端运行时 groupId（Rust 侧无此字段）
-          const prevGroups = new Map(this.tabs.map((t) => [t.id, t.groupId]))
-          const prevUrls = new Map(this.tabs.map((t) => [t.id, t.url]))
-          const prevTitles = new Map(this.tabs.map((t) => [t.id, t.title]))
-          this.tabs = tabs.map((t) => ({ ...t, groupId: prevGroups.get(t.id) ?? null }))
-          // 页面加载完成（URL/标题变化）→ 关掉加载指示；webview 内链跳视为可后退
-          if (this.loadingTabId) {
-            const lid = this.loadingTabId
-            const t = tabs.find((x) => x.id === lid)
-            if (
-              t &&
-              (t.url !== prevUrls.get(lid) || t.title !== prevTitles.get(lid))
-            ) {
-              this.loadingTabId = null
-              this.canGoBack = true
-            }
+    /** 从 Rust 侧同步标签状态（事件驱动 + 低频兜底调用） */
+    async syncTabs() {
+      try {
+        const my = this._opSeq
+        const tabs = await invoke<Tab[]>('get_tabs')
+        // 保留前端运行时 groupId（Rust 侧无此字段）
+        const prevGroups = new Map(this.tabs.map((t) => [t.id, t.groupId]))
+        const prevUrls = new Map(this.tabs.map((t) => [t.id, t.url]))
+        const prevTitles = new Map(this.tabs.map((t) => [t.id, t.title]))
+        this.tabs = tabs.map((t) => ({ ...t, groupId: prevGroups.get(t.id) ?? null }))
+        // 页面加载完成（URL/标题变化）→ 关掉加载指示；webview 内链跳视为可后退
+        if (this.loadingTabId) {
+          const lid = this.loadingTabId
+          const t = tabs.find((x) => x.id === lid)
+          if (
+            t &&
+            (t.url !== prevUrls.get(lid) || t.title !== prevTitles.get(lid))
+          ) {
+            this.loadingTabId = null
+            this.canGoBack = true
           }
-          // activeTabId 只在轮询期间无用户操作时回写（_opSeq 未变），
-          // 避免 poll 的 is_active 覆盖用户刚点的 switchTab/closeTab 结果
-          const active = tabs.find((t) => t.is_active)
-          if (active && my === this._opSeq) this.activeTabId = active.id
-          // WebKit 原生历史栈状态（覆盖乐观追踪：内链跳转/JS history 也正确反映）
-          try {
-            const nav = await invoke<{ canGoBack: boolean; canGoForward: boolean }>(
-              'get_nav_state'
-            )
-            this.canGoBack = nav.canGoBack
-            this.canGoForward = nav.canGoForward
-          } catch (e) {
-            console.error('[tabs] 轮询导航状态失败:', e)
-          }
-        } catch (e) {
-          console.error('[tabs] 轮询标签失败:', e)
         }
-      }, interval)
+        // activeTabId 只在同步期间无用户操作时回写（_opSeq 未变），
+        // 避免同步的 is_active 覆盖用户刚点的 switchTab/closeTab 结果
+        const active = tabs.find((t) => t.is_active)
+        if (active && my === this._opSeq) this.activeTabId = active.id
+        // WebKit 原生历史栈状态（覆盖乐观追踪：内链跳转/JS history 也正确反映）
+        try {
+          const nav = await invoke<{ canGoBack: boolean; canGoForward: boolean }>(
+            'get_nav_state'
+          )
+          this.canGoBack = nav.canGoBack
+          this.canGoForward = nav.canGoForward
+        } catch (e) {
+          console.error('[tabs] 同步导航状态失败:', e)
+        }
+      } catch (e) {
+        console.error('[tabs] 同步标签失败:', e)
+      }
     },
 
-    /** 停止轮询（组件卸载时调用） */
+    /**
+     * 启动标签状态同步
+     * Rust 侧在页面加载完成/标题变化/新窗口建标签/favicon 更新时 emit "tabs-updated"，
+     * 前端监听事件即时同步（替代原 2s 轮询，查询开销约降 75%+）。
+     * 兜底轮询（8s，仅窗口可见时跑）：覆盖 WebKit 无事件信号的场景（如 JS history.pushState
+     * 改历史栈、SPA 内路由切换），把 get_nav_state（需 GTK 主线程）的开销从每 2s 降到每 8s。
+     */
+    startPolling(fallbackInterval = 8000) {
+      if (this.pollTimer) return
+      listen('tabs-updated', () => {
+        this.syncTabs()
+      })
+        .then((un) => {
+          this._unlisten = un
+        })
+        .catch((e) => {
+          console.error('[tabs] 监听 tabs-updated 失败（退回兜底轮询）:', e)
+        })
+      this.pollTimer = window.setInterval(() => {
+        // 窗口不可见时跳过（省 CPU/GTK 主线程调用；恢复可见后事件或下轮会补上）
+        if (document.hidden) return
+        this.syncTabs()
+      }, fallbackInterval)
+    },
+
+    /** 停止同步（组件卸载时调用） */
     stopPolling() {
       if (this.pollTimer) {
         clearInterval(this.pollTimer)
         this.pollTimer = null
+      }
+      if (this._unlisten) {
+        this._unlisten()
+        this._unlisten = null
       }
     },
   },

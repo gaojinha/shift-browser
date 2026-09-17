@@ -18,7 +18,11 @@ const downloadsStore = useDownloadsStore()
 let unlisten: (() => void) | null = null
 onMounted(async () => {
   unlisten = await listen('downloads-updated', () => {
-    if (props.show) downloadsStore.loadDownloads().catch(() => {})
+    if (props.show) {
+      downloadsStore.loadDownloads().catch((e) => {
+        console.error('[downloads] 事件刷新失败:', e)
+      })
+    }
   })
 })
 onUnmounted(() => {

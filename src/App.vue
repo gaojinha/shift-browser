@@ -16,6 +16,7 @@ import AISidebar from './components/AISidebar.vue'
 import TranslatePanel from './components/TranslatePanel.vue'
 import HistoryDialog from './components/HistoryDialog.vue'
 import BookmarksDialog from './components/BookmarksDialog.vue'
+import SessionDialog from './components/SessionDialog.vue'
 import AppToast from './components/AppToast.vue'
 import { useTabsStore } from './stores/tabs'
 import { useGroupsStore } from './stores/groups'
@@ -34,6 +35,7 @@ const showAI = ref(false)
 const showTranslate = ref(false)
 const showHistory = ref(false)
 const showBookmarks = ref(false)
+const showSessions = ref(false)
 const addressBarRef = ref<InstanceType<typeof AddressBar> | null>(null)
 let saveTimer: number | null = null
 
@@ -60,13 +62,19 @@ function onGlobalKeydown(e: KeyboardEvent) {
       return
     }
     // 弹窗打开时，其余标签快捷键不响应（避免误关标签/新建标签）
-    if (showTranslate.value || showAI.value || showSettings.value || showDownloads.value || showGroups.value || showPasswords.value || showHistory.value) {
+    if (showTranslate.value || showAI.value || showSettings.value || showDownloads.value || showGroups.value || showPasswords.value || showHistory.value || showSessions.value) {
       return
     }
     // Ctrl+Shift+T 打开翻译面板（不影响 Ctrl+T 建标签）
     if (k === 't' && e.shiftKey) {
       e.preventDefault()
       showTranslate.value = true
+      return
+    }
+    // Ctrl+Shift+S 打开会话管理
+    if (k === 's' && e.shiftKey) {
+      e.preventDefault()
+      showSessions.value = true
       return
     }
     if (k === 't' && !e.shiftKey) {
@@ -100,6 +108,8 @@ function onGlobalKeydown(e: KeyboardEvent) {
     showPasswords.value = false
   } else if (showHistory.value) {
     showHistory.value = false
+  } else if (showSessions.value) {
+    showSessions.value = false
   }
 }
 
@@ -117,7 +127,9 @@ onMounted(async () => {
     console.error('[app] 书签栏初始化同步失败:', e)
   }
   // 分组尽早加载（不等标签恢复，避免右键菜单/组头迟迟不显示）
-  groupsStore.loadGroups().catch(() => {})
+  groupsStore.loadGroups().catch((e) => {
+    console.error('[app] 加载分组失败:', e)
+  })
   try {
     // 工作区列表加载（当前工作区 = 默认）
     await workspacesStore.loadWorkspaces()
@@ -191,6 +203,7 @@ watch(
     <TranslatePanel :show="showTranslate" @close="showTranslate = false" />
     <HistoryDialog :show="showHistory" @close="showHistory = false" />
     <BookmarksDialog :show="showBookmarks" @close="showBookmarks = false" />
+    <SessionDialog :show="showSessions" @close="showSessions = false" />
     <AppToast />
     <!-- 启动锁屏已迁移到 Rust/GTK 层（lib.rs），不在此处重复实现 -->
   </div>

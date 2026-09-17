@@ -117,8 +117,12 @@ export const useWorkspacesStore = defineStore('workspaces', {
         console.error('[workspaces] 切换工作区失败:', e)
         // 回滚：清空可能恢复一半的标签，回到原工作区
         const tabs = useTabsStore()
-        await tabs.clearAllTabs().catch(() => {})
-        await tabs.restoreLastSession(prev).catch(() => {})
+        await tabs.clearAllTabs().catch((e) => {
+          console.error('[workspaces] 回滚清空标签失败:', e)
+        })
+        await tabs.restoreLastSession(prev).catch((e) => {
+          console.error('[workspaces] 回滚恢复会话失败:', e)
+        })
         this.currentId = prev
         useToastStore().error('切换工作区失败')
       } finally {

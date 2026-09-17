@@ -12,15 +12,35 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// 写入主密钥文件（权限 600，仅当前用户可读写）
+/// 写入主密钥文件（权限 600）
+///
+/// 安全：必须用 OpenOptions::mode(0o600) 在创建时就收紧权限，不能用 std::fs::write ——
+/// 后者先按进程 umask 落盘（常见 644）、再补 chmod，中间存在同机其他用户可读的窗口。
 fn write_key_file(path: &Path, encoded: &str) -> DbResult<()> {
-    std::fs::write(path, encoded)
-        .map_err(|e| DbError::Other(format!("写入主密钥文件失败: {}", e)))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
+  let write_err = |e: std::io::Error| DbError::Other(format!("写入主密钥文件失败: {}", e));
+
+  #[cfg(unix)]
+  {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new()
+      .write(true)
+      .create(true)
+      .truncate(true)
+      .mode(0o600)
+      .open(path)
+      .map_err(write_err)?;
+    f.write_all(encoded.as_bytes()).map_err(write_err)?;
+    f.sync_all().map_err(write_err)?;
+    // mode 仅在创建时生效；若文件早已存在（权限可能被放宽过），补一次收紧兜底
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+  }
+  #[cfg(not(unix))]
+  {
+    std::fs::write(path, encoded).map_err(write_err)?;
+  }
+  Ok(())
 }
 
 /// 获取主密钥（不存在则生成随机 32 字节并写入独立密钥文件）
@@ -416,5 +436,43 @@ mod tests {
         .await
         .unwrap();
     assert!(leftover.is_none());
+  }
+
+  /// P3-2：密钥文件权限必须"创建即 600"，且覆盖写后收紧回 600
+  #[test]
+  fn test_write_key_file_permissions() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("master.key");
+
+    // 1. 新建：内容写入且权限 600（OpenOptions.mode 在创建时即生效，无 644 窗口期）
+    write_key_file(&path, "first-value").unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "first-value");
+    #[cfg(unix)]
+    {
+      use std::os::unix::fs::PermissionsExt;
+      assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600,
+        "新建密钥文件应立即为 600"
+      );
+    }
+
+    // 2. 文件已被放宽到 644 时覆盖写：内容更新且权限收紧回 600
+    #[cfg(unix)]
+    {
+      use std::os::unix::fs::PermissionsExt;
+      std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    write_key_file(&path, "second-value").unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "second-value");
+    #[cfg(unix)]
+    {
+      use std::os::unix::fs::PermissionsExt;
+      assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600,
+        "覆盖写后应收紧回 600"
+      );
+    }
   }
 }

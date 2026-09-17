@@ -24,6 +24,8 @@ const toastStore = useToastStore()
 const list = ref<HistoryEntry[]>([])
 const query = ref('')
 const loading = ref(false)
+// 自定义确认弹窗（WebKitGTK 下 window.confirm 不弹，必须用组件内弹窗）
+const showConfirm = ref(false)
 
 // 弹窗显示时隐藏所有标签 webview（child 盖在 Vue UI 上），关闭时恢复
 let seq = 0
@@ -87,9 +89,13 @@ async function onDelete(e: MouseEvent, entry: HistoryEntry) {
   }
 }
 
-/** 清空全部（二次确认） */
-async function onClearAll() {
-  if (!window.confirm('确定清空全部浏览历史？此操作不可恢复。')) return
+/** 清空全部（二次确认，自定义弹窗） */
+function onClearAll() {
+  showConfirm.value = true
+}
+
+async function doClearAll() {
+  showConfirm.value = false
   try {
     await invoke('clear_history')
     list.value = []
@@ -155,6 +161,16 @@ function hostOf(url: string): string {
                 <span class="history-time">{{ formatTime(entry.last_visit_at) }}</span>
               </div>
               <button class="history-del" aria-label="删除" @click="onDelete($event, entry)">×</button>
+            </div>
+          </div>
+        </div>
+        <!-- 自定义确认弹窗（覆盖在 dialog 之上） -->
+        <div v-if="showConfirm" class="confirm-overlay">
+          <div class="confirm-box">
+            <div class="confirm-text">确定清空全部浏览历史？此操作不可恢复。</div>
+            <div class="confirm-actions">
+              <button class="confirm-btn cancel" @click="showConfirm = false">取消</button>
+              <button class="confirm-btn ok" @click="doClearAll">清空</button>
             </div>
           </div>
         </div>
@@ -278,5 +294,54 @@ function hostOf(url: string): string {
 .history-del:hover {
   color: var(--danger);
   background: var(--bg-active);
+}
+.confirm-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 10px;
+  z-index: 10;
+}
+.confirm-box {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 18px 20px;
+  min-width: 260px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+}
+.confirm-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-bottom: 14px;
+  line-height: 1.6;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.confirm-btn {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+}
+.confirm-btn.cancel {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+.confirm-btn.ok {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.confirm-btn:hover {
+  filter: brightness(1.1);
 }
 </style>

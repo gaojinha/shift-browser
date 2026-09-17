@@ -147,6 +147,37 @@ async function onNewFolder() {
   }
 }
 
+// ---- 文件夹管理（删除，级联删子文件夹+书签，需自定义确认）----
+const folderDeleteTarget = ref<{ id: number; name: string } | null>(null)
+const showFolderConfirm = ref(false)
+
+/** 文件夹内书签数（含未分类统计用） */
+function folderCount(id: number): number {
+  return bookmarksStore.bookmarks.filter((b) => b.folder_id === id).length
+}
+
+function onDeleteFolder(f: { id: number; name: string }) {
+  folderDeleteTarget.value = f
+  showFolderConfirm.value = true
+}
+
+async function doDeleteFolder() {
+  const target = folderDeleteTarget.value
+  if (!target) return
+  showFolderConfirm.value = false
+  folderDeleteTarget.value = null
+  try {
+    await invoke('delete_bookmark_folder', { id: target.id })
+    await bookmarksStore.loadBookmarks()
+    folders.value = await bookmarksStore.loadFolders()
+    if (filterFolder.value === target.id) filterFolder.value = 'all'
+    toastStore.success(`文件夹「${target.name}」已删除`)
+  } catch (e) {
+    console.error('[bookmarks] 删除文件夹失败:', e)
+    toastStore.error('删除文件夹失败')
+  }
+}
+
 // 导入：调系统文件对话框（XDG portal，WebKitGTK 的 file input 不弹窗）
 async function onImport() {
   try {
@@ -202,6 +233,16 @@ async function onExport() {
               <option value="none">未分类</option>
               <option v-for="f in folders" :key="f.id" :value="String(f.id)">{{ f.name }}</option>
             </select>
+          </div>
+
+          <!-- 文件夹管理区 -->
+          <div v-if="folders.length > 0" class="bm-folders">
+            <div class="bm-folders-head">文件夹（{{ folders.length }}）</div>
+            <div class="bm-folder-row" v-for="f in folders" :key="f.id">
+              <span class="bm-folder-name" @click="filterFolder = f.id">📁 {{ f.name }}</span>
+              <span class="bm-folder-count">{{ folderCount(f.id) }} 个书签</span>
+              <button class="op-btn danger" title="删除文件夹（含其中的书签）" @click="onDeleteFolder(f)">✕</button>
+            </div>
           </div>
 
           <div class="bm-list">
@@ -279,6 +320,26 @@ async function onExport() {
             <div class="bm-actions">
               <button class="bm-cancel" @click="addOpen = false">取消</button>
               <button class="bm-save" @click="onSaveAdd">添加</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 删除文件夹确认弹窗 -->
+      <div v-if="showFolderConfirm" class="dialog-overlay inner" @click.self="showFolderConfirm = false">
+        <div class="dialog bm-edit-dialog">
+          <div class="dialog-header">
+            <span>删除文件夹</span>
+            <button class="close-btn" aria-label="关闭" @click="showFolderConfirm = false">×</button>
+          </div>
+          <div class="dialog-body">
+            <div class="bm-confirm-text">
+              确定删除文件夹「{{ folderDeleteTarget?.name }}」？
+              <br />其中的 {{ folderDeleteTarget ? folderCount(folderDeleteTarget.id) : 0 }} 个书签和子文件夹将一并删除，此操作不可恢复。
+            </div>
+            <div class="bm-actions">
+              <button class="bm-cancel" @click="showFolderConfirm = false">取消</button>
+              <button class="bm-save danger-btn" @click="doDeleteFolder">删除</button>
             </div>
           </div>
         </div>
@@ -377,6 +438,58 @@ async function onExport() {
   font-size: 13px;
   text-align: center;
   padding: 40px 0;
+}
+.bm-folders {
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-hover);
+}
+.bm-folders-head {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  padding-left: 2px;
+}
+.bm-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.bm-folder-row:hover {
+  background: var(--bg-active);
+}
+.bm-folder-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bm-folder-name:hover {
+  color: var(--accent);
+}
+.bm-folder-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.bm-confirm-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.7;
+  margin-bottom: 4px;
+}
+.danger-btn {
+  background: var(--danger) !important;
+  border-color: var(--danger) !important;
+  color: #fff !important;
 }
 .bm-row {
   display: flex;
