@@ -462,3 +462,30 @@ Corrections, insights, and knowledge gaps captured during development.
 2. 启动新实例前先确认要杀的目标到底是谁（Electron 原版 vs Tauri 版进程名相同，用命令行路径区分）
 3. 涉及"清理进程再启动"的操作，先 `ps -eo pid,args` 看清再动手
 **结果**: Electron 原版已重新拉起（/usr/share/applications/shift-browser.desktop 的 Exec）；Tauri 版用精确 PID 安全关闭
+
+---
+
+## 2026-09-18 07:20 — 单测里写了真实密码，提交前扫描拦住（error）
+
+**类别**: error
+**场景**: 第二十一轮 P3-1 给 PBKDF2 写单测，顺手用了高哥的真实锁屏账号密码当测试数据
+**发现**:
+- 测试代码（`insert_user(&db, "gaoge", "206694", ...)`）会随 git 提交永久留在仓库历史里，等于把密码写进版本库
+- 提交前做 diff 敏感信息扫描时才发现，已全部替换为假数据（`testuser` / `test-pass-42`）
+**预防**:
+1. **测试数据一律用假值**：写单测时不要图省事复制真实账号/密码/token，一律用明显假的占位值
+2. **提交前必扫**：`git diff | grep -inE "(password|secret|token|api[_-]?key)"`，再单独 grep 已知的真实口令（如锁屏密码、sudo 密码）
+3. 真实凭据只允许出现在运行时文件（600 权限的配置/密钥文件），绝不能进源码和测试
+
+---
+
+## 2026-09-18 07:20 — PBKDF2 迭代次数要与交互延迟一起权衡（insight）
+
+**类别**: insight
+**场景**: P3-1 把密码哈希迭代次数从 10 万提到 OWASP 建议值
+**要点**:
+- 一开始按"越高越安全"选了 60 万，实测 debug 下单测跑 55 秒、推算 release（本项目 `opt-level="s"`，体积优化比速度优化更慢）登录接近 1 秒——本地锁屏解锁会明显卡顿
+- 最终取 **21 万**（OWASP 2023 对 PBKDF2-SHA512 的建议下限）：约 0.2-0.4 秒，安全性与体验平衡
+- 关键设计：把参数写进 `hash_algo` 字段（如 `pbkdf2-sha512-210000`），验证成功后自动用新参数重算并落库 → **日后想调次数不用锁死老用户**
+- 判断依据要落到实测/推算，别只凭"更安全"就往上加
+**结果**: 34 个测试全过，生产库 gaoge 的 hash_algo 已在锁屏解锁时自动升级为 `pbkdf2-sha512-210000`

@@ -1058,5 +1058,65 @@ tabs store 的 4 个核心操作（createTab/closeTab/switchTab/navigateTab）�
 
 ### 28.5 遗留事项
 
-- 历史清空仍用原生 window.confirm（WebKitGTK 下可能无显示，后续可换自定义确认弹窗）
-- 书签文件夹当前仅支持创建（无展开/嵌套 UI），书签栏只显示顶层书签
+- 历史清空仍用原生 window.confirm（WebKitGTK 下可能无显示，后续可换自定义确认弹窗）→ ✅ 第二十一轮已解决
+- 书签文件夹当前仅支持创建（无展开/嵌套 UI），书签栏只显示顶层书签 → 删除 UI ✅ 第二十一轮已补
+
+---
+
+## 第二十九章（第二十轮）：翻译面板 + 用户账号系统 + 新标签页增强 + 书签管理面板 + IPC 桥
+
+> 补记（交接文档当时漏写，据 git `d1e3e1b` 归档）
+
+- **翻译**：`translate.rs` 选中文本/整页翻译（`shift://__translate__` 协议），TranslatePanel 侧滑面板（Ctrl+Shift+T）
+- **账号**：`users.rs` 注册/登录/资料/偏好（PBKDF2 10 万次迭代 SHA-512，与 Electron 原版一致），偏好登录时写入 settings 生效
+- **新标签页**：Bing 每日壁纸（主进程拉取规避 CORS）、字号设置、动态背景开关
+- **书签**：BookmarksDialog 管理面板 + 右键编辑/删除/新建文件夹
+- **IPC 桥**：`ipc-bridge.js` 解决 shift:// 自定义协议页不执行 UserScript 的问题
+- **验证**：cargo clippy 0 警告 / 19 测试全过 / npm lint 0 错误 / build 通过 / release 编译成功
+
+---
+
+## 第三十章（第二十一轮）：安全加固 + 功能补齐 + 性能优化 + 硬化（2026-09-18）
+
+全修计划：P0 安全 5 项 + P1 功能 5 项 + P2 性能 4 项 + P3 硬化 3 项。提交 `0b9075a`。
+
+### 30.1 P0 安全（5 项）
+
+- **P0-1 恢复 CSP**：`tauri.conf.json` 恢复 `security.csp`（default 严格 + dev 宽松含 localhost:5173/ws）；因 `shift://` 是自定义协议、Tauri 不会自动注入 CSP，在 `lib.rs` 对 main index.html / newtab / worldnav 响应手动加 `Content-Security-Policy` 头（`SHIFT_CSP`）
+- **P0-2 reader.rs 净化**：原 regex 方案可被 `<svg/onload=alert(1)>` 绕过 → 改用 `ammonia 4.2.0` 白名单（标签/属性白名单、url_schemes 仅 http/https、on* 全剥）；Cargo.toml 删 `regex`
+- **P0-3 user_export 鉴权**：去掉可传的 `username` 参数，强制导出 `current_user_id` 指向的当前登录用户
+- **P0-4 ai.rs SSRF**：新增 `validate_base_url`（仅 https、拒 userinfo、拒内网/本机字面地址与内网域名）+ `is_private_host`；注意本机 Rust 工具链 `IpAddr` 无 `is_private`，需 match 到 Ipv4Addr/Ipv6Addr
+- **P0-5 下载文件名净化**：取 `url::Url::parse(u).path()` 解码 + `sanitize_filename`（剥路径穿越/控制字符/首尾点段、限长 200）
+
+### 30.2 P1 功能（5 项）
+
+- **P1-1/P1-2**：HistoryDialog 去 `window.confirm` 改自定义确认弹窗；BookmarksDialog 补文件夹删除 UI（含级联删除提示+确认弹窗），全项目不再有 window.confirm/alert
+- **P1-3 会话管理**：新增 `SessionDialog.vue`（列表/恢复/删除/保存当前为命名会话），store 加 `restoreSession`/`saveNamedSession`，快捷键 **Ctrl+Shift+S**
+- **P1-4 整页翻译**：新增 `whole_page_translate.js`（include_str! 注入）——收集文本节点/去重/分批 15 段调 `/batch`/轮询回写 DOM/右上角进度浮层；`/batch` 每批 5 并发保序
+- **P1-5 静默吞错**：SettingsDialog / DownloadsDialog / TabBar / App.vue / tabs.ts / workspaces.ts 的容错分支改 `console.error` 或 toast（webview 显隐、剪贴板等辅助调用仍保留静默）
+
+### 30.3 P2 性能（4 项）
+
+- **P2-1 tabs 事件推送**：`tabs.rs` 四处 emit `"tabs-updated"`（页面加载后、标题变化时、新窗口建标签后、favicon 更新后）；前端 `startPolling` 改事件监听 + **8s 兜底**（`document.hidden` 时跳过），`stopPolling` 一并取消 listen
+- **P2-2 newtab 去重**：加 `GEN_LOCK`（tokio Mutex）序列化 + 1.5s mtime 防抖；Bing 壁纸改 `wallpapers.json` 6h TTL 缓存（失败回退旧缓存）；删除 `lib.rs` 里与异步生成重复的同步 `block_on` 预生成块
+- **P2-3 日志降级**：点击按下/抬起、滚轮、favicon、滚动诊断 `info → debug`（这几处每次点击/滚动都刷一条，会刷爆日志）
+- **P2-4 历史查询**：迁移 **v6** 加 `idx_history_last_visit`（原表只有 url 唯一索引，排序/清理全表扫）；`record_history` 的 COUNT(*) 降频到每 64 次 + `MAX(id)` 快速短路
+
+### 30.4 P3 硬化（3 项）
+
+- **P3-1 PBKDF2 迭代版本化**：10 万 → **21 万**（OWASP 建议下限；60 万在本项目 `opt-level="s"` 下实测登录近 1 秒太卡）。参数写入 `hash_algo`（`pbkdf2-sha512-210000`），旧标记 `pbkdf2` 按 10 万兼容，**验证成功后自动透明升级**；账号导入读备份 `hashAlgo`，旧备份兜底
+- **P3-2 密钥/数据库文件权限时序**：`std::fs::write` 会先按 umask 落 644 再 chmod → 改 `OpenOptions.mode(0o600)` 创建即收紧；数据库文件同样预创建为 600
+- **P3-3 delete_setting 白名单**：抽 `check_deletable`，敏感键（master_key）+ 白名单双重校验（原可删任意键，包括切断密码解密链的 master_key）
+
+### 30.5 验证结果
+
+- `cargo clippy --all-targets` **0 警告 0 错误**；`cargo test` **34 passed**（原 27 + 新增 7）
+- `npm run lint` / `npm run build` 通过（81 模块）
+- release 编译通过；精确 PID 重启（旧 437457 → 新 544406），标签页/扩展注入正常
+- **生产库实测**：迁移 v6 已应用、`idx_history_last_visit` 已建、gaoge 的 `hash_algo` 已在锁屏解锁时自动升级为 `pbkdf2-sha512-210000`、db 与 master.key 权限均 600
+
+### 30.6 遗留事项
+
+- **整页翻译受第三方页面 CSP 限制**：注入脚本用 `Image().src = 'shift://__translate__/batch?...'` 触发，受目标页自身 `img-src` 约束，严格 CSP 站点可能失效（与既有"翻译选中文本"机制同源限制），待实测确认
+- **UI 层未人工实测**：Ctrl+Shift+S 会话管理、整页翻译、书签文件夹删除确认、历史清空确认弹窗——单测覆盖不到，需要手动点一遍
+- **测试数据规范**：`.learnings/LEARNINGS.md` 新增"单测禁用真实密码"教训（本轮差点把真实锁屏密码提交进仓库，提交前扫描拦住）
