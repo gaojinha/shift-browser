@@ -5,9 +5,61 @@ mod extensions;
 mod newtab;
 mod feed;
 mod reader;
+mod translate;
 
-use db::{bookmarks, downloads, history, passwords, sessions, settings, tab_groups, workspaces, Db};
+use db::{bookmarks, downloads, history, passwords, sessions, settings, tab_groups, users, workspaces, Db};
 use tauri::Manager;
+
+/// 简易 percent-decode（处理 shift:// query 参数，避免引入 url crate）
+/// 注意：只处理 %XX 和 + → 空格，满足 shift:// 内部用
+fn percent_decode(s: &str) -> String {
+  let bytes = s.as_bytes();
+  let mut out = Vec::with_capacity(bytes.len());
+  let mut i = 0;
+  while i < bytes.len() {
+    match bytes[i] {
+      b'+' => { out.push(b' '); i += 1; }
+      b'%' if i + 2 < bytes.len() => {
+        let h1 = (bytes[i + 1] as char).to_digit(16);
+        let h2 = (bytes[i + 2] as char).to_digit(16);
+        if let (Some(a), Some(b)) = (h1, h2) {
+          out.push((a * 16 + b) as u8);
+          i += 3;
+        } else {
+          out.push(bytes[i]); i += 1;
+        }
+      }
+      c => { out.push(c); i += 1; }
+    }
+  }
+  String::from_utf8_lossy(&out).into_owned()
+}
+
+/// 把翻译结果写到对应 webview 的 window.__shift_translate_result_<callback>
+/// 菜单 JS 轮询这个变量拿到结果（shift:// Image 请求不读响应体，必须走 window 变量）
+fn write_translate_result(
+  app: &tauri::AppHandle,
+  webview_label: &str,
+  callback: &str,
+  payload: &serde_json::Value,
+) {
+  let Some(wv) = app.get_webview(webview_label) else {
+    log::warn!("[translate] 找不到 webview: {}", webview_label);
+    return;
+  };
+  // 序列化为 JS 表达式：window.__shift_translate_result_<cb> = <json>;
+  let json_str = payload.to_string();
+  let escaped_cbk = callback.replace('\'', "\\'");
+  let js = format!(
+    "window.__shift_translate_result_{} = {};",
+    escaped_cbk, json_str
+  );
+  if let Err(e) = wv.eval(&js) {
+    log::warn!("[translate] eval 结果失败: {}", e);
+  } else {
+    log::debug!("[translate] 已写入结果 callback={}", callback);
+  }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -38,6 +90,9 @@ pub fn run() {
       bookmarks::delete_bookmark,
       bookmarks::delete_bookmark_folder,
       bookmarks::search_bookmarks,
+      bookmarks::import_bookmarks_html,
+      bookmarks::import_bookmarks_from_file,
+      bookmarks::export_bookmarks_html,
       // 历史
       history::record_history,
       history::get_recent_history,
@@ -51,6 +106,8 @@ pub fn run() {
       sessions::load_last_session,
       sessions::list_sessions,
       sessions::delete_session,
+      // 翻译
+      translate::translate_text,
       // 下载记录
       downloads::create_download,
       downloads::update_download_progress,
@@ -86,6 +143,9 @@ pub fn run() {
       tabs::update_tab,
       tabs::reload_tab,
       tabs::reorder_tabs,
+      tabs::toggle_pin,
+      tabs::toggle_mute,
+      tabs::toggle_maximize,
       tabs::set_bookmarks_bar_visible,
       tabs::get_nav_state,
       // AI 侧边栏
@@ -101,12 +161,178 @@ pub fn run() {
       // 新标签页
       newtab::refresh_newtab,
       newtab::get_newtab_url,
+      newtab::save_quick_sites,
+      newtab::open_ai_from_newtab,
+      newtab::open_settings_from_newtab,
+      // 用户账号（个人中心）
+      users::user_register,
+      users::user_login,
+      users::user_logout,
+      users::user_get_current,
+      users::user_update_profile,
+      users::user_change_password,
+      users::user_delete,
+      users::user_update_prefs,
+      users::user_export,
+      users::user_import,
       // 阅读模式
       reader::enter_reader_mode,
       reader::fetch_article,
       extensions::get_adblock_keywords,
       extensions::set_adblock_keywords,
     ])
+    .register_uri_scheme_protocol("shift", |ctx, request| {
+      // shift://newtab → newtab/index.html; shift://worldnav → world-nav.html
+      // shift://main → dist 前端资源（主窗口，从嵌入资源读取并替换 invoke_key）
+      // 注意：shift://newtab 的 host 是 newtab，path 是 /
+      let host = request.uri().host().unwrap_or("").to_string();
+      let path = request.uri().path().to_string();
+      let app = ctx.app_handle();
+
+      // 主窗口：shift://main → dist（asset_resolver 读嵌入资源）
+      if host == "main" {
+        let rel = if path == "/" || path == "/index.html" {
+          "index.html".to_string()
+        } else {
+          path.trim_start_matches('/').to_string()
+        };
+        if let Some(asset) = app.asset_resolver().get(rel.clone()) {
+          let bytes = asset.bytes().to_vec();
+          let mime = asset.mime_type();
+          if rel == "index.html" {
+            // 替换 IPC 桥里的 invoke_key 占位符（Tauri 校验 invoke_key）
+            let html = String::from_utf8_lossy(&bytes);
+            let html = html.replace("__INVOKE_KEY_PLACEHOLDER__", app.invoke_key());
+            return tauri::http::Response::builder()
+              .header(tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
+              .body(html.into_bytes())
+              .unwrap();
+          }
+          return tauri::http::Response::builder()
+            .header(tauri::http::header::CONTENT_TYPE, mime)
+            .body(bytes)
+            .unwrap();
+        }
+        log::warn!("[shift://] main 资源未找到: {}", rel);
+        return tauri::http::Response::builder()
+          .status(404)
+          .header(tauri::http::header::CONTENT_TYPE, "text/plain")
+          .body("Not Found".as_bytes().to_vec())
+          .unwrap();
+      }
+
+      // 翻译 IPC：child webview 的右键菜单 JS 通过 shift://__translate__/* 调翻译
+      // （shift handler 同步返回，翻译异步 spawn，结果通过 webview.eval 写回 window 全局变量，
+      //  菜单 JS 轮询拿到结果）
+      if host == "__translate__" {
+        let webview_label = ctx.webview_label().to_string();
+        let query = request.uri().query().unwrap_or("");
+        let params: std::collections::HashMap<String, String> = query
+          .split('&')
+          .filter_map(|kv| {
+            let mut it = kv.splitn(2, '=');
+            let k = it.next()?;
+            let v = it.next().unwrap_or("");
+            Some((percent_decode(k), percent_decode(v)))
+          })
+          .collect();
+        let callback = params.get("callback").cloned().unwrap_or_default();
+        let app_clone = app.clone();
+
+        match path.as_str() {
+          "/text" => {
+            let text = params.get("text").cloned().unwrap_or_default();
+            log::info!(
+              "[translate] 选中文本翻译 request: label={} callback={} len={}",
+              webview_label, callback, text.len()
+            );
+            tauri::async_runtime::spawn(async move {
+              let payload = match translate::translate_google(&text, "zh-CN").await {
+                Ok(t) => serde_json::json!({ "text": t }),
+                Err(e) => serde_json::json!({ "error": e }),
+              };
+              write_translate_result(&app_clone, &webview_label, &callback, &payload);
+            });
+          }
+          "/whole-page" => {
+            log::info!(
+              "[translate] 整页翻译 request: label={} callback={}",
+              webview_label, callback
+            );
+            let url = params.get("url").cloned().unwrap_or_default();
+            tauri::async_runtime::spawn(async move {
+              // 整页翻译简化版：先 eval 收集文本节点，再分块翻译，再 eval 回填
+              // 这里先返回"开始翻译"状态——具体逻辑后续扩展
+              let payload = serde_json::json!({
+                "translated": 0u32,
+                "total": 0u32,
+                "note": "整页翻译链路已接通，待实现 DOM 收集/回填"
+              });
+              write_translate_result(&app_clone, &webview_label, &callback, &payload);
+              let _ = url; // 暂未用
+            });
+          }
+          "/remove-auto-site" => {
+            log::info!("[translate] 取消本站自动汉化: {}", webview_label);
+            // 暂简化：不实际清理列表
+            tauri::async_runtime::spawn(async move {
+              let payload = serde_json::json!({ "ok": true });
+              write_translate_result(&app_clone, &webview_label, &callback, &payload);
+            });
+          }
+          _ => {
+            log::warn!("[translate] 未知子路径: {}", path);
+          }
+        }
+
+        // shift handler 同步返回（菜单 JS 用 Image().src 触发，不读响应体）
+        return tauri::http::Response::builder()
+          .status(200)
+          .header(tauri::http::header::CONTENT_TYPE, "image/gif")
+          .body(Vec::<u8>::new())
+          .unwrap();
+      }
+
+      let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+      let newtab_dir = app_data.join("newtab");
+      let file_path = match (host.as_str(), path.as_str()) {
+        ("newtab", "/") | ("newtab", "/index.html") => newtab_dir.join("index.html"),
+        // newtab 页内"世界导航"按钮用相对路径 world-nav.html 跳转，
+        // 落到 shift://newtab/world-nav.html，必须匹配到才能加载世界导航页
+        ("newtab", "/world-nav.html") => newtab_dir.join("world-nav.html"),
+        ("worldnav", "/") | ("worldnav", "/index.html") => newtab_dir.join("world-nav.html"),
+        ("worldnav", "/world-nav.html") => newtab_dir.join("world-nav.html"),
+        _ => {
+          log::warn!("[shift://] 未知路径: {} {}", host, path);
+          return tauri::http::Response::builder()
+            .status(404)
+            .header(tauri::http::header::CONTENT_TYPE, "text/plain")
+            .body("Not Found".as_bytes().to_vec())
+            .unwrap();
+        }
+      };
+      log::info!("[shift://] 加载: {:?}", file_path);
+      if let Ok(data) = std::fs::read(&file_path) {
+        // 把 IPC 桥里的 invoke_key 占位符替换成运行时真实 key（Tauri 校验 invoke_key）
+        let html = String::from_utf8_lossy(&data);
+        let html = html.replace("__INVOKE_KEY_PLACEHOLDER__", app.invoke_key());
+        tauri::http::Response::builder()
+          .header(tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
+          .body(html.into_bytes())
+          .unwrap()
+      } else {
+        log::error!("[shift://] 文件读取失败: {:?}", file_path);
+        tauri::http::Response::builder()
+          .status(404)
+          .header(tauri::http::header::CONTENT_TYPE, "text/plain")
+          .body("File not found".as_bytes().to_vec())
+          .unwrap()
+      }
+    })
     .setup(|app| {
       // 初始化数据库（异步）
       let app_data_dir = app
@@ -128,9 +354,119 @@ pub fn run() {
         }
       }
 
+      // 启动锁屏：设置启用后，在创建任何 webview 之前弹 GTK 原生密码对话框。
+      // 注意：必须在 GTK 层面实现——Vue 锁屏覆盖层只能盖住 Vue 自己的 DOM，
+      // 盖不住另一个独立的 GTK webview（标签页）。
+      #[cfg(target_os = "linux")]
+      {
+        use gtk::prelude::*;
+        let db_state = app.state::<Db>();
+        let lock_enabled: bool = {
+          let row = tauri::async_runtime::block_on(
+            sqlx::query_as::<_, (String,)>(
+              "SELECT value FROM settings WHERE key = 'lock_enabled'",
+            )
+            .fetch_optional(&db_state.pool),
+          )
+          .ok()
+          .flatten();
+          row.map(|r| r.0 == "true").unwrap_or(false)
+        };
+
+        if lock_enabled {
+          log::info!("[ShiftBrowser] 启动锁屏已启用，弹出 GTK 密码对话框");
+          let parent_win = app
+            .get_window("main")
+            .and_then(|w| w.gtk_window().ok());
+
+          loop {
+            let dialog = gtk::Dialog::builder()
+              .title("Shift Browser 已锁定")
+              .modal(true)
+              .resizable(false)
+              .default_width(340)
+              .default_height(160)
+              .build();
+
+            if let Some(ref pw) = parent_win {
+              dialog.set_transient_for(Some(pw));
+            }
+
+            let content = dialog.content_area();
+            content.set_spacing(8);
+            content.set_margin(12);
+
+            let label = gtk::Label::new(Some("输入账号密码解锁浏览器"));
+            content.add(&label);
+
+            let user_entry = gtk::Entry::new();
+            user_entry.set_placeholder_text(Some("用户名"));
+            content.add(&user_entry);
+
+            let pass_entry = gtk::Entry::new();
+            pass_entry.set_visibility(false);
+            pass_entry.set_placeholder_text(Some("密码"));
+            pass_entry.set_activates_default(true);
+            content.add(&pass_entry);
+
+            dialog.add_button("退出", gtk::ResponseType::Cancel);
+            dialog.add_button("解锁", gtk::ResponseType::Ok);
+
+            dialog.show_all();
+            pass_entry.grab_focus();
+
+            let response = dialog.run();
+
+            let username = user_entry.text().to_string();
+            let password = pass_entry.text().to_string();
+
+            dialog.close();
+
+            if response != gtk::ResponseType::Ok {
+              log::info!("[ShiftBrowser] 启动锁屏取消，退出应用");
+              std::process::exit(0);
+            }
+
+            match tauri::async_runtime::block_on(users::verify_password(
+              &db_state, &username, &password,
+            )) {
+              Ok(true) => {
+                log::info!("[ShiftBrowser] 启动锁屏验证通过: {}", username);
+                // 验证通过后清除会话：启动锁屏只验证身份，不自动登录个人中心
+                tauri::async_runtime::block_on(users::clear_session(&db_state));
+                // 显式 destroy 锁屏 dialog，避免 close 后残留；forget 阻止 drop 再次释放
+                unsafe {
+                  dialog.destroy();
+                }
+                std::mem::forget(dialog);
+                break;
+              }
+              Ok(false) => {
+                log::warn!("[ShiftBrowser] 启动锁屏密码错误，重新输入");
+              }
+              Err(e) => {
+                log::error!("[ShiftBrowser] 启动锁屏验证出错: {}", e);
+              }
+            }
+          }
+        }
+      }
+
       // 初始化标签管理器
       app.manage(tabs::TabManager::new());
       log::info!("[ShiftBrowser] 标签管理器初始化成功");
+
+      // 预生成新标签页 HTML（确保 shift:// 加载时文件就绪，避免时序竞态）
+      {
+        let app_handle = app.handle();
+        if let Some(path) = newtab::newtab_path(app_handle) {
+          let db = app_handle.state::<Db>();
+          match tauri::async_runtime::block_on(newtab::generate(&db, &path)) {
+            Ok(_) => log::info!("[ShiftBrowser] 新标签页预生成: {}", path.display()),
+            Err(e) => log::error!("[ShiftBrowser] 新标签页预生成失败: {}", e),
+          }
+        }
+      }
 
       // Linux：手动设置 WebKit web extensions 目录（tauri://localhost 协议依赖 web extension）
       // Tauri 2 不会自动设置 extensions_path，必须手动指定，否则前端资源加载失败

@@ -58,6 +58,17 @@ export const useBookmarksStore = defineStore('bookmarks', {
       }
     },
 
+    /** 更新书签所属文件夹（null = 未分类，Rust 侧 0 表示置 NULL） */
+    async updateBookmarkFolder(id: number, folderId: number | null) {
+      try {
+        await invoke<void>('update_bookmark', { id, title: null, url: null, folderId: folderId ?? 0 })
+        await this.loadBookmarks()
+      } catch (e) {
+        console.error('[bookmarks] 更新书签文件夹失败:', e)
+        useToastStore().error('更新书签文件夹失败')
+      }
+    },
+
     /** 新建文件夹 */
     async createFolder(name: string): Promise<number | null> {
       try {
@@ -70,6 +81,29 @@ export const useBookmarksStore = defineStore('bookmarks', {
         useToastStore().error('新建文件夹失败')
         return null
       }
+    },
+
+    /** 文件夹列表（管理弹窗用） */
+    async loadFolders(): Promise<{ id: number; name: string }[]> {
+      try {
+        return await invoke<{ id: number; name: string }[]>('get_bookmark_folders')
+      } catch (e) {
+        console.error('[bookmarks] 加载文件夹失败:', e)
+        return []
+      }
+    },
+
+    /** 导入书签（Netscape HTML 内容），返回导入数量 */
+    async importHtml(html: string): Promise<number> {
+      const count = await invoke<number>('import_bookmarks_html', { html })
+      await this.loadBookmarks()
+      return count
+    },
+
+    /** 导出书签为 Netscape HTML 到下载目录，返回文件路径 */
+    async exportHtml(): Promise<string> {
+      const path = await invoke<string>('export_bookmarks_html')
+      return path
     },
   },
 })

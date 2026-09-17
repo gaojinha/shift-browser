@@ -167,6 +167,34 @@ export const useTabsStore = defineStore('tabs', {
       }
     },
 
+    /** 固定/取消固定标签（原版 tab-pin） */
+    async pinTab(id: string) {
+      try {
+        const tab = await invoke<Tab | null>('toggle_pin', { id })
+        if (tab) {
+          const idx = this.tabs.findIndex((t) => t.id === id)
+          if (idx !== -1) this.tabs[idx] = { ...tab, groupId: this.tabs[idx].groupId ?? null }
+        }
+      } catch (e) {
+        console.error('[tabs] 固定标签失败:', e)
+        useToastStore().error('固定标签失败')
+      }
+    },
+
+    /** 静音/取消静音标签（原版 tab-mute） */
+    async muteTab(id: string) {
+      try {
+        const tab = await invoke<Tab | null>('toggle_mute', { id })
+        if (tab) {
+          const idx = this.tabs.findIndex((t) => t.id === id)
+          if (idx !== -1) this.tabs[idx] = { ...tab, groupId: this.tabs[idx].groupId ?? null }
+        }
+      } catch (e) {
+        console.error('[tabs] 静音标签失败:', e)
+        useToastStore().error('静音标签失败')
+      }
+    },
+
     /** 拖拽排序：把 fromId 移到 toId 的位置（前端先乐观更新，再通知 Rust） */
     async reorderTabs(fromId: string, toId: string) {
       const from = this.tabs.findIndex((t) => t.id === fromId)

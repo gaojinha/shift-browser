@@ -414,3 +414,51 @@ Corrections, insights, and knowledge gaps captured during development.
   重启前用 `xlsclients` 确认没有别的要紧 X11 GUI 应用在跑。
 - **教训**: GUI 应用"进程活着窗口不出现"，先测**任意**新 X11 窗口能否显示（对照），
   是环境病就别在代码里找原因。
+
+---
+
+## 2026-09-17 18:20 — opencode 全面自检：钉钉通道断裂根源
+
+**类别**: insight
+**场景**: opencode 系统全面自检
+**发现**:
+1. **opencode-serve.service 已死**（9月15日 20:34:59 被停止后未重启）→ 4096 端口无服务 → dingtalk-bridge 每2秒 "fetch failed" 疯狂重连 → 钉钉消息处理全部失败（已断 2 天）
+2. **opencode.db 15.9GB 严重膨胀**（仅 28 会话/13739 消息/107142 parts）→ compacted 版本仅 631MB（可缩 96%）→ 数据库过大是 9月15日 OOM kill（systemd-oomd 杀 11 进程）的根源之一
+3. **备份文件占 40GB**：opencode.db.bak_20260914（15G）+ before_vacuum.bak（8.7G）+ compacted（631M）
+4. **atomcode datalog 16GB**：Toonflow-app 11G + clipyai 2.6G + ShiftBrowser 2.2G
+5. **opencode.log 85MB** 无轮转；bridge.log 15MB 每2秒刷一条
+6. **atomcode 市场更新失败**：atomgit.com DNS 解析失败 + 418
+7. **架构**：opencode-serve(4096) 是钉钉桥接后端；opencode-fix.py(14096) 是绕过 opencode API 直接读库的临时补丁，仅提供 /session 查询
+**预防**: 自检时先看 systemd 服务状态和端口监听，再查日志；数据库膨胀要定期 vacuum，备份别堆在数据目录
+
+---
+
+## 2026-09-17 19:58 — opencode 自检修复实战经验
+
+**类别**: best_practice
+**场景**: 修复 opencode 系统问题
+**关键经验**:
+1. **数据库膨胀根源是 event 表孤儿数据**：event 表 37 万行 14.1GB，其中 16.5 万行 12.6GB 属于已删除会话（session 表无记录）。DELETE 大表数据写 WAL 极慢（12.6GB 写入超时回滚 2 次）
+2. **正确姿势**：CREATE TABLE event_new AS SELECT ... JOIN session（只复制有效数据 1.7GB）→ 但 DROP TABLE 需要独占锁，opencode 运行中拿不到
+3. **终极方案**：VACUUM INTO 生成新库副本（无需独占锁）→ 在新库上 DROP/RENAME/重建索引 → 替换主库。VACUUM INTO 目标必须放 /home（/tmp 只有 12G，库 16G 放不下会报 disk full）
+4. **WAL 陷阱**：checkpoint 返回 (0,0,0) 不一定代表 WAL 已清空；DELETE 事务未提交时 WAL 会涨到 13GB，checkpoint 会丢弃未提交帧（WAL 缩到 32 字节）
+5. **替换后验证**：检查所有进程 fd 确认都用新库（避免 serve/CLI 还握着旧 inode 导致数据分叉）
+6. **sudo + heredoc 冲突**：`echo '密码' | sudo -S tee ... << EOF` 中 heredoc 会覆盖管道 stdin，密码传不进去 → 先写临时文件再 sudo cp
+7. **logrotate 配置**：copytruncate 模式适合被进程持续打开的日志；用户文件用 `su gao gao`
+**结果**: 数据库 15.9G→1.8G、磁盘释放 53G、日志轮转生效、钉钉通道恢复
+
+---
+
+## 2026-09-17 20:30 — pkill -f 误杀自己 + 误杀 Electron 原版
+
+**类别**: error
+**场景**: 启动 Tauri 版验证前想清理进程，用了 `pkill -f "shift-browser"`
+**发现**:
+1. **`pkill -f` 匹配完整命令行**：我自己的 bash 命令命令行里含 "shift-browser" 字符串（要启动的二进制路径），pkill 把执行命令的 shell 也杀了 → 命令中断无输出
+2. **连带误杀 Electron 原版**：/opt/Shift Browser/shift-browser 进程名和命令行都含 shift-browser，被一起杀掉 → 高哥正在用的原版浏览器被误杀，需要重新拉起
+3. HANDOFF 7.5 早记过此坑（"命令行里含该关键字的进程会误杀自己"，当时是 grep 误杀），这次 pkill 又踩了一遍
+**预防**:
+1. 杀进程用精确方式：`ps -eo pid,args | grep 精确路径 | awk '{print $1}'` 拿 PID 再 `kill <PID>`；或 `pgrep -x`（精确进程名）；**不要用 `pkill -f 宽泛关键字`**
+2. 启动新实例前先确认要杀的目标到底是谁（Electron 原版 vs Tauri 版进程名相同，用命令行路径区分）
+3. 涉及"清理进程再启动"的操作，先 `ps -eo pid,args` 看清再动手
+**结果**: Electron 原版已重新拉起（/usr/share/applications/shift-browser.desktop 的 Exec）；Tauri 版用精确 PID 安全关闭

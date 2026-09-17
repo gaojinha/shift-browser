@@ -1,6 +1,7 @@
 // 书签管理
 use crate::db::{Db, DbResult};
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Bookmark {
@@ -234,4 +235,253 @@ pub async fn search_bookmarks(
       created_at,
     })
     .collect())
+}
+
+/// 导入书签（Netscape HTML 格式，Chrome/Firefox 导出标准）。
+/// 解析 <DT><A HREF> 书签项与 <H3> 文件夹层级，同名文件夹复用，返回导入数量。
+#[tauri::command]
+pub async fn import_bookmarks_html(
+  db: tauri::State<'_, Db>,
+  html: String,
+) -> Result<usize, String> {
+  do_import(&db, &html).await
+}
+
+/// 选择书签 HTML 文件并导入（系统文件对话框，XDG portal）
+#[tauri::command]
+pub async fn import_bookmarks_from_file(db: tauri::State<'_, Db>) -> Result<usize, String> {
+  let file = rfd::AsyncFileDialog::new()
+    .set_title("选择书签文件（Chrome/Firefox 导出的 HTML）")
+    .add_filter("书签文件", &["html", "htm"])
+    .pick_file()
+    .await
+    .ok_or_else(|| "已取消".to_string())?;
+  let html = std::fs::read_to_string(file.path()).map_err(|e| format!("读取文件失败: {}", e))?;
+  let count = do_import(&db, &html).await?;
+  log::info!("[bookmarks] 文件导入书签 {} 个", count);
+  Ok(count)
+}
+
+async fn do_import(db: &Db, html: &str) -> Result<usize, String> {
+  let items = parse_bookmarks_html(html);
+  let mut count = 0usize;
+  for item in &items {
+    let mut folder_id: Option<i64> = None;
+    if let Some(folder_name) = &item.folder_name {
+      // 找同名文件夹，没有则新建
+      let existing: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM bookmark_folders WHERE name = ? ORDER BY id LIMIT 1",
+      )
+      .bind(folder_name)
+      .fetch_optional(&db.pool)
+      .await
+      .map_err(|e| e.to_string())?;
+      folder_id = match existing {
+        Some((fid,)) => Some(fid),
+        None => {
+          let res = sqlx::query(
+            "INSERT INTO bookmark_folders (name, parent_id, sort_order) VALUES (?, NULL, 0)",
+          )
+          .bind(folder_name)
+          .execute(&db.pool)
+          .await
+          .map_err(|e| e.to_string())?;
+          Some(res.last_insert_rowid())
+        }
+      };
+    }
+    // 去重：同 URL 已存在则跳过
+    let dup: Option<(i64,)> =
+      sqlx::query_as("SELECT id FROM bookmarks WHERE url = ? ORDER BY id LIMIT 1")
+        .bind(&item.url)
+        .fetch_optional(&db.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    if dup.is_some() {
+      continue;
+    }
+    sqlx::query(
+      "INSERT INTO bookmarks (title, url, folder_id, sort_order) VALUES (?, ?, ?, 0)",
+    )
+    .bind(&item.title)
+    .bind(&item.url)
+    .bind(folder_id)
+    .execute(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    count += 1;
+  }
+  log::info!("[bookmarks] 导入书签 {} 个", count);
+  Ok(count)
+}
+
+/// 导出书签为 Netscape HTML，写入用户下载目录，返回文件路径。
+#[tauri::command]
+pub async fn export_bookmarks_html(
+  db: tauri::State<'_, Db>,
+  app: tauri::AppHandle,
+) -> Result<String, String> {
+  // 书签（含文件夹归属）
+  let bookmarks = sqlx::query_as::<_, (i64, String, String, Option<i64>, i64, String)>(
+    "SELECT id, title, url, folder_id, sort_order, created_at FROM bookmarks ORDER BY sort_order, id",
+  )
+  .fetch_all(&db.pool)
+  .await
+  .map_err(|e| e.to_string())?;
+  let folders = sqlx::query_as::<_, (i64, String, Option<i64>, i64, String)>(
+    "SELECT id, name, parent_id, sort_order, created_at FROM bookmark_folders ORDER BY sort_order, id",
+  )
+  .fetch_all(&db.pool)
+  .await
+  .map_err(|e| e.to_string())?;
+
+  // 生成 Netscape 书签 HTML
+  let mut html = String::new();
+  html.push_str("<!DOCTYPE NETSCAPE-Bookmark-file-1>\n");
+  html.push_str("<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">\n");
+  html.push_str("<TITLE>Bookmarks</TITLE>\n");
+  html.push_str("<H1>Bookmarks</H1>\n<DL><p>\n");
+
+  // 顶层文件夹
+  let top_folders: Vec<_> = folders.iter().filter(|f| f.2.is_none()).collect();
+  for folder in &top_folders {
+    html.push_str(&format!(
+      "    <DT><H3>{}</H3>\n    <DL><p>\n",
+      escape_html(&folder.1)
+    ));
+    // 文件夹内书签
+    for bm in &bookmarks {
+      if bm.3 == Some(folder.0) {
+        html.push_str(&format!(
+          "        <DT><A HREF=\"{}\">{}</A>\n",
+          escape_html(&bm.2),
+          escape_html(&bm.1)
+        ));
+      }
+    }
+    html.push_str("    </DL><p>\n");
+  }
+  // 未分类书签（无文件夹）
+  for bm in &bookmarks {
+    if bm.3.is_none() {
+      html.push_str(&format!(
+        "    <DT><A HREF=\"{}\">{}</A>\n",
+        escape_html(&bm.2),
+        escape_html(&bm.1)
+      ));
+    }
+  }
+  html.push_str("</DL><p>\n");
+
+  // 写入下载目录
+  let dir = app
+    .path()
+    .download_dir()
+    .unwrap_or_else(|_| std::path::PathBuf::from("."));
+  let file = dir.join("bookmarks.html");
+  std::fs::write(&file, html).map_err(|e| format!("写入导出文件失败: {}", e))?;
+  log::info!("[bookmarks] 导出书签 {} 个 → {:?}", bookmarks.len(), file);
+  Ok(file.to_string_lossy().to_string())
+}
+
+/// 转义 HTML 特殊字符
+fn escape_html(s: &str) -> String {
+  s.replace('&', "&amp;")
+    .replace('<', "&lt;")
+    .replace('>', "&gt;")
+    .replace('"', "&quot;")
+}
+
+/// 解析 Netscape 书签 HTML（Chrome/Firefox 导出标准格式）
+fn parse_bookmarks_html(html: &str) -> Vec<BookmarkItem> {
+  let mut items: Vec<BookmarkItem> = Vec::new();
+  let mut folder_stack: Vec<String> = Vec::new();
+  let mut rest = html;
+  while let Some(idx) = rest.find("<DT>") {
+    let seg = &rest[idx..];
+    let end = seg[4..]
+      .find("<DT>")
+      .map(|i| i + 4)
+      .unwrap_or(seg.len());
+    process_segment(&seg[..end], &mut items, &mut folder_stack);
+    rest = &seg[end..];
+    if end >= seg.len() {
+      break;
+    }
+  }
+  items
+}
+
+#[derive(Debug, Clone)]
+struct BookmarkItem {
+  url: String,
+  title: String,
+  folder_name: Option<String>,
+}
+
+fn process_segment(seg: &str, items: &mut Vec<BookmarkItem>, folder_stack: &mut Vec<String>) {
+  // 文件夹开始：<DT><H3 ...>名称</H3>
+  if let Some(h3) = find_h3(seg) {
+    let name = strip_tags(&h3).trim().to_string();
+    if !name.is_empty() {
+      folder_stack.push(name);
+    }
+    return;
+  }
+  // 书签项：<DT><A HREF="...">标题</A>
+  if let Some((url, title)) = find_anchor(seg) {
+    if !url.is_empty() {
+      items.push(BookmarkItem {
+        url: url.clone(),
+        title: {
+          let t = strip_tags(&title).trim().to_string();
+          if t.is_empty() {
+            url.clone()
+          } else {
+            t
+          }
+        },
+        folder_name: folder_stack.last().cloned(),
+      });
+    }
+  }
+  // 文件夹结束：</DL> 弹出
+  let closes = seg.matches("</DL>").count();
+  for _ in 0..closes {
+    if !folder_stack.is_empty() {
+      folder_stack.pop();
+    }
+  }
+}
+
+fn find_h3(seg: &str) -> Option<String> {
+  let start = seg.find("<H3")?;
+  let gt = seg[start..].find('>')? + start + 1;
+  let end = seg[gt..].find("</H3>")? + gt;
+  Some(seg[gt..end].to_string())
+}
+
+fn find_anchor(seg: &str) -> Option<(String, String)> {
+  let start = seg.find("<A ")?;
+  let href_start = seg[start..].find("HREF=\"")? + start + 6;
+  let href_end = seg[href_start..].find('"')? + href_start;
+  let url = seg[href_start..href_end].to_string();
+  let gt = seg[start..].find('>')? + start + 1;
+  let end = seg[gt..].find("</A>")? + gt;
+  let title = seg[gt..end].to_string();
+  Some((url, title))
+}
+
+fn strip_tags(s: &str) -> String {
+  let mut out = String::new();
+  let mut in_tag = false;
+  for c in s.chars() {
+    match c {
+      '<' => in_tag = true,
+      '>' => in_tag = false,
+      _ if !in_tag => out.push(c),
+      _ => {}
+    }
+  }
+  out
 }

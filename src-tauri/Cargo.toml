@@ -26,6 +26,11 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 aes-gcm = "0.10"
 rand = "0.8"
 base64 = "0.22"
+# 用户账号密码哈希（PBKDF2，与原版 Electron 一致：10 万次迭代 SHA-512）
+pbkdf2 = "0.12"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
 tokio = { version = "1", features = ["full"] }
 thiserror = "2"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
@@ -33,6 +38,8 @@ readability = "0.3.0"
 regex = "1"
 encoding_rs = "0.8"
 uuid = { version = "1", features = ["v4"] }
+# 系统文件对话框（XDG portal，走 DBus，不依赖 GTK 主线程）
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", features = ["v3_24"] }

@@ -23,6 +23,15 @@ const ALLOWED_KEYS: &[&str] = &[
   "ai_api_key",
   "adblock_enabled",
   "adblock_keywords",
+  "show_lunar",
+  "show_quote",
+  "show_weather",
+  "font_size",
+  "weather_city",
+  "theme_color",
+  "wallpaper",
+  "show_bg",
+  "lock_enabled",
 ];
 
 /// 是否为敏感设置键
@@ -74,10 +83,15 @@ pub async fn get_setting(db: tauri::State<'_, Db>, key: String) -> DbResult<Opti
 /// 获取所有设置（敏感项脱敏：master_key 不返回，ai_api_key 返回掩码）
 #[tauri::command]
 pub async fn get_all_settings(db: tauri::State<'_, Db>) -> DbResult<Vec<Setting>> {
+  log::info!("[settings] get_all_settings 被调用");
   let rows: Vec<(String, String)> =
     sqlx::query_as("SELECT key, value FROM settings ORDER BY key")
       .fetch_all(&db.pool)
       .await?;
+  let keys: Vec<String> = rows.iter().map(|(k, _)| k.clone()).collect();
+  log::info!("[settings] get_all_settings 返回 {} 项: {:?}", rows.len(), keys);
+  let has_lock = rows.iter().find(|(k, _)| k == "lock_enabled");
+  log::info!("[settings] lock_enabled 原始值: {:?}", has_lock.map(|(_, v)| v.as_str()));
   Ok(rows
     .into_iter()
     .filter(|(key, _)| !is_sensitive(key))

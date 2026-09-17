@@ -3,6 +3,7 @@
 // 结构：TabBar(40) + AddressBar(42) + BookmarksBar(30) + 内容区(webview) + StatusBar(22)
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import TabBar from './components/TabBar.vue'
 import AddressBar from './components/AddressBar.vue'
 import BookmarksBar from './components/BookmarksBar.vue'
@@ -12,7 +13,9 @@ import GroupsDialog from './components/GroupsDialog.vue'
 import DownloadsDialog from './components/DownloadsDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import AISidebar from './components/AISidebar.vue'
+import TranslatePanel from './components/TranslatePanel.vue'
 import HistoryDialog from './components/HistoryDialog.vue'
+import BookmarksDialog from './components/BookmarksDialog.vue'
 import AppToast from './components/AppToast.vue'
 import { useTabsStore } from './stores/tabs'
 import { useGroupsStore } from './stores/groups'
@@ -28,7 +31,9 @@ const showGroups = ref(false)
 const showDownloads = ref(false)
 const showSettings = ref(false)
 const showAI = ref(false)
+const showTranslate = ref(false)
 const showHistory = ref(false)
+const showBookmarks = ref(false)
 const addressBarRef = ref<InstanceType<typeof AddressBar> | null>(null)
 let saveTimer: number | null = null
 
@@ -55,10 +60,16 @@ function onGlobalKeydown(e: KeyboardEvent) {
       return
     }
     // 弹窗打开时，其余标签快捷键不响应（避免误关标签/新建标签）
-    if (showAI.value || showSettings.value || showDownloads.value || showGroups.value || showPasswords.value || showHistory.value) {
+    if (showTranslate.value || showAI.value || showSettings.value || showDownloads.value || showGroups.value || showPasswords.value || showHistory.value) {
       return
     }
-    if (k === 't') {
+    // Ctrl+Shift+T 打开翻译面板（不影响 Ctrl+T 建标签）
+    if (k === 't' && e.shiftKey) {
+      e.preventDefault()
+      showTranslate.value = true
+      return
+    }
+    if (k === 't' && !e.shiftKey) {
       e.preventDefault()
       tabsStore.createTab()
     } else if (k === 'w') {
@@ -74,8 +85,10 @@ function onGlobalKeydown(e: KeyboardEvent) {
     return
   }
 
-  if (e.key !== 'Escape') return
-  if (showAI.value) {
+   if (e.key !== 'Escape') return
+  if (showTranslate.value) {
+    showTranslate.value = false
+  } else if (showAI.value) {
     showAI.value = false
   } else if (showSettings.value) {
     showSettings.value = false
@@ -94,6 +107,9 @@ onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeydown)
   // 设置尽早加载（主页/搜索引擎/主题/书签栏显隐依赖）
   await settingsStore.loadSettings()
+  // 启动锁屏已迁移到 Rust/GTK 层（lib.rs setup 里弹 GTK 原生密码对话框，
+  // 在所有 webview 创建之前验证），不再在 Vue 层处理——Vue 锁屏覆盖层只能盖住
+  // Vue 自己的 DOM，盖不住另一个独立的 GTK webview（标签页）
   // 同步书签栏显隐到 Rust 侧（初始化 top_offset）
   try {
     await invoke('set_bookmarks_bar_visible', { visible: settingsStore.showBookmarksBar })
@@ -123,6 +139,14 @@ onMounted(async () => {
   }
   // 无论初始化成功失败，轮询都要启动（Rust 侧状态可能在初始化期间已变化）
   tabsStore.startPolling()
+
+  // 启动页右侧栏按钮 → 打开主界面组件（newtab webview 通过 IPC 触发）
+  listen('open-ai-from-newtab', () => {
+    showAI.value = true
+  }).catch(() => {})
+  listen('open-settings-from-newtab', () => {
+    showSettings.value = true
+  }).catch(() => {})
 })
 
 onUnmounted(() => {
@@ -153,8 +177,9 @@ watch(
       @open-downloads="showDownloads = true"
       @open-settings="showSettings = true"
       @open-ai="showAI = true"
+      @open-translate="showTranslate = true"
     />
-    <BookmarksBar v-if="settingsStore.showBookmarksBar" />
+    <BookmarksBar v-if="settingsStore.showBookmarksBar" @open-manager="showBookmarks = true" />
     <!-- 内容区：webview 由 Rust 以 (0, 112) 起盖住此区域 -->
     <div class="content-area" id="contentArea"></div>
     <StatusBar />
@@ -163,8 +188,11 @@ watch(
     <DownloadsDialog :show="showDownloads" @close="showDownloads = false" />
     <SettingsDialog :show="showSettings" @close="showSettings = false" />
     <AISidebar :show="showAI" @close="showAI = false" />
+    <TranslatePanel :show="showTranslate" @close="showTranslate = false" />
     <HistoryDialog :show="showHistory" @close="showHistory = false" />
+    <BookmarksDialog :show="showBookmarks" @close="showBookmarks = false" />
     <AppToast />
+    <!-- 启动锁屏已迁移到 Rust/GTK 层（lib.rs），不在此处重复实现 -->
   </div>
 </template>
 
@@ -173,13 +201,87 @@ watch(
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--bg-primary, #1a1a1a);
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
   overflow: hidden;
 }
 .content-area {
   flex: 1;
   position: relative;
-  background: var(--bg-primary, #1a1a1a);
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+}
+.lock-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0f1626 0%, #16213e 50%, #0f3460 100%);
+}
+.lock-box {
+  width: 320px;
+  padding: 36px 32px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.lock-logo {
+  font-size: 42px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.lock-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #fff;
+}
+.lock-sub {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 8px;
+}
+.lock-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
+  font-size: 14px;
+  outline: none;
+}
+.lock-input:focus {
+  border-color: var(--accent);
+}
+.lock-error {
+  width: 100%;
+  color: #ff6b6b;
+  font-size: 12px;
+  text-align: center;
+}
+.lock-btn {
+  width: 100%;
+  padding: 10px 0;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.lock-btn:hover {
+  opacity: 0.9;
+}
+.lock-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>
 
@@ -187,15 +289,15 @@ watch(
 /* 主题变量：深色（默认）+ 浅色（.theme-light 覆盖）
    各组件 scoped 样式引用 var(--xxx)，实现全局深浅色切换 */
 :root {
-  --bg-primary: #1a1a1a;
-  --bg-secondary: #2d2d2d;
-  --bg-hover: #383838;
-  --bg-active: #3d3d3d;
+  --bg-primary: #16213e;
+  --bg-secondary: #1e2a45;
+  --bg-hover: #26345a;
+  --bg-active: #2b3a5e;
   --text-primary: #e0e0e0;
   --text-secondary: #ccc;
-  --text-muted: #999;
-  --border-color: #444;
-  --border-subtle: #333;
+  --text-muted: #9aa5b8;
+  --border-color: rgba(255, 255, 255, 0.12);
+  --border-subtle: rgba(255, 255, 255, 0.08);
   --accent: #4a9eff;
   --success: #43a047;
   --danger: #e53935;

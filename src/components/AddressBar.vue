@@ -38,6 +38,7 @@ const isHttps = computed(() => /^https:\/\//i.test(addressInput.value))
 
 const emit = defineEmits<{
   (e: 'openAi'): void
+  (e: 'openTranslate'): void
   (e: 'openPasswords'): void
   (e: 'openGroups'): void
   (e: 'openDownloads'): void
@@ -283,6 +284,7 @@ async function onReader() {
       {{ readerLoading ? '⏳' : '📖' }}
     </button>
     <span v-if="readerTip" class="reader-tip" :title="readerTip">{{ readerTip }}</span>
+    <button class="action-btn translate-btn" title="翻译（粘贴文本→中文）" @click="emit('openTranslate')">🌐</button>
     <button class="action-btn ai-btn" title="AI 助手" @click="emit('openAi')">AI</button>
     <button class="action-btn" title="密码管理" @click="emit('openPasswords')">🔑</button>
     <button class="action-btn" title="标签分组" @click="emit('openGroups')">🗂</button>
@@ -348,6 +350,9 @@ async function onReader() {
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.5px;
+}
+.translate-btn {
+  font-size: 15px;
 }
 .nav-btn:hover:not(:disabled),
 .action-btn:hover {

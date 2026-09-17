@@ -135,6 +135,7 @@ fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>
     };
     let webviews = window.webviews();
     log::info!("[extensions] 注入到 {} 个 webview", webviews.len());
+    let items_owned = items.clone();
     let _ = app.run_on_main_thread(move || {
         // 只注入 child 标签页（已跳过主 webview），child 都是 http/https 外部网页，
         // allow_list 留空（全部注入）避免 WebKitGTK 对 "http://*" 通配符格式不识别导致不注入
@@ -145,10 +146,10 @@ fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>
             if wv.label() == "main" {
                 continue;
             }
-            let items_clone = items.clone();
+            let items_clone = items_owned.clone();
             let _ = wv.with_webview(move |pwv| {
-                let child_gtk = pwv.inner();
-                let Some(manager) = child_gtk.user_content_manager() else {
+                let webview = pwv.inner();
+                let Some(manager) = webview.user_content_manager() else {
                     return;
                 };
                 manager.remove_all_scripts();

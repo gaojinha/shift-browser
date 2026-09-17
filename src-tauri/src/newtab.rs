@@ -3,10 +3,13 @@
 // 标签用 file:// 打开。面板静态数据（最近访问/书签/快捷访问）渲染时嵌入，
 // 交互状态（待办勾选）用 localStorage 存本地，无需 IPC。
 use crate::db::Db;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// 世界导航数据（32 大类 721 站，从原版 worldNav.ts 移植）
 const WORLDNAV_JSON: &str = include_str!("../resources/worldnav.json");
+
+/// IPC 桥 JS（WebKitGTK 自定义协议页面不执行 UserScript，手动注入）
+const IPC_BRIDGE: &str = include_str!("ipc-bridge.js");
 
 /// 新标签页文件路径（app_data_dir/newtab/index.html）
 pub fn newtab_path(app: &AppHandle) -> Option<std::path::PathBuf> {
@@ -35,6 +38,49 @@ const DEFAULT_QUICK_SITES: &[(&str, &str, &str)] = &[
     ("💬", "微博", "https://weibo.com"),
     ("🧭", "世界导航", "https://www.hao123.com"),
 ];
+
+/// 拉取 Bing 每日壁纸（原版 bg-images IPC 迁移）。
+/// 主进程拉取规避 CORS，失败返回空 Vec（保持纯色渐变背景）。
+async fn fetch_bing_wallpapers() -> Vec<String> {
+    let api = "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=8&mkt=zh-CN";
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(6))
+        .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build()
+        .unwrap_or_default();
+    match client.get(api).send().await {
+        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+            Ok(data) => {
+                let imgs = data
+                    .get("images")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let urls: Vec<String> = imgs
+                    .iter()
+                    .filter_map(|i| {
+                        let u = i.get("url")?.as_str()?;
+                        Some(format!("https://www.bing.com{}", u))
+                    })
+                    .collect();
+                log::info!("[newtab] Bing 壁纸拉取成功 {} 张", urls.len());
+                urls
+            }
+            Err(e) => {
+                log::warn!("[newtab] Bing 壁纸 JSON 解析失败: {}", e);
+                Vec::new()
+            }
+        },
+        Ok(resp) => {
+            log::warn!("[newtab] Bing 壁纸 HTTP {}", resp.status());
+            Vec::new()
+        }
+        Err(e) => {
+            log::warn!("[newtab] Bing 壁纸拉取失败: {}", e);
+            Vec::new()
+        }
+    }
+}
 
 /// 生成新标签页 HTML 并写盘。返回文件路径字符串。
 pub async fn generate(db: &Db, path: &std::path::Path) -> Result<String, String> {
@@ -91,8 +137,34 @@ pub async fn generate(db: &Db, path: &std::path::Path) -> Result<String, String>
     // ---- 数据：资讯（内置源缓存最新 80 条）----
     let feed_items = crate::feed::latest_items(db, 80).await;
 
+    // ---- 数据：动态背景开关（原版 showBg，默认开）----
+    let show_bg = setting(db, "show_bg")
+        .await
+        .map(|v| v != "0" && v != "false")
+        .unwrap_or(true);
+    let wallpapers = if show_bg {
+        fetch_bing_wallpapers().await
+    } else {
+        Vec::new()
+    };
+
+    // ---- 数据：字体大小（原版 fontSize，默认 14）----
+    let font_size: u32 = setting(db, "font_size")
+        .await
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(14);
+
     // ---- 渲染 HTML（启动页 + 世界导航页）----
-    let html = render_html(search_url, &recent, &bookmarks, &quick_sites, &feed_items);
+    let html = render_html(
+        search_url,
+        &recent,
+        &bookmarks,
+        &quick_sites,
+        &feed_items,
+        &wallpapers,
+        show_bg,
+        font_size,
+    );
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -126,12 +198,16 @@ fn json_script_safe(v: &serde_json::Value) -> String {
         .replace('<', "\\u003c")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_html(
     search_url: &str,
     recent: &[(String, String)],
     bookmarks: &[(String, String)],
     quick_sites: &[(String, String, String)],
     feed_items: &[(String, String, String, String, String)],
+    wallpapers: &[String],
+    show_bg: bool,
+    font_size: u32,
 ) -> String {
     let recent_html = if recent.is_empty() {
         "<div class=\"empty\">暂无访问记录</div>".to_string()
@@ -164,13 +240,13 @@ fn render_html(
             .join("")
     };
 
-    // 快捷访问内置项传给前端 JS（动态面板用）
+    // 快捷访问内置项（主区 top-sites 网格）
     let quick_grid = quick_sites
         .iter()
         .map(|(i, n, u)| {
             format!(
-                "<a class=\"grid-item\" href=\"{}\"><span class=\"gi-icon\">{}</span><span class=\"gi-name\">{}</span></a>",
-                esc(u), esc(i), esc(n)
+                "<div class=\"top-site\" data-url=\"{}\"><a class=\"top-site-link\" href=\"{}\"><span class=\"icon\">{}</span><span class=\"name\">{}</span></a><button class=\"qs-del\">×</button></div>",
+                esc(u), esc(u), esc(i), esc(n)
             )
         })
         .collect::<Vec<_>>()
@@ -184,111 +260,339 @@ fn render_html(
         })
         .collect();
 
+    // 动态背景层（原版 bg-layer：Bing 每日壁纸 + Ken Burns 缓慢缩放 + 暗色渐变遮罩）
+    let bg_layer_html = if show_bg {
+        "<div class=\"bg-layer\" id=\"bgLayer\"></div>".to_string()
+    } else {
+        String::new()
+    };
+    // 壁纸 URL 数组嵌入 JS（file:// 页面直接 fetch Bing 有 CORS，Rust 端拉取规避）
+    let wallpapers_json = serde_json::to_string(wallpapers)
+        .unwrap_or_else(|_| "[]".into())
+        .replace('<', "\\u003c");
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <title>新标签页</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: http: data:; connect-src https: http: ipc: http://ipc.localhost; frame-src https: http:">
+<script>{ipc_bridge}</script>
 <style>
-  :root {{ --bg:#1a1a1a; --bg2:#232323; --bg3:#2a2a2a; --fg:#e0e0e0; --muted:#888; --accent:#4a9eff; --border:#333; }}
-  * {{ box-sizing:border-box; margin:0; padding:0; }}
+  :root {{ --accent:#4a9eff; }}
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
   html,body {{ height:100%; }}
-  body {{ background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; display:flex; overflow:hidden; }}
-  .icon-bar {{ width:44px; background:var(--bg2); border-right:1px solid var(--border); display:flex; flex-direction:column; align-items:center; padding:8px 0; gap:4px; flex-shrink:0; }}
-  .icon-btn {{ width:36px; height:36px; display:flex; align-items:center; justify-content:center; font-size:18px; border:none; background:transparent; border-radius:8px; cursor:pointer; text-decoration:none; color:var(--fg); }}
-  .icon-btn:hover {{ background:rgba(255,255,255,.1); }}
-  .icon-btn.active {{ background:rgba(255,255,255,.16); box-shadow:inset 0 0 0 2px rgba(255,255,255,.3); }}
+  body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%); color:#e0e0e0; min-height:100vh; overflow-y:auto; }}
+  .bg-layer {{ position:fixed; top:-5%; left:-5%; width:110%; height:110%; z-index:-1; background-size:cover; background-position:center; animation:kenburns 45s ease-in-out infinite alternate; }}
+  .bg-layer::after {{ content:''; position:absolute; inset:0; background:linear-gradient(180deg, rgba(10,15,30,0.5) 0%, rgba(10,15,30,0.35) 40%, rgba(10,15,30,0.7) 100%); }}
+  @keyframes kenburns {{ from {{ transform:scale(1) translate(0,0); }} to {{ transform:scale(1.08) translate(1%,1.5%); }} }}
+  .main-layout {{ display:flex; max-width:none; margin:0; align-items:stretch; min-height:100vh; padding-left:44px; }}
+  .icon-bar {{ position:fixed; top:0; bottom:0; left:0; width:44px; background:rgba(255,255,255,0.05); border-right:1px solid rgba(255,255,255,0.1); display:flex; flex-direction:column; align-items:center; padding:14px 0; gap:4px; overflow-y:auto; scrollbar-width:none; }}
+  .icon-btn {{ position:relative; width:40px; height:40px; display:flex; align-items:center; justify-content:center; font-size:19px; border:none; background:transparent; border-radius:8px; cursor:pointer; transition:all 0.15s; }}
+  .icon-btn:hover {{ background:rgba(255,255,255,0.12); }}
+  .icon-btn.active {{ background:rgba(255,255,255,0.18); box-shadow:inset 0 0 0 2px rgba(255,255,255,0.35); }}
   .icon-btn.bottom {{ margin-top:auto; }}
-  .side-panel {{ width:0; overflow:hidden; background:var(--bg2); border-right:1px solid var(--border); transition:width .18s ease; flex-shrink:0; display:flex; flex-direction:column; }}
-  .side-panel.open {{ width:300px; }}
-  .panel-head {{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid var(--border); flex-shrink:0; }}
-  .panel-head h2 {{ font-size:14px; font-weight:600; white-space:nowrap; }}
-  .fs-close {{ border:none; background:transparent; color:var(--muted); font-size:18px; cursor:pointer; padding:0 4px; }}
-  .fs-close:hover {{ color:var(--fg); }}
-  .panel-body {{ overflow-y:auto; padding:8px; flex:1; }}
-  .item {{ display:block; padding:8px 10px; border-radius:8px; text-decoration:none; color:var(--fg); }}
-  .item:hover {{ background:var(--bg3); }}
+  .right-bar {{ width:44px; flex-shrink:0; background:rgba(255,255,255,0.05); border-left:1px solid rgba(255,255,255,0.1); display:flex; flex-direction:column; align-items:center; padding:14px 0; gap:4px; }}
+  .side-panel {{ width:260px; flex-shrink:0; background:rgba(255,255,255,0.05); border-right:1px solid rgba(255,255,255,0.1); display:none; flex-direction:column; max-height:100vh; position:sticky; top:0; overflow:hidden; }}
+  .side-panel.open {{ display:flex; }}
+  .panel-head {{ display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,0.1); gap:8px; }}
+  .panel-head h2 {{ font-size:14px; color:#fff; white-space:nowrap; }}
+  .panel-actions {{ display:flex; gap:6px; align-items:center; flex-shrink:0; }}
+  .panel-body {{ flex:1; overflow-y:auto; padding:12px; }}
+  .panel-body::-webkit-scrollbar {{ width:6px; }}
+  .panel-body::-webkit-scrollbar-thumb {{ background:rgba(255,255,255,0.2); border-radius:3px; }}
+  .fs-close {{ background:none; border:none; color:rgba(255,255,255,0.5); font-size:18px; cursor:pointer; line-height:1; padding:2px 6px; border-radius:4px; }}
+  .fs-close:hover {{ color:#f44; background:rgba(255,255,255,0.08); }}
+  .fs-item {{ display:block; padding:9px 10px; border-radius:8px; cursor:pointer; color:#ddd; font-size:13px; line-height:1.4; margin-bottom:4px; transition:background 0.15s; text-decoration:none; position:relative; }}
+  .fs-item:hover {{ background:rgba(255,255,255,0.1); color:#fff; }}
+  .fs-item .fs-title {{ display:block; }}
+  .fs-item .fs-meta {{ display:block; font-size:11px; color:rgba(255,255,255,0.4); margin-top:2px; }}
+  .fs-item.read {{ opacity:0.55; }}
+  .fs-item.read .fs-title {{ color:rgba(255,255,255,0.55); }}
+  .fs-item.read .fs-title::before {{ content:'✓ '; color:var(--accent); font-weight:600; }}
+  .panel-body.hide-read .fs-item.read {{ display:none; }}
+  .fs-count {{ text-align:center; font-size:11px; color:rgba(255,255,255,0.35); padding:10px 0 4px; }}
+  .item {{ display:block; padding:8px 10px; border-radius:8px; text-decoration:none; color:#ddd; }}
+  .item:hover {{ background:rgba(255,255,255,0.1); }}
   .it-title {{ display:block; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
-  .it-url {{ display:block; font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
-  .fs-item {{ position:relative; }}
-  .fs-read {{ position:absolute; right:8px; top:50%; transform:translateY(-50%); z-index:2; width:26px; height:26px; border:none; background:var(--bg3); border:1px solid var(--border); border-radius:7px; cursor:pointer; font-size:13px; display:flex; align-items:center; justify-content:center; color:var(--accent); }}
+  .it-url {{ display:block; font-size:11px; color:rgba(255,255,255,0.4); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+  .fs-item .it-url {{ padding-right:34px; }}
+  .fs-read {{ position:absolute; right:8px; top:50%; transform:translateY(-50%); z-index:2; width:26px; height:26px; border:none; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:7px; cursor:pointer; font-size:13px; display:flex; align-items:center; justify-content:center; color:var(--accent); }}
   .fs-read:hover {{ background:var(--accent); color:#fff; border-color:var(--accent); }}
-  .fs-item .it-url {{ padding-right:34px; }}  /* 给 📖 让位 */
-  .feed-toggle {{ display:block; margin:0 0 8px 4px; background:var(--bg3); border:1px solid var(--border); color:var(--accent); border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }}
   .feed-bar {{ display:flex; flex-wrap:wrap; gap:4px; margin-bottom:8px; }}
-  .feed-cat {{ background:var(--bg3); border:1px solid var(--border); color:var(--muted); border-radius:10px; padding:2px 8px; font-size:11px; cursor:pointer; }}
+  .feed-toggle {{ display:block; margin:0 0 8px 4px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:var(--accent); border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }}
+  .feed-cat {{ background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15); color:rgba(255,255,255,0.6); border-radius:10px; padding:2px 8px; font-size:11px; cursor:pointer; }}
   .feed-cat.on {{ background:var(--accent); border-color:var(--accent); color:#fff; }}
   .q-item {{ display:flex; align-items:center; }}
   .q-link {{ flex:1; min-width:0; display:block; text-decoration:none; color:inherit; overflow:hidden; }}
-  .q-del {{ border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:12px; flex-shrink:0; visibility:hidden; }}
+  .q-del {{ border:none; background:transparent; color:rgba(255,255,255,0.4); cursor:pointer; font-size:12px; flex-shrink:0; visibility:hidden; }}
   .q-item:hover .q-del {{ visibility:visible; }}
   .q-del:hover {{ color:#ff6b6b; }}
+  .todo-panel {{ display:flex; gap:8px; margin-bottom:10px; }}
+  .todo-add {{ display:flex; gap:6px; margin-bottom:8px; }}
+  .todo-add input {{ flex:1; padding:8px 12px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#fff; font-size:13px; outline:none; }}
+  .todo-add input:focus {{ border-color:var(--accent); }}
+  .todo-add button {{ padding:8px 14px; background:var(--accent); border:none; border-radius:8px; color:#fff; font-size:13px; cursor:pointer; }}
+  .todo-list {{ display:flex; flex-direction:column; gap:6px; }}
+  .todo-item {{ display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,255,255,0.05); border-radius:8px; font-size:13px; cursor:pointer; transition:background 0.15s; }}
+  .todo-item:hover {{ background:rgba(255,255,255,0.1); }}
+  .todo-item input[type=checkbox] {{ accent-color:var(--accent); width:15px; height:15px; flex-shrink:0; }}
+  .todo-item.done .todo-text {{ text-decoration:line-through; color:rgba(255,255,255,0.4); }}
+  .todo-text {{ flex:1; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+  .todo-del {{ border:none; background:transparent; color:rgba(255,255,255,0.4); cursor:pointer; font-size:13px; }}
+  .todo-del:hover {{ color:#f44; }}
+  .bookmark-list {{ display:flex; flex-wrap:wrap; gap:8px; }}
+  .bookmark-item {{ display:flex; align-items:center; gap:6px; padding:8px 14px; background:rgba(255,255,255,0.05); border-radius:8px; text-decoration:none; color:#e0e0e0; font-size:13px; transition:background 0.15s; max-width:220px; }}
+  .bookmark-item:hover {{ background:rgba(255,255,255,0.1); }}
+  .bookmark-name {{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+  .inline-read-loading {{ padding:20px; text-align:center; color:rgba(255,255,255,0.6); font-size:13px; }}
+  .ir-bar {{ display:flex; align-items:center; gap:6px; margin-bottom:10px; }}
+  .ir-bar button {{ border:none; background:rgba(255,255,255,0.1); color:#ddd; border-radius:6px; padding:4px 10px; font-size:13px; cursor:pointer; }}
+  .ir-bar .ir-src {{ margin-left:auto; color:var(--accent); font-size:12px; text-decoration:none; }}
+  .ir-art h1 {{ font-size:18px; margin-bottom:10px; color:#fff; line-height:1.4; }}
+  .ir-art {{ font-size:var(--fs,19px); line-height:1.8; color:#ddd; word-break:break-word; }}
+  .ir-art img {{ max-width:100%; height:auto; }}
+  .profile-info {{ text-align:center; padding:16px 10px; }}
+  .profile-info .pi-avatar {{ font-size:44px; line-height:1.2; }}
+  .profile-info .pi-name {{ font-size:16px; font-weight:600; color:#fff; margin-top:8px; }}
+  .profile-info .pi-user {{ font-size:12px; color:rgba(255,255,255,0.45); margin-top:2px; }}
+  .profile-info .pi-sig {{ font-size:12px; color:rgba(255,255,255,0.6); margin-top:8px; padding:0 6px; }}
+  .panel-link-item {{ display:flex; align-items:center; gap:8px; padding:9px 10px; border-radius:8px; cursor:pointer; color:#ddd; font-size:13px; margin-bottom:4px; transition:background 0.15s; text-decoration:none; }}
+  .panel-link-item:hover {{ background:rgba(255,255,255,0.1); color:#fff; }}
+  .panel-link-item .pli-icon {{ font-size:16px; flex-shrink:0; }}
+  .panel-link-item .pli-name {{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+  .panel-link-item .pli-url {{ font-size:11px; color:rgba(255,255,255,0.4); max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+  .uc-loading {{ text-align:center; padding:30px; color:rgba(255,255,255,0.5); font-size:13px; }}
+  .uc-wrap {{ padding:4px 2px; }}
+  .uc-tabs {{ display:flex; gap:6px; margin-bottom:14px; background:rgba(255,255,255,0.06); border-radius:10px; padding:4px; }}
+  .uc-tab {{ flex:1; padding:8px 0; border:none; background:transparent; color:rgba(255,255,255,0.6); font-size:13px; border-radius:8px; cursor:pointer; transition:all 0.15s; }}
+  .uc-tab.active {{ background:var(--accent); color:#fff; }}
+  .uc-form {{ display:flex; flex-direction:column; gap:10px; }}
+  .uc-form input {{ padding:9px 12px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#fff; font-size:13px; outline:none; }}
+  .uc-form input:focus {{ border-color:var(--accent); }}
+  .uc-btn {{ padding:9px 0; border:none; border-radius:8px; font-size:13px; cursor:pointer; transition:filter 0.15s; }}
+  .uc-btn.primary {{ background:var(--accent); color:#fff; }}
+  .uc-btn.ghost {{ background:rgba(255,255,255,0.1); color:#ddd; }}
+  .uc-btn.danger {{ background:rgba(204,68,68,0.2); color:#f88; }}
+  .uc-btn:hover {{ filter:brightness(1.12); }}
+  .uc-section {{ margin-top:16px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.08); }}
+  .uc-sec-title {{ font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:10px; letter-spacing:0.5px; }}
+  .uc-section input {{ width:100%; padding:8px 10px; margin-bottom:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#fff; font-size:13px; outline:none; box-sizing:border-box; }}
+  .uc-section input:focus {{ border-color:var(--accent); }}
+  .uc-check {{ display:flex; align-items:center; gap:8px; padding:7px 0; font-size:13px; color:#ddd; cursor:pointer; }}
+  .uc-check input {{ width:auto; margin:0; accent-color:var(--accent); }}
+  .uc-row {{ display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:13px; color:#ddd; }}
+  .uc-row label {{ width:72px; flex-shrink:0; }}
+  .uc-row input {{ flex:1; margin:0; }}
+  .uc-row input[type=color] {{ width:46px; padding:2px; height:30px; flex:0 0 46px; }}
+  .uc-inline {{ display:none; flex-direction:column; gap:8px; margin-top:10px; padding:12px; background:rgba(255,255,255,0.05); border-radius:8px; }}
+  .uc-inline.show {{ display:flex; }}
+  .uc-inline input {{ width:100%; padding:8px 10px; margin:0; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#fff; font-size:13px; outline:none; box-sizing:border-box; }}
+  .uc-inline input:focus {{ border-color:var(--accent); }}
+  .uc-btns {{ display:flex; gap:8px; margin-top:10px; }}
+  .uc-btns .uc-btn {{ flex:1; }}
   .modal-mask {{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50; align-items:center; justify-content:center; }}
   .modal-mask.show {{ display:flex; }}
-  .modal-box {{ width:340px; background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:18px; }}
+  .modal-box {{ width:340px; background:#1e2a45; border:1px solid rgba(255,255,255,0.15); border-radius:12px; padding:18px; }}
   .modal-box h3 {{ font-size:15px; margin-bottom:12px; }}
-  .modal-box input {{ width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:8px; color:var(--fg); padding:8px 10px; font-size:13px; margin-bottom:10px; outline:none; }}
+  .modal-box input {{ width:100%; padding:8px 10px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#fff; font-size:13px; margin-bottom:10px; outline:none; }}
+  .modal-box input:focus {{ border-color:var(--accent); }}
   .modal-actions {{ display:flex; justify-content:flex-end; gap:8px; }}
   .modal-btn {{ border:none; border-radius:8px; padding:7px 16px; cursor:pointer; font-size:13px; }}
-  .modal-btn.cancel {{ background:var(--bg3); color:var(--fg); }}
+  .modal-btn.cancel {{ background:rgba(255,255,255,0.1); color:#ddd; }}
   .modal-btn.ok {{ background:var(--accent); color:#fff; }}
-  .empty {{ color:var(--muted); text-align:center; padding:24px 0; font-size:13px; }}
-  .todo-panel {{ padding:4px; }}
-  .todo-add {{ display:flex; gap:6px; margin-bottom:8px; }}
-  .todo-add input {{ flex:1; background:var(--bg3); border:1px solid var(--border); color:var(--fg); border-radius:6px; padding:6px 8px; font-size:13px; outline:none; }}
-  .todo-add button {{ background:var(--accent); color:#fff; border:none; border-radius:6px; padding:6px 12px; cursor:pointer; font-size:13px; }}
-  .todo-item {{ display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; }}
-  .todo-item:hover {{ background:var(--bg3); }}
-  .todo-item input[type=checkbox] {{ accent-color:var(--accent); width:15px; height:15px; flex-shrink:0; }}
-  .todo-item.done .todo-text {{ text-decoration:line-through; color:var(--muted); }}
-  .todo-text {{ flex:1; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
-  .todo-del {{ border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:13px; }}
-  .todo-del:hover {{ color:#ff6b6b; }}
-  .container {{ flex:1; display:flex; flex-direction:column; align-items:center; padding:8vh 24px 24px; overflow-y:auto; }}
-  .greeting {{ font-size:30px; font-weight:600; margin-bottom:6px; }}
-  .date {{ color:var(--muted); font-size:13px; margin-bottom:6px; }}
-  .weather {{ color:var(--muted); font-size:13px; margin-bottom:24px; min-height:18px; }}
-  .weather b {{ color:var(--fg); font-weight:600; }}
-  .search {{ display:flex; width:min(560px,90%); margin-bottom:36px; }}
-  .search input {{ flex:1; background:var(--bg3); border:1px solid var(--border); border-right:none; border-radius:10px 0 0 10px; color:var(--fg); padding:12px 16px; font-size:15px; outline:none; }}
-  .search input:focus {{ border-color:var(--accent); }}
-  .search button {{ background:var(--accent); color:#fff; border:none; border-radius:0 10px 10px 0; padding:0 22px; font-size:15px; cursor:pointer; }}
-  .grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:12px; width:min(720px,92%); }}
-  .grid-item {{ display:flex; flex-direction:column; align-items:center; gap:8px; padding:16px 8px; background:var(--bg2); border:1px solid var(--border); border-radius:12px; text-decoration:none; color:var(--fg); }}
-  .grid-item:hover {{ border-color:var(--accent); }}
-  .gi-icon {{ font-size:26px; }}
-  .gi-name {{ font-size:12px; color:var(--muted); }}
+  .empty {{ text-align:center; padding:20px; color:rgba(255,255,255,0.4); font-size:13px; }}
+  .toast {{ position:fixed; bottom:40px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.8); color:#fff; padding:10px 20px; border-radius:20px; font-size:13px; opacity:0; transition:opacity 0.3s; pointer-events:none; z-index:99; }}
+  .toast.show {{ opacity:1; }}
+  .container {{ position:relative; flex:1; min-width:0; max-width:960px; margin:0 auto; padding:32px 40px 20px; zoom:{font_scale}; }}
+  .hero {{ text-align:center; margin-bottom:20px; }}
+  .hero h1 {{ font-size:34px; font-weight:700; color:#fff; margin-bottom:6px; }}
+  .hero p {{ font-size:14px; color:rgba(255,255,255,0.6); }}
+  .hero .lunar {{ color:rgba(255,255,255,0.45); font-size:13px; margin-top:2px; }}
+  .quote {{ margin-top:10px; font-size:13px; color:rgba(255,255,255,0.55); font-style:italic; max-width:640px; margin-left:auto; margin-right:auto; }}
+  .info-strip {{ display:flex; justify-content:center; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:24px; }}
+  .info-card {{ background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:14px 18px; width:270px; max-width:100%; height:190px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:8px; }}
+  .info-card .ic {{ font-size:24px; }}
+  .info-card .id {{ font-size:13px; color:rgba(255,255,255,0.5); }}
+  .info-card .iv {{ font-size:15px; font-weight:600; color:#fff; }}
+  .info-card .is {{ font-size:12px; color:rgba(255,255,255,0.45); margin-top:2px; line-height:1.5; }}
+  .clock-card {{ gap:10px; }}
+  .clock-info {{ min-width:0; }}
+  .clock-time {{ font-size:20px; font-weight:700; color:#fff; font-family:monospace; letter-spacing:1px; }}
+  .clock-face {{ width:90px; height:90px; border-radius:50%; flex-shrink:0; background:radial-gradient(circle at 35% 30%, rgba(255,255,255,0.12), rgba(255,255,255,0.04) 45%, rgba(0,0,0,0.25)); border:1px solid rgba(255,255,255,0.18); box-shadow:0 0 16px rgba(74,158,255,0.15), inset 0 0 12px rgba(0,0,0,0.35); position:relative; }}
+  .clock-inner {{ position:absolute; inset:0; }}
+  .clock-num {{ position:absolute; left:50%; top:50%; width:16px; height:16px; margin:-8px; text-align:center; line-height:16px; font-size:9px; font-weight:600; color:rgba(255,255,255,0.85); transform-origin:center; }}
+  .clock-hand {{ position:absolute; left:50%; top:50%; transform-origin:50% 100%; border-radius:3px; }}
+  .hour-hand {{ width:3px; height:20px; margin:-20px 0 0 -1.5px; background:rgba(255,255,255,0.92); box-shadow:0 0 3px rgba(0,0,0,0.4); }}
+  .minute-hand {{ width:2px; height:27px; margin:-27px 0 0 -1px; background:rgba(255,255,255,0.85); box-shadow:0 0 3px rgba(0,0,0,0.4); }}
+  .second-hand {{ width:1.5px; height:31px; margin:-31px 0 0 -0.75px; background:var(--accent); box-shadow:0 0 6px rgba(74,158,255,0.9); }}
+  .second-hand::after {{ content:''; position:absolute; bottom:-5px; left:50%; width:3px; height:5px; margin-left:-1.5px; background:var(--accent); border-radius:0 0 2px 2px; }}
+  .clock-center {{ position:absolute; left:50%; top:50%; width:5px; height:5px; margin:-2.5px; background:#fff; border-radius:50%; box-shadow:0 0 4px rgba(74,158,255,0.8); }}
+  .forecast {{ display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin-top:8px; }}
+  .forecast .f-day {{ background:rgba(255,255,255,0.08); border-radius:8px; padding:6px 4px; text-align:center; font-size:11px; color:rgba(255,255,255,0.7); line-height:1.5; }}
+  .forecast .f-day b {{ display:block; font-size:14px; color:#fff; }}
+  .forecast .f-day span {{ display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+  .search-box {{ position:relative; margin-bottom:32px; max-width:640px; margin-left:auto; margin-right:auto; }}
+  .search-box input {{ width:100%; padding:14px 24px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:28px; color:#fff; font-size:15px; outline:none; transition:all 0.2s; }}
+  .search-box input:focus {{ background:rgba(255,255,255,0.15); border-color:var(--accent); box-shadow:0 0 20px rgba(74,158,255,0.3); }}
+  .search-box input::placeholder {{ color:rgba(255,255,255,0.5); }}
+  .search-engine-tag {{ position:absolute; right:16px; top:50%; transform:translateY(-50%); font-size:11px; color:rgba(255,255,255,0.4); pointer-events:none; }}
+  .suggest-box {{ position:absolute; top:calc(100% + 6px); left:0; right:0; background:#1e2a45; border:1px solid rgba(255,255,255,0.15); border-radius:12px; overflow:hidden; display:none; z-index:10; max-height:240px; overflow-y:auto; }}
+  .suggest-item {{ display:flex; align-items:center; gap:8px; padding:10px 16px; cursor:pointer; font-size:13px; color:#ccc; }}
+  .suggest-item:hover {{ background:rgba(74,158,255,0.15); }}
+  .suggest-item .s-icon {{ color:var(--accent); font-size:12px; }}
+  .suggest-item .s-url {{ color:rgba(255,255,255,0.4); font-size:11px; margin-left:auto; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+  .section {{ margin-bottom:28px; }}
+  .section-head {{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }}
+  .section-head h2 {{ font-size:14px; font-weight:600; color:rgba(255,255,255,0.65); letter-spacing:1px; }}
+  .section-actions {{ display:flex; gap:8px; }}
+  .btn-mini {{ padding:4px 12px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15); border-radius:12px; color:#ccc; font-size:12px; cursor:pointer; transition:all 0.15s; }}
+  .btn-mini:hover {{ background:rgba(255,255,255,0.18); color:#fff; }}
+  .btn-mini.primary {{ background:var(--accent); border-color:var(--accent); color:#fff; }}
+  .btn-mini.primary:hover {{ background:#5aaeff; }}
+  .top-sites {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:12px; }}
+  .top-site {{ position:relative; display:flex; flex-direction:column; align-items:center; padding:14px 8px; background:rgba(255,255,255,0.05); border-radius:12px; transition:all 0.2s; }}
+  .top-site:hover {{ background:rgba(255,255,255,0.1); transform:translateY(-2px); }}
+  .top-site-link {{ display:flex; flex-direction:column; align-items:center; text-decoration:none; color:#e0e0e0; }}
+  .top-site .icon {{ font-size:26px; margin-bottom:6px; }}
+  .top-site .name {{ font-size:12px; text-align:center; }}
+  .qs-del {{ position:absolute; top:2px; right:2px; width:20px; height:20px; border-radius:50%; border:none; background:rgba(204,68,68,0.85); color:#fff; font-size:12px; line-height:1; cursor:pointer; display:none; }}
+  .top-site.editing .qs-del, #quickSites.editing .qs-del {{ display:block; }}
+  .qs-add {{ display:flex; flex-direction:column; align-items:center; justify-content:center; padding:14px 8px; background:rgba(255,255,255,0.03); border:1px dashed rgba(255,255,255,0.2); border-radius:12px; color:rgba(255,255,255,0.5); font-size:12px; cursor:pointer; transition:all 0.2s; min-height:74px; }}
+  .qs-add:hover {{ background:rgba(255,255,255,0.08); color:#fff; }}
+  .qs-add .plus {{ font-size:24px; margin-bottom:4px; }}
+  .qs-form {{ display:none; margin-top:12px; padding:14px; background:rgba(255,255,255,0.06); border-radius:10px; gap:8px; }}
+  .qs-form.show {{ display:flex; flex-wrap:wrap; }}
+  .qs-form input {{ flex:1; min-width:140px; padding:8px 12px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#fff; font-size:13px; outline:none; }}
+  .qs-form input:focus {{ border-color:var(--accent); }}
+  .feed-list {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:8px; }}
+  .feed-item {{ display:flex; flex-direction:column; padding:12px 16px; background:rgba(255,255,255,0.05); border-radius:8px; cursor:pointer; transition:background 0.15s; text-decoration:none; color:#e0e0e0; }}
+  .feed-item:hover {{ background:rgba(255,255,255,0.1); }}
+  .feed-title {{ font-size:13px; font-weight:500; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; margin-bottom:4px; }}
+  .feed-meta {{ font-size:11px; color:rgba(255,255,255,0.5); }}
+  .recent-list {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:8px; }}
+  .recent-item {{ display:flex; flex-direction:column; padding:12px 16px; background:rgba(255,255,255,0.05); border-radius:8px; cursor:pointer; transition:background 0.15s; text-decoration:none; color:#e0e0e0; }}
+  .recent-item:hover {{ background:rgba(255,255,255,0.1); }}
+  .recent-title {{ font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:2px; }}
+  .recent-url {{ font-size:11px; color:rgba(255,255,255,0.5); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+  .footer {{ display:flex; justify-content:center; gap:12px; padding:20px 0 8px; border-top:1px solid rgba(255,255,255,0.08); margin-top:8px; }}
 </style>
 </head>
 <body>
-  <div class="icon-bar">
+  {bg_layer_html}
+  <div class="icon-bar" id="iconBar">
+    <button class="icon-btn" data-panel="feed" title="资讯">📰</button>
     <button class="icon-btn" data-panel="bookmark" title="书签">🔖</button>
     <button class="icon-btn" data-panel="todo" title="待办">📝</button>
     <button class="icon-btn" data-panel="recent" title="最近访问">🕘</button>
     <button class="icon-btn" data-panel="quick" title="快捷访问">⚡</button>
+    <button class="icon-btn" data-panel="profile" title="我的">👤</button>
     <a class="icon-btn" href="world-nav.html" title="世界导航">🌐</a>
-    <button class="icon-btn" data-panel="feed" title="资讯（迁移中）">📰</button>
-    <button class="icon-btn bottom" data-panel="profile" title="我的">👤</button>
   </div>
-  <div class="side-panel" id="sidePanel">
-    <div class="panel-head">
-      <h2 id="panelTitle">🔖 书签</h2>
-      <button class="fs-close" id="panelClose" title="关闭">×</button>
+  <div class="main-layout">
+    <div class="side-panel" id="sidePanel">
+      <div class="panel-head">
+        <h2 id="panelTitle">📰 资讯</h2>
+        <div class="panel-actions">
+          <button class="btn-mini" id="feedHideRead" style="display:none">只看未读</button>
+          <button class="fs-close" id="panelClose" title="关闭面板">×</button>
+        </div>
+      </div>
+      <div class="panel-body" id="panelBody"></div>
     </div>
-    <div class="panel-body" id="panelBody"></div>
+    <div class="container" id="mainContainer">
+      <div class="hero">
+        <h1 id="greeting">早上好，高哥 👋</h1>
+        <p id="dateStr"></p>
+        <p class="lunar" id="lunarText"></p>
+        <p class="quote" id="quoteText"></p>
+      </div>
+      <div class="info-strip">
+        <div class="info-card clock-card">
+          <div class="clock-face">
+            <div class="clock-inner" id="clockInner"></div>
+            <div class="clock-hand hour-hand" id="hourHand"></div>
+            <div class="clock-hand minute-hand" id="minuteHand"></div>
+            <div class="clock-hand second-hand" id="secondHand"></div>
+            <div class="clock-center"></div>
+          </div>
+          <div class="clock-info">
+            <div class="iv clock-time" id="clockCardTime">--:--:--</div>
+            <div class="id" id="clockCardDate"></div>
+            <div class="is" id="clockCardLunar"></div>
+          </div>
+        </div>
+        <div class="info-card" id="weatherCard">
+          <span class="ic">🌤️</span>
+          <div>
+            <div class="iv" id="weatherMain">天气加载中…</div>
+            <div class="id" id="weatherCity">运城</div>
+            <div class="is" id="weatherDetail"></div>
+          </div>
+        </div>
+        <div class="info-card" id="locationCard">
+          <div>
+            <div class="iv" id="locationMain">定位中…</div>
+            <div class="id" id="locationDetail"></div>
+            <div class="id" id="locationCoord"></div>
+            <div class="is" id="locationIp"></div>
+            <div class="is" id="locationTime"></div>
+            <div class="is" id="locationSun"></div>
+            <div class="is" id="locationDayLen"></div>
+          </div>
+        </div>
+      </div>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="搜索或输入网址..." autocomplete="off" spellcheck="false">
+        <span class="search-engine-tag" id="searchEngineTag"></span>
+        <div class="suggest-box" id="suggestBox"></div>
+      </div>
+      <div class="section">
+        <div class="section-head">
+          <h2>⚡ 快捷访问</h2>
+          <div class="section-actions">
+            <button class="btn-mini" id="quickEditBtn">编辑</button>
+          </div>
+        </div>
+        <div class="top-sites" id="quickSites">
+          {quick_grid}
+          <div class="qs-add" id="qsAddBtn"><span class="plus">＋</span><span>添加</span></div>
+        </div>
+        <div class="qs-form" id="qsForm">
+          <input type="text" id="qsName" placeholder="名称（如 网易）">
+          <input type="text" id="qsUrl" placeholder="网址（如 https://www.163.com）">
+          <input type="text" id="qsIcon" placeholder="图标 emoji（如 🎵）" style="max-width:120px">
+          <button class="btn-mini primary" id="qsSave">保存</button>
+          <button class="btn-mini" id="qsCancel">取消</button>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-head">
+          <h2>📰 资讯</h2>
+          <div class="section-actions">
+            <button class="btn-mini" id="feedMoreBtn">更多</button>
+          </div>
+        </div>
+        <div class="feed-list" id="feedList"></div>
+      </div>
+      <div class="section">
+        <div class="section-head">
+          <h2>🕘 最近访问</h2>
+        </div>
+        <div class="recent-list" id="recentList"></div>
+      </div>
+      <div class="footer">
+        <button id="footerWorldNav">🌐 世界导航</button>
+        <button id="footerRefresh">⟳ 刷新</button>
+        <span style="font-size:12px;color:rgba(255,255,255,0.35);line-height:30px;">v{sb_version}</span>
+      </div>
+    </div>
+    <div class="right-bar" id="rightBar">
+      <button class="icon-btn" id="aiBtn" title="AI 助手">🤖</button>
+      <button class="icon-btn" id="settingsBtn" title="设置">⚙️</button>
+    </div>
   </div>
-  <div class="container">
-    <div class="greeting" id="greeting"></div>
-    <div class="date" id="dateStr"></div>
-    <div class="weather" id="weather"></div>
-    <form class="search" id="searchForm">
-      <input id="searchInput" placeholder="搜索或输入网址" autofocus autocomplete="off" spellcheck="false">
-      <button type="submit">搜索</button>
-    </form>
-    <div class="grid">{quick_grid}</div>
-  </div>
+  <div class="toast" id="toast"></div>
   <div class="modal-mask" id="quickModal">
     <div class="modal-box">
       <h3>添加快捷访问</h3>
@@ -303,28 +607,284 @@ fn render_html(
   </div>
 <script>
 (function() {{
+  window.onerror = function(msg, src, line) {{
+    var d = document.createElement('div');
+    d.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:#c00;color:#fff;font-size:12px;padding:8px;max-width:100%;';
+    d.textContent = 'JS错误: ' + msg + ' @行' + line;
+    document.body.appendChild(d);
+  }};
+  function esc(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }}
+  // 动态背景（Bing 每日壁纸，Ken Burns 缓慢缩放；预加载成功才换图，失败保持渐变）
+  var BING_WALLPAPERS = {wallpapers_json};
+  function loadBg() {{
+    var bgEl = document.getElementById('bgLayer');
+    if (!bgEl || !BING_WALLPAPERS.length) return;
+    var pick = BING_WALLPAPERS[Math.floor(Math.random() * BING_WALLPAPERS.length)];
+    var img = new Image();
+    img.onload = function() {{ bgEl.style.backgroundImage = 'url("' + pick + '")'; }};
+    img.src = pick;
+  }}
+  loadBg();
+
+  // 应用账号偏好（主题色/壁纸/农历/每日一句/天气显隐）——登录后写 settings 表，读出来动态生效
+  if (window.__TAURI_INTERNALS__) {{
+    window.__TAURI_INTERNALS__.invoke('get_all_settings').then(function(s) {{
+      var map = {{}};
+      (s || []).forEach(function(x) {{ map[x.key] = x.value; }});
+      var accent = map.theme_color || '#4a9eff';
+      document.documentElement.style.setProperty('--accent', accent);
+      var bgEl = document.getElementById('bgLayer');
+      var w = map.wallpaper || '';
+      if (w && bgEl) {{
+        var img = new Image();
+        img.onload = function() {{ bgEl.style.backgroundImage = 'url("' + w + '")'; }};
+        img.src = w;
+      }}
+      function hideIfOff(key, id) {{
+        var v = map[key];
+        if (v === '0' || v === 'false') {{
+          var el = document.getElementById(id);
+          if (el) el.style.display = 'none';
+        }}
+      }}
+      hideIfOff('show_lunar', 'lunarText');
+      hideIfOff('show_quote', 'quoteText');
+      hideIfOff('show_weather', 'weatherCard');
+    }}).catch(function() {{}});
+  }}
+
   // 问候语 + 日期（JS 动态生成，省得后端依赖时区库）
   var now = new Date();
   var h = now.getHours();
   var greet = h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好';
-  document.getElementById('greeting').textContent = greet + '，高哥';
+  document.getElementById('greeting').textContent = greet + '，高哥 👋';
   var wd = ['日','一','二','三','四','五','六'][now.getDay()];
   document.getElementById('dateStr').textContent =
-    now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 星期' + wd;
+    now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 星期' + wd + ' <span id="clockTime"></span>';
 
-  // ---- 运城天气（Open-Meteo 免费 API，无需 key）----
-  var WMO = {{0:'☀️ 晴',1:'🌤️ 基本晴',2:'⛅ 多云',3:'☁️ 阴',45:'🌫️ 雾',48:'🌫️ 冻雾',51:'🌦️ 毛毛雨',53:'🌦️ 毛毛雨',55:'🌧️ 毛毛雨',61:'🌧️ 小雨',63:'🌧️ 中雨',65:'🌧️ 大雨',71:'🌨️ 小雪',73:'🌨️ 中雪',75:'❄️ 大雪',80:'🌦️ 阵雨',81:'🌧️ 强阵雨',82:'⛈️ 暴阵雨',95:'⛈️ 雷雨',96:'⛈️ 雷雨伴冰雹',99:'⛈️ 强冰雹'}};
-  fetch('https://api.open-meteo.com/v1/forecast?latitude=35.03&longitude=110.45&current=temperature_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FShanghai')
-    .then(function(r) {{ return r.json(); }})
-    .then(function(d) {{
-      var c = d.current || {{}};
-      var desc = WMO[c.weather_code] || '🌡️';
-      var t = Math.round(c.temperature_2m);
-      var lo = Math.round(d.daily.temperature_2m_min[0]), hi = Math.round(d.daily.temperature_2m_max[0]);
-      document.getElementById('weather').innerHTML =
-        '📍 运城 ' + desc + ' <b>' + t + '°C</b>（' + lo + '~' + hi + '°C，风 ' + Math.round(c.wind_speed_10m) + ' km/h）';
-    }})
-    .catch(function() {{ document.getElementById('weather').textContent = '📍 运城天气获取失败'; }});
+  // ---- 实时时钟（数字 + 指针）----
+  function tickClock() {{
+    var d = new Date();
+    var hh = String(d.getHours()).padStart(2, '0');
+    var mm = String(d.getMinutes()).padStart(2, '0');
+    var ss = String(d.getSeconds()).padStart(2, '0');
+    var el = document.getElementById('clockTime');
+    if (el) el.textContent = hh + ':' + mm + ':' + ss;
+    var ct = document.getElementById('clockCardTime');
+    if (ct) ct.textContent = hh + ':' + mm + ':' + ss;
+    var cd = document.getElementById('clockCardDate');
+    if (cd) cd.textContent = (d.getMonth()+1) + '月' + d.getDate() + '日 星期' + ['日','一','二','三','四','五','六'][d.getDay()];
+  }}
+  tickClock();
+  setInterval(tickClock, 1000);
+
+  // 指针时钟刻度
+  (function() {{
+    var inner = document.getElementById('clockInner');
+    if (!inner) return;
+    var nums = '';
+    for (var i = 0; i < 12; i++) {{
+      var ang = i * 30 * Math.PI / 180;
+      var x = 50 + 34 * Math.sin(ang), y = 50 - 34 * Math.cos(ang);
+      nums += '<span class="clock-num" style="left:' + x + '%;top:' + y + '%">' + (i === 0 ? 12 : i) + '</span>';
+    }}
+    inner.innerHTML = nums;
+  }})();
+  var lastAnalogTick = 0;
+  function updateAnalogClock(ts) {{
+    if (ts - lastAnalogTick < 50) {{ requestAnimationFrame(updateAnalogClock); return; }}
+    lastAnalogTick = ts;
+    var d = new Date();
+    var hh = d.getHours() % 12, mm = d.getMinutes(), ss = d.getSeconds(), ms = d.getMilliseconds();
+    var hourDeg = (hh + mm/60 + ss/3600) * 30;
+    var minDeg = (mm + ss/60 + ms/60000) * 6;
+    var secDeg = (ss + ms/1000) * 6;
+    var e1 = document.getElementById('hourHand'), e2 = document.getElementById('minuteHand'), e3 = document.getElementById('secondHand');
+    if (e1) e1.style.transform = 'rotate(' + hourDeg + 'deg)';
+    if (e2) e2.style.transform = 'rotate(' + minDeg + 'deg)';
+    if (e3) e3.style.transform = 'rotate(' + secDeg + 'deg)';
+    requestAnimationFrame(updateAnalogClock);
+  }}
+  requestAnimationFrame(updateAnalogClock);
+
+  // ---- 农历（浏览器内置 Intl 中国农历）----
+  function lunarDayName(n) {{
+    var digits = ['','一','二','三','四','五','六','七','八','九','十'];
+    var num = parseInt(n, 10);
+    if (num === 10) return '初十';
+    if (num < 10) return '初' + digits[num];
+    if (num === 20) return '二十';
+    if (num < 20) return '十' + digits[num % 10];
+    if (num === 30) return '三十';
+    return '廿' + digits[num % 10];
+  }}
+  function renderLunar() {{
+    var el = document.getElementById('lunarText');
+    var cl = document.getElementById('clockCardLunar');
+    try {{
+      var fmt = new Intl.DateTimeFormat('zh-CN-u-ca-chinese', {{ year:'numeric', month:'long', day:'numeric' }});
+      var parts = fmt.formatToParts(new Date());
+      var year = '', month = '', day = '';
+      for (var i = 0; i < parts.length; i++) {{
+        var p = parts[i];
+        if (p.type === 'yearName') year = p.value;
+        else if (p.type === 'year' || p.type === 'relatedYear') {{ if (!year) year = p.value; }}
+        else if (p.type === 'month') month = p.value;
+        else if (p.type === 'day') day = p.value;
+      }}
+      var lunarStr = '农历 ' + year + '年 ' + month + lunarDayName(day);
+      if (el) el.textContent = lunarStr;
+      if (cl) cl.textContent = lunarStr;
+    }} catch(e) {{
+      if (el) el.textContent = '';
+      if (cl) cl.textContent = '';
+    }}
+  }}
+  renderLunar();
+
+  // ---- 每日一句（内置精选）----
+  var QUOTES = ['路虽远，行则将至；事虽难，做则必成。','身体是革命的本钱，健康是最大的财富。','不积跬步，无以至千里；不积小流，无以成江海。','生活明朗，万物可爱，人间值得，未来可期。','种一棵树最好的时间是十年前，其次是现在。','知足者常乐，能忍者自安。','千里之行，始于足下。','日日行，不怕千万里；常常做，不怕千万事。','心若向阳，无谓悲伤；心若向暖，安之若素。','今日事，今日毕；明日事，明日计。'];
+  var quoteEl = document.getElementById('quoteText');
+  if (quoteEl) quoteEl.textContent = '💬 ' + QUOTES[new Date().getDate() % QUOTES.length];
+
+  // ---- 天气（wttr.in 免费 API，无需 key；英文描述映射中文）----
+  var WEATHER_ZH = {{ 'Clear':'晴','Sunny':'晴','Partly cloudy':'多云','Cloudy':'阴','Overcast':'阴天','Mist':'薄雾','Fog':'雾','Light drizzle':'毛毛雨','Drizzle':'毛毛雨','Light rain':'小雨','Moderate rain':'中雨','Heavy rain':'大雨','Torrential rain shower':'暴雨','Light rain shower':'阵雨','Moderate or heavy rain shower':'中到大雨','Patchy rain possible':'局部有雨','Thundery outbreaks possible':'雷阵雨','Thunderstorm':'雷阵雨','Light snow':'小雪','Moderate snow':'中雪','Heavy snow':'大雪','Light sleet':'雨夹雪','Freezing fog':'冻雾','Hail':'冰雹','Windy':'大风','Light rain with thunder':'雷雨' }};
+  function weatherZh(desc) {{
+    if (!desc) return '';
+    var key = String(desc).trim();
+    return WEATHER_ZH[key] || key;
+  }}
+  function loadWeather() {{
+    var mainEl = document.getElementById('weatherMain');
+    var detailEl = document.getElementById('weatherDetail');
+    var cityEl = document.getElementById('weatherCity');
+    if (!mainEl) return;
+    fetch('https://wttr.in/Yuncheng?format=j1&lang=zh')
+      .then(function(r) {{ return r.json(); }})
+      .then(function(data) {{
+        var cur = data.current_condition && data.current_condition[0];
+        if (!cur) throw new Error('no data');
+        var desc = cur.lang_zh && cur.lang_zh[0] ? cur.lang_zh[0].value : (cur.weatherDesc && cur.weatherDesc[0] ? cur.weatherDesc[0].value : '');
+        mainEl.textContent = cur.temp_C + '°C ' + weatherZh(desc);
+        detailEl.textContent = '湿度 ' + cur.humidity + '% · 体感 ' + cur.FeelsLikeC + '°C';
+        var days = (data.weather || []).slice(0, 3);
+        if (days.length > 0) {{
+          var fHtml = days.map(function(d) {{
+            var wName = '日一二三四五六'[new Date(d.date).getDay()];
+            var dDesc = d.hourly && d.hourly[0] && d.hourly[0].lang_zh && d.hourly[0].lang_zh[0] ? d.hourly[0].lang_zh[0].value : '';
+            return '<div class="f-day"><b>' + d.maxtempC + '°</b><span>' + wName + '</span><span>' + weatherZh(dDesc) + '</span></div>';
+          }}).join('');
+          detailEl.innerHTML = detailEl.textContent + '<div class="forecast">' + fHtml + '</div>';
+        }}
+      }})
+      .catch(function() {{
+        mainEl.textContent = '天气获取失败';
+        detailEl.textContent = '请检查网络或稍后重试';
+      }});
+  }}
+  loadWeather();
+
+  // ---- 定位（ipinfo.io 免费；中文映射）----
+  var CN_REGION = {{ 'Shanxi':'山西','Beijing':'北京','Shanghai':'上海','Tianjin':'天津','Chongqing':'重庆','Guangdong':'广东','Zhejiang':'浙江','Jiangsu':'江苏','Shandong':'山东','Henan':'河南','Sichuan':'四川','Hubei':'湖北','Hunan':'湖南','Fujian':'福建','Hebei':'河北','Shaanxi':'陕西','Anhui':'安徽','Jiangxi':'江西','Guangxi':'广西','Yunnan':'云南','Guizhou':'贵州','Gansu':'甘肃','Liaoning':'辽宁','Jilin':'吉林','Heilongjiang':'黑龙江','Inner Mongolia':'内蒙古','Xinjiang':'新疆','Tibet':'西藏','Ningxia':'宁夏','Qinghai':'青海','Hainan':'海南','Hong Kong':'香港','Macau':'澳门','Taiwan':'台湾' }};
+  var CN_CITY = {{ 'Taiyuan':'太原','Datong':'大同','Yangquan':'阳泉','Changzhi':'长治','Jincheng':'晋城','Shuozhou':'朔州','Jinzhong':'晋中','Yuncheng':'运城','Xinzhou':'忻州','Linfen':'临汾','Lvliang':'吕梁','Beijing':'北京','Shanghai':'上海','Guangzhou':'广州','Shenzhen':'深圳','Hangzhou':'杭州','Nanjing':'南京','Wuhan':'武汉','Chengdu':'成都','Xi\'an':'西安','Zhengzhou':'郑州','Jinan':'济南','Qingdao':'青岛','Tianjin':'天津','Chongqing':'重庆','Suzhou':'苏州','Xiamen':'厦门','Changsha':'长沙','Hefei':'合肥','Nanchang':'南昌','Fuzhou':'福州','Kunming':'昆明','Guiyang':'贵阳','Lanzhou':'兰州','Harbin':'哈尔滨','Changchun':'长春','Shenyang':'沈阳','Shijiazhuang':'石家庄','Hohhot':'呼和浩特','Yinchuan':'银川','Xining':'西宁','Urumqi':'乌鲁木齐','Lhasa':'拉萨','Haikou':'海口','Nanning':'南宁','Taipei':'台北' }};
+  function mapOrg(org) {{
+    if (!org) return '';
+    var o = String(org).toUpperCase();
+    if (o.indexOf('CHINANET') >= 0 || o.indexOf('CHINA TELECOM') >= 0) return '中国电信';
+    if (o.indexOf('UNICOM') >= 0 || o.indexOf('CHINA UNICOM') >= 0) return '中国联通';
+    if (o.indexOf('CHINA MOBILE') >= 0 || o.indexOf('CMNET') >= 0 || o.indexOf('CMCC') >= 0) return '中国移动';
+    if (o.indexOf('CERNET') >= 0) return '教育网';
+    var cleaned = org.replace(/^AS\d+\s*/i, '');
+    return cleaned.length > 14 ? cleaned.slice(0, 14) : cleaned;
+  }}
+  function formatLocalTime(timeZone) {{
+    try {{ return new Intl.DateTimeFormat('zh-CN', {{ timeZone:timeZone, hour:'2-digit', minute:'2-digit', hour12:false }}).format(new Date()); }} catch(e) {{ return ''; }}
+  }}
+  function tzOffsetHours(timeZone, date) {{
+    try {{
+      var dtf = new Intl.DateTimeFormat('en-US', {{ timeZone:timeZone, hour12:false, year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' }});
+      var parts = dtf.formatToParts(date);
+      var map = {{}};
+      for (var i = 0; i < parts.length; i++) map[parts[i].type] = parts[i].value;
+      var asUTC = Date.UTC(+map.year, +map.month - 1, +map.day, +map.hour % 24, +map.minute, +map.second);
+      return (asUTC - date.getTime()) / 3600000;
+    }} catch(e) {{ return 0; }}
+  }}
+  function calcSunTimes(lat, lng, date, timeZone) {{
+    var rad = Math.PI / 180;
+    var start = new Date(date.getFullYear(), 0, 1);
+    var dayOfYear = Math.floor((date - start) / 86400000) + 1;
+    var latRad = lat * rad;
+    var decl = 23.44 * rad * Math.sin(2 * Math.PI * (284 + dayOfYear) / 365);
+    var cosH = (Math.sin(-0.833 * rad) - Math.sin(latRad) * Math.sin(decl)) / (Math.cos(latRad) * Math.cos(decl));
+    if (cosH > 1 || cosH < -1) return null;
+    var H = Math.acos(cosH) / rad;
+    var sunriseSolar = 12 - H / 15;
+    var sunsetSolar = 12 + H / 15;
+    var tz = tzOffsetHours(timeZone, date);
+    var lngCorr = lng / 15 - tz;
+    var norm = function(h2) {{ return ((h2 % 24) + 24) % 24; }};
+    var fmt = function(h2) {{
+      var hh = Math.floor(h2);
+      var mm = Math.round((h2 - hh) * 60);
+      return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+    }};
+    var rise = norm(sunriseSolar + lngCorr);
+    var set = norm(sunsetSolar + lngCorr);
+    var dayLenH = sunsetSolar - sunriseSolar;
+    var dh = Math.floor(dayLenH);
+    var dm = Math.round((dayLenH - dh) * 60);
+    return {{ rise: fmt(rise), set: fmt(set), dayLen: dh + '小时' + dm + '分' }};
+  }}
+  function loadLocation() {{
+    var mainEl = document.getElementById('locationMain');
+    var detailEl = document.getElementById('locationDetail');
+    var coordEl = document.getElementById('locationCoord');
+    var ipEl = document.getElementById('locationIp');
+    var timeEl = document.getElementById('locationTime');
+    var sunEl = document.getElementById('locationSun');
+    var dayLenEl = document.getElementById('locationDayLen');
+    if (!mainEl) return;
+    fetch('https://ipinfo.io/json')
+      .then(function(r) {{ return r.json(); }})
+      .then(function(data) {{
+        var region = CN_REGION[data.region] || data.region || '';
+        var city = CN_CITY[data.city] || data.city || '';
+        var country = data.country === 'CN' ? '中国' : (data.country || '');
+        var tz = data.timezone || '';
+        mainEl.textContent = (data.country === 'CN' ? (region ? region + ' · ' : '') + (city || '未知') : (country ? country + ' · ' : '') + (city || '未知'));
+        detailEl.textContent = country ? country + ' · ' + mapOrg(data.org || '') : mapOrg(data.org || '');
+        var locParts = (data.loc || '').split(',');
+        var lat = parseFloat(locParts[0]);
+        var lng = parseFloat(locParts[1]);
+        coordEl.textContent = (data.loc && !isNaN(lat) && !isNaN(lng)) ? '经纬度 ' + lat.toFixed(2) + ', ' + lng.toFixed(2) : '';
+        ipEl.textContent = data.ip ? 'IP 地址 ' + data.ip : '';
+        if (tz) timeEl.textContent = '当地时间 ' + formatLocalTime(tz);
+        if (!isNaN(lat) && !isNaN(lng)) {{
+          var sun = calcSunTimes(lat, lng, new Date(), tz);
+          if (sun) {{
+            sunEl.textContent = '日出 ' + sun.rise + ' · 日落 ' + sun.set;
+            dayLenEl.textContent = '昼长 ' + sun.dayLen;
+          }}
+        }}
+      }})
+      .catch(function() {{
+        mainEl.textContent = '位置获取失败';
+        detailEl.textContent = '请检查网络';
+      }});
+  }}
+  loadLocation();
+
+  // ---- toast 提示条 ----
+  var toastTimer = null;
+  function showToast(msg) {{
+    var t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function() {{ t.classList.remove('show'); }}, 1800);
+  }}
 
   var SEARCH_BASE = {search_url_json};
   function loadUserFavs() {{ try {{ return JSON.parse(localStorage.getItem('sb_user_favs') || '[]'); }} catch(e) {{ return []; }} }}
@@ -536,15 +1096,222 @@ fn render_html(
     }});
   }}
 
-  // ---- "我的"面板 ----
+  // ---- "我的"面板（个人中心：登录/注册/资料/偏好/备份）----
+  var ucUser = null;
   function renderProfile() {{
-    var todos = loadTodos();
-    var open = todos.filter(function(t) {{ return !t.done; }}).length;
-    var h2 = '<div class="item"><span class="it-title">📚 书签 ' + {bookmark_count} + ' 条</span></div>';
-    h2 += '<div class="item"><span class="it-title">🕘 历史 ' + {recent_count} + ' 条</span></div>';
-    h2 += '<div class="item"><span class="it-title">📝 待办未完成 ' + open + ' 条</span></div>';
-    h2 += '<div class="item"><span class="it-title">🌐 ShiftBrowser v{sb_version}</span></div>';
-    return h2;
+    var h = '<div class="uc-loading">⏳ 加载中…</div>';
+    if (window.__TAURI_INTERNALS__) {{
+      window.__TAURI_INTERNALS__.invoke('user_get_current').then(function(r) {{
+        if (r && r.ok && r.user) {{
+          ucUser = r.user;
+          panelBody.innerHTML = renderProfileLoggedIn(r.user);
+          bindProfileLoggedIn(r.user);
+        }} else {{
+          ucUser = null;
+          panelBody.innerHTML = renderProfileLogin();
+          bindProfileLogin();
+        }}
+      }}).catch(function() {{
+        ucUser = null;
+        panelBody.innerHTML = renderProfileLogin();
+        bindProfileLogin();
+      }});
+    }} else {{
+      var keys = Object.keys(window).filter(function(k){{ return k.indexOf('TAURI') >= 0 || k.indexOf('ipc') >= 0 || k.indexOf('webkit') >= 0 || k.indexOf('__') === 0; }});
+      h = '<div style="padding:20px;color:#ff4444;font-size:14px;"><b>⚠ 用户系统不可用</b><br>TAURI_INTERNALS: ' + (typeof window.__TAURI_INTERNALS__) + '<br>window keys: ' + keys.join(', ') + '</div>';
+    }}
+    return h;
+  }}
+
+  function renderProfileLogin() {{
+    var h = '<div class="uc-wrap">';
+    h += '<div class="uc-tabs">';
+    h += '<button class="uc-tab active" data-tab="login">登录</button>';
+    h += '<button class="uc-tab" data-tab="register">注册</button>';
+    h += '</div>';
+    h += '<div class="uc-form" id="ucLoginForm">';
+    h += '<input id="ucLoginUser" placeholder="用户名" autocomplete="off">';
+    h += '<input id="ucLoginPass" type="password" placeholder="密码">';
+    h += '<button class="uc-btn primary" id="ucLoginBtn">登 录</button>';
+    h += '<button class="uc-btn ghost" id="ucImportBtn">📥 导入账号备份</button>';
+    h += '</div>';
+    h += '<div class="uc-form" id="ucRegForm" style="display:none">';
+    h += '<input id="ucRegUser" placeholder="用户名（2-20位，中英文/数字/_/-）" autocomplete="off">';
+    h += '<input id="ucRegPass" type="password" placeholder="密码（至少 6 位）">';
+    h += '<input id="ucRegPass2" type="password" placeholder="确认密码">';
+    h += '<button class="uc-btn primary" id="ucRegBtn">注 册</button>';
+    h += '</div>';
+    h += '</div>';
+    return h;
+  }}
+
+  function bindProfileLogin() {{
+    var tabs = panelBody.querySelectorAll('.uc-tab');
+    tabs.forEach(function(t) {{
+      t.addEventListener('click', function() {{
+        tabs.forEach(function(x) {{ x.classList.remove('active'); }});
+        t.classList.add('active');
+        document.getElementById('ucLoginForm').style.display = t.dataset.tab === 'login' ? '' : 'none';
+        document.getElementById('ucRegForm').style.display = t.dataset.tab === 'register' ? '' : 'none';
+      }});
+    }});
+    var loginBtn = document.getElementById('ucLoginBtn');
+    if (loginBtn) loginBtn.addEventListener('click', function() {{
+      var u = document.getElementById('ucLoginUser').value.trim();
+      var p = document.getElementById('ucLoginPass').value;
+      if (!u || !p) {{ showToast('请输入用户名和密码'); return; }}
+      loginBtn.disabled = true;
+      window.__TAURI_INTERNALS__.invoke('user_login', {{ username: u, password: p }}).then(function(r) {{
+        loginBtn.disabled = false;
+        if (r && r.ok) {{ showToast(r.msg || '登录成功'); setTimeout(function() {{ location.reload(); }}, 500); }}
+        else {{ showToast((r && r.msg) || '登录失败'); }}
+      }}).catch(function(e) {{ loginBtn.disabled = false; showToast('登录失败：' + e); }});
+    }});
+    var regBtn = document.getElementById('ucRegBtn');
+    if (regBtn) regBtn.addEventListener('click', function() {{
+      var u = document.getElementById('ucRegUser').value.trim();
+      var p = document.getElementById('ucRegPass').value;
+      var p2 = document.getElementById('ucRegPass2').value;
+      if (!u || !p) {{ showToast('请输入用户名和密码'); return; }}
+      if (p !== p2) {{ showToast('两次密码不一致'); return; }}
+      regBtn.disabled = true;
+      window.__TAURI_INTERNALS__.invoke('user_register', {{ username: u, password: p }}).then(function(r) {{
+        regBtn.disabled = false;
+        if (r && r.ok) {{ showToast(r.msg || '注册成功'); setTimeout(function() {{ location.reload(); }}, 500); }}
+        else {{ showToast((r && r.msg) || '注册失败'); }}
+      }}).catch(function(e) {{ regBtn.disabled = false; showToast('注册失败：' + e); }});
+    }});
+    var importBtn = document.getElementById('ucImportBtn');
+    if (importBtn) importBtn.addEventListener('click', function() {{
+      window.__TAURI_INTERNALS__.invoke('user_import').then(function(r) {{
+        if (r && r.ok) {{ showToast(r.msg || '导入成功'); setTimeout(function() {{ location.reload(); }}, 500); }}
+        else {{ showToast((r && r.msg) || '已取消导入'); }}
+      }}).catch(function(e) {{ showToast('导入失败：' + e); }});
+    }});
+  }}
+
+  function renderProfileLoggedIn(u) {{
+    var p = u.prefs || {{}};
+    var avatar = u.avatar || '👤';
+    var name = u.nickname || u.username;
+    var sig = u.signature || '这个人很懒，什么都没写';
+    var h = '<div class="uc-wrap">';
+    h += '<div class="profile-info">';
+    h += '<div class="pi-avatar">' + avatar + '</div>';
+    h += '<div class="pi-name">' + esc(name) + '</div>';
+    h += '<div class="pi-user">@' + esc(u.username) + '</div>';
+    h += '<div class="pi-sig">' + esc(sig) + '</div>';
+    h += '</div>';
+    h += '<div class="uc-section"><div class="uc-sec-title">✏️ 编辑资料</div>';
+    h += '<input id="ucNick" placeholder="昵称" value="' + esc(u.nickname || '') + '">';
+    h += '<input id="ucAvatar" placeholder="头像 emoji（如 🐶）" value="' + esc(u.avatar || '') + '">';
+    h += '<input id="ucSig" placeholder="个性签名" value="' + esc(u.signature || '') + '">';
+    h += '<button class="uc-btn primary" id="ucSaveProfileBtn">保存资料</button>';
+    h += '</div>';
+    h += '<div class="uc-section"><div class="uc-sec-title">⚙️ 偏好设置</div>';
+    h += '<label class="uc-check"><input type="checkbox" id="ucShowLunar"' + (p.show_lunar ? ' checked' : '') + '> 显示农历</label>';
+    h += '<label class="uc-check"><input type="checkbox" id="ucShowQuote"' + (p.show_quote ? ' checked' : '') + '> 显示每日一句</label>';
+    h += '<label class="uc-check"><input type="checkbox" id="ucShowWeather"' + (p.show_weather ? ' checked' : '') + '> 显示天气</label>';
+    h += '<div class="uc-row"><label>字体大小</label><input type="number" id="ucFontSize" min="12" max="22" value="' + (p.font_size || 14) + '"></div>';
+    h += '<div class="uc-row"><label>天气城市</label><input id="ucCity" value="' + esc(p.weather_city || '运城') + '"></div>';
+    h += '<div class="uc-row"><label>主题色</label><input type="color" id="ucThemeColor" value="' + (p.theme_color || '#4a9eff') + '"></div>';
+    h += '<div class="uc-row"><label>壁纸</label><input id="ucWallpaper" placeholder="图片链接（留空=默认）" value="' + esc(p.wallpaper || '') + '"></div>';
+    h += '<button class="uc-btn primary" id="ucSavePrefsBtn">保存偏好</button>';
+    h += '</div>';
+    h += '<div class="uc-section"><div class="uc-sec-title">🔐 账号</div>';
+    h += '<div class="uc-btns"><button class="uc-btn ghost" id="ucExportBtn">📤 导出备份</button>';
+    h += '<button class="uc-btn ghost" id="ucChangePassBtn">🔑 改密码</button></div>';
+    h += '<div class="uc-inline" id="ucPassBox">';
+    h += '<input type="password" id="ucOldPass" placeholder="旧密码">';
+    h += '<input type="password" id="ucNewPass" placeholder="新密码（至少 6 位）">';
+    h += '<input type="password" id="ucNewPass2" placeholder="确认新密码">';
+    h += '<div class="uc-btns"><button class="uc-btn primary" id="ucPassOkBtn">确认修改</button>';
+    h += '<button class="uc-btn ghost" id="ucPassCancelBtn">取消</button></div>';
+    h += '</div>';
+    h += '<div class="uc-btns"><button class="uc-btn danger" id="ucLogoutBtn">退出登录</button>';
+    h += '<button class="uc-btn danger" id="ucDeleteBtn">删除账号</button></div>';
+    h += '<div class="uc-inline" id="ucDelBox">';
+    h += '<input type="password" id="ucDelPass" placeholder="输入密码确认删除">';
+    h += '<div class="uc-btns"><button class="uc-btn danger" id="ucDelOkBtn">确认删除</button>';
+    h += '<button class="uc-btn ghost" id="ucDelCancelBtn">取消</button></div>';
+    h += '</div>';
+    h += '</div>';
+    h += '</div>';
+    return h;
+  }}
+
+  function bindProfileLoggedIn(u) {{
+    var saveBtn = document.getElementById('ucSaveProfileBtn');
+    if (saveBtn) saveBtn.addEventListener('click', function() {{
+      var nick = document.getElementById('ucNick').value.trim();
+      var avatar = document.getElementById('ucAvatar').value.trim();
+      var sig = document.getElementById('ucSig').value.trim();
+      window.__TAURI_INTERNALS__.invoke('user_update_profile', {{ nickname: nick, avatar: avatar, signature: sig }}).then(function(r) {{
+        if (r && r.ok) {{ showToast(r.msg || '资料已保存'); renderProfile(); }}
+        else {{ showToast((r && r.msg) || '保存失败'); }}
+      }}).catch(function(e) {{ showToast('保存失败：' + e); }});
+    }});
+    var prefsBtn = document.getElementById('ucSavePrefsBtn');
+    if (prefsBtn) prefsBtn.addEventListener('click', function() {{
+      var prefs = {{
+        show_lunar: document.getElementById('ucShowLunar').checked,
+        show_quote: document.getElementById('ucShowQuote').checked,
+        show_weather: document.getElementById('ucShowWeather').checked,
+        font_size: parseInt(document.getElementById('ucFontSize').value, 10) || 14,
+        weather_city: document.getElementById('ucCity').value.trim() || '运城',
+        theme_color: document.getElementById('ucThemeColor').value,
+        wallpaper: document.getElementById('ucWallpaper').value.trim()
+      }};
+      window.__TAURI_INTERNALS__.invoke('user_update_prefs', {{ prefs: prefs }}).then(function(r) {{
+        if (r && r.ok) {{ showToast(r.msg || '偏好已保存'); setTimeout(function() {{ location.reload(); }}, 600); }}
+        else {{ showToast((r && r.msg) || '保存失败'); }}
+      }}).catch(function(e) {{ showToast('保存失败：' + e); }});
+    }});
+    var expBtn = document.getElementById('ucExportBtn');
+    if (expBtn) expBtn.addEventListener('click', function() {{
+      window.__TAURI_INTERNALS__.invoke('user_export').then(function(r) {{
+        if (r && r.ok) {{ showToast((r.path ? '已导出：' + r.path : r.msg) || '已导出'); }}
+        else {{ showToast((r && r.msg) || '已取消导出'); }}
+      }}).catch(function(e) {{ showToast('导出失败：' + e); }});
+    }});
+    var passBtn = document.getElementById('ucChangePassBtn');
+    var passBox = document.getElementById('ucPassBox');
+    if (passBtn) passBtn.addEventListener('click', function() {{ passBox.classList.toggle('show'); }});
+    var passOk = document.getElementById('ucPassOkBtn');
+    if (passOk) passOk.addEventListener('click', function() {{
+      var oldp = document.getElementById('ucOldPass').value;
+      var np = document.getElementById('ucNewPass').value;
+      var np2 = document.getElementById('ucNewPass2').value;
+      if (!oldp || !np) {{ showToast('请填写旧密码和新密码'); return; }}
+      if (np !== np2) {{ showToast('两次新密码不一致'); return; }}
+      window.__TAURI_INTERNALS__.invoke('user_change_password', {{ old_password: oldp, new_password: np }}).then(function(r) {{
+        if (r && r.ok) {{ showToast(r.msg || '密码已修改'); renderProfile(); }}
+        else {{ showToast((r && r.msg) || '修改失败'); }}
+      }}).catch(function(e) {{ showToast('修改失败：' + e); }});
+    }});
+    var passCancel = document.getElementById('ucPassCancelBtn');
+    if (passCancel) passCancel.addEventListener('click', function() {{ passBox.classList.remove('show'); }});
+    var logoutBtn = document.getElementById('ucLogoutBtn');
+    if (logoutBtn) logoutBtn.addEventListener('click', function() {{
+      window.__TAURI_INTERNALS__.invoke('user_logout').then(function(r) {{
+        if (r && r.ok) {{ showToast(r.msg || '已退出登录'); setTimeout(function() {{ location.reload(); }}, 500); }}
+        else {{ showToast((r && r.msg) || '退出失败'); }}
+      }}).catch(function(e) {{ showToast('退出失败：' + e); }});
+    }});
+    var delBtn = document.getElementById('ucDeleteBtn');
+    var delBox = document.getElementById('ucDelBox');
+    if (delBtn) delBtn.addEventListener('click', function() {{ delBox.classList.toggle('show'); }});
+    var delOk = document.getElementById('ucDelOkBtn');
+    if (delOk) delOk.addEventListener('click', function() {{
+      var p = document.getElementById('ucDelPass').value;
+      if (!p) {{ showToast('请输入密码确认删除'); return; }}
+      window.__TAURI_INTERNALS__.invoke('user_delete', {{ password: p }}).then(function(r) {{
+        if (r && r.ok) {{ showToast(r.msg || '账号已删除'); setTimeout(function() {{ location.reload(); }}, 500); }}
+        else {{ showToast((r && r.msg) || '删除失败'); }}
+      }}).catch(function(e) {{ showToast('删除失败：' + e); }});
+    }});
+    var delCancel = document.getElementById('ucDelCancelBtn');
+    if (delCancel) delCancel.addEventListener('click', function() {{ delBox.classList.remove('show'); }});
   }}
 
   function switchPanel(name) {{
@@ -595,34 +1362,176 @@ fn render_html(
     if (e.target === this) this.classList.remove('show');
   }});
 
-  // ---- 主区九宫格追加用户收藏（世界导航页里 ⭐ 过的）----
+// ---- 主区快捷访问追加用户收藏（世界导航页里 ⭐ 过的）----
   (function() {{
     var favs = loadUserFavs();
     if (!favs.length) return;
-    var grid = document.querySelector('.grid');
-    if (!grid) return;
-    grid.insertAdjacentHTML('afterbegin', favs.map(function(f) {{
-      return '<a class="grid-item" href="' + f.url + '"><span class="gi-icon">' + (f.icon || '⭐') + '</span><span class="gi-name">' + f.name.replace(/</g,'&lt;') + '</span></a>';
+    var box = document.getElementById('quickSites');
+    if (!box) return;
+    box.insertAdjacentHTML('afterbegin', favs.map(function(f) {{
+      return '<div class="top-site" data-url="' + f.url + '"><a class="top-site-link" href="' + f.url + '"><span class="icon">' + (f.icon || '⭐') + '</span><span class="name">' + f.name.replace(/</g,'&lt;') + '</span></a><button class="qs-del">×</button></div>';
     }}).join(''));
   }})();
 
-  // ---- 搜索框 ----
-  document.getElementById('searchForm').addEventListener('submit', function(e) {{
-    e.preventDefault();
-    var v = document.getElementById('searchInput').value.trim();
-    if (!v) return;
-    var url;
-    if (/^https?:\/\//i.test(v)) url = v;
-    else if (/^[\w-]+(\.[\w-]+)+/.test(v) && !/\s/.test(v)) url = 'https://' + v;
-    else url = SEARCH_BASE + encodeURIComponent(v);
-    window.open(url, '_blank');
+  // ---- 搜索：回车 + 本地历史联想（原版方式）----
+  var RE_HTTP = new RegExp('^https?://', 'i');
+  var RE_DOMAIN = new RegExp('^[a-z0-9-]+\\.[a-z]{{2,}}', 'i');
+  var searchInput = document.getElementById('searchInput');
+  var suggestBox = document.getElementById('suggestBox');
+  var HISTORY_DATA = {history_json};
+  var SEARCH_BASE = {search_url_json};
+  var searchEngineName = SEARCH_BASE.indexOf('baidu.com') >= 0 ? '百度' : SEARCH_BASE.indexOf('google.com') >= 0 ? 'Google' : 'Bing';
+  var seTag = document.getElementById('searchEngineTag');
+  if (seTag) seTag.textContent = searchEngineName;
+  searchInput.addEventListener('keydown', function(e) {{
+    if (e.key === 'Enter') {{
+      var q = e.target.value.trim();
+      if (!q) return;
+      var url;
+      if (RE_HTTP.test(q)) url = q;
+      else if (RE_DOMAIN.test(q)) url = 'https://' + q;
+      else url = SEARCH_BASE + encodeURIComponent(q);
+      window.open(url, '_blank');
+    }}
   }});
-}})();
+  searchInput.addEventListener('input', function() {{
+    var q = searchInput.value.trim().toLowerCase();
+    if (!q) {{ suggestBox.style.display = 'none'; return; }}
+    var matches = HISTORY_DATA.filter(function(h) {{ return (h.title || '').toLowerCase().indexOf(q) >= 0 || h.url.toLowerCase().indexOf(q) >= 0; }}).slice(0, 8);
+    if (matches.length === 0) {{ suggestBox.style.display = 'none'; return; }}
+    suggestBox.innerHTML = matches.map(function(h) {{
+      return '<div class="suggest-item" data-url="' + h.url + '"><span class="s-icon">🔗</span><span>' + (h.title || h.url) + '</span><span class="s-url">' + h.url + '</span></div>';
+    }}).join('');
+    suggestBox.style.display = 'block';
+  }});
+  suggestBox.addEventListener('click', function(e) {{
+    var item = e.target.closest('.suggest-item');
+    if (item) window.open(item.dataset.url, '_blank');
+  }});
+  document.addEventListener('click', function(e) {{
+    if (!e.target.closest('.search-box')) suggestBox.style.display = 'none';
+  }});
+
+  // ---- 主区快捷访问：编辑模式 + 添加 ----
+  var quickSitesBox = document.getElementById('quickSites');
+  var quickEditBtn = document.getElementById('quickEditBtn');
+  var editing = false;
+  quickEditBtn.addEventListener('click', function() {{
+    if (!editing) {{
+      editing = true;
+      quickSitesBox.classList.add('editing');
+      quickEditBtn.textContent = '完成';
+      return;
+    }}
+    var sites = Array.prototype.slice.call(quickSitesBox.querySelectorAll('.top-site')).map(function(card) {{
+      return {{ name: card.querySelector('.name').textContent, url: card.dataset.url, icon: card.querySelector('.icon').textContent }};
+    }});
+    if (sites.length === 0) {{ showToast('快捷访问不能为空'); return; }}
+    // 保存到数据库（原版 quick-sites-set），并重新生成 HTML
+    try {{
+      if (window.__TAURI_INTERNALS__) {{
+        window.__TAURI_INTERNALS__.invoke('save_quick_sites', {{ sites: sites }}).then(function() {{
+          showToast('快捷访问已保存');
+        }}).catch(function(e) {{ showToast('保存失败：' + String(e).replace(/</g,'&lt;')); }});
+      }} else {{
+        localStorage.setItem('sb_quick_sites', JSON.stringify(sites));
+        showToast('快捷访问已保存（本地）');
+      }}
+    }} catch(e) {{ showToast('保存失败'); }}
+    editing = false;
+    quickSitesBox.classList.remove('editing');
+    quickEditBtn.textContent = '编辑';
+  }});
+  quickSitesBox.addEventListener('click', function(e) {{
+    var del = e.target.closest('.qs-del');
+    if (!del || !editing) return;
+    var card = del.closest('.top-site');
+    if (card) card.remove();
+    showToast('已移除，点「完成」保存');
+  }});
+  var qsForm = document.getElementById('qsForm');
+  document.getElementById('qsAddBtn').addEventListener('click', function() {{
+    qsForm.classList.add('show');
+    document.getElementById('qsName').focus();
+  }});
+  document.getElementById('qsCancel').addEventListener('click', function() {{
+    qsForm.classList.remove('show');
+  }});
+  document.getElementById('qsSave').addEventListener('click', function() {{
+    var name = document.getElementById('qsName').value.trim();
+    var url = document.getElementById('qsUrl').value.trim();
+    var icon = document.getElementById('qsIcon').value.trim() || '🌐';
+    if (!name || !url) {{ showToast('名称和网址都要填'); return; }}
+    var finalUrl = RE_HTTP.test(url) ? url : 'https://' + url;
+    var card = document.createElement('div');
+    card.className = 'top-site';
+    card.dataset.url = finalUrl;
+    card.innerHTML = '<a class="top-site-link" href="' + finalUrl + '"><span class="icon">' + icon + '</span><span class="name">' + name + '</span></a><button class="qs-del">×</button>';
+    quickSitesBox.insertBefore(card, document.getElementById('qsAddBtn'));
+    qsForm.classList.remove('show');
+    document.getElementById('qsName').value = '';
+    document.getElementById('qsUrl').value = '';
+    document.getElementById('qsIcon').value = '';
+    showToast('已添加，点「完成」保存');
+  }});
+
+  // ---- 主区资讯（feed-list 网格）----
+  (function() {{
+    var list = document.getElementById('feedList');
+    if (!list) return;
+    var items = FEED_DATA.slice(0, 12);
+    if (!items.length) {{
+      list.innerHTML = '<div class="empty">资讯还没抓到，稍等 30 秒刷新本页</div>';
+      return;
+    }}
+    list.innerHTML = items.map(function(f) {{
+      return '<a class="feed-item" href="' + f[1] + '"><span class="feed-title">' + f[0].replace(/</g,'&lt;') + '</span><span class="feed-meta">' + f[2] + (f[3] ? ' · ' + timeAgo(f[3]) : '') + '</span></a>';
+    }}).join('');
+    document.getElementById('feedMoreBtn').addEventListener('click', function() {{
+      switchPanel('feed');
+    }});
+  }})();
+
+  // ---- 主区最近访问（recent-list 网格）----
+  (function() {{
+    var list = document.getElementById('recentList');
+    if (!list) return;
+    var items = HISTORY_DATA.slice(0, 10);
+    if (!items.length) {{
+      list.innerHTML = '<div class="empty">暂无最近访问</div>';
+      return;
+    }}
+    list.innerHTML = items.map(function(h) {{
+      return '<a class="recent-item" href="' + h.url + '"><span class="recent-title">' + (h.title || h.url).replace(/</g,'&lt;') + '</span><span class="recent-url">' + h.url + '</span></a>';
+    }}).join('');
+  }})();
+
+  // ---- 右侧栏：AI / 设置（经 IPC 通知主界面打开对应组件）----
+  document.getElementById('aiBtn').addEventListener('click', function() {{
+    if (window.__TAURI_INTERNALS__) {{
+      window.__TAURI_INTERNALS__.invoke('open_ai_from_newtab').catch(function(e) {{ showToast('打开失败：' + e); }});
+    }} else {{ showToast('🤖 AI 助手'); }}
+  }});
+  document.getElementById('settingsBtn').addEventListener('click', function() {{
+    if (window.__TAURI_INTERNALS__) {{
+      window.__TAURI_INTERNALS__.invoke('open_settings_from_newtab').catch(function(e) {{ showToast('打开失败：' + e); }});
+    }} else {{ showToast('⚙️ 设置'); }}
+  }});
+
+  // ---- footer ----
+  document.getElementById('footerWorldNav').addEventListener('click', function() {{ window.location.href = 'world-nav.html'; }});
+  document.getElementById('footerRefresh').addEventListener('click', function() {{ window.location.reload(); }});
+  }})();
 </script>
 </body>
 </html>"#,
         quick_grid = quick_grid,
+        font_scale = font_size as f64 / 14.0,
         search_url_json = json_script_safe(&serde_json::json!(search_url)),
+        history_json = json_script_safe(&serde_json::json!(recent
+            .iter()
+            .map(|(u, t)| serde_json::json!({ "title": t, "url": u }))
+            .collect::<Vec<_>>())),
         feed_data_json = json_script_safe(&serde_json::json!(feed_data)),
         bookmark_html_json = json_script_safe(&serde_json::json!(bookmark_html)),
         recent_html_json = json_script_safe(&serde_json::json!(recent_html)),
@@ -630,8 +1539,7 @@ fn render_html(
             .iter()
             .map(|(i, n, u)| serde_json::json!({ "i": i, "n": n, "u": u }))
             .collect::<Vec<_>>())),
-        bookmark_count = bookmarks.len(),
-        recent_count = recent.len(),
+        ipc_bridge = IPC_BRIDGE,
         sb_version = env!("CARGO_PKG_VERSION"),
     )
 }
@@ -643,23 +1551,22 @@ fn render_worldnav_html() -> String {
 <head>
 <meta charset="utf-8">
 <title>世界导航</title>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: http: data:; connect-src https: http: ipc: http://ipc.localhost; frame-src https: http:">
 <style>
-  :root { --bg:#1a1a1a; --bg2:#232323; --bg3:#2a2a2a; --fg:#e0e0e0; --muted:#888; --accent:#4a9eff; --border:#333; }
+  :root { --bg2:rgba(255,255,255,0.05); --bg3:rgba(255,255,255,0.1); --fg:#e0e0e0; --muted:rgba(255,255,255,0.45); --accent:#4a9eff; --border:rgba(255,255,255,0.1); }
   * { box-sizing:border-box; margin:0; padding:0; }
   html,body { height:100%; }
-  body { background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; display:flex; flex-direction:column; }
-  .nav-header { display:flex; align-items:center; gap:16px; padding:12px 20px; background:var(--bg2); border-bottom:1px solid var(--border); flex-shrink:0; }
+  body { background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%); color:var(--fg); font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; display:flex; flex-direction:column; }
+  .nav-header { display:flex; align-items:center; gap:16px; padding:12px 20px; background:rgba(255,255,255,0.05); border-bottom:1px solid var(--border); flex-shrink:0; }
   .nav-title { font-size:17px; font-weight:600; white-space:nowrap; }
   .nav-title a { color:var(--muted); text-decoration:none; font-size:13px; margin-left:10px; }
   .nav-search { flex:1; max-width:420px; }
-  .nav-search input { width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:8px; color:var(--fg); padding:8px 12px; font-size:13px; outline:none; }
+  .nav-search input { width:100%; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:var(--fg); padding:8px 12px; font-size:13px; outline:none; }
   .nav-search input:focus { border-color:var(--accent); }
   .layout { flex:1; display:flex; overflow:hidden; }
-  .cat-tabs { width:150px; overflow-y:auto; background:var(--bg2); border-right:1px solid var(--border); flex-shrink:0; padding:8px 6px; }
+  .cat-tabs { width:150px; overflow-y:auto; background:rgba(255,255,255,0.05); border-right:1px solid var(--border); flex-shrink:0; padding:8px 6px; }
   .cat-tab { display:flex; align-items:center; gap:8px; width:100%; padding:8px 10px; border:none; background:transparent; color:var(--fg); border-radius:8px; cursor:pointer; font-size:13px; text-align:left; margin-bottom:2px; }
   .cat-tab span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .cat-tab:hover { background:var(--bg3); }
+  .cat-tab:hover { background:rgba(255,255,255,0.1); }
   .cat-tab.active { background:var(--accent); color:#fff; }
   .main { flex:1; overflow-y:auto; padding:18px 22px; }
   .cat-header { margin-bottom:14px; }
@@ -667,14 +1574,14 @@ fn render_worldnav_html() -> String {
   .cat-header .ch-title { font-size:18px; font-weight:600; }
   .cat-header .ch-desc { color:var(--muted); font-size:12px; margin-top:2px; }
   .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; }
-  .site-card { position:relative; background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:14px; cursor:pointer; transition:border-color .12s; }
-  .site-card:hover { border-color:var(--accent); }
+  .site-card { position:relative; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:14px; cursor:pointer; transition:border-color .12s,background .15s; }
+  .site-card:hover { border-color:var(--accent); background:rgba(255,255,255,0.08); }
   .sc-icon { font-size:26px; margin-bottom:8px; }
   .sc-name { font-size:14px; font-weight:600; margin-bottom:3px; }
   .sc-desc { font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-bottom:8px; }
   .sc-rating { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
   .stars { position:relative; display:inline-block; font-size:12px; line-height:1; }
-  .stars-bg { color:#444; }
+  .stars-bg { color:rgba(255,255,255,0.2); }
   .stars-fill { position:absolute; left:0; top:0; color:#f5a623; overflow:hidden; white-space:nowrap; }
   .rating-num { font-size:12px; color:var(--muted); }
   .sc-meta { font-size:11px; color:var(--muted); }
@@ -684,15 +1591,16 @@ fn render_worldnav_html() -> String {
   .sc-remove { position:absolute; top:10px; right:34px; border:none; background:transparent; color:var(--muted); font-size:13px; cursor:pointer; display:none; }
   .site-card:hover .sc-remove { display:block; }
   .empty { color:var(--muted); text-align:center; padding:60px 0; }
-  .add-fav-btn { margin-bottom:14px; background:var(--bg3); color:var(--accent); border:1px dashed var(--accent); border-radius:8px; padding:8px 16px; cursor:pointer; font-size:13px; }
+  .add-fav-btn { margin-bottom:14px; background:rgba(255,255,255,0.1); color:var(--accent); border:1px dashed var(--accent); border-radius:8px; padding:8px 16px; cursor:pointer; font-size:13px; }
   .modal-mask { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50; align-items:center; justify-content:center; }
   .modal-mask.show { display:flex; }
-  .modal-box { width:360px; background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:18px; }
+  .modal-box { width:360px; background:#1e2a45; border:1px solid rgba(255,255,255,0.15); border-radius:12px; padding:18px; }
   .modal-box h3 { font-size:15px; margin-bottom:12px; }
-  .modal-box input { width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:8px; color:var(--fg); padding:8px 10px; font-size:13px; margin-bottom:10px; outline:none; }
+  .modal-box input { width:100%; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:var(--fg); padding:8px 10px; font-size:13px; margin-bottom:10px; outline:none; }
+  .modal-box input:focus { border-color:var(--accent); }
   .modal-actions { display:flex; justify-content:flex-end; gap:8px; }
   .modal-btn { border:none; border-radius:8px; padding:7px 16px; cursor:pointer; font-size:13px; }
-  .modal-btn.cancel { background:var(--bg3); color:var(--fg); }
+  .modal-btn.cancel { background:rgba(255,255,255,0.1); color:var(--fg); }
   .modal-btn.ok { background:var(--accent); color:#fff; }
 </style>
 </head>
@@ -861,4 +1769,40 @@ pub async fn get_newtab_url(app: AppHandle) -> Result<String, String> {
     newtab_url(&app)
         .await
         .ok_or_else(|| "无法生成新标签页".to_string())
+}
+
+/// 启动页右侧栏按钮：通知主界面打开 AI 助手侧栏
+#[tauri::command]
+pub fn open_ai_from_newtab(app: AppHandle) {
+    let _ = app.emit("open-ai-from-newtab", ());
+}
+
+/// 启动页右侧栏按钮：通知主界面打开设置弹窗
+#[tauri::command]
+pub fn open_settings_from_newtab(app: AppHandle) {
+    let _ = app.emit("open-settings-from-newtab", ());
+}
+
+/// 保存主区快捷访问（原版 quick-sites-set IPC 迁移）。
+/// 启动页编辑完成后调用，写入 settings.quick_sites，下次生成 HTML 时生效。
+#[tauri::command]
+pub async fn save_quick_sites(
+    db: State<'_, Db>,
+    app: AppHandle,
+    sites: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    let json = serde_json::to_string(&sites).map_err(|e| e.to_string())?;
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ('quick_sites', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(&json)
+    .execute(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    log::info!("[newtab] 快捷访问已保存 {} 条", sites.len());
+    // 重新生成 HTML，让主区网格立即生效
+    let path = newtab_path(&app).ok_or("无法获取数据目录")?;
+    generate(&db, &path).await?;
+    Ok(())
 }

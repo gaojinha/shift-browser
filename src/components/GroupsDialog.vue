@@ -108,7 +108,7 @@ async function onToggleCollapse(g: { id: number; collapsed: boolean }) {
 }
 
 async function onDelete(id: number) {
-  // WebKitGTK 不显示原生 confirm，直接删除（组内标签回未分组）
+  // WebKitGTK 不显示原生 confirm，用前端确认弹窗（组内标签回未分组）
   // 删除失败时不清标签归属，避免 UI 与数据库脱节（分组还在但标签已清出组）
   try {
     await groupsStore.deleteGroup(id)
@@ -118,6 +118,15 @@ async function onDelete(id: number) {
   for (const t of tabsStore.tabs) {
     if (t.groupId === id) tabsStore.assignTabToGroup(t.id, null)
   }
+}
+
+// 删除确认弹窗（防止误删分组）
+const confirmTarget = ref<{ id: number; name: string } | null>(null)
+function askDelete(g: { id: number; name: string }) {
+  confirmTarget.value = { id: g.id, name: g.name }
+}
+function cancelDelete() {
+  confirmTarget.value = null
 }
 </script>
 
@@ -190,12 +199,31 @@ async function onDelete(id: number) {
               <button v-if="editingId !== g.id" class="mini-btn" @click="startEdit(g)">
                 重命名
               </button>
-              <button class="mini-btn danger" @click="onDelete(g.id)">删除</button>
+              <button class="mini-btn danger" @click="askDelete(g)">删除</button>
             </div>
           </div>
         </div>
         <div v-else-if="groupsStore.loading" class="empty loading-hint">加载中…</div>
         <div v-else class="empty">还没有分组。右键标签 → 新建分组并移动，或点"+ 新建分组"</div>
+      </div>
+    </div>
+
+    <!-- 删除确认弹窗 -->
+    <div v-if="confirmTarget" class="dialog-overlay inner" @click.self="cancelDelete">
+      <div class="dialog confirm-dialog">
+        <div class="dialog-header">
+          <span>删除分组</span>
+          <button class="close-btn" aria-label="关闭" @click="cancelDelete">×</button>
+        </div>
+        <div class="dialog-body">
+          <p class="confirm-text">
+            确定删除分组「{{ confirmTarget.name }}」吗？组内标签将回到未分组。
+          </p>
+          <div class="confirm-actions">
+            <button class="bm-cancel" @click="cancelDelete">取消</button>
+            <button class="bm-save danger" @click="onDelete(confirmTarget.id)">删除</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -354,5 +382,49 @@ async function onDelete(id: number) {
   font-size: 13px;
   text-align: center;
   padding: 24px 0;
+}
+/* 删除确认弹窗（嵌套在分组弹窗之上） */
+.dialog-overlay.inner {
+  z-index: 1100;
+}
+.confirm-dialog {
+  width: min(360px, calc(100vw - 32px));
+}
+.confirm-text {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 16px;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.bm-cancel,
+.bm-save {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  border: none;
+}
+.bm-cancel {
+  background: var(--bg-active);
+  color: var(--text-secondary);
+}
+.bm-save {
+  background: var(--accent);
+  color: #fff;
+}
+.bm-save:hover {
+  filter: brightness(1.1);
+}
+.bm-save.danger {
+  background: #c62828;
+}
+.bm-save.danger:hover {
+  background: #b71c1c;
 }
 </style>

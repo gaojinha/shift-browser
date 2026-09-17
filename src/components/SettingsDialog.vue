@@ -14,6 +14,16 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const settingsStore = useSettingsStore()
 const extensionsStore = useExtensionsStore()
 
+// 侧边导航：当前激活区块
+const activeSection = ref('general')
+const SECTIONS = [
+  { id: 'general', icon: '🏠', label: '通用' },
+  { id: 'appearance', icon: '🎨', label: '外观' },
+  { id: 'ai', icon: '🤖', label: 'AI 助手' },
+  { id: 'extensions', icon: '🧩', label: '扩展' },
+  { id: 'privacy', icon: '🛡', label: '隐私' },
+]
+
 // AI Key 输入框：不回显掩码（get_all_settings 返回前4后4掩码），
 // 留空 = 保持原值；输入新值才保存。hasAiKey 判断是否已配置（掩码非空即已配置）
 const aiKeyInput = ref('')
@@ -77,6 +87,14 @@ async function onSet(key: string, value: string) {
     } catch (e) {
       console.error('[settings] 书签栏显隐同步失败:', e)
       useToastStore().error('书签栏切换失败')
+    }
+  }
+  // 启动页相关设置：保存后重新生成新标签页 HTML
+  if (key === 'show_bg' || key === 'font_size' || key === 'search_engine') {
+    try {
+      await invoke('refresh_newtab')
+    } catch (e) {
+      console.error('[settings] 启动页刷新失败:', e)
     }
   }
 }
@@ -177,188 +195,271 @@ async function onRemoveKeyword(k: string) {
 <template>
   <Transition name="fade">
   <div class="dialog-overlay" v-if="props.show">
-    <div class="dialog">
+    <div class="dialog settings-dialog">
       <div class="dialog-header">
         <span>⚙ 设置</span>
         <button class="close-btn" aria-label="关闭" @click="emit('close')">✕</button>
       </div>
-      <div class="dialog-body">
-        <!-- 通用 -->
-        <div class="section">
-          <div class="section-title">通用</div>
-          <div class="field">
-            <label>主页 URL</label>
-            <input
-              type="text"
-              :value="settingsStore.get('homepage')"
-              placeholder="newtab 或 https://..."
-              spellcheck="false"
-              @change="onSet('homepage', ($event.target as HTMLInputElement).value.trim())"
-            />
-          </div>
-          <div class="field">
-            <label>搜索引擎</label>
-            <select
-              :value="settingsStore.get('search_engine')"
-              @change="onSet('search_engine', ($event.target as HTMLSelectElement).value)"
-            >
-              <option v-for="e in SEARCH_ENGINES" :key="e.id" :value="e.id">
-                {{ e.label }}
-              </option>
-            </select>
+      <div class="dialog-body settings-body">
+        <!-- 左侧导航 -->
+        <div class="settings-nav">
+          <div
+            v-for="s in SECTIONS"
+            :key="s.id"
+            class="nav-item"
+            :class="{ active: activeSection === s.id }"
+            @click="activeSection = s.id"
+          >
+            <span class="nav-icon">{{ s.icon }}</span>
+            <span class="nav-label">{{ s.label }}</span>
           </div>
         </div>
 
-        <!-- 外观 -->
-        <div class="section">
-          <div class="section-title">外观</div>
-          <div class="field">
-            <label>主题</label>
-            <select
-              :value="settingsStore.get('theme')"
-              @change="onSet('theme', ($event.target as HTMLSelectElement).value)"
-            >
-              <option value="dark">深色</option>
-              <option value="light">浅色</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>显示书签栏</label>
-            <select
-              :value="settingsStore.get('show_bookmarks_bar')"
-              @change="onSet('show_bookmarks_bar', ($event.target as HTMLSelectElement).value)"
-            >
-              <option value="true">显示</option>
-              <option value="false">隐藏</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- AI 助手 -->
-        <div class="section">
-          <div class="section-title">AI 助手</div>
-          <div class="field">
-            <label>模型</label>
-            <select
-              :value="settingsStore.get('ai_model')"
-              @change="onSet('ai_model', ($event.target as HTMLSelectElement).value)"
-            >
-              <option value="agnes-2.0-flash">agnes-2.0-flash（推荐）</option>
-              <option value="agnes-2.5-pro">agnes-2.5-pro</option>
-              <option value="agnes-2.5-flash">agnes-2.5-flash（可能超时）</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>API 地址</label>
-            <input
-              type="text"
-              :value="settingsStore.get('ai_base_url')"
-              placeholder="https://apihub.agnes-ai.com/v1"
-              spellcheck="false"
-              @change="onSet('ai_base_url', ($event.target as HTMLInputElement).value.trim())"
-            />
-          </div>
-          <div class="field">
-            <label>API Key</label>
-            <input
-              type="password"
-              v-model="aiKeyInput"
-              :placeholder="hasAiKey() ? '已配置（不回显），留空保持不变' : '留空使用环境变量 AGNES_API_KEY'"
-              spellcheck="false"
-              @change="onAiKeyChange"
-            />
-          </div>
-        </div>
-
-        <!-- 扩展 -->
-        <div class="section">
-          <div class="section-title">扩展</div>
-          <div class="field ext-load-row">
-            <input
-              v-model="extPath"
-              type="text"
-              placeholder="扩展目录或 manifest.json 路径"
-              spellcheck="false"
-              @keyup.enter="onLoadExtension"
-            />
-            <button class="mini-btn primary" :disabled="extLoading" @click="onLoadExtension">
-              {{ extLoading ? '加载中…' : '加载' }}
-            </button>
-          </div>
-          <div v-if="extError" class="ext-error">{{ extError }}</div>
-          <div class="ext-list" v-if="extensionsStore.list.length > 0">
-            <div v-for="e in extensionsStore.list" :key="e.id" class="ext-item">
-              <div class="ext-info">
-                <span class="ext-name">{{ e.name }}</span>
-                <span class="ext-desc">
-                  {{ e.version ? 'v' + e.version : '' }}
-                  {{ e.description ? '· ' + e.description : '' }}
-                </span>
+        <!-- 右侧内容 -->
+        <div class="settings-content">
+          <!-- 通用 -->
+          <div v-if="activeSection === 'general'" class="settings-scroll">
+            <div class="card">
+              <div class="card-title">🖥 通用</div>
+              <div class="field">
+                <label>主页 URL</label>
+                <input
+                  type="text"
+                  :value="settingsStore.get('homepage')"
+                  placeholder="newtab 或 https://..."
+                  spellcheck="false"
+                  @change="onSet('homepage', ($event.target as HTMLInputElement).value.trim())"
+                />
               </div>
-              <div class="ext-actions">
-                <span v-if="e.js_count" class="ext-badge">JS</span>
-                <span v-if="e.css_count" class="ext-badge">CSS</span>
+              <div class="field">
+                <label>搜索引擎</label>
+                <div class="seg-group">
+                  <button
+                    v-for="e in SEARCH_ENGINES"
+                    :key="e.id"
+                    class="seg-btn"
+                    :class="{ active: (settingsStore.get('search_engine') || 'bing') === e.id }"
+                    @click="onSet('search_engine', e.id)"
+                  >
+                    {{ e.label }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 外观 -->
+          <div v-if="activeSection === 'appearance'" class="settings-scroll">
+            <div class="card">
+              <div class="card-title">🎨 外观</div>
+              <div class="field">
+                <label>主题</label>
+                <div class="theme-picker">
+                  <button
+                    class="theme-card"
+                    :class="{ active: (settingsStore.get('theme') || 'dark') === 'dark' }"
+                    @click="onSet('theme', 'dark')"
+                  >
+                    <span class="theme-swatch dark-swatch"></span>
+                    <span>深色</span>
+                  </button>
+                  <button
+                    class="theme-card"
+                    :class="{ active: (settingsStore.get('theme') || 'dark') === 'light' }"
+                    @click="onSet('theme', 'light')"
+                  >
+                    <span class="theme-swatch light-swatch"></span>
+                    <span>浅色</span>
+                  </button>
+                </div>
+              </div>
+              <div class="field">
+                <label>显示书签栏</label>
                 <label class="switch">
-                  <input type="checkbox" :checked="e.enabled" @change="onToggleExtension(e)" />
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('show_bookmarks_bar') !== 'false'"
+                    @change="onSet('show_bookmarks_bar', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
                   <span class="slider"></span>
                 </label>
-                <button class="mini-btn danger" @click="onDeleteExtension(e.id)">删除</button>
+              </div>
+              <div class="card-title" style="margin-top: 16px">🏠 启动页</div>
+              <div class="field">
+                <label>动态背景</label>
+                <span class="field-desc">Bing 每日高清壁纸 + 缓慢缩放动画</span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('show_bg') !== 'false'"
+                    @change="onSet('show_bg', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>字体大小</label>
+                <select
+                  :value="settingsStore.get('font_size') || '14'"
+                  @change="onSet('font_size', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="12">12px（小）</option>
+                  <option value="13">13px</option>
+                  <option value="14">14px（默认）</option>
+                  <option value="15">15px</option>
+                  <option value="16">16px（大）</option>
+                  <option value="18">18px</option>
+                  <option value="20">20px（特大）</option>
+                </select>
               </div>
             </div>
           </div>
-          <div v-else class="ext-empty">还没有扩展</div>
-        </div>
 
-        <!-- 隐私 -->
-        <div class="section">
-          <div class="section-title">隐私</div>
-          <div class="field">
-            <label>广告拦截</label>
-            <select
-              :value="settingsStore.get('adblock_enabled') !== 'false' ? 'true' : 'false'"
-              @change="onToggleAdblock"
-            >
-              <option value="true">开启</option>
-              <option value="false">关闭</option>
-            </select>
-          </div>
-          <div class="kw-block" v-if="settingsStore.get('adblock_enabled') !== 'false'">
-            <div class="kw-hint">
-              内置已含「关闭广告 / 头条报 / 推广」等。下面可手工加词，刷新页面后生效。
+          <!-- AI 助手 -->
+          <div v-if="activeSection === 'ai'" class="settings-scroll">
+            <div class="card">
+              <div class="card-title">🤖 AI 助手</div>
+              <div class="field">
+                <label>模型</label>
+                <select
+                  :value="settingsStore.get('ai_model')"
+                  @change="onSet('ai_model', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="agnes-2.0-flash">agnes-2.0-flash（推荐）</option>
+                  <option value="agnes-2.5-pro">agnes-2.5-pro</option>
+                  <option value="agnes-2.5-flash">agnes-2.5-flash（可能超时）</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>API 地址</label>
+                <input
+                  type="text"
+                  :value="settingsStore.get('ai_base_url')"
+                  placeholder="https://apihub.agnes-ai.com/v1"
+                  spellcheck="false"
+                  @change="onSet('ai_base_url', ($event.target as HTMLInputElement).value.trim())"
+                />
+              </div>
+              <div class="field">
+                <label>API Key</label>
+                <input
+                  type="password"
+                  v-model="aiKeyInput"
+                  :placeholder="hasAiKey() ? '已配置（不回显），留空保持不变' : '留空使用环境变量 AGNES_API_KEY'"
+                  spellcheck="false"
+                  @change="onAiKeyChange"
+                />
+              </div>
             </div>
-            <div class="kw-list" v-if="customKeywords.length > 0">
-              <span v-for="k in customKeywords" :key="k" class="kw-chip">
-                {{ k }}
-                <button class="kw-x" title="删除" @click="onRemoveKeyword(k)">✕</button>
-              </span>
-            </div>
-            <div class="kw-add">
-              <input
-                v-model="newKeyword"
-                type="text"
-                placeholder="输入关键词，回车添加"
-                spellcheck="false"
-                @keyup.enter="onAddKeyword"
-              />
-              <button class="mini-btn primary" @click="onAddKeyword">添加</button>
-            </div>
-            <div v-if="kwMsg" class="cleared-msg">{{ kwMsg }}</div>
           </div>
-          <div class="field">
-            <label>记录浏览历史</label>
-            <select
-              :value="settingsStore.get('record_history')"
-              @change="onSet('record_history', ($event.target as HTMLSelectElement).value)"
-            >
-              <option value="true">记录</option>
-              <option value="false">不记录</option>
-            </select>
+
+          <!-- 扩展 -->
+          <div v-if="activeSection === 'extensions'" class="settings-scroll">
+            <div class="card">
+              <div class="card-title">🧩 扩展</div>
+              <div class="ext-load-row">
+                <input
+                  v-model="extPath"
+                  type="text"
+                  placeholder="扩展目录或 manifest.json 路径"
+                  spellcheck="false"
+                  @keyup.enter="onLoadExtension"
+                />
+                <button class="mini-btn primary" :disabled="extLoading" @click="onLoadExtension">
+                  {{ extLoading ? '加载中…' : '加载' }}
+                </button>
+              </div>
+              <div v-if="extError" class="ext-error">{{ extError }}</div>
+              <div class="ext-list" v-if="extensionsStore.list.length > 0">
+                <div v-for="e in extensionsStore.list" :key="e.id" class="ext-item">
+                  <div class="ext-info">
+                    <span class="ext-name">{{ e.name }}</span>
+                    <span class="ext-desc">
+                      {{ e.version ? 'v' + e.version : '' }}
+                      {{ e.description ? '· ' + e.description : '' }}
+                    </span>
+                  </div>
+                  <div class="ext-actions">
+                    <span v-if="e.js_count" class="ext-badge">JS</span>
+                    <span v-if="e.css_count" class="ext-badge">CSS</span>
+                    <label class="switch">
+                      <input type="checkbox" :checked="e.enabled" @change="onToggleExtension(e)" />
+                      <span class="slider"></span>
+                    </label>
+                    <button class="mini-btn danger" @click="onDeleteExtension(e.id)">删除</button>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="ext-empty">还没有扩展，输入路径加载一个试试</div>
+            </div>
           </div>
-          <div class="field">
-            <label>历史记录</label>
-            <div class="history-actions">
-              <button class="danger-btn" @click="onClearHistory">清除历史数据</button>
-              <span v-if="clearedMsg" class="cleared-msg">{{ clearedMsg }}</span>
+
+          <!-- 隐私 -->
+          <div v-if="activeSection === 'privacy'" class="settings-scroll">
+            <div class="card">
+              <div class="card-title">🛡 隐私</div>
+              <div class="field">
+                <label>广告拦截</label>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('adblock_enabled') !== 'false'"
+                    @change="onToggleAdblock"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="kw-block" v-if="settingsStore.get('adblock_enabled') !== 'false'">
+                <div class="kw-hint">
+                  内置已含「关闭广告 / 头条报 / 推广」等。下面可手工加词，刷新页面后生效。
+                </div>
+                <div class="kw-list" v-if="customKeywords.length > 0">
+                  <span v-for="k in customKeywords" :key="k" class="kw-chip">
+                    {{ k }}
+                    <button class="kw-x" title="删除" @click="onRemoveKeyword(k)">✕</button>
+                  </span>
+                </div>
+                <div class="kw-add">
+                  <input
+                    v-model="newKeyword"
+                    type="text"
+                    placeholder="输入关键词，回车添加"
+                    spellcheck="false"
+                    @keyup.enter="onAddKeyword"
+                  />
+                  <button class="mini-btn primary" @click="onAddKeyword">添加</button>
+                </div>
+                <div v-if="kwMsg" class="cleared-msg">{{ kwMsg }}</div>
+              </div>
+              <div class="field">
+                <label>记录浏览历史</label>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('record_history') !== 'false'"
+                    @change="onSet('record_history', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>启动锁屏（每次启动输入账号密码解锁）</label>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('lock_enabled') === 'true'"
+                    @change="onSet('lock_enabled', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field danger-field">
+                <label>历史记录</label>
+                <div class="history-actions">
+                  <button class="danger-btn" @click="onClearHistory">清除历史数据</button>
+                  <span v-if="clearedMsg" class="cleared-msg">{{ clearedMsg }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -369,23 +470,106 @@ async function onRemoveKeyword(k: string) {
 </template>
 
 <style scoped>
-.section {
-  margin-bottom: 14px;
+.settings-dialog {
+  width: min(620px, calc(100vw - 32px));
+  height: min(600px, calc(100vh - 120px));
+  display: flex;
+  flex-direction: column;
 }
-.section-title {
-  font-size: 12px;
+.settings-body {
+  display: flex;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 左侧导航 */
+.settings-nav {
+  width: 132px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-subtle);
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-secondary);
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition:
+    background 0.15s,
+    color 0.15s;
+  user-select: none;
+}
+.nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.nav-item.active {
+  background: rgba(74, 158, 255, 0.15);
   color: var(--accent);
   font-weight: 600;
-  margin-bottom: 8px;
-  border-bottom: 1px solid var(--border-subtle);
-  padding-bottom: 4px;
 }
+.nav-icon {
+  font-size: 15px;
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* 右侧内容 */
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.settings-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+}
+.settings-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.settings-scroll::-webkit-scrollbar-thumb {
+  background: var(--bg-active);
+  border-radius: 3px;
+}
+
+/* 卡片 */
+.card {
+  margin-bottom: 12px;
+}
+.card-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
 .field {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+}
+.field-desc {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 .field label {
   font-size: 13px;
@@ -395,14 +579,15 @@ async function onRemoveKeyword(k: string) {
 .field input,
 .field select {
   flex: 1;
-  max-width: 260px;
+  max-width: 300px;
   border: 1px solid var(--border-color);
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
   color: var(--text-primary);
-  border-radius: 6px;
-  padding: 6px 10px;
+  border-radius: 7px;
+  padding: 7px 11px;
   font-size: 13px;
   outline: none;
+  transition: border-color 0.15s;
   /* WebKitGTK 下 select/input 默认用系统白色渲染，强制自定义样式 */
   -webkit-appearance: none;
   appearance: none;
@@ -418,33 +603,167 @@ async function onRemoveKeyword(k: string) {
 .field select:focus {
   border-color: var(--accent);
 }
+
+/* 搜索引擎分段按钮 */
+.seg-group {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  max-width: 300px;
+}
+.seg-btn {
+  flex: 1;
+  padding: 6px 0;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border-radius: 7px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.seg-btn:hover {
+  background: var(--bg-hover);
+}
+.seg-btn.active {
+  background: rgba(74, 158, 255, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 主题选择卡片 */
+.theme-picker {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  max-width: 300px;
+}
+.theme-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.theme-card:hover {
+  background: var(--bg-hover);
+}
+.theme-card.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.theme-swatch {
+  width: 44px;
+  height: 26px;
+  border-radius: 5px;
+  border: 1px solid var(--border-color);
+}
+.dark-swatch {
+  background: linear-gradient(135deg, #16213e 50%, #1e2a45 50%);
+}
+.light-swatch {
+  background: linear-gradient(135deg, #f5f6f8 50%, #e8eaee 50%);
+}
+
+/* 开关 */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--bg-active);
+  border-radius: 10px;
+  transition: 0.2s;
+}
+.slider::before {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 3px;
+  top: 3px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: 0.2s;
+}
+.switch input:checked + .slider {
+  background: rgba(74, 158, 255, 0.45);
+}
+.switch input:checked + .slider::before {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
+/* 危险操作 */
 .history-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
+.danger-field {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-subtle);
+}
 .danger-btn {
-  background: var(--bg-active);
-  color: #e53935;
-  border: 1px solid #5a2a2a;
-  border-radius: 6px;
-  padding: 6px 12px;
+  background: rgba(229, 57, 53, 0.12);
+  color: #ff6b6b;
+  border: 1px solid rgba(229, 57, 53, 0.35);
+  border-radius: 7px;
+  padding: 6px 14px;
   font-size: 12px;
   cursor: pointer;
+  transition: all 0.15s;
 }
 .danger-btn:hover {
-  background: #4a3a3a;
+  background: rgba(229, 57, 53, 0.22);
 }
 .cleared-msg {
   font-size: 12px;
   color: #43a047;
 }
+
+/* 扩展 */
 .ext-load-row {
-  align-items: stretch;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 .ext-load-row input {
   flex: 1;
-  max-width: none;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: 7px;
+  padding: 7px 11px;
+  font-size: 13px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.ext-load-row input:focus {
+  border-color: var(--accent);
 }
 .ext-error {
   color: #ff6b6b;
@@ -455,16 +774,20 @@ async function onRemoveKeyword(k: string) {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 4px;
 }
 .ext-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
   padding: 8px 10px;
   gap: 8px;
+  transition: border-color 0.15s;
+}
+.ext-item:hover {
+  border-color: var(--border-color);
 }
 .ext-info {
   display: flex;
@@ -502,73 +825,43 @@ async function onRemoveKeyword(k: string) {
   color: var(--text-muted);
   font-size: 12px;
   text-align: center;
-  padding: 8px 0;
+  padding: 14px 0;
 }
 .mini-btn {
   background: var(--bg-active);
   color: var(--text-secondary);
   border: none;
-  border-radius: 4px;
-  padding: 5px 10px;
+  border-radius: 6px;
+  padding: 5px 11px;
   font-size: 12px;
   cursor: pointer;
+  transition: all 0.15s;
 }
 .mini-btn:hover {
   background: var(--text-secondary);
+  color: var(--bg-primary);
 }
 .mini-btn.primary {
-  background: #2b5a8a;
+  background: rgba(74, 158, 255, 0.18);
   color: #cfe4ff;
 }
 .mini-btn.primary:hover {
-  background: #3370ab;
+  background: rgba(74, 158, 255, 0.3);
+}
+.mini-btn.danger {
+  color: #ff8a8a;
+  background: rgba(229, 57, 53, 0.1);
 }
 .mini-btn.danger:hover {
-  background: #5c2b2b;
-  color: #ff8a8a;
+  background: rgba(229, 57, 53, 0.25);
 }
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 34px;
-  height: 18px;
-  flex-shrink: 0;
-}
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.slider {
-  position: absolute;
-  cursor: pointer;
-  inset: 0;
-  background: var(--bg-active);
-  border-radius: 9px;
-  transition: 0.2s;
-}
-.slider::before {
-  content: '';
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  left: 3px;
-  top: 3px;
-  background: var(--text-muted);
-  border-radius: 50%;
-  transition: 0.2s;
-}
-.switch input:checked + .slider {
-  background: rgba(74, 158, 255, 0.4);
-}
-.switch input:checked + .slider::before {
-  transform: translateX(16px);
-  background: var(--accent);
-}
+
+/* 关键词 */
 .kw-block {
-  margin: 4px 0 10px 0;
-  padding: 8px 10px;
-  background: var(--bg-secondary);
+  margin: 4px 0 12px 0;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
 }
 .kw-hint {
@@ -612,9 +905,9 @@ async function onRemoveKeyword(k: string) {
 .kw-add input {
   flex: 1;
   border: 1px solid var(--border-color);
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
   color: var(--text-primary);
-  border-radius: 6px;
+  border-radius: 7px;
   padding: 6px 10px;
   font-size: 13px;
   outline: none;

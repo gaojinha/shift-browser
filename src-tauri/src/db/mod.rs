@@ -7,6 +7,7 @@ pub mod passwords;
 pub mod sessions;
 pub mod settings;
 pub mod tab_groups;
+pub mod users;
 pub mod workspaces;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -109,6 +110,10 @@ impl Db {
       4,
       "drop_dead_feed_index",
       include_str!("../../migrations/20260913000002_drop_dead_index.sql"),
+    ), (
+      5,
+      "users_account_system",
+      include_str!("../../migrations/20260914000000_users.sql"),
     )];
 
     for (version, name, sql) in migrations {
