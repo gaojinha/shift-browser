@@ -132,6 +132,10 @@ impl Db {
       6,
       "history_last_visit_index",
       include_str!("../../migrations/20260918000000_history_last_visit_index.sql"),
+    ), (
+      7,
+      "passwords_domain_username_uniq",
+      include_str!("../../migrations/20260918000001_passwords_uniq.sql"),
     )];
 
     for (version, name, sql) in migrations {

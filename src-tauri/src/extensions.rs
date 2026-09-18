@@ -79,13 +79,35 @@ fn read_extension_dir(path: &str) -> Result<ExtensionDirResult, String> {
     let mut js_sources: Vec<String> = Vec::new();
     let mut css_sources: Vec<String> = Vec::new();
     // 安全：manifest 里的脚本/样式路径必须解析后仍落在扩展目录内，
-    // 防止恶意/被篡改的 manifest 声明 "../../../.ssh/id_rsa" 之类路径越界读任意文件
+    // 防止恶意/被篡改的 manifest 声明 "../../../.ssh/id_rsa" 之类路径越界读任意文件。
+    //
+    // 两道防线：
+    //  1) 词法：拒绝含 ".."（ParentDir）组件的路径；Path::starts_with 是纯词法比较、
+    //     不解析 ".."，若只靠 starts_with，声明 "../../../home/gao/.ssh/id_rsa" 可绕过越界读取。
+    //  2) 物理（symlink 兜底）：文件真实存在时做 canonicalize，解析符号链接后
+    //     再校验「真实路径」仍落在「真实 base」内——防止扩展包在目录里埋一个
+    //     symlink 指向 /home/gao/.ssh，再让 manifest 引用该链接名间接越界。
+    //     文件不存在（如首次注入尚未生成）时退回到已通过词法校验的相对路径，
+    //     因为相对路径 + 无 ".." + 以 base 开头，词法上已确定无法越界。
     let base = std::path::Path::new(&base_dir);
+    // 真实 base：解析 base 自身可能的 symlink（防御扩展目录本身是链接指向外部的场景）
+    let base_real = base.canonicalize().unwrap_or_else(|_| base.to_owned());
     for cs in &manifest.content_scripts {
         for js in &cs.js {
             let p = base.join(js);
+            // 拒绝含 ".." 组件的路径
+            if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                return Err(format!("脚本路径含 ..（拒绝）: {}", js));
+            }
+            // 词法越界
             if !p.starts_with(base) {
                 return Err(format!("脚本路径越界（拒绝）: {}", js));
+            }
+            // symlink 兜底：解析真实路径后再校验一次
+            if let Ok(p_real) = p.canonicalize() {
+                if !p_real.starts_with(&base_real) {
+                    return Err(format!("脚本路径经符号链接越界（拒绝）: {}", js));
+                }
             }
             let content = std::fs::read_to_string(&p)
                 .map_err(|e| format!("读取脚本 {} 失败: {}", js, e))?;
@@ -93,8 +115,17 @@ fn read_extension_dir(path: &str) -> Result<ExtensionDirResult, String> {
         }
         for css in &cs.css {
             let p = base.join(css);
+            if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                return Err(format!("样式路径含 ..（拒绝）: {}", css));
+            }
             if !p.starts_with(base) {
                 return Err(format!("样式路径越界（拒绝）: {}", css));
+            }
+            // symlink 兜底（与 js 分支保持一致）：解析真实路径后校验仍落在真实 base 内
+            if let Ok(p_real) = p.canonicalize() {
+                if !p_real.starts_with(&base_real) {
+                    return Err(format!("样式路径经符号链接越界（拒绝）: {}", css));
+                }
             }
             let content = std::fs::read_to_string(&p)
                 .map_err(|e| format!("读取样式 {} 失败: {}", css, e))?;

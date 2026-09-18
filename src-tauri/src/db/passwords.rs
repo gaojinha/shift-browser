@@ -152,37 +152,28 @@ pub async fn save_password(
     let key = get_master_key(&db).await?;
     let encrypted = encrypt(&key, &password)?;
 
-    // 同 domain+username 存在则更新
-    let existing: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM passwords WHERE domain = ? AND username IS ?",
+    // UPSERT：靠迁移 7 的 (domain, username) 唯一索引原子去重。
+    // 原实现是先 SELECT 判重再 INSERT/UPDATE，两步之间有竞态窗口——
+    // 并发保存同一 domain+username 时可能 INSERT 出重复行（迁移 7 清理过了历史重复，
+    // 现在唯一索引保证不会再有；但 save_password 自身必须也对齐 UPSERT，
+    // 否则 UNIQUE 违反直接报错而不是静默去重）。
+    // 注意：username 为 NULL 时 SQLite 不触发唯一冲突（NULL 之间不相等），
+    // 走 INSERT 分支，允许 NULL username 重复——这是有意的（空白 username 不设约束）。
+    sqlx::query(
+        "INSERT INTO passwords (domain, username, password, notes) VALUES (?, ?, ?, ?)
+         ON CONFLICT(domain, username) DO UPDATE SET
+           password = excluded.password,
+           notes = excluded.notes,
+           updated_at = datetime('now')",
     )
     .bind(&domain)
     .bind(&username)
-    .fetch_optional(&db.pool)
+    .bind(&encrypted)
+    .bind(&notes)
+    .execute(&db.pool)
     .await?;
 
-    if let Some(id) = existing {
-        sqlx::query(
-            "UPDATE passwords SET password = ?, notes = ?, updated_at = datetime('now') WHERE id = ?",
-        )
-        .bind(&encrypted)
-        .bind(&notes)
-        .bind(id)
-        .execute(&db.pool)
-        .await?;
-        Ok(id)
-    } else {
-        let result = sqlx::query(
-            "INSERT INTO passwords (domain, username, password, notes) VALUES (?, ?, ?, ?)",
-        )
-        .bind(&domain)
-        .bind(&username)
-        .bind(&encrypted)
-        .bind(&notes)
-        .execute(&db.pool)
-        .await?;
-        Ok(result.last_insert_rowid())
-    }
+    Ok(0) // UPSERT 不返回可靠 rowid，调用方（前端）以 domain+username 查询为准
 }
 
 /// 获取密码（解密返回）

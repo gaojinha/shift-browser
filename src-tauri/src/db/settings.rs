@@ -127,6 +127,16 @@ pub async fn set_setting(
       key
     )));
   }
+  // 掩码防御：前端把"****xxxx"这类掩码回写会盖掉真实密钥/令牌。
+  // 前端读到的敏感值是掩码（get_all_settings 里已 mask），回写黑洞会毁掉真实值。
+  // master_key 走上面的 is_sensitive 早拒；ai_api_key 是"前端可写+读回掩码"，
+  // 必须在入库前拦掉掩码——否则前端整表回写 settings 就让真实 key 变成 "sk-****"。
+  if (is_sensitive(&key) || key == "ai_api_key") && value.contains("****") {
+    return Err(crate::db::DbError::Other(format!(
+      "设置 {} 收到掩码回写（含 ****），已拒绝。真实值不会写库，请重新输入完整值",
+      key
+    )));
+  }
   sqlx::query(
     "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",

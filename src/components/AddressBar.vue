@@ -196,8 +196,15 @@ function onRefresh() {
 
 function onHome() {
   const active = tabsStore.activeTab
-  if (active)
-    tabsStore.navigateTab(active.id, settingsStore.get('homepage') || 'https://www.bing.com')
+  if (!active) return
+  const homepage = settingsStore.get('homepage') || 'https://www.bing.com'
+  // 默认 homepage='newtab'（本地新标签页关键字），navigateTab 会把它当 URL 解析必失败；
+  // 本地新标签页必须走 createTab。统一判断：'newtab' → createTab，其余 → navigateTab
+  if (homepage === 'newtab') {
+    tabsStore.createTab()
+  } else {
+    tabsStore.navigateTab(active.id, homepage)
+  }
 }
 
 function onBack() {

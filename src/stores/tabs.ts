@@ -66,8 +66,12 @@ export const useTabsStore = defineStore('tabs', {
       if (tab) tab.groupId = groupId
     },
 
-    /** 创建新标签页（无参时按主页设置解析；'newtab' = 本地新标签页） */
-    async createTab(url?: string): Promise<Tab | null> {
+    /** 创建新标签页（无参时按主页设置解析；'newtab' = 本地新标签页）
+     *  @param groupId 可选：创建后把新标签归入该分组（group 是前端运行时概念，后端 Tab 无此字段，
+     *                 所以在 invoke 返回后由前端补写 groupId，不依赖 Rust 返回） */
+    async createTab(url?: string, groupId?: number | null): Promise<Tab | null> {
+      // 参与 _opSeq：防止 create_tab 在途时 syncTabs（轮询）用旧快照整体覆盖，把刚建的标签顶掉
+      const my = ++this._opSeq
       let target = url || useSettingsStore().get('homepage') || 'newtab'
       if (target === 'newtab') {
         try {
@@ -82,13 +86,23 @@ export const useTabsStore = defineStore('tabs', {
       }
       try {
         const tab = await invoke<Tab>('create_tab', { url: target })
-        this.tabs.push(tab)
+        // push 前去重：syncTabs 轮询可能已把该 id 带进列表（并发窗口），直接 push 会重复
+        const dup = this.tabs.findIndex((t) => t.id === tab.id)
+        if (dup !== -1) this.tabs[dup] = tab
+        else this.tabs.push(tab)
+        // 归组（可选）：createTab(url, groupId) 语义 —— 新建即归入给定分组。
+        // groupId 是前端运行时概念（Rust Tab 无此字段，参见 54 行注释），
+        // 所以通过现有 assignTabToGroup 幂等归组，不依赖后端回传。
+        if (groupId != null) this.assignTabToGroup(tab.id, groupId)
         // 取消旧标签激活
         for (const t of this.tabs) {
           if (t.id !== tab.id) t.is_active = false
         }
-        this.activeTabId = tab.id
-        this._markLoading(tab.id)
+        // 仅当无更新的用户操作时才接管激活，避免覆盖连点/切换结果
+        if (my === this._opSeq) {
+          this.activeTabId = tab.id
+          this._markLoading(tab.id)
+        }
         this.canGoBack = false
         this.canGoForward = false
         return tab
@@ -164,7 +178,8 @@ export const useTabsStore = defineStore('tabs', {
         const tab = await invoke<Tab | null>('navigate_tab', { id, url })
         if (tab) {
           const idx = this.tabs.findIndex((t) => t.id === id)
-          if (idx !== -1) this.tabs[idx] = tab
+          // 保留分组：Rust 返回的 Tab 无 groupId 字段，整体替换会掉组（与 pinTab/muteTab 对齐）
+          if (idx !== -1) this.tabs[idx] = { ...tab, groupId: this.tabs[idx].groupId ?? null }
         }
       } catch (e) {
         console.error('[tabs] 导航失败:', e)
@@ -225,7 +240,8 @@ export const useTabsStore = defineStore('tabs', {
         const tab = await invoke<Tab | null>('reload_tab', { id })
         if (tab) {
           const idx = this.tabs.findIndex((t) => t.id === id)
-          if (idx !== -1) this.tabs[idx] = tab
+          // 保留分组：reload 返回的 Tab 无 groupId，整体替换会掉组（对齐 navigateTab/pinTab）
+          if (idx !== -1) this.tabs[idx] = { ...tab, groupId: this.tabs[idx].groupId ?? null }
         }
       } catch (e) {
         console.error('[tabs] 刷新失败:', e)

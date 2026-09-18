@@ -62,7 +62,7 @@ function onGlobalKeydown(e: KeyboardEvent) {
       return
     }
     // 弹窗打开时，其余标签快捷键不响应（避免误关标签/新建标签）
-    if (showTranslate.value || showAI.value || showSettings.value || showDownloads.value || showGroups.value || showPasswords.value || showHistory.value || showSessions.value) {
+    if (showTranslate.value || showAI.value || showSettings.value || showDownloads.value || showGroups.value || showPasswords.value || showHistory.value || showSessions.value || showBookmarks.value) {
       return
     }
     // Ctrl+Shift+T 打开翻译面板（不影响 Ctrl+T 建标签）
