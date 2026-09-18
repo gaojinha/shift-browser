@@ -752,7 +752,10 @@ fn render_html(
   var greet = h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好';
   document.getElementById('greeting').textContent = greet + '，高哥 👋';
   var wd = ['日','一','二','三','四','五','六'][now.getDay()];
-  document.getElementById('dateStr').textContent =
+  // 注意：必须用 innerHTML——dateStr 里嵌了时钟 span，textContent 不当 HTML 解析，
+  // 会把 "<span id=\"clockTime\"></span>" 当字面文本显示，且 span 不创建导致时钟不显示。
+  // 内容全是 JS 内部生成的数字/星期（无用户输入），无 XSS 风险。
+  document.getElementById('dateStr').innerHTML =
     now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日 星期' + wd + ' <span id="clockTime"></span>';
 
   // ---- 实时时钟（数字 + 指针）----
