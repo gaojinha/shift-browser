@@ -156,6 +156,20 @@ async function onDeleteExtension(id: number) {
   }
 }
 
+/** 隐私防护开关（GPC + 反指纹加噪 + WebRTC 防泄露），默认开启 */
+async function onTogglePrivacyShield() {
+  const current = settingsStore.get('privacy_shield') !== 'false'
+  const next = (!current).toString()
+  await settingsStore.set('privacy_shield', next)
+  try {
+    await invoke('set_privacy_shield_enabled', { enabled: next === 'true' })
+    useToastStore().success(next === 'true' ? '隐私防护已开启' : '隐私防护已关闭')
+  } catch (e) {
+    console.error('[settings] 隐私防护同步失败:', e)
+    useToastStore().error('隐私防护切换失败')
+  }
+}
+
 /** 广告拦截开关：settings 表是唯一状态源，set_adblock_enabled 只负责把开关同步给注入器 */
 async function onToggleAdblock() {
   const current = settingsStore.get('adblock_enabled') !== 'false'
@@ -420,6 +434,21 @@ async function onRemoveKeyword(k: string) {
           <div v-if="activeSection === 'privacy'" class="settings-scroll">
             <div class="card">
               <div class="card-title">🛡 隐私</div>
+              <div class="field">
+                <label>隐私防护</label>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('privacy_shield') !== 'false'"
+                    @change="onTogglePrivacyShield"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="kw-hint" v-if="settingsStore.get('privacy_shield') !== 'false'">
+                反指纹加噪（Canvas / WebGL / 音频 / WebGPU）、GPC 隐私信号、WebRTC 内网 IP 防护、
+                字体与设备探针收敛、追踪参数清洗、第三方 Cookie 阻断。刷新页面后对已开标签生效。
+              </div>
               <div class="field">
                 <label>广告拦截</label>
                 <label class="switch">

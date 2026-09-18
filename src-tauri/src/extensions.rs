@@ -336,6 +336,141 @@ const PRIVACY_JS: &str = r#"
       window.RTCPeerConnection = Patched;
     }
   } catch (e) {}
+
+  // ---- 8) 字体探针防护：document.fonts.check / measureText 返回收敛结果 ----
+  // 说明：系统已装字体列表是强指纹（国内用户字体组合尤其独特）。
+  // 策略：不改动真实字体渲染（避免页面错乱），只让"探测接口"结果收敛。
+  try {
+    if (document.fonts && document.fonts.check) {
+      var ocheck = document.fonts.check.bind(document.fonts);
+      var COMMON = ['Arial', 'Times New Roman', 'Courier New', 'Verdana', 'Helvetica',
+                    'Georgia', 'Tahoma', 'Trebuchet MS', 'Segoe UI', 'Roboto',
+                    'Microsoft YaHei', 'SimSun', 'PingFang SC', 'Noto Sans CJK SC'];
+      document.fonts.check = function (font, text) {
+        try {
+          var m = /(\d+(?:\.\d+)?)(px|pt|em|rem)?\s+(.+)/.exec(String(font || ''));
+          var fam = m ? m[3] : String(font || '');
+          fam = fam.replace(/["']/g, '').split(',')[0].trim();
+          // 只对"探测未装字体"的调用做收敛：非通用字体一律报 false
+          if (fam && COMMON.indexOf(fam) === -1) return false;
+        } catch (e) {}
+        return ocheck.apply(null, arguments);
+      };
+    }
+  } catch (e) {}
+
+  // ---- 9) WebGPU 指纹防护（2026 新兴高熵信号）----
+  try {
+    if (navigator.gpu && navigator.gpu.requestAdapter) {
+      var oreq = navigator.gpu.requestAdapter.bind(navigator.gpu);
+      navigator.gpu.requestAdapter = function () {
+        return oreq.apply(null, arguments).then(function (adapter) {
+          try {
+            if (adapter && adapter.info) {
+              return new Proxy(adapter, {
+                get: function (t, k) {
+                  if (k === 'info') {
+                    return { vendor: 'google', architecture: 'generic',
+                             device: 'generic', description: 'Generic GPU' };
+                  }
+                  var v = t[k];
+                  return typeof v === 'function' ? v.bind(t) : v;
+                }
+              });
+            }
+            if (adapter && adapter.requestAdapterInfo) {
+              var oinfo = adapter.requestAdapterInfo.bind(adapter);
+              adapter.requestAdapterInfo = function () {
+                return Promise.resolve({ vendor: 'google', architecture: 'generic',
+                                         device: 'generic', description: 'Generic GPU' });
+              };
+            }
+          } catch (e) {}
+          return adapter;
+        });
+      };
+    }
+  } catch (e) {}
+
+  // ---- 10) navigator 杂项归一化（plugins/mimeTypes/Client Hints/平台）----
+  try {
+    // 现代网站不再依赖 plugins/mimeTypes，但指纹脚本仍会读取
+    Object.defineProperty(navigator, 'plugins', {
+      get: function () { return { length: 0, item: function () { return null; },
+                                  namedItem: function () { return null; },
+                                  refresh: function () {} }; },
+      configurable: true
+    });
+    Object.defineProperty(navigator, 'mimeTypes', {
+      get: function () { return { length: 0, item: function () { return null; },
+                                  namedItem: function () { return null; } }; },
+      configurable: true
+    });
+  } catch (e) {}
+  try {
+    // Client Hints JS API：抹掉精确的平台版本/架构
+    if (navigator.userAgentData) {
+      var uad = navigator.userAgentData;
+      try {
+        Object.defineProperty(navigator, 'userAgentData', {
+          get: function () {
+            return {
+              brands: uad.brands,
+              mobile: false,
+              platform: 'Linux',
+              getHighEntropyValues: function () {
+                return Promise.resolve({ platform: 'Linux', platformVersion: '',
+                                         architecture: '', model: '', uaFullVersion: '' });
+              },
+              toJSON: function () { return { brands: uad.brands, mobile: false, platform: 'Linux' }; }
+            };
+          },
+          configurable: true
+        });
+      } catch (e) {}
+    }
+  } catch (e) {}
+
+  // ---- 11) 屏幕色深归一化（不碰 width/height，避免影响响应式布局）----
+  try {
+    Object.defineProperty(screen, 'colorDepth', { get: function () { return 24; }, configurable: true });
+    Object.defineProperty(screen, 'pixelDepth', { get: function () { return 24; }, configurable: true });
+  } catch (e) {}
+
+  // ---- 12) 电池 / 网络信息 / 设备枚举 归一化 ----
+  try {
+    if (navigator.getBattery) {
+      navigator.getBattery = function () {
+        return Promise.resolve({
+          charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1,
+          onchargingchange: null, onchargingtimechange: null,
+          ondischargingtimechange: null, onlevelchange: null,
+          addEventListener: function () {}, removeEventListener: function () {}
+        });
+      };
+    }
+  } catch (e) {}
+  try {
+    if (navigator.connection) {
+      Object.defineProperty(navigator.connection, 'type', { get: function () { return 'wifi'; }, configurable: true });
+      Object.defineProperty(navigator.connection, 'effectiveType', { get: function () { return '4g'; }, configurable: true });
+      Object.defineProperty(navigator.connection, 'downlink', { get: function () { return 10; }, configurable: true });
+      Object.defineProperty(navigator.connection, 'rtt', { get: function () { return 50; }, configurable: true });
+    }
+  } catch (e) {}
+  try {
+    // 设备枚举：抹掉 label（真实设备名是强指纹），只保留 kind
+    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+      var oenum = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
+      navigator.mediaDevices.enumerateDevices = function () {
+        return oenum.apply(null, arguments).then(function (list) {
+          return list.map(function (d) {
+            return { deviceId: '', groupId: '', kind: d.kind, label: '' };
+          });
+        });
+      };
+    }
+  } catch (e) {}
 })();
 "#;
 
@@ -604,12 +739,54 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
         );
         items.push((Some(js), Some(ADBLOCK_CSS.to_string())));
     }
-    // 内置隐私防护（GPC + Canvas/WebGL/Audio 反指纹 + WebRTC 防泄露）——始终注入，
-    // 放在最后确保不被用户扩展覆盖；注意 inject_extensions 会先 remove_all_scripts，
-    // 所以脚本必须都在这份 items 里，不能单独注入。
-    items.push((Some(PRIVACY_JS.to_string()), None));
-    log::info!("[extensions] 隐私防护已注入（GPC + 反指纹 + WebRTC 候选过滤）");
+    // 内置隐私防护（GPC + Canvas/WebGL/Audio 反指纹 + WebRTC 防泄露）——默认开启，
+    // 可通过 settings.privacy_shield='false' 关闭；注意 inject_extensions 会先
+    // remove_all_scripts，所以脚本必须都在这份 items 里，不能单独注入。
+    let prow: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_shield'")
+            .fetch_optional(&db.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let privacy_on = prow.map(|r| r.0 != "false").unwrap_or(true); // 默认开启
+    if privacy_on {
+        items.push((Some(PRIVACY_JS.to_string()), None));
+        log::info!("[extensions] 隐私防护已注入（GPC + 反指纹 + WebRTC 候选过滤）");
+    } else {
+        log::info!("[extensions] 隐私防护已被用户关闭，跳过注入");
+    }
     Ok(items)
+}
+
+/// 隐私防护开关（存设置 + 立即重新注入）
+#[tauri::command]
+pub async fn set_privacy_shield_enabled(
+    db: State<'_, Db>,
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    log::info!("[extensions] set_privacy_shield_enabled: {}", enabled);
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ('privacy_shield', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(enabled.to_string())
+    .execute(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let items = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items);
+    Ok(())
+}
+
+/// 隐私防护当前状态（前端初始化用；默认开启）
+#[tauri::command]
+pub async fn get_privacy_shield_enabled(db: State<'_, Db>) -> Result<bool, String> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_shield'")
+            .fetch_optional(&db.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(row.map(|r| r.0 != "false").unwrap_or(true))
 }
 
 /// 广告拦截开关（存设置 + 重新注入）
