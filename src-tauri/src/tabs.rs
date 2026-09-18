@@ -497,9 +497,10 @@ impl TabManager {
             settings.set_javascript_can_open_windows_automatically(true);
             // 设置完整 UA（带 Safari 标记 + 浏览器名）：WebKitGTK 默认 UA 残缺（无 Safari 标记），
             // 导致 Bing 等网站识别为未知浏览器返回简化版单屏页面（无法滚动）。
-            // 版本号跟随 2026 年主流 Chrome（避免"独一份版本号"成为稀有指纹）
+            // 版本号回退到保守的 Chrome 120（2026-09-18）：曾升到 152，但 UA 是唯一
+            // 直接影响服务端响应的指纹项，个别站点对高版本 UA 有兼容分支，先保守。
             settings.set_user_agent(Some(
-              "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+              "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             ));
           }
           // 监听 child webview 的鼠标点击事件
