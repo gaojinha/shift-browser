@@ -422,7 +422,7 @@ fn render_html(
   .q-del {{ border:none; background:transparent; color:rgba(255,255,255,0.4); cursor:pointer; font-size:12px; flex-shrink:0; visibility:hidden; }}
   .q-item:hover .q-del {{ visibility:visible; }}
   .q-del:hover {{ color:#ff6b6b; }}
-  .todo-panel {{ display:flex; gap:8px; margin-bottom:10px; }}
+  .todo-panel {{ display:flex; flex-direction:column; gap:8px; margin-bottom:10px; }}
   .todo-add {{ display:flex; gap:6px; margin-bottom:8px; }}
   .todo-add input {{ flex:1; padding:8px 12px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#fff; font-size:13px; outline:none; }}
   .todo-add input:focus {{ border-color:var(--accent); }}
