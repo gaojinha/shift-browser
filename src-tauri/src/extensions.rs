@@ -394,27 +394,11 @@ const PRIVACY_JS: &str = r#"
     }
   } catch (e) {}
 
-  // ---- 8) 字体探针防护：document.fonts.check / measureText 返回收敛结果 ----
-  // 说明：系统已装字体列表是强指纹（国内用户字体组合尤其独特）。
-  // 策略：不改动真实字体渲染（避免页面错乱），只让"探测接口"结果收敛。
-  try {
-    if (document.fonts && document.fonts.check) {
-      var ocheck = document.fonts.check.bind(document.fonts);
-      var COMMON = ['Arial', 'Times New Roman', 'Courier New', 'Verdana', 'Helvetica',
-                    'Georgia', 'Tahoma', 'Trebuchet MS', 'Segoe UI', 'Roboto',
-                    'Microsoft YaHei', 'SimSun', 'PingFang SC', 'Noto Sans CJK SC'];
-      document.fonts.check = function (font, text) {
-        try {
-          var m = /(\d+(?:\.\d+)?)(px|pt|em|rem)?\s+(.+)/.exec(String(font || ''));
-          var fam = m ? m[3] : String(font || '');
-          fam = fam.replace(/["']/g, '').split(',')[0].trim();
-          // 只对"探测未装字体"的调用做收敛：非通用字体一律报 false
-          if (fam && COMMON.indexOf(fam) === -1) return false;
-        } catch (e) {}
-        return ocheck.apply(null, arguments);
-      };
-    }
-  } catch (e) {}
+  // ---- 8) 字体探针防护：已移至严格档 ----
+  // 事故记录（2026-09-18）：本项在标准档曾导致邮箱正文空白 —— 部分站点用
+  // document.fonts.check 判断"字体是否就绪"来决定是否渲染内容，强制返回 false
+  // 会被误判为字体未加载而卡住渲染。字体探针改为仅在严格档启用。
+  // （实现见 STRICT_PRIVACY_JS 的字体探针段）
 
   // ---- 9) WebGPU 指纹防护（2026 新兴高熵信号）----
   try {
@@ -589,6 +573,25 @@ const STRICT_PRIVACY_JS: &str = r#"
           name: 'Generic Voice', lang: 'zh-CN', localService: true,
           default: true, voiceURI: 'generic'
         }];
+      };
+    }
+  } catch (e) {}
+
+  // ---- 4.5) 字体探针防护（仅严格档；标准档曾导致邮箱正文空白，见事故记录）----
+  try {
+    if (document.fonts && document.fonts.check) {
+      var ocheck = document.fonts.check.bind(document.fonts);
+      var COMMON = ['Arial', 'Times New Roman', 'Courier New', 'Verdana', 'Helvetica',
+                    'Georgia', 'Tahoma', 'Trebuchet MS', 'Segoe UI', 'Roboto',
+                    'Microsoft YaHei', 'SimSun', 'PingFang SC', 'Noto Sans CJK SC'];
+      document.fonts.check = function (font, text) {
+        try {
+          var m = /(\d+(?:\.\d+)?)(px|pt|em|rem)?\s+(.+)/.exec(String(font || ''));
+          var fam = m ? m[3] : String(font || '');
+          fam = fam.replace(/["']/g, '').split(',')[0].trim();
+          if (fam && COMMON.indexOf(fam) === -1) return false;
+        } catch (e) {}
+        return ocheck.apply(null, arguments);
       };
     }
   } catch (e) {}
