@@ -357,6 +357,14 @@ impl TabManager {
                         if title.is_empty() {
                             return;
                         }
+                        // 内部启动页（shift://newtab/worldnav）标题固定"启动页"：
+                        // 页面自身的 <title>（"新标签页"）不覆盖，否则启动页标签
+                        // 刚出来一下又变成"新标签页"
+                        if let Some(uri) = webview.uri() {
+                            if is_internal_newtab_url(&uri) {
+                                return;
+                            }
+                        }
                         // 标题变化 → 更新内存态；仅在真的变化时通知前端（防高频重复 emit）
                         let changed = {
                             if let Some(state) = app2.try_state::<TabManager>() {
