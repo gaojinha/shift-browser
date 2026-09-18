@@ -683,22 +683,24 @@ fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>
 /// 内置广告拦截 CSS 规则（精简版，常见广告选择器）
 /// 设置 adblock_enabled=true 时自动注入，优先级低于用户扩展（扩展后注入）
 const ADBLOCK_CSS: &str = r#"
-/* ShiftBrowser 内置广告拦截（精简规则） */
-#ad, #ads, .ad, .ads, .advert, .advertisement, .ad-banner, .ad-container,
-.ad-slot, .ad-wrapper, .adsbygoogle, .banner-ad, .sponsored, .sponsor,
-.promo, .promotion, .google-ads, .ggads, .adv, .advertise, .ad-box,
-[class*="ad-banner"], [class*="ad-container"], [id*="ad-banner"],
-iframe[src*="ad."], iframe[src*="doubleclick"], iframe[src*="googlead"],
-img[src*="ad."], img[src*="advert"], img[src*="doubleclick"],
-ins.adsbygoogle, .ad-placeholder, .advertisement-banner,
+/* ShiftBrowser 内置广告拦截（收紧版 2026-09-18）
+   事故：宽泛选择器（[class*="banner"]、[id*="banner"]、iframe[src*="ad"]、
+   img[src*="ad."]、[src*="advert"] 等）导致邮箱正文的 iframe 与图片被隐藏，
+   表现为"邮件正文空白"。教训：src/class 的子串匹配会命中正常资源。
+   原则：只保留高置信度广告标识，严禁 [src*="ad"] 这类会误伤正文的匹配。 */
+ins.adsbygoogle, .adsbygoogle,
+[id^="google_ads"], [id^="aswift"], [id^="div-gpt-ad"], [class^="div-gpt-ad"],
+.google-ads, .ggads, #sinaads, .sinaads,
+iframe[src*="doubleclick.net"], iframe[src*="googlesyndication.com"],
+iframe[src*="amazon-adsystem.com"], iframe[src*="cpro.baidu.com"],
+img[src*="doubleclick.net"],
+.ad-banner, #ad-banner, .ad-container, .ad-slot,
+[class*="popup-ad"], [id*="popup-ad"], .ad-modal, .ad-overlay,
 [class*="popup-ad"], [id*="popup-ad"], .ad-modal, .ad-overlay,
 /* 门户/新浪类广告 */
 #ad_right, .ad-left, .ad-top, .ad-bottom, .adbox, .ad-box, .ad_box,
-.adsbox, .ggbox, #sinaads, .sinaads, .ads_global, .ad_global,
-[class*="advert"], [id*="advert"], [class*="sinaads"], [id*="sinaads"],
-[class*="gg_"], [class*="_gg"], [class*="banner"], [id*="banner"],
-iframe[src*="ad"], iframe[src*="ads"], iframe[src*="advert"], iframe[src*="sinaads"],
-iframe[src*="googlesyndication"], iframe[src*="amazon-adsystem"],
+.adsbox, .ads_global, .ad_global,
+[class*="sinaads"], [id*="sinaads"],
 /* 对联/悬浮广告（页面左右两侧） */
 #leftCouplet, #rightCouplet, .leftCouplet, .rightCouplet, .couplet, #couplet,
 .floatAd, .float-ad, .floatAdLeft, .floatAdRight, .leftFloat, .rightFloat,
@@ -763,7 +765,8 @@ const BUILTIN_KEYWORDS: &[&str] = &[
     "跳过广告",
     "跳过推广",
     "头条报",
-    "推广",
+    // 2026-09-18 移除宽泛词「推广」：邮件正文含"产品推广"等字样时整块被隐藏，
+    // 表现为"邮件正文空白"。文本关键词只保留明确的广告关闭按钮文案。
     "赞助",
     "下载APP",
     "下载 App",
