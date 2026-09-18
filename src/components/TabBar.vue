@@ -6,6 +6,7 @@ import { useGroupsStore } from '../stores/groups'
 import { useWorkspacesStore } from '../stores/workspaces'
 import { useToastStore } from '../stores/toast'
 import { invoke } from '@tauri-apps/api/core'
+import { setWebviewVisible } from '../utils/webview'
 import type { Tab } from '../types/tab'
 
 const tabsStore = useTabsStore()
@@ -34,7 +35,7 @@ const menu = ref<{ x: number; y: number; tabId: string } | null>(null)
 
 // 菜单打开时隐藏 GTK 层 webview（否则 HTML 菜单被 webview 盖住），关闭时恢复
 watch(menu, (v) => {
-  invoke('set_webview_visible', { visible: !v }).catch(() => {})
+  setWebviewVisible(!v, 'tab-context-menu')
   // 关闭菜单时清空拖拽状态
   if (!v) {
     menuDragState.value = null
@@ -331,7 +332,7 @@ const showWorkspaceDialog = ref(false)
 
 // 弹窗打开时隐藏 GTK 层 webview（否则 HTML 弹窗被 webview 盖住），关闭时恢复
 watch(showWorkspaceDialog, (v) => {
-  invoke('set_webview_visible', { visible: !v }).catch(() => {})
+  setWebviewVisible(!v, 'workspace-dialog')
 })
 
 function toggleWorkspaceMenu() {

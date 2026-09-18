@@ -6,16 +6,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl};
+use tauri::{
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl,
+};
 
 use crate::db::{downloads, history, Db};
 
 #[cfg(target_os = "linux")]
 use gtk::glib::translate::ToGlibPtr;
 use gtk::prelude::*;
+use webkit2gtk::WebViewExt;
 #[cfg(target_os = "linux")]
 use webkit2gtk::{DownloadExt, SettingsExt, URIRequestExt, URIResponseExt, WebContextExt};
-use webkit2gtk::WebViewExt;
 
 // UI 布局常量（与前端 CSS 保持一致）
 pub const TAB_BAR_HEIGHT: f64 = 40.0;
@@ -26,156 +28,168 @@ pub const STATUS_BAR_HEIGHT: f64 = 22.0;
 /// 净化下载文件名（防路径穿越）：
 /// 剥掉 / \ 路径分隔符、空字节/控制字符、首尾点段（防 ../ 与隐藏文件），限长 200 字符
 fn sanitize_filename(name: &str) -> String {
-  let cleaned: String = name
-    .chars()
-    .filter(|c| !matches!(c, '/' | '\\' | '\0' | '\n' | '\r' | '\t'))
-    .collect();
-  let cleaned = cleaned.trim().trim_matches('.').trim().to_string();
-  if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
-    return "download".to_string();
-  }
-  let mut s: String = cleaned.chars().take(200).collect();
-  if s.is_empty() {
-    s = "download".to_string();
-  }
-  s
+    let cleaned: String = name
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\' | '\0' | '\n' | '\r' | '\t'))
+        .collect();
+    let cleaned = cleaned.trim().trim_matches('.').trim().to_string();
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+        return "download".to_string();
+    }
+    let mut s: String = cleaned.chars().take(200).collect();
+    if s.is_empty() {
+        s = "download".to_string();
+    }
+    s
 }
 
 /// 内容区顶部偏移（书签栏开启时）= 标签栏 + 地址栏 + 书签栏
-pub const CONTENT_TOP_OFFSET: f64 =
-  TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT + BOOKMARKS_BAR_HEIGHT;
+pub const CONTENT_TOP_OFFSET: f64 = TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT + BOOKMARKS_BAR_HEIGHT;
 /// 书签栏关闭时的顶部偏移 = 标签栏 + 地址栏
 pub const CONTENT_TOP_OFFSET_NO_BOOKMARKS: f64 = TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT;
 
 /// 标签页元数据（运行时状态，不持久化；会话保存走 sessions 表）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tab {
-  pub id: String,
-  pub url: String,
-  pub title: String,
-  pub favicon: String,
-  pub is_active: bool,
-  pub is_pinned: bool,
-  pub is_muted: bool,
+    pub id: String,
+    pub url: String,
+    pub title: String,
+    pub favicon: String,
+    pub is_active: bool,
+    pub is_pinned: bool,
+    pub is_muted: bool,
 }
 
 /// 标签管理器（Tauri State）
 pub struct TabManager {
-  tabs: Mutex<HashMap<String, Tab>>,
-  order: Mutex<Vec<String>>,
-  active_id: Mutex<Option<String>>,
-  /// 书签栏是否显示（影响 child webview 的 top 偏移：112 vs 82）
-  show_bookmarks_bar: Mutex<bool>,
+    tabs: Mutex<HashMap<String, Tab>>,
+    order: Mutex<Vec<String>>,
+    active_id: Mutex<Option<String>>,
+    /// 书签栏是否显示（影响 child webview 的 top 偏移：112 vs 82）
+    show_bookmarks_bar: Mutex<bool>,
+    /// set_webview_visible 已应用的最近 seq（P1-9：丢弃并发乱序的过期指令）
+    webview_visible_seq: Mutex<u64>,
 }
 
 impl TabManager {
-  pub fn new() -> Self {
-    Self {
-      tabs: Mutex::new(HashMap::new()),
-      order: Mutex::new(Vec::new()),
-      active_id: Mutex::new(None),
-      show_bookmarks_bar: Mutex::new(true),
+    pub fn new() -> Self {
+        Self {
+            tabs: Mutex::new(HashMap::new()),
+            order: Mutex::new(Vec::new()),
+            active_id: Mutex::new(None),
+            show_bookmarks_bar: Mutex::new(true),
+            webview_visible_seq: Mutex::new(0),
+        }
     }
-  }
 
-  pub fn set_show_bookmarks_bar(&self, visible: bool) -> f64 {
-    *self.show_bookmarks_bar.lock().unwrap() = visible;
-    self.top_offset()
-  }
-
-  /// 当前内容区顶部偏移（随书签栏显隐变化）
-  pub fn top_offset(&self) -> f64 {
-    if *self.show_bookmarks_bar.lock().unwrap() {
-      CONTENT_TOP_OFFSET
-    } else {
-      CONTENT_TOP_OFFSET_NO_BOOKMARKS
+    pub fn set_show_bookmarks_bar(&self, visible: bool) -> f64 {
+        *self.show_bookmarks_bar.lock().unwrap() = visible;
+        self.top_offset()
     }
-  }
 
-  /// 生成 UUID v4（真随机，crypto 级）
-  fn uuid() -> String {
-    uuid::Uuid::new_v4().to_string()
-  }
+    /// 当前内容区顶部偏移（随书签栏显隐变化）
+    pub fn top_offset(&self) -> f64 {
+        if *self.show_bookmarks_bar.lock().unwrap() {
+            CONTENT_TOP_OFFSET
+        } else {
+            CONTENT_TOP_OFFSET_NO_BOOKMARKS
+        }
+    }
 
-  fn all_tabs(&self) -> Vec<Tab> {
-    let tabs = self.tabs.lock().unwrap();
-    let order = self.order.lock().unwrap();
-    order
-      .iter()
-      .filter_map(|id| tabs.get(id).cloned())
-      .collect()
-  }
+    /// 生成 UUID v4（真随机，crypto 级）
+    fn uuid() -> String {
+        uuid::Uuid::new_v4().to_string()
+    }
 
-  /// 根据窗口尺寸计算内容区域大小（逻辑像素）；top 随书签栏显隐变化
-  fn content_size(window: &tauri::Window, top: f64) -> (f64, f64) {
-    let inner = window.inner_size().unwrap_or(tauri::PhysicalSize::new(1280, 800));
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let w = inner.width as f64 / scale;
-    let h = inner.height as f64 / scale;
-    (w, (h - top - STATUS_BAR_HEIGHT).max(100.0))
-  }
+    fn all_tabs(&self) -> Vec<Tab> {
+        let tabs = self.tabs.lock().unwrap();
+        let order = self.order.lock().unwrap();
+        order
+            .iter()
+            .filter_map(|id| tabs.get(id).cloned())
+            .collect()
+    }
 
-  /// 创建嵌入式 webview
-  fn create_webview(
-    app: &AppHandle,
-    id: &str,
-    url: &str,
-  ) -> Result<(), String> {
-    let window = app
-      .get_window("main")
-      .ok_or_else(|| "主窗口不存在".to_string())?;
+    /// 根据窗口尺寸计算内容区域大小（逻辑像素）；top 随书签栏显隐变化
+    fn content_size(window: &tauri::Window, top: f64) -> (f64, f64) {
+        let inner = window
+            .inner_size()
+            .unwrap_or(tauri::PhysicalSize::new(1280, 800));
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let w = inner.width as f64 / scale;
+        let h = inner.height as f64 / scale;
+        (w, (h - top - STATUS_BAR_HEIGHT).max(100.0))
+    }
 
-    let parsed_url = url
-      .parse::<tauri::Url>()
-      .map_err(|e| format!("URL 解析失败: {}", e))?;
+    /// 创建嵌入式 webview
+    fn create_webview(app: &AppHandle, id: &str, url: &str) -> Result<(), String> {
+        let window = app
+            .get_window("main")
+            .ok_or_else(|| "主窗口不存在".to_string())?;
 
-    // file:// URL 用 shift:// 自定义协议替代，让 WebKitGTK 的 UserScript（IPC桥）能注入
-    let webview_url = if parsed_url.scheme() == "file" {
-      let path = parsed_url.path();
-      let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法获取 app_data_dir: {}", e))?;
-      let newtab_dir = app_data.join("newtab");
-      let newtab_index = newtab_dir.join("index.html");
-      let worldnav = newtab_dir.join("world-nav.html");
-      if path == newtab_index.to_string_lossy() || path.ends_with("newtab/index.html") {
-        log::info!("[tabs] file URL → shift://newtab");
-        tauri::WebviewUrl::CustomProtocol(
-          "shift://newtab".parse().map_err(|e| format!("URL 解析失败: {}", e))?,
-        )
-      } else if path == worldnav.to_string_lossy() || path.ends_with("newtab/world-nav.html") {
-        log::info!("[tabs] file URL → shift://worldnav");
-        tauri::WebviewUrl::CustomProtocol(
-          "shift://worldnav".parse().map_err(|e| format!("URL 解析失败: {}", e))?,
-        )
-      } else {
-        log::info!("[tabs] file URL 保持 External: {}", path);
-        WebviewUrl::External(parsed_url)
-      }
-    } else {
-      WebviewUrl::External(parsed_url)
-    };
+        let parsed_url = url
+            .parse::<tauri::Url>()
+            .map_err(|e| format!("URL 解析失败: {}", e))?;
 
-    let top = {
-      if let Some(state) = app.try_state::<TabManager>() {
-        state.top_offset()
-      } else {
-        CONTENT_TOP_OFFSET
-      }
-    };
-    let (w, h) = Self::content_size(&window, top);
-    log::info!("[tabs] create_webview: inner={:?} content=({:.0},{:.0}) top={}", window.inner_size(), w, h, top);
+        // file:// URL 用 shift:// 自定义协议替代，让 WebKitGTK 的 UserScript（IPC桥）能注入
+        let webview_url = if parsed_url.scheme() == "file" {
+            let path = parsed_url.path();
+            let app_data = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("无法获取 app_data_dir: {}", e))?;
+            let newtab_dir = app_data.join("newtab");
+            let newtab_index = newtab_dir.join("index.html");
+            let worldnav = newtab_dir.join("world-nav.html");
+            if path == newtab_index.to_string_lossy() || path.ends_with("newtab/index.html") {
+                log::info!("[tabs] file URL → shift://newtab");
+                tauri::WebviewUrl::CustomProtocol(
+                    "shift://newtab"
+                        .parse()
+                        .map_err(|e| format!("URL 解析失败: {}", e))?,
+                )
+            } else if path == worldnav.to_string_lossy() || path.ends_with("newtab/world-nav.html")
+            {
+                log::info!("[tabs] file URL → shift://worldnav");
+                tauri::WebviewUrl::CustomProtocol(
+                    "shift://worldnav"
+                        .parse()
+                        .map_err(|e| format!("URL 解析失败: {}", e))?,
+                )
+            } else {
+                log::info!("[tabs] file URL 保持 External: {}", path);
+                WebviewUrl::External(parsed_url)
+            }
+        } else {
+            WebviewUrl::External(parsed_url)
+        };
 
-    // 页面加载完成时同步标题（用 host 作标题，MVP 阶段）
-    let app_handle = app.clone();
-    let app_handle2 = app_handle.clone();
-    let tab_id = id.to_string();
-    let label = format!("tab-{}", id);
-    // 新窗口去重：同一 URL 500ms 内重复触发（原生 create 信号 + JS window.open 双通道）只建一个标签
-    let last_new_window: std::sync::Arc<std::sync::Mutex<Option<(String, std::time::Instant)>>> =
-      std::sync::Arc::new(std::sync::Mutex::new(None));
-    let child = window
+        let top = {
+            if let Some(state) = app.try_state::<TabManager>() {
+                state.top_offset()
+            } else {
+                CONTENT_TOP_OFFSET
+            }
+        };
+        let (w, h) = Self::content_size(&window, top);
+        log::info!(
+            "[tabs] create_webview: inner={:?} content=({:.0},{:.0}) top={}",
+            window.inner_size(),
+            w,
+            h,
+            top
+        );
+
+        // 页面加载完成时同步标题（用 host 作标题，MVP 阶段）
+        let app_handle = app.clone();
+        let app_handle2 = app_handle.clone();
+        let tab_id = id.to_string();
+        let label = format!("tab-{}", id);
+        // 新窗口去重：同一 URL 500ms 内重复触发（原生 create 信号 + JS window.open 双通道）只建一个标签
+        let last_new_window: std::sync::Arc<
+            std::sync::Mutex<Option<(String, std::time::Instant)>>,
+        > = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let child = window
       .add_child(
         WebviewBuilder::new(label.clone(), webview_url)
           // Linux：显式指定 web extensions 目录（exe 同目录），否则 Tauri 的 IPC 桥
@@ -189,6 +203,14 @@ impl TabManager {
           // target=_blank / window.open 新窗口请求：统一创建新标签页打开链接
           .on_new_window(move |url, _features| {
             log::info!("[tabs] on_new_window: url={}", url);
+            // P2：远程页面可控入口——只放行 http/https。
+            // 拒绝 file:/javascript:/data: 等：恶意页面可 window.open('file:///etc/passwd')
+            // 强制打开本地文件标签（create_webview 对非 newtab 的 file:// 保持 External 渲染）。
+            // 内部页面（shift://newtab 等）由可信前端 create_tab 命令打开，不走此入口。
+            if url.scheme() != "http" && url.scheme() != "https" {
+              log::warn!("[tabs] on_new_window: 拒绝非 http/https scheme: {}", url);
+              return tauri::webview::NewWindowResponse::Deny;
+            }
             let url_str = url.to_string();
             // 去重：500ms 内同 URL 已处理过则忽略，防止原生+JS 双通道重复建标签
             {
@@ -302,78 +324,82 @@ impl TabManager {
       )
       .map_err(|e| format!("创建 webview 失败: {}", e))?;
 
-    log::info!("[tabs] child_webview: pos={:?} size={:?}", child.position().unwrap(), child.size().unwrap());
+        log::info!(
+            "[tabs] child_webview: pos={:?} size={:?}",
+            child.position().unwrap(),
+            child.size().unwrap()
+        );
 
-    // GTK 的 vbox 会忽略 add_child 的位置参数并平分空间（webview 落到窗口下半部分）。
-    // 解法：把主 webview 和所有 child webview reparent 到 GtkFixed 容器，实现绝对定位叠层。
-    #[cfg(target_os = "linux")]
-    {
-      let db = app.state::<Db>();
-      Self::fix_gtk_layout(&child, w, h, db.pool.clone(), app.clone())?;
-    }
+        // GTK 的 vbox 会忽略 add_child 的位置参数并平分空间（webview 落到窗口下半部分）。
+        // 解法：把主 webview 和所有 child webview reparent 到 GtkFixed 容器，实现绝对定位叠层。
+        #[cfg(target_os = "linux")]
+        {
+            let db = app.state::<Db>();
+            Self::fix_gtk_layout(&child, w, h, db.pool.clone(), app.clone())?;
+        }
 
-    // 监听 WebKit title 变化 → 实时同步标签标题（on_page_load 的 host 只是初始占位）
-    #[cfg(target_os = "linux")]
-    {
-      let app_for_title = app.clone();
-      let id_for_title = id.to_string();
-      let _ = child.with_webview(move |pwv| {
-        let wv = pwv.inner().clone();
-        let app2 = app_for_title;
-        let tab_id = id_for_title;
-        wv.connect_title_notify(move |webview| {
-          if let Some(t) = webview.title() {
-            let title = t.trim().to_string();
-            if title.is_empty() {
-              return;
-            }
-            // 标题变化 → 更新内存态；仅在真的变化时通知前端（防高频重复 emit）
-            let changed = {
-              if let Some(state) = app2.try_state::<TabManager>() {
-                let mut tabs = state.tabs.lock().unwrap();
-                match tabs.get_mut(&tab_id) {
-                  Some(tab) if tab.title != title => {
-                    tab.title = title;
-                    true
-                  }
-                  _ => false,
-                }
-              } else {
-                false
-              }
-            };
-            if changed {
-              let _ = app2.emit("tabs-updated", ());
-            }
-          }
+        // 监听 WebKit title 变化 → 实时同步标签标题（on_page_load 的 host 只是初始占位）
+        #[cfg(target_os = "linux")]
+        {
+            let app_for_title = app.clone();
+            let id_for_title = id.to_string();
+            let _ = child.with_webview(move |pwv| {
+                let wv = pwv.inner().clone();
+                let app2 = app_for_title;
+                let tab_id = id_for_title;
+                wv.connect_title_notify(move |webview| {
+                    if let Some(t) = webview.title() {
+                        let title = t.trim().to_string();
+                        if title.is_empty() {
+                            return;
+                        }
+                        // 标题变化 → 更新内存态；仅在真的变化时通知前端（防高频重复 emit）
+                        let changed = {
+                            if let Some(state) = app2.try_state::<TabManager>() {
+                                let mut tabs = state.tabs.lock().unwrap();
+                                match tabs.get_mut(&tab_id) {
+                                    Some(tab) if tab.title != title => {
+                                        tab.title = title;
+                                        true
+                                    }
+                                    _ => false,
+                                }
+                            } else {
+                                false
+                            }
+                        };
+                        if changed {
+                            let _ = app2.emit("tabs-updated", ());
+                        }
+                    }
+                });
+            });
+        }
+
+        // 新标签创建后重新注入扩展 + 广告拦截（新 webview 需要注入）
+        let app_for_inject = app.clone();
+        tauri::async_runtime::spawn(async move {
+            crate::extensions::re_inject(&app_for_inject).await;
         });
-      });
+
+        Ok(())
     }
 
-    // 新标签创建后重新注入扩展 + 广告拦截（新 webview 需要注入）
-    let app_for_inject = app.clone();
-    tauri::async_runtime::spawn(async move {
-      crate::extensions::re_inject(&app_for_inject).await;
-    });
+    /// Linux/GTK 布局修复：把 child webview reparent 到 GtkFixed 容器，定位到内容区
+    /// 结构：窗口 vbox → [GtkFixed] → 主 webview(0,0 全屏) + child webview(0,82 内容区)
+    /// with_webview 闭包在主线程执行；gtk 对象在闭包内创建/查找，不跨线程捕获
+    #[cfg(target_os = "linux")]
+    fn fix_gtk_layout(
+        child: &tauri::Webview,
+        w: f64,
+        h: f64,
+        db_pool: sqlx::SqlitePool,
+        app: AppHandle,
+    ) -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let child = child.clone();
 
-    Ok(())
-  }
-
-/// Linux/GTK 布局修复：把 child webview reparent 到 GtkFixed 容器，定位到内容区
-  /// 结构：窗口 vbox → [GtkFixed] → 主 webview(0,0 全屏) + child webview(0,82 内容区)
-  /// with_webview 闭包在主线程执行；gtk 对象在闭包内创建/查找，不跨线程捕获
-  #[cfg(target_os = "linux")]
-  fn fix_gtk_layout(
-    child: &tauri::Webview,
-    w: f64,
-    h: f64,
-    db_pool: sqlx::SqlitePool,
-    app: AppHandle,
-  ) -> Result<(), String> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let child = child.clone();
-
-    child
+        child
       .with_webview(move |pwv| {
         let child_gtk = pwv.inner();
         // 从 parent 拿 vbox（不调 window 方法，避免主线程死锁）
@@ -649,84 +675,90 @@ impl TabManager {
       })
       .map_err(|e| format!("child webview 句柄获取失败: {}", e))?;
 
-    rx.recv().map_err(|e| format!("主线程布局失败: {}", e))?;
-    Ok(())
-  }
-
-  /// 切换 webview 显隐
-  fn set_webview_visible(app: &AppHandle, id: &str, visible: bool) -> Result<(), String> {
-    let window = app
-      .get_window("main")
-      .ok_or_else(|| "主窗口不存在".to_string())?;
-    let label = format!("tab-{}", id);
-    if let Some(webview) = window.get_webview(&label) {
-      if visible {
-        let _ = webview.show();
-        let _ = webview.set_focus();
-      } else {
-        let _ = webview.hide();
-      }
+        rx.recv().map_err(|e| format!("主线程布局失败: {}", e))?;
+        Ok(())
     }
-    Ok(())
-  }
 
-  /// 标签切换专用：先 hide 旧标签再 show 新标签
-  /// 注意 1：绝不能在 run_on_main_thread 闭包里再调 wv.show()/hide()——
-  /// 那两个 API 内部是"主线程则直接 handle_user_message"的重入路径，
-  /// 在事件循环处理 Task 时重入会导致可见性变更静默失效（切换无反应）。
-  /// 注意 2：顺序必须 hide→show。GtkFixed 里后添加的 widget 盖在上面，
-  /// 若先 show 新再 hide 旧，旧标签（若后创建）会盖住新标签，
-  /// 表现为"切了标签内容不变，很久才变过来"。hide 先行后白屏空窗仅毫秒级。
-  fn switch_visibility(app: &AppHandle, show_id: &str, hide_id: Option<&str>) -> Result<(), String> {
-    let window = app
-      .get_window("main")
-      .ok_or_else(|| "主窗口不存在".to_string())?;
-    let show_wv = window
-      .get_webview(&format!("tab-{}", show_id))
-      .ok_or_else(|| "目标标签 webview 不存在".to_string())?;
-    let hide_wv = hide_id.and_then(|h| window.get_webview(&format!("tab-{}", h)));
-    // 先隐藏旧标签（避免 z-order 盖住新标签），再显示新标签
-    if let Some(wv) = &hide_wv {
-      let _ = wv.hide();
+    /// 切换 webview 显隐
+    fn set_webview_visible(app: &AppHandle, id: &str, visible: bool) -> Result<(), String> {
+        let window = app
+            .get_window("main")
+            .ok_or_else(|| "主窗口不存在".to_string())?;
+        let label = format!("tab-{}", id);
+        if let Some(webview) = window.get_webview(&label) {
+            if visible {
+                let _ = webview.show();
+                let _ = webview.set_focus();
+            } else {
+                let _ = webview.hide();
+            }
+        }
+        Ok(())
     }
-    let _ = show_wv.show();
-    let _ = show_wv.set_focus();
-    // 修复：show 后重新设置尺寸。hide 期间 set_size_request 不触发 GTK 重新分配，
-    // 窗口 resize 后切回该标签会停留在旧尺寸（小窗口大小不跟随放大）
-    let top = if let Some(state) = app.try_state::<TabManager>() {
-      state.top_offset()
-    } else {
-      CONTENT_TOP_OFFSET
-    };
-    let inner = window.inner_size().unwrap_or(tauri::PhysicalSize::new(1280, 800));
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let w = (inner.width as f64 / scale) as i32;
-    let h = ((inner.height as f64 / scale) - top - STATUS_BAR_HEIGHT).max(100.0) as i32;
-    let _ = show_wv.with_webview(move |pwv| {
-      let gtk_wv = pwv.inner();
-      if let Some(fixed) = gtk_wv
-        .parent()
-        .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
-      {
-        fixed.move_(&gtk_wv, 0, 0);
-        fixed.set_size_request(w, h);
-      }
-      gtk_wv.set_size_request(w, h);
-    });
-    Ok(())
-  }
 
-  /// 关闭并销毁 webview
-  fn destroy_webview(app: &AppHandle, id: &str) {
-    let window = match app.get_window("main") {
-      Some(w) => w,
-      None => return,
-    };
-    let label = format!("tab-{}", id);
-    if let Some(webview) = window.get_webview(&label) {
-      let _ = webview.close();
+    /// 标签切换专用：先 hide 旧标签再 show 新标签
+    /// 注意 1：绝不能在 run_on_main_thread 闭包里再调 wv.show()/hide()——
+    /// 那两个 API 内部是"主线程则直接 handle_user_message"的重入路径，
+    /// 在事件循环处理 Task 时重入会导致可见性变更静默失效（切换无反应）。
+    /// 注意 2：顺序必须 hide→show。GtkFixed 里后添加的 widget 盖在上面，
+    /// 若先 show 新再 hide 旧，旧标签（若后创建）会盖住新标签，
+    /// 表现为"切了标签内容不变，很久才变过来"。hide 先行后白屏空窗仅毫秒级。
+    fn switch_visibility(
+        app: &AppHandle,
+        show_id: &str,
+        hide_id: Option<&str>,
+    ) -> Result<(), String> {
+        let window = app
+            .get_window("main")
+            .ok_or_else(|| "主窗口不存在".to_string())?;
+        let show_wv = window
+            .get_webview(&format!("tab-{}", show_id))
+            .ok_or_else(|| "目标标签 webview 不存在".to_string())?;
+        let hide_wv = hide_id.and_then(|h| window.get_webview(&format!("tab-{}", h)));
+        // 先隐藏旧标签（避免 z-order 盖住新标签），再显示新标签
+        if let Some(wv) = &hide_wv {
+            let _ = wv.hide();
+        }
+        let _ = show_wv.show();
+        let _ = show_wv.set_focus();
+        // 修复：show 后重新设置尺寸。hide 期间 set_size_request 不触发 GTK 重新分配，
+        // 窗口 resize 后切回该标签会停留在旧尺寸（小窗口大小不跟随放大）
+        let top = if let Some(state) = app.try_state::<TabManager>() {
+            state.top_offset()
+        } else {
+            CONTENT_TOP_OFFSET
+        };
+        let inner = window
+            .inner_size()
+            .unwrap_or(tauri::PhysicalSize::new(1280, 800));
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let w = (inner.width as f64 / scale) as i32;
+        let h = ((inner.height as f64 / scale) - top - STATUS_BAR_HEIGHT).max(100.0) as i32;
+        let _ = show_wv.with_webview(move |pwv| {
+            let gtk_wv = pwv.inner();
+            if let Some(fixed) = gtk_wv
+                .parent()
+                .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
+            {
+                fixed.move_(&gtk_wv, 0, 0);
+                fixed.set_size_request(w, h);
+            }
+            gtk_wv.set_size_request(w, h);
+        });
+        Ok(())
     }
-  }
+
+    /// 关闭并销毁 webview
+    fn destroy_webview(app: &AppHandle, id: &str) {
+        let window = match app.get_window("main") {
+            Some(w) => w,
+            None => return,
+        };
+        let label = format!("tab-{}", id);
+        if let Some(webview) = window.get_webview(&label) {
+            let _ = webview.close();
+        }
+    }
 }
 
 /// 应用启动时初始化 GTK 布局（setup 阶段调用，主线程）
@@ -734,98 +766,101 @@ impl TabManager {
 /// 主 webview 在 overlay 主层自动跟随窗口（不手动改 size_request，避免撑大窗口 natural size 导致无法缩小）
 #[cfg(target_os = "linux")]
 pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
-  // 读取书签栏显隐，决定初始 top_offset
-  let top = if let Some(state) = app.try_state::<TabManager>() {
-    state.top_offset()
-  } else {
-    CONTENT_TOP_OFFSET
-  };
+    // 读取书签栏显隐，决定初始 top_offset
+    let top = if let Some(state) = app.try_state::<TabManager>() {
+        state.top_offset()
+    } else {
+        CONTENT_TOP_OFFSET
+    };
 
-  if let Some(main_wv) = app.get_webview("main") {
-    main_wv
-      .with_webview(move |pwv| {
-        let main_gtk = pwv.inner();
-        // 从 parent 拿 vbox（不调 window 方法，避免主线程死锁）
-        if let Some(vbox) = main_gtk
-          .parent()
-          .and_then(|p| p.dynamic_cast::<gtk::Box>().ok())
-        {
-          // 创建 GtkOverlay 挂到 vbox（填满窗口）
-          let overlay = gtk::Overlay::new();
-          vbox.remove(&main_gtk);
-          vbox.pack_start(&overlay, true, true, 0);
-          overlay.show();
-
-          // 主 webview 放主层：自动填满 overlay。size_request 只设最小尺寸（跟窗口 minWidth/minHeight 一致），
-          // 不能设 1280x800——那会撑大窗口 natural size，导致窗口无法缩小
-          overlay.add(&main_gtk);
-          main_gtk.set_size_request(800, 600);
-          main_gtk.show();
-
-          // GtkFixed 放上层：child webviews 绝对定位
-          // 关键：Fixed 用 margin_top 定位到内容区（y=top 起），避免覆盖地址栏拦截点击事件
-          // 同样只设最小尺寸，避免撑大窗口；resize 时 on_window_event 会更新为实际尺寸
-          let fixed = gtk::Fixed::new();
-          fixed.set_valign(gtk::Align::Start);
-          fixed.set_margin_top(top as i32);
-          fixed.set_size_request(800, 600);
-          overlay.add_overlay(&fixed);
-          fixed.show();
-
-          log::info!("[tabs] setup: GtkOverlay 布局初始化完成 top={}", top);
-        } else {
-          log::info!("[tabs] setup: 主 webview 的 parent 不是 GtkBox，跳过 reparent");
-        }
-      })
-      .map_err(|e| format!("主 webview 句柄获取失败: {}", e))?;
-  }
-
-  // 注册窗口 resize 监听：同步 child webviews 和 Fixed 容器（主 webview 在 overlay 主层自动跟随窗口）
-  let app_handle = app.handle().clone();
-  if let Some(window) = app.get_window("main") {
-    window.on_window_event(move |event| {
-      if let tauri::WindowEvent::Resized(size) = event {
-        let w = size.width as i32;
-        let h = size.height as i32;
-        let top = if let Some(state) = app_handle.try_state::<TabManager>() {
-          state.top_offset()
-        } else {
-          CONTENT_TOP_OFFSET
-        };
-        let content_h = (h as f64 - top - STATUS_BAR_HEIGHT).max(100.0) as i32;
-        log::info!(
-          "[tabs] window resized: {}x{} content_h={} top={}",
-          w, h, content_h, top
-        );
-
-        // child webviews：Fixed 内位置 (0,0)，尺寸 (w, content_h)；Fixed 本身在窗口 (0, top)
-        if let Some(state) = app_handle.try_state::<TabManager>() {
-          let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
-          for id in ids {
-            let label = format!("tab-{}", id);
-            if let Some(wv) = app_handle.get_webview(&label) {
-              let _ = wv.with_webview(move |pwv| {
-                let gtk_wv = pwv.inner();
-                if let Some(fixed) = gtk_wv
-                  .parent()
-                  .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
+    if let Some(main_wv) = app.get_webview("main") {
+        main_wv
+            .with_webview(move |pwv| {
+                let main_gtk = pwv.inner();
+                // 从 parent 拿 vbox（不调 window 方法，避免主线程死锁）
+                if let Some(vbox) = main_gtk
+                    .parent()
+                    .and_then(|p| p.dynamic_cast::<gtk::Box>().ok())
                 {
-                  fixed.move_(&gtk_wv, 0, 0);
-                  fixed.set_size_request(w, content_h);
-                }
-                gtk_wv.set_size_request(w, content_h);
-                // 隐藏的 webview 不触发重新分配；标记 queue_resize，
-                // show() 时 GTK 会按最新 size_request 分配（避免切回后停留旧尺寸）
-                gtk_wv.queue_resize();
-              });
-            }
-          }
-        }
-      }
-    });
-  }
+                    // 创建 GtkOverlay 挂到 vbox（填满窗口）
+                    let overlay = gtk::Overlay::new();
+                    vbox.remove(&main_gtk);
+                    vbox.pack_start(&overlay, true, true, 0);
+                    overlay.show();
 
-  Ok(())
+                    // 主 webview 放主层：自动填满 overlay。size_request 只设最小尺寸（跟窗口 minWidth/minHeight 一致），
+                    // 不能设 1280x800——那会撑大窗口 natural size，导致窗口无法缩小
+                    overlay.add(&main_gtk);
+                    main_gtk.set_size_request(800, 600);
+                    main_gtk.show();
+
+                    // GtkFixed 放上层：child webviews 绝对定位
+                    // 关键：Fixed 用 margin_top 定位到内容区（y=top 起），避免覆盖地址栏拦截点击事件
+                    // 同样只设最小尺寸，避免撑大窗口；resize 时 on_window_event 会更新为实际尺寸
+                    let fixed = gtk::Fixed::new();
+                    fixed.set_valign(gtk::Align::Start);
+                    fixed.set_margin_top(top as i32);
+                    fixed.set_size_request(800, 600);
+                    overlay.add_overlay(&fixed);
+                    fixed.show();
+
+                    log::info!("[tabs] setup: GtkOverlay 布局初始化完成 top={}", top);
+                } else {
+                    log::info!("[tabs] setup: 主 webview 的 parent 不是 GtkBox，跳过 reparent");
+                }
+            })
+            .map_err(|e| format!("主 webview 句柄获取失败: {}", e))?;
+    }
+
+    // 注册窗口 resize 监听：同步 child webviews 和 Fixed 容器（主 webview 在 overlay 主层自动跟随窗口）
+    let app_handle = app.handle().clone();
+    if let Some(window) = app.get_window("main") {
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::Resized(size) = event {
+                let w = size.width as i32;
+                let h = size.height as i32;
+                let top = if let Some(state) = app_handle.try_state::<TabManager>() {
+                    state.top_offset()
+                } else {
+                    CONTENT_TOP_OFFSET
+                };
+                let content_h = (h as f64 - top - STATUS_BAR_HEIGHT).max(100.0) as i32;
+                log::info!(
+                    "[tabs] window resized: {}x{} content_h={} top={}",
+                    w,
+                    h,
+                    content_h,
+                    top
+                );
+
+                // child webviews：Fixed 内位置 (0,0)，尺寸 (w, content_h)；Fixed 本身在窗口 (0, top)
+                if let Some(state) = app_handle.try_state::<TabManager>() {
+                    let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
+                    for id in ids {
+                        let label = format!("tab-{}", id);
+                        if let Some(wv) = app_handle.get_webview(&label) {
+                            let _ = wv.with_webview(move |pwv| {
+                                let gtk_wv = pwv.inner();
+                                if let Some(fixed) = gtk_wv
+                                    .parent()
+                                    .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
+                                {
+                                    fixed.move_(&gtk_wv, 0, 0);
+                                    fixed.set_size_request(w, content_h);
+                                }
+                                gtk_wv.set_size_request(w, content_h);
+                                // 隐藏的 webview 不触发重新分配；标记 queue_resize，
+                                // show() 时 GTK 会按最新 size_request 分配（避免切回后停留旧尺寸）
+                                gtk_wv.queue_resize();
+                            });
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    Ok(())
 }
 
 /// 下载目标路径唯一化：同名文件已存在时加 (1)(2)... 后缀，避免覆盖
@@ -851,538 +886,592 @@ fn unique_download_path(dir: &str, filename: &str) -> String {
 /// 从 vbox 查找 GtkOverlay 里的 GtkFixed 容器，不存在则创建并挂到 vbox（兜底）
 #[cfg(target_os = "linux")]
 fn find_or_create_fixed(vbox: &gtk::Box) -> gtk::Fixed {
-  // 优先：vbox → GtkOverlay → GtkFixed
-  if let Some(overlay) = vbox
-    .children()
-    .iter()
-    .find(|c| c.type_().name() == "GtkOverlay")
-    .and_then(|c| c.dynamic_cast_ref::<gtk::Overlay>().cloned())
-  {
-    if let Some(f) = overlay
-      .children()
-      .iter()
-      .find(|c| c.type_().name() == "GtkFixed")
-      .and_then(|c| c.dynamic_cast_ref::<gtk::Fixed>().cloned())
+    // 优先：vbox → GtkOverlay → GtkFixed
+    if let Some(overlay) = vbox
+        .children()
+        .iter()
+        .find(|c| c.type_().name() == "GtkOverlay")
+        .and_then(|c| c.dynamic_cast_ref::<gtk::Overlay>().cloned())
     {
-      return f;
+        if let Some(f) = overlay
+            .children()
+            .iter()
+            .find(|c| c.type_().name() == "GtkFixed")
+            .and_then(|c| c.dynamic_cast_ref::<gtk::Fixed>().cloned())
+        {
+            return f;
+        }
     }
-  }
-  // 兜底：vbox 直接找 Fixed
-  if let Some(f) = vbox
-    .children()
-    .iter()
-    .find(|c| c.type_().name() == "GtkFixed")
-    .and_then(|c| c.dynamic_cast_ref::<gtk::Fixed>().cloned())
-  {
-    return f;
-  }
-  let f = gtk::Fixed::new();
-  vbox.pack_start(&f, true, true, 0);
-  f.show();
-  f
+    // 兜底：vbox 直接找 Fixed
+    if let Some(f) = vbox
+        .children()
+        .iter()
+        .find(|c| c.type_().name() == "GtkFixed")
+        .and_then(|c| c.dynamic_cast_ref::<gtk::Fixed>().cloned())
+    {
+        return f;
+    }
+    let f = gtk::Fixed::new();
+    vbox.pack_start(&f, true, true, 0);
+    f.show();
+    f
 }
 
 /// 创建新标签页
 #[tauri::command]
 pub async fn create_tab(
-  app: AppHandle,
-  state: tauri::State<'_, TabManager>,
-  url: String,
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+    url: String,
 ) -> Result<Tab, String> {
-  log::info!("[tabs] create_tab: url={}", url);
-  let id = TabManager::uuid();
-  // 本地新标签页（file:// 路径含 /newtab/）标题显示"启动页"，不显示冗长文件路径
-  let is_newtab = url.contains("/newtab/");
-  let title = if is_newtab { "启动页".to_string() } else { url.clone() };
-
-  TabManager::create_webview(&app, &id, &url)?;
-  log::info!("[tabs] create_tab: webview 创建成功 id={}", id);
-
-  let tab = Tab {
-    id: id.clone(),
-    url,
-    title,
-    favicon: String::new(),
-    is_active: true,
-    is_pinned: false,
-    is_muted: false,
-  };
-
-  // 更新状态：新标签激活，旧标签取消激活
-  let old_active = {
-    let mut tabs = state.tabs.lock().unwrap();
-    let mut order = state.order.lock().unwrap();
-    let mut active = state.active_id.lock().unwrap();
-
-    for t in tabs.values_mut() {
-      t.is_active = false;
+    log::info!("[tabs] create_tab: url={}", url);
+    // P2：URL scheme 白名单——只允许 http/https、内部页面（file://newtab、shift://）。
+    // 拒绝 file:// 其他路径（本地文件泄露）与 javascript:/data: 等危险 scheme
+    let parsed = url
+        .parse::<tauri::Url>()
+        .map_err(|e| format!("URL 解析失败: {}", e))?;
+    match parsed.scheme() {
+        "http" | "https" | "shift" => {}
+        "file" => {
+            if !url.contains("/newtab/") && !url.contains("world-nav.html") {
+                return Err("不允许打开本地文件".to_string());
+            }
+        }
+        other => return Err(format!("不允许的 URL scheme: {}", other)),
     }
-    tabs.insert(id.clone(), tab.clone());
-    order.push(id.clone());
-    active.replace(id.clone())
-  };
+    let id = TabManager::uuid();
+    // 本地新标签页（file:// 路径含 /newtab/）标题显示"启动页"，不显示冗长文件路径
+    let is_newtab = url.contains("/newtab/");
+    let title = if is_newtab {
+        "启动页".to_string()
+    } else {
+        url.clone()
+    };
 
-  // 新建标签页：立即切换可见性（show 新、hide 旧），避免新 webview 透明期透出旧页面
-  if let Some(old) = old_active {
-    let _ = TabManager::switch_visibility(&app, &id, Some(&old));
-  } else {
-    let _ = TabManager::set_webview_visible(&app, &id, true);
-  }
+    TabManager::create_webview(&app, &id, &url)?;
+    log::info!("[tabs] create_tab: webview 创建成功 id={}", id);
 
-  Ok(tab)
+    let tab = Tab {
+        id: id.clone(),
+        url,
+        title,
+        favicon: String::new(),
+        is_active: true,
+        is_pinned: false,
+        is_muted: false,
+    };
+
+    // 更新状态：新标签激活，旧标签取消激活
+    let old_active = {
+        let mut tabs = state.tabs.lock().unwrap();
+        let mut order = state.order.lock().unwrap();
+        let mut active = state.active_id.lock().unwrap();
+
+        for t in tabs.values_mut() {
+            t.is_active = false;
+        }
+        tabs.insert(id.clone(), tab.clone());
+        order.push(id.clone());
+        active.replace(id.clone())
+    };
+
+    // 新建标签页：立即切换可见性（show 新、hide 旧），避免新 webview 透明期透出旧页面
+    if let Some(old) = old_active {
+        let _ = TabManager::switch_visibility(&app, &id, Some(&old));
+    } else {
+        let _ = TabManager::set_webview_visible(&app, &id, true);
+    }
+
+    Ok(tab)
 }
 
 /// 关闭标签页（切换到相邻标签）
 #[tauri::command]
 pub async fn close_tab(
-  app: AppHandle,
-  state: tauri::State<'_, TabManager>,
-  id: String,
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+    id: String,
 ) -> Result<Option<Tab>, String> {
-  log::info!("[tabs] close_tab: id={}", id);
-  let mut next_id: Option<String> = None;
+    log::info!("[tabs] close_tab: id={}", id);
+    let mut next_id: Option<String> = None;
 
-  {
-    let mut tabs = state.tabs.lock().unwrap();
-    let mut order = state.order.lock().unwrap();
-    let mut active = state.active_id.lock().unwrap();
+    {
+        let mut tabs = state.tabs.lock().unwrap();
+        let mut order = state.order.lock().unwrap();
+        let mut active = state.active_id.lock().unwrap();
 
-    let was_active = *active == Some(id.clone());
-    let removed = tabs.remove(&id);
-    // 记录被删标签在 order 中的位置（删除后同位置即右邻）
-    let removed_pos = order.iter().position(|x| x == &id);
-    if let Some(pos) = removed_pos {
-      order.remove(pos);
-    }
-
-    if was_active {
-      // 优先切右边的标签（删除后同位置即右邻），没有则切左边（最后一个）
-      next_id = match removed_pos {
-        Some(p) if p < order.len() => order.get(p).cloned(),
-        _ => order.last().cloned(),
-      };
-      if let Some(nid) = &next_id {
-        if let Some(t) = tabs.get_mut(nid) {
-          t.is_active = true;
+        let was_active = *active == Some(id.clone());
+        let removed = tabs.remove(&id);
+        // 记录被删标签在 order 中的位置（删除后同位置即右邻）
+        let removed_pos = order.iter().position(|x| x == &id);
+        if let Some(pos) = removed_pos {
+            order.remove(pos);
         }
-      }
-      *active = next_id.clone();
+
+        if was_active {
+            // 优先切右边的标签（删除后同位置即右邻），没有则切左边（最后一个）
+            next_id = match removed_pos {
+                Some(p) if p < order.len() => order.get(p).cloned(),
+                _ => order.last().cloned(),
+            };
+            if let Some(nid) = &next_id {
+                if let Some(t) = tabs.get_mut(nid) {
+                    t.is_active = true;
+                }
+            }
+            *active = next_id.clone();
+        }
+
+        if removed.is_none() {
+            return Ok(None);
+        }
     }
 
-    if removed.is_none() {
-      return Ok(None);
+    TabManager::destroy_webview(&app, &id);
+
+    // 激活下一个标签的 webview
+    if let Some(nid) = &next_id {
+        let _ = TabManager::set_webview_visible(&app, nid, true);
     }
-  }
 
-  TabManager::destroy_webview(&app, &id);
-
-  // 激活下一个标签的 webview
-  if let Some(nid) = &next_id {
-    let _ = TabManager::set_webview_visible(&app, nid, true);
-  }
-
-  let tabs = state.tabs.lock().unwrap();
-  Ok(next_id.and_then(|nid| tabs.get(&nid).cloned()))
+    let tabs = state.tabs.lock().unwrap();
+    Ok(next_id.and_then(|nid| tabs.get(&nid).cloned()))
 }
 
 /// 关闭全部标签（切换工作区时清空用）
 #[tauri::command]
 pub async fn close_all_tabs(
-  app: AppHandle,
-  state: tauri::State<'_, TabManager>,
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
 ) -> Result<(), String> {
-  log::info!("[tabs] close_all_tabs");
-  let ids: Vec<String> = {
-    let mut tabs = state.tabs.lock().unwrap();
-    let mut order = state.order.lock().unwrap();
-    let mut active = state.active_id.lock().unwrap();
-    let collected: Vec<String> = tabs.keys().cloned().collect();
-    tabs.clear();
-    order.clear();
-    *active = None;
-    collected
-  };
+    log::info!("[tabs] close_all_tabs");
+    let ids: Vec<String> = {
+        let mut tabs = state.tabs.lock().unwrap();
+        let mut order = state.order.lock().unwrap();
+        let mut active = state.active_id.lock().unwrap();
+        let collected: Vec<String> = tabs.keys().cloned().collect();
+        tabs.clear();
+        order.clear();
+        *active = None;
+        collected
+    };
 
-  for id in ids {
-    TabManager::destroy_webview(&app, &id);
-  }
-  Ok(())
+    for id in ids {
+        TabManager::destroy_webview(&app, &id);
+    }
+    Ok(())
 }
 
 /// 切换标签页
 #[tauri::command]
 pub async fn switch_tab(
-  app: AppHandle,
-  state: tauri::State<'_, TabManager>,
-  id: String,
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+    id: String,
 ) -> Result<Option<Tab>, String> {
-  log::info!("[tabs] switch_tab: id={}", id);
-  // 先校验标签存在，再写 active_id（否则 active_id 会指向不存在的标签，
-  // 导致 go_back/go_forward 报"标签不存在"、UI 显示与实际不符）
-  {
+    log::info!("[tabs] switch_tab: id={}", id);
+    // 先校验标签存在，再写 active_id（否则 active_id 会指向不存在的标签，
+    // 导致 go_back/go_forward 报"标签不存在"、UI 显示与实际不符）
+    {
+        let tabs = state.tabs.lock().unwrap();
+        if !tabs.contains_key(&id) {
+            return Ok(None);
+        }
+    }
+    // 隐藏当前活动 webview
+    let old_active = {
+        let mut active = state.active_id.lock().unwrap();
+        let old = active.clone();
+        *active = Some(id.clone());
+        old
+    };
+
+    // 更新激活状态
+    {
+        let mut tabs = state.tabs.lock().unwrap();
+        for t in tabs.values_mut() {
+            t.is_active = t.id == id;
+        }
+    }
+
+    // 切换可见性：一次主线程投递里"先显示新标签、再隐藏旧标签"
+    // （原实现 hide→show 两次投递且顺序相反，中间白屏空窗 + 双跨线程往返导致切换迟钝）
+    if old_active.as_deref() == Some(id.as_str()) {
+        // 点的就是当前标签：仅确保可见
+        let _ = TabManager::set_webview_visible(&app, &id, true);
+    } else {
+        let _ = TabManager::switch_visibility(&app, &id, old_active.as_deref());
+    }
+
     let tabs = state.tabs.lock().unwrap();
-    if !tabs.contains_key(&id) {
-      return Ok(None);
-    }
-  }
-  // 隐藏当前活动 webview
-  let old_active = {
-    let mut active = state.active_id.lock().unwrap();
-    let old = active.clone();
-    *active = Some(id.clone());
-    old
-  };
-
-  // 更新激活状态
-  {
-    let mut tabs = state.tabs.lock().unwrap();
-    for t in tabs.values_mut() {
-      t.is_active = t.id == id;
-    }
-  }
-
-  // 切换可见性：一次主线程投递里"先显示新标签、再隐藏旧标签"
-  // （原实现 hide→show 两次投递且顺序相反，中间白屏空窗 + 双跨线程往返导致切换迟钝）
-  if old_active.as_deref() == Some(id.as_str()) {
-    // 点的就是当前标签：仅确保可见
-    let _ = TabManager::set_webview_visible(&app, &id, true);
-  } else {
-    let _ = TabManager::switch_visibility(&app, &id, old_active.as_deref());
-  }
-
-  let tabs = state.tabs.lock().unwrap();
-  Ok(tabs.get(&id).cloned())
+    Ok(tabs.get(&id).cloned())
 }
 
 /// 导航到新 URL
 #[tauri::command]
 pub async fn navigate_tab(
-  app: AppHandle,
-  state: tauri::State<'_, TabManager>,
-  id: String,
-  url: String,
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+    id: String,
+    url: String,
 ) -> Result<Option<Tab>, String> {
-  log::info!("[tabs] navigate_tab: id={} url={}", id, url);
-  let window = app
-    .get_window("main")
-    .ok_or_else(|| "主窗口不存在".to_string())?;
-  let label = format!("tab-{}", id);
-  let webview = window
-    .get_webview(&label)
-    .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
+    log::info!("[tabs] navigate_tab: id={} url={}", id, url);
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    let label = format!("tab-{}", id);
+    let webview = window
+        .get_webview(&label)
+        .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
 
-  let parsed_url = url
-    .parse::<tauri::Url>()
-    .map_err(|e| format!("URL 解析失败: {}", e))?;
-  webview
-    .navigate(parsed_url)
-    .map_err(|e| format!("导航失败: {}", e))?;
+    let parsed_url = url
+        .parse::<tauri::Url>()
+        .map_err(|e| format!("URL 解析失败: {}", e))?;
+    // P2：导航同样做 scheme 白名单（与 create_tab 一致），防止注入的脚本导航到 file://
+    match parsed_url.scheme() {
+        "http" | "https" | "shift" => {}
+        "file" => {
+            if !url.contains("/newtab/") && !url.contains("world-nav.html") {
+                return Err("不允许导航到本地文件".to_string());
+            }
+        }
+        other => return Err(format!("不允许的 URL scheme: {}", other)),
+    }
+    webview
+        .navigate(parsed_url)
+        .map_err(|e| format!("导航失败: {}", e))?;
 
-  let mut tabs = state.tabs.lock().unwrap();
-  let mut tab = tabs.get_mut(&id);
-  if let Some(ref mut t) = tab {
-    t.url = url.clone();
-    t.title = url;
-  }
-  Ok(tab.cloned())
+    let mut tabs = state.tabs.lock().unwrap();
+    let mut tab = tabs.get_mut(&id);
+    if let Some(ref mut t) = tab {
+        t.url = url.clone();
+        t.title = url;
+    }
+    Ok(tab.cloned())
 }
 
 /// 刷新当前标签（Ctrl+R）
 #[tauri::command]
 pub async fn reload_tab(
-  app: AppHandle,
-  state: tauri::State<'_, TabManager>,
-  id: String,
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+    id: String,
 ) -> Result<Option<Tab>, String> {
-  log::info!("[tabs] reload_tab: id={}", id);
-  let window = app
-    .get_window("main")
-    .ok_or_else(|| "主窗口不存在".to_string())?;
-  let label = format!("tab-{}", id);
-  let webview = window
-    .get_webview(&label)
-    .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
-  webview
-    .with_webview(|pwv| {
-      let wv = pwv.inner();
-      webkit2gtk::WebViewExt::reload(&wv);
-    })
-    .map_err(|e| format!("刷新失败: {}", e))?;
-  let tabs = state.tabs.lock().unwrap();
-  Ok(tabs.get(&id).cloned())
+    log::info!("[tabs] reload_tab: id={}", id);
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    let label = format!("tab-{}", id);
+    let webview = window
+        .get_webview(&label)
+        .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
+    webview
+        .with_webview(|pwv| {
+            let wv = pwv.inner();
+            webkit2gtk::WebViewExt::reload(&wv);
+        })
+        .map_err(|e| format!("刷新失败: {}", e))?;
+    let tabs = state.tabs.lock().unwrap();
+    Ok(tabs.get(&id).cloned())
 }
 
 /// 更新标签顺序（拖拽排序）；前端传新顺序，缺失的现存标签兜底追加到末尾
 #[tauri::command]
 pub async fn reorder_tabs(
-  state: tauri::State<'_, TabManager>,
-  ids: Vec<String>,
+    state: tauri::State<'_, TabManager>,
+    ids: Vec<String>,
 ) -> Result<(), String> {
-  let existing_set: std::collections::HashSet<String> = {
-    let tabs = state.tabs.lock().unwrap();
-    tabs.keys().cloned().collect()
-  };
-  let mut new_order: Vec<String> = ids
-    .iter()
-    .filter(|id| existing_set.contains(*id))
-    .cloned()
-    .collect();
-  let mut order = state.order.lock().unwrap();
-  for id in order.iter() {
-    if !new_order.contains(id) {
-      new_order.push(id.clone());
+    let existing_set: std::collections::HashSet<String> = {
+        let tabs = state.tabs.lock().unwrap();
+        tabs.keys().cloned().collect()
+    };
+    let mut new_order: Vec<String> = ids
+        .iter()
+        .filter(|id| existing_set.contains(*id))
+        .cloned()
+        .collect();
+    let mut order = state.order.lock().unwrap();
+    for id in order.iter() {
+        if !new_order.contains(id) {
+            new_order.push(id.clone());
+        }
     }
-  }
-  *order = new_order;
-  log::info!("[tabs] reorder_tabs: 新顺序 {:?}", order);
-  Ok(())
+    *order = new_order;
+    log::info!("[tabs] reorder_tabs: 新顺序 {:?}", order);
+    Ok(())
 }
 
 /// 获取所有标签页（按顺序）
 #[tauri::command]
 pub async fn get_tabs(state: tauri::State<'_, TabManager>) -> Result<Vec<Tab>, String> {
-  Ok(state.all_tabs())
+    Ok(state.all_tabs())
 }
 
 /// 隐藏/显示所有标签页 webview（弹窗/菜单等 Vue UI 覆盖层需要）
 /// source: 调用来源标识（前端调试用，可选）
+/// seq: 单调递增令牌（P1-9）——前端快速开关面板时多次调用并发乱序，
+/// 只让最新 seq 生效，过期指令直接丢弃，避免"最后完成的是旧指令"导致
+/// webview 显隐状态与面板实际状态相反。
 #[tauri::command]
 pub async fn set_webview_visible(
-  app: AppHandle,
-  state: tauri::State<'_, TabManager>,
-  visible: bool,
-  source: Option<String>,
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+    visible: bool,
+    seq: u64,
+    source: Option<String>,
 ) -> Result<(), String> {
-  let window = app
-    .get_window("main")
-    .ok_or_else(|| "主窗口不存在".to_string())?;
-  // 注意：child webview 不在 window.webviews() 列表里（只有 main），
-  // 必须从 TabManager 拿已知标签逐个 get_webview
-  let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
-  let mut count = 0usize;
-  for id in ids {
-    let label = format!("tab-{}", id);
-    if let Some(wv) = window.get_webview(&label) {
-      let wv2 = wv.clone();
-      let _ = wv.with_webview(move |pwv| {
-        let gtk_wv = pwv.inner();
-        // 同时隐藏/显示 Fixed 容器：Fixed 覆盖内容区会拦截弹窗点击，必须一起隐藏
-        if let Some(fixed) = gtk_wv
-          .parent()
-          .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
-        {
-          if visible {
-            fixed.show();
-          } else {
-            fixed.hide();
-          }
+    // 过期指令丢弃：并发乱序时只应用最大 seq
+    {
+        let mut last = state.webview_visible_seq.lock().unwrap();
+        if seq <= *last {
+            log::info!(
+                "[tabs] set_webview_visible 过期指令丢弃 seq={} last={} source={:?}",
+                seq,
+                *last,
+                source
+            );
+            return Ok(());
         }
-        if visible {
-          let _ = wv2.show();
-        } else {
-          let _ = wv2.hide();
-        }
-      });
-      count += 1;
+        *last = seq;
     }
-  }
-  log::info!(
-    "[tabs] set_webview_visible: visible={} count={} source={:?}",
-    visible, count, source
-  );
-  Ok(())
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    // 注意：child webview 不在 window.webviews() 列表里（只有 main），
+    // 必须从 TabManager 拿已知标签逐个 get_webview
+    let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
+    let mut count = 0usize;
+    for id in ids {
+        let label = format!("tab-{}", id);
+        if let Some(wv) = window.get_webview(&label) {
+            let wv2 = wv.clone();
+            let _ = wv.with_webview(move |pwv| {
+                let gtk_wv = pwv.inner();
+                // 同时隐藏/显示 Fixed 容器：Fixed 覆盖内容区会拦截弹窗点击，必须一起隐藏
+                if let Some(fixed) = gtk_wv
+                    .parent()
+                    .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
+                {
+                    if visible {
+                        fixed.show();
+                    } else {
+                        fixed.hide();
+                    }
+                }
+                if visible {
+                    let _ = wv2.show();
+                } else {
+                    let _ = wv2.hide();
+                }
+            });
+            count += 1;
+        }
+    }
+    log::info!(
+        "[tabs] set_webview_visible: visible={} count={} source={:?}",
+        visible,
+        count,
+        source
+    );
+    Ok(())
 }
 
 /// 后退（对当前活动标签执行 history.back()）
 #[tauri::command]
 pub async fn go_back(
-  app: AppHandle,
-  state: tauri::State<'_, TabManager>,
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
 ) -> Result<Option<Tab>, String> {
-  let id = state.active_id.lock().unwrap().clone();
-  let Some(id) = id else {
-    return Ok(None);
-  };
-  log::info!("[tabs] go_back: tab={}", id);
-  let window = app
-    .get_window("main")
-    .ok_or_else(|| "主窗口不存在".to_string())?;
-  let label = format!("tab-{}", id);
-  let webview = window
-    .get_webview(&label)
-    .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
-  webview
-    .eval("history.back()")
-    .map_err(|e| format!("后退失败: {}", e))?;
-  let tabs = state.tabs.lock().unwrap();
-  Ok(tabs.get(&id).cloned())
+    let id = state.active_id.lock().unwrap().clone();
+    let Some(id) = id else {
+        return Ok(None);
+    };
+    log::info!("[tabs] go_back: tab={}", id);
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    let label = format!("tab-{}", id);
+    let webview = window
+        .get_webview(&label)
+        .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
+    webview
+        .eval("history.back()")
+        .map_err(|e| format!("后退失败: {}", e))?;
+    let tabs = state.tabs.lock().unwrap();
+    Ok(tabs.get(&id).cloned())
 }
 
 /// 前进（对当前活动标签执行 history.forward()）
 #[tauri::command]
 pub async fn go_forward(
-  app: AppHandle,
-  state: tauri::State<'_, TabManager>,
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
 ) -> Result<Option<Tab>, String> {
-  let id = state.active_id.lock().unwrap().clone();
-  let Some(id) = id else {
-    return Ok(None);
-  };
-  log::info!("[tabs] go_forward: tab={}", id);
-  let window = app
-    .get_window("main")
-    .ok_or_else(|| "主窗口不存在".to_string())?;
-  let label = format!("tab-{}", id);
-  let webview = window
-    .get_webview(&label)
-    .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
-  webview
-    .eval("history.forward()")
-    .map_err(|e| format!("前进失败: {}", e))?;
-  let tabs = state.tabs.lock().unwrap();
-  Ok(tabs.get(&id).cloned())
+    let id = state.active_id.lock().unwrap().clone();
+    let Some(id) = id else {
+        return Ok(None);
+    };
+    log::info!("[tabs] go_forward: tab={}", id);
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    let label = format!("tab-{}", id);
+    let webview = window
+        .get_webview(&label)
+        .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
+    webview
+        .eval("history.forward()")
+        .map_err(|e| format!("前进失败: {}", e))?;
+    let tabs = state.tabs.lock().unwrap();
+    Ok(tabs.get(&id).cloned())
 }
 
 /// 更新标签页元数据（标题/图标等，供前端同步）
 #[tauri::command]
 pub async fn update_tab(
-  state: tauri::State<'_, TabManager>,
-  id: String,
-  title: Option<String>,
-  favicon: Option<String>,
+    state: tauri::State<'_, TabManager>,
+    id: String,
+    title: Option<String>,
+    favicon: Option<String>,
 ) -> Result<Option<Tab>, String> {
-  let mut tabs = state.tabs.lock().unwrap();
-  let mut tab = tabs.get_mut(&id);
-  if let Some(ref mut t) = tab {
-    if let Some(new_title) = title {
-      t.title = new_title;
+    let mut tabs = state.tabs.lock().unwrap();
+    let mut tab = tabs.get_mut(&id);
+    if let Some(ref mut t) = tab {
+        if let Some(new_title) = title {
+            t.title = new_title;
+        }
+        if let Some(new_favicon) = favicon {
+            t.favicon = new_favicon;
+        }
     }
-    if let Some(new_favicon) = favicon {
-      t.favicon = new_favicon;
-    }
-  }
-  Ok(tab.cloned())
+    Ok(tab.cloned())
 }
 
 /// 切换书签栏显隐，返回新的 top_offset
 #[tauri::command]
 pub async fn set_bookmarks_bar_visible(
-  app: AppHandle,
-  state: tauri::State<'_, TabManager>,
-  visible: bool,
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+    visible: bool,
 ) -> Result<f64, String> {
-  let new_top = state.set_show_bookmarks_bar(visible);
-  log::info!("[tabs] 书签栏显隐切换: visible={} 新 top_offset={}", visible, new_top);
+    let new_top = state.set_show_bookmarks_bar(visible);
+    log::info!(
+        "[tabs] 书签栏显隐切换: visible={} 新 top_offset={}",
+        visible,
+        new_top
+    );
 
-  // 即时重算：不依赖下次窗口 Resize，直接调整 GTK Fixed 的 margin_top 与所有 child webviews 尺寸
-  if let Some(window) = app.get_window("main") {
-    let inner = window.inner_size().unwrap_or(tauri::PhysicalSize::new(1280, 800));
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let w = inner.width as f64 / scale;
-    let h = inner.height as f64 / scale;
-    let content_h = (h - new_top - STATUS_BAR_HEIGHT).max(100.0) as i32;
-    let w_i32 = w as i32;
-    let top_i32 = new_top as i32;
+    // 即时重算：不依赖下次窗口 Resize，直接调整 GTK Fixed 的 margin_top 与所有 child webviews 尺寸
+    if let Some(window) = app.get_window("main") {
+        let inner = window
+            .inner_size()
+            .unwrap_or(tauri::PhysicalSize::new(1280, 800));
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let w = inner.width as f64 / scale;
+        let h = inner.height as f64 / scale;
+        let content_h = (h - new_top - STATUS_BAR_HEIGHT).max(100.0) as i32;
+        let w_i32 = w as i32;
+        let top_i32 = new_top as i32;
 
-    let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
-    for id in ids {
-      let label = format!("tab-{}", id);
-      if let Some(wv) = app.get_webview(&label) {
-        let _ = wv.with_webview(move |pwv| {
-          let gtk_wv = pwv.inner();
-          if let Some(fixed) = gtk_wv
-            .parent()
-            .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
-          {
-            fixed.set_margin_top(top_i32);
-            fixed.set_size_request(w_i32, content_h);
-          }
-          gtk_wv.set_size_request(w_i32, content_h);
-        });
-      }
+        let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
+        for id in ids {
+            let label = format!("tab-{}", id);
+            if let Some(wv) = app.get_webview(&label) {
+                let _ = wv.with_webview(move |pwv| {
+                    let gtk_wv = pwv.inner();
+                    if let Some(fixed) = gtk_wv
+                        .parent()
+                        .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
+                    {
+                        fixed.set_margin_top(top_i32);
+                        fixed.set_size_request(w_i32, content_h);
+                    }
+                    gtk_wv.set_size_request(w_i32, content_h);
+                });
+            }
+        }
     }
-  }
 
-  Ok(new_top)
+    Ok(new_top)
 }
 
 /// 获取当前活动标签的导航状态（可后退/可前进）
 #[tauri::command]
 pub async fn get_nav_state(
-  app: AppHandle,
-  state: tauri::State<'_, TabManager>,
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
 ) -> Result<serde_json::Value, String> {
-  let id = state.active_id.lock().unwrap().clone();
-  let Some(id) = id else {
-    return Ok(json!({ "canGoBack": false, "canGoForward": false }));
-  };
-  let window = app
-    .get_window("main")
-    .ok_or_else(|| "主窗口不存在".to_string())?;
-  let label = format!("tab-{}", id);
-  let webview = window
-    .get_webview(&label)
-    .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
+    let id = state.active_id.lock().unwrap().clone();
+    let Some(id) = id else {
+        return Ok(json!({ "canGoBack": false, "canGoForward": false }));
+    };
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    let label = format!("tab-{}", id);
+    let webview = window
+        .get_webview(&label)
+        .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
 
-  // with_webview 闭包要求 'static + Send，用 Arc<Mutex> 捕获结果
-  let nav = Arc::new(Mutex::new((false, false)));
-  let nav_clone = nav.clone();
-  webview
-    .with_webview(move |pwv| {
-      let wv = pwv.inner();
-      let mut guard = nav_clone.lock().unwrap();
-      guard.0 = webkit2gtk::WebViewExt::can_go_back(&wv);
-      guard.1 = webkit2gtk::WebViewExt::can_go_forward(&wv);
-    })
-    .map_err(|e| format!("获取导航状态失败: {}", e))?;
+    // with_webview 闭包要求 'static + Send，用 Arc<Mutex> 捕获结果
+    let nav = Arc::new(Mutex::new((false, false)));
+    let nav_clone = nav.clone();
+    webview
+        .with_webview(move |pwv| {
+            let wv = pwv.inner();
+            let mut guard = nav_clone.lock().unwrap();
+            guard.0 = webkit2gtk::WebViewExt::can_go_back(&wv);
+            guard.1 = webkit2gtk::WebViewExt::can_go_forward(&wv);
+        })
+        .map_err(|e| format!("获取导航状态失败: {}", e))?;
 
-  let (can_go_back, can_go_forward) = *nav.lock().unwrap();
-  Ok(json!({ "canGoBack": can_go_back, "canGoForward": can_go_forward }))
+    let (can_go_back, can_go_forward) = *nav.lock().unwrap();
+    Ok(json!({ "canGoBack": can_go_back, "canGoForward": can_go_forward }))
 }
 
 /// 固定/取消固定标签（原版 tab-pin IPC）
 #[tauri::command]
 pub async fn toggle_pin(
-  state: tauri::State<'_, TabManager>,
-  id: String,
+    state: tauri::State<'_, TabManager>,
+    id: String,
 ) -> Result<Option<Tab>, String> {
-  let mut tabs = state.tabs.lock().unwrap();
-  let mut tab = tabs.get_mut(&id);
-  if let Some(ref mut t) = tab {
-    t.is_pinned = !t.is_pinned;
-    log::info!("[tabs] toggle_pin: id={} pinned={}", id, t.is_pinned);
-  }
-  Ok(tab.cloned())
+    let mut tabs = state.tabs.lock().unwrap();
+    let mut tab = tabs.get_mut(&id);
+    if let Some(ref mut t) = tab {
+        t.is_pinned = !t.is_pinned;
+        log::info!("[tabs] toggle_pin: id={} pinned={}", id, t.is_pinned);
+    }
+    Ok(tab.cloned())
 }
 
 /// 静音/取消静音标签（原版 tab-mute IPC；WebKitGTK 无 per-tab 音量 API，标记状态由前端展示）
 #[tauri::command]
 pub async fn toggle_mute(
-  state: tauri::State<'_, TabManager>,
-  id: String,
+    state: tauri::State<'_, TabManager>,
+    id: String,
 ) -> Result<Option<Tab>, String> {
-  let mut tabs = state.tabs.lock().unwrap();
-  let mut tab = tabs.get_mut(&id);
-  if let Some(ref mut t) = tab {
-    t.is_muted = !t.is_muted;
-    log::info!("[tabs] toggle_mute: id={} muted={}", id, t.is_muted);
-  }
-  Ok(tab.cloned())
+    let mut tabs = state.tabs.lock().unwrap();
+    let mut tab = tabs.get_mut(&id);
+    if let Some(ref mut t) = tab {
+        t.is_muted = !t.is_muted;
+        log::info!("[tabs] toggle_mute: id={} muted={}", id, t.is_muted);
+    }
+    Ok(tab.cloned())
 }
 
 /// 最大化/还原主窗口（双击标签栏空白处调用）
 #[tauri::command]
 pub async fn toggle_maximize(app: AppHandle) -> Result<bool, String> {
-  let window = app
-    .get_window("main")
-    .ok_or_else(|| "主窗口不存在".to_string())?;
-  let maximized = window.is_maximized().unwrap_or(false);
-  if maximized {
-    window.unmaximize().map_err(|e| e.to_string())?;
-  } else {
-    window.maximize().map_err(|e| e.to_string())?;
-  }
-  Ok(!maximized)
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    let maximized = window.is_maximized().unwrap_or(false);
+    if maximized {
+        window.unmaximize().map_err(|e| e.to_string())?;
+    } else {
+        window.maximize().map_err(|e| e.to_string())?;
+    }
+    Ok(!maximized)
 }
 
 #[cfg(test)]

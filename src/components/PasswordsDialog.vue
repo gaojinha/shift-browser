@@ -3,7 +3,7 @@
 // 注意：child webview 是 GTK 部件盖在 Vue UI 上，弹窗会被页面盖住。
 // 因此挂载时隐藏所有标签 webview，卸载时恢复。
 import { ref, watch } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { setWebviewVisible } from '../utils/webview'
 import { usePasswordsStore } from '../stores/passwords'
 import { useToastStore } from '../stores/toast'
 
@@ -35,7 +35,7 @@ watch(
       toastStore.error('加载密码失败')
     } finally {
       if (my === seq) {
-        await invoke('set_webview_visible', { visible: !v }).catch(() => {})
+        await setWebviewVisible(!v, 'passwords-dialog')
       }
     }
   },

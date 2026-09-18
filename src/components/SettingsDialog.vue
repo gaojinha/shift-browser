@@ -3,6 +3,7 @@
 // 设置项存 settings 表（key-value），保存即生效
 import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { setWebviewVisible } from '../utils/webview'
 import { useSettingsStore } from '../stores/settings'
 import { useExtensionsStore } from '../stores/extensions'
 import { useToastStore } from '../stores/toast'
@@ -70,7 +71,7 @@ watch(
       useToastStore().error('加载设置失败')
     } finally {
       if (my === seq) {
-        await invoke('set_webview_visible', { visible: !v }).catch(() => {})
+        await setWebviewVisible(!v, 'settings-dialog')
       }
     }
   },

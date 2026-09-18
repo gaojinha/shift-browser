@@ -3,6 +3,7 @@
 // 原版 Electron 翻译功能的核心场景——选不中文本复制到这里翻译
 import { ref, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { setWebviewVisible } from '../utils/webview'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -17,7 +18,7 @@ const elapsedMs = ref(0)
 watch(
   () => props.show,
   (v) => {
-    invoke('set_webview_visible', { visible: !v }).catch(() => {})
+    setWebviewVisible(!v, 'translate-panel')
     if (v) {
       // 自动聚焦输入框
       nextTick(() => {

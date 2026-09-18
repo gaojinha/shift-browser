@@ -3,9 +3,9 @@
 // 注意：child webview 是 GTK 部件盖在 Vue UI 上，弹窗会被页面盖住。
 // 因此显示时隐藏所有标签 webview（同 PasswordsDialog），关闭时恢复。
 import { onMounted, onUnmounted, watch } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener'
+import { setWebviewVisible } from '../utils/webview'
 import { useDownloadsStore } from '../stores/downloads'
 import { useToastStore } from '../stores/toast'
 
@@ -45,7 +45,7 @@ watch(
       useToastStore().error('加载下载记录失败')
     } finally {
       if (my === seq) {
-        await invoke('set_webview_visible', { visible: !v }).catch(() => {})
+        await setWebviewVisible(!v, 'downloads-dialog')
       }
     }
   },

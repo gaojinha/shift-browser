@@ -2,7 +2,7 @@
 // 标签分组管理弹窗
 // 与 PasswordsDialog 一样：组件在 App.vue 始终挂载，用 watch(props.show) 控制显示副作用
 import { ref, watch } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { setWebviewVisible } from '../utils/webview'
 import { useGroupsStore } from '../stores/groups'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
@@ -46,7 +46,7 @@ watch(
       useToastStore().error('加载分组失败')
     } finally {
       if (my === seq) {
-        await invoke('set_webview_visible', { visible: !v }).catch(() => {})
+        await setWebviewVisible(!v, 'groups-dialog')
       }
     }
   },

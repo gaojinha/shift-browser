@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 书签栏：显示文件夹分组 + 未分类书签 + 收藏当前页 + 右键管理 + 管理器入口
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { setWebviewVisible } from '../utils/webview'
 import { useBookmarksStore } from '../stores/bookmarks'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
@@ -104,7 +104,7 @@ const editTarget = ref<Bookmark | null>(null)
 // 不用 watch——异步时序会竞争（菜单关闭的恢复和弹窗打开的隐藏互相覆盖）。
 function syncWebview() {
   const hidden = !!menu.value || !!editTarget.value || !!folderMenu.value
-  invoke('set_webview_visible', { visible: !hidden, source: 'bm' }).catch(() => {})
+  setWebviewVisible(!hidden, 'bookmarks-bar')
 }
 
 // 点击菜单外部任意处关闭菜单

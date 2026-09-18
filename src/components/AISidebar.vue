@@ -3,7 +3,7 @@
 import { nextTick, ref, watch } from 'vue'
 import { useAIStore } from '../stores/ai'
 import { useTabsStore } from '../stores/tabs'
-import { invoke } from '@tauri-apps/api/core'
+import { setWebviewVisible } from '../utils/webview'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -17,7 +17,7 @@ const listRef = ref<HTMLElement | null>(null)
 watch(
   () => props.show,
   (v) => {
-    invoke('set_webview_visible', { visible: !v }).catch(() => {})
+    setWebviewVisible(!v, 'ai-sidebar')
     if (v) {
       // 打开时同步当前页面上下文
       const tab = tabsStore.activeTab

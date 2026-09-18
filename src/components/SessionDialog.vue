@@ -4,6 +4,7 @@
 // 因此挂载时隐藏所有标签 webview，卸载时恢复。
 import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { setWebviewVisible } from '../utils/webview'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
 import type { Session, SessionTab } from '../types/session'
@@ -41,7 +42,7 @@ watch(
       toastStore.error('加载会话失败')
     } finally {
       if (my === seq) {
-        await invoke('set_webview_visible', { visible: !v }).catch(() => {})
+        await setWebviewVisible(!v, 'session-dialog')
       }
     }
   },

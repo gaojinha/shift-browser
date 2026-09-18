@@ -1,13 +1,15 @@
-mod db;
-mod tabs;
 mod ai;
+mod db;
 mod extensions;
-mod newtab;
 mod feed;
+mod newtab;
 mod reader;
+mod tabs;
 mod translate;
 
-use db::{bookmarks, downloads, history, passwords, sessions, settings, tab_groups, users, workspaces, Db};
+use db::{
+    bookmarks, downloads, history, passwords, sessions, settings, tab_groups, users, workspaces, Db,
+};
 use tauri::Manager;
 
 /// shift:// 自定义协议页面的 CSP（主窗口/新标签页/世界导航页统一）
@@ -23,57 +25,76 @@ const WHOLE_PAGE_TRANSLATE_JS: &str = include_str!("whole_page_translate.js");
 /// 简易 percent-decode（处理 shift:// query 参数，避免引入 url crate）
 /// 注意：只处理 %XX 和 + → 空格，满足 shift:// 内部用
 fn percent_decode(s: &str) -> String {
-  let bytes = s.as_bytes();
-  let mut out = Vec::with_capacity(bytes.len());
-  let mut i = 0;
-  while i < bytes.len() {
-    match bytes[i] {
-      b'+' => { out.push(b' '); i += 1; }
-      b'%' if i + 2 < bytes.len() => {
-        let h1 = (bytes[i + 1] as char).to_digit(16);
-        let h2 = (bytes[i + 2] as char).to_digit(16);
-        if let (Some(a), Some(b)) = (h1, h2) {
-          out.push((a * 16 + b) as u8);
-          i += 3;
-        } else {
-          out.push(bytes[i]); i += 1;
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b'%' if i + 2 < bytes.len() => {
+                let h1 = (bytes[i + 1] as char).to_digit(16);
+                let h2 = (bytes[i + 2] as char).to_digit(16);
+                if let (Some(a), Some(b)) = (h1, h2) {
+                    out.push((a * 16 + b) as u8);
+                    i += 3;
+                } else {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
         }
-      }
-      c => { out.push(c); i += 1; }
     }
-  }
-  String::from_utf8_lossy(&out).into_owned()
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// 把翻译结果写到对应 webview 的 window.__shift_translate_result_<callback>
 /// 菜单 JS 轮询这个变量拿到结果（shift:// Image 请求不读响应体，必须走 window 变量）
 fn write_translate_result(
-  app: &tauri::AppHandle,
-  webview_label: &str,
-  callback: &str,
-  payload: &serde_json::Value,
+    app: &tauri::AppHandle,
+    webview_label: &str,
+    callback: &str,
+    payload: &serde_json::Value,
 ) {
-  let Some(wv) = app.get_webview(webview_label) else {
-    log::warn!("[translate] 找不到 webview: {}", webview_label);
-    return;
-  };
-  // 序列化为 JS 表达式：window.__shift_translate_result_<cb> = <json>;
-  let json_str = payload.to_string();
-  let escaped_cbk = callback.replace('\'', "\\'");
-  let js = format!(
-    "window.__shift_translate_result_{} = {};",
-    escaped_cbk, json_str
-  );
-  if let Err(e) = wv.eval(&js) {
-    log::warn!("[translate] eval 结果失败: {}", e);
-  } else {
-    log::debug!("[translate] 已写入结果 callback={}", callback);
-  }
+    // P2：callback 白名单双保险（入口已校验，这里再挡一道）——
+    // callback 被拼进 JS 变量名 eval 到特权 webview，恶意 callback 可注入任意 JS
+    if !valid_callback(callback) {
+        log::warn!("[translate] 非法 callback，拒绝写入: {:?}", callback);
+        return;
+    }
+    let Some(wv) = app.get_webview(webview_label) else {
+        log::warn!("[translate] 找不到 webview: {}", webview_label);
+        return;
+    };
+    // 序列化为 JS 表达式：window.__shift_translate_result_<cb> = <json>;
+    let json_str = payload.to_string();
+    let js = format!(
+        "window.__shift_translate_result_{} = {};",
+        callback, json_str
+    );
+    if let Err(e) = wv.eval(&js) {
+        log::warn!("[translate] eval 结果失败: {}", e);
+    } else {
+        log::debug!("[translate] 已写入结果 callback={}", callback);
+    }
+}
+
+/// P2：callback 参数白名单——只允许 [A-Za-z0-9_]，长度 1~64。
+/// callback 会被拼进 JS 变量名并 eval 到 webview，必须严格白名单，
+/// 否则恶意页面可通过 shift://__translate__ 端点注入任意 JS
+fn valid_callback(cb: &str) -> bool {
+    !cb.is_empty() && cb.len() <= 64 && cb.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
+    tauri::Builder::default()
     .plugin(tauri_plugin_opener::init())
     // 注意：不再注册 shell/dialog/fs 插件——前端只用到 opener，
     // 多余插件只增加攻击面与二进制体积（安全最小化原则）
@@ -248,6 +269,15 @@ pub fn run() {
           })
           .collect();
         let callback = params.get("callback").cloned().unwrap_or_default();
+        // P2：callback 白名单——不合法直接拒绝，不 eval（防 JS 注入）
+        if !valid_callback(&callback) {
+          log::warn!("[translate] 非法 callback 拒绝: {:?}", callback);
+          return tauri::http::Response::builder()
+            .status(400)
+            .header(tauri::http::header::CONTENT_TYPE, "text/plain")
+            .body("Bad Request".as_bytes().to_vec())
+            .unwrap();
+        }
         let app_clone = app.clone();
 
         match path.as_str() {
@@ -257,6 +287,16 @@ pub fn run() {
               "[translate] 选中文本翻译 request: label={} callback={} len={}",
               webview_label, callback, text.len()
             );
+            // P2：单段文本限长——恶意页面可刷超大文本放大翻译请求（外部网络调用）
+            if text.len() > 5000 {
+              let payload = serde_json::json!({ "error": "待翻译文本过长（>5000 字符）" });
+              write_translate_result(&app_clone, &webview_label, &callback, &payload);
+              return tauri::http::Response::builder()
+                .status(200)
+                .header(tauri::http::header::CONTENT_TYPE, "image/gif")
+                .body(Vec::<u8>::new())
+                .unwrap();
+            }
             tauri::async_runtime::spawn(async move {
               let payload = match translate::translate_google(&text, "zh-CN").await {
                 Ok(t) => serde_json::json!({ "text": t }),
@@ -303,6 +343,14 @@ pub fn run() {
                   return;
                 }
               };
+              // P2：批量限长——恶意页面可刷超大数组/超长文本放大翻译请求
+              // （每段翻一次外部网络调用，20 段×2000 字符已是整页翻译的合理上限）
+              if texts.len() > 20 || texts.iter().any(|t| t.len() > 2000) {
+                let payload =
+                  serde_json::json!({ "error": "批量翻译参数超限（≤20 段、每段 ≤2000 字符）" });
+                write_translate_result(&app_clone, &webview_label, &callback, &payload);
+                return;
+              }
               let mut out: Vec<String> = vec![String::new(); texts.len()];
               // 分批并发（每批 5 段），保持顺序
               for chunk_start in (0..texts.len()).step_by(5) {
@@ -490,7 +538,9 @@ pub fn run() {
               Ok(true) => {
                 log::info!("[ShiftBrowser] 启动锁屏验证通过: {}", username);
                 // 验证通过后清除会话：启动锁屏只验证身份，不自动登录个人中心
-                tauri::async_runtime::block_on(users::clear_session(&db_state));
+                if let Err(e) = tauri::async_runtime::block_on(users::clear_session(&db_state)) {
+                  log::warn!("[ShiftBrowser] 启动锁屏验证通过但会话清除失败: {}", e);
+                }
                 // 显式 destroy 锁屏 dialog，避免 close 后残留；forget 阻止 drop 再次释放
                 unsafe {
                   dialog.destroy();
@@ -587,4 +637,31 @@ pub fn run() {
     })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn callback_whitelist_accepts_normal() {
+        assert!(valid_callback("cb_1"));
+        assert!(valid_callback("a"));
+        assert!(valid_callback("_"));
+        assert!(valid_callback("x".repeat(64).as_str()));
+    }
+
+    #[test]
+    fn callback_whitelist_rejects_injection() {
+        // 恶意 callback 注入 JS：拼进变量名 eval 到特权 webview
+        assert!(!valid_callback(""));
+        assert!(!valid_callback("x".repeat(65).as_str()));
+        assert!(!valid_callback("cb;alert(1)//"));
+        assert!(!valid_callback("cb'));alert(1);//"));
+        assert!(!valid_callback("cb\"));alert(1);//"));
+        assert!(!valid_callback("cb\nalert(1)"));
+        assert!(!valid_callback("cb-1"));
+        assert!(!valid_callback("cb.1"));
+        assert!(!valid_callback("中文"));
+    }
 }
