@@ -519,3 +519,18 @@ Corrections, insights, and knowledge gaps captured during development.
 3. **insight：Rust log 走 stdout 被全缓冲，日志"卡住"不是没输出**。GUI 进程 stdout 重定向到文件时是块缓冲（4-8KB），不 flush 就看不到。启动命令加 `stdbuf -oL`（行缓冲）后日志实时可见——排查"启动页加载失败"这类问题时，这一步比读代码更关键。用 `setsid nohup ... < /dev/null &` 还能让进程完全脱离、启动命令不再挂住 shell 工具。
 4. **insight：定位"加载失败"根因的正确姿势**：Tauri `PageLoadEvent` 只有 Started/Finished（没有 Failed），必须下沉到 GTK 层 `connect_load_failed`（webkit2gtk-2.0 签名是 `Fn(&WebView, LoadEvent, &str, &glib::Error) -> bool`，**返回 bool** 而不是 `glib::Propagation`，返回 true 才阻止 WebKit 默认错误页）。CLI 输出会误导：本地 systemd/沙箱里"创建页面失败"是 WebKit 的 `WEBKIT_ERROR_CANNOT_CREATE_PAGE`（错误码 104），系统 `WebKitGTK-4.1.mo` 里搜不到这个中文串，别死磕翻译文件。
 **结果**: v5.5.1 提交 eb51f88；59 测试全过、clippy 零警告；日志行缓冲后能实时观察解锁→建标签→page_load_finished 全链路
+
+---
+
+## 2026-09-18 10:36 — 前端初始化撞上 Rust setup 阻塞：要用"可查询状态"而非"猜失败"（best_practice）
+
+**类别**: best_practice
+**场景**: ShiftBrowser 启动锁屏期间前端反复弹"创建/加载标签页失败"toast
+**要点**:
+1. **症状与根因**：Tauri 的 `setup()` 里同步弹 GTK modal 密码对话框（`dialog.run()` 阻塞事件循环），此时 `app.manage(Db/TabManager)` 都还没执行；而主窗口 webview 早已加载，Vue `onMounted` 照常跑 `initBrowser()` 并对失败做"每秒重试 10 次"兜底 → 每次命令失败都 `useToastStore().error(...)`，用户看到的是**锁屏界面上不停弹同一个失败提示**。
+2. **错误做法**：只在前端"捕获异常后静默"或"减少重试次数"——治标；前端无法区分"锁屏未就绪"和"真故障"，静默会吞掉真实错误。
+3. **正确做法**：**Rust 暴露一个不依赖 Db/State 的状态查询命令**。锁屏标志用 `static LOCKED: AtomicBool`（不能放进 `State<Db>`，锁屏时 Db 还没 manage，命令参数取 State 会 panic/失败），锁屏前置 true、验证通过置 false；`#[tauri::command] fn is_locked() -> bool` 只读原子变量，**在 Db 就绪前也能成功返回**。
+4. **前端配合**：`onMounted` 第一件事查 `is_locked`；true 则只 `listen('app-unlocked')` 静默等待，不初始化/不轮询；解锁后再跑初始化 + 建启动页。另在 store 里缓存该状态（`setLockedState`/`isLockedNow`）作为双保险，命令失败时若锁屏中则静默——既防时序错开，也保留非锁屏时的真实报错。
+5. **验证手法**：对比"日志安静度"最直观——修复前锁屏 13 秒内 `get_all_settings 被调用` 每秒刷屏且伴随 create_tab 失败；修复后同样 13 秒**日志无任何业务调用**，解锁瞬间才出现 `app-unlocked` → `create_tab` → `page_load_finished`。
+6. **顺带**：`initBrowser()` 加 `skipStartupTab` 参数，把"建标签"职责交给调用方，避免"恢复上次会话"和"解锁后开启动页"两个分支各建一个标签。
+**结果**: 提交 3a13d3b；59 测试全过、clippy 零警告、前端 build+lint 通过；锁屏期间日志完全安静
