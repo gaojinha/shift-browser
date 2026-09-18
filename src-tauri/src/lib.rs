@@ -644,6 +644,17 @@ pub fn run() {
           // 1) 主 webview 在 setup 前已创建，进程池已固化，设置被 g_return_if_fail 静默忽略；
           // 2) 实测强行切换会触发 WebKit bug（WebLoaderStrategy internallyFailedLoad），整个应用崩。
           // 多标签开销靠"切标签前 hide 旧 + 前端连点合并"缓解，进程模型保持默认。
+
+          // 隐私防护 P0：第三方 Cookie 默认阻断（只允许第一方 Cookie）。
+          // 注意必须在创建 child webview 之前设置才生效。
+          #[cfg(target_os = "linux")]
+          {
+            use webkit2gtk::CookieManagerExt;
+            if let Some(cm) = context.cookie_manager() {
+              cm.set_accept_policy(webkit2gtk::CookieAcceptPolicy::NoThirdParty);
+              log::info!("[privacy] 第三方 Cookie 已阻断（CookieAcceptPolicy::NoThirdParty）");
+            }
+          }
         }
       }
 

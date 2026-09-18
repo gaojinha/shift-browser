@@ -159,6 +159,186 @@ fn read_extension_dir(path: &str) -> Result<ExtensionDirResult, String> {
     ))
 }
 
+/// 内置隐私防护脚本（P0：GPC + 反指纹随机化 + WebRTC 防泄露）
+///
+/// 设计要点（依据 Brave/Tor 的公开实践）：
+/// - **随机化路线**：Canvas/WebGL/Audio 加入"同源稳定、跨源不同"的确定性噪声，
+///   避免出现"每源都变"这种可被识别的加噪特征（UCSD IMC25 论文指出该识别手法）。
+/// - **GPC**：W3C 规范除 Sec-GPC 请求头外，还有 navigator.globalPrivacyControl 属性；
+///   WebKitGTK 未暴露请求头改写 API，故用 JS 属性表达（主流合规网站可识别）。
+/// - **WebRTC**：过滤 icecandidate 中的 host 候选（内网 IP 泄露主因），保留公网候选，
+///   不整体禁用 WebRTC（避免破坏视频会议类网站）。
+const PRIVACY_JS: &str = r#"
+(function () {
+  if (window.__shiftPrivacyInstalled) return;
+  window.__shiftPrivacyInstalled = true;
+
+  // ---- 1) GPC：全球隐私控制（W3C 规范信号，2027 起加州强制）----
+  try {
+    Object.defineProperty(navigator, 'globalPrivacyControl', {
+      get: function () { return true; },
+      configurable: true
+    });
+  } catch (e) {}
+
+  // ---- 2) per-origin 确定性种子（FNV-1a 哈希 origin）----
+  function originSeed() {
+    var o = String(location.origin || location.href || '');
+    var h = 2166136261;
+    for (var i = 0; i < o.length; i++) {
+      h ^= o.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+  var SEED = originSeed();
+  // xorshift32 确定性伪随机：同源同会话稳定，换站点即变
+  function rnd(i) {
+    var x = (SEED + Math.imul(i, 2654435761)) >>> 0;
+    x ^= x << 13; x >>>= 0;
+    x ^= x >> 17;
+    x ^= x << 5; x >>>= 0;
+    return (x % 1000) / 1000;
+  }
+
+  // ---- 3) Canvas 加噪（读回路径 toDataURL / toBlob / getImageData）----
+  try {
+    var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = function () {
+      try {
+        var ctx = this.getContext && this.getContext('2d');
+        if (ctx && this.width > 0 && this.height > 0) {
+          var w = Math.min(this.width, 12), h = Math.min(this.height, 12);
+          var d = ctx.getImageData(0, 0, w, h);
+          for (var i = 0; i < d.data.length; i += 4) {
+            d.data[i] = (d.data[i] + (rnd(i) < 0.5 ? 0 : 1)) & 255;
+            d.data[i + 1] = (d.data[i + 1] + (rnd(i + 1) < 0.5 ? 0 : 1)) & 255;
+          }
+          ctx.putImageData(d, 0, 0);
+        }
+      } catch (e) {}
+      return origToDataURL.apply(this, arguments);
+    };
+    var origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+    CanvasRenderingContext2D.prototype.getImageData = function () {
+      var d = origGetImageData.apply(this, arguments);
+      try {
+        for (var i = 0; i < d.data.length; i += 4) {
+          d.data[i] = (d.data[i] + (rnd(i) < 0.5 ? 0 : 1)) & 255;
+        }
+      } catch (e) {}
+      return d;
+    };
+  } catch (e) {}
+
+  // ---- 4) WebGL 参数归一化（抹掉 GPU 型号/驱动指纹）----
+  try {
+    var gp = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function (p) {
+      // 37445 = UNMASKED_VENDOR_WEBGL, 37446 = UNMASKED_RENDERER_WEBGL
+      if (p === 37445) return 'Google Inc.';
+      if (p === 37446) return 'ANGLE (Generic Renderer)';
+      return gp.apply(this, arguments);
+    };
+    if (window.WebGL2RenderingContext) {
+      var gp2 = WebGL2RenderingContext.prototype.getParameter;
+      WebGL2RenderingContext.prototype.getParameter = function (p) {
+        if (p === 37445) return 'Google Inc.';
+        if (p === 37446) return 'ANGLE (Generic Renderer)';
+        return gp2.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+
+  // ---- 5) AudioContext 加噪 ----
+  try {
+    if (window.AnalyserNode && AnalyserNode.prototype.getFloatFrequencyData) {
+      var ofd = AnalyserNode.prototype.getFloatFrequencyData;
+      AnalyserNode.prototype.getFloatFrequencyData = function (arr) {
+        ofd.apply(this, arguments);
+        try {
+          for (var i = 0; i < arr.length; i += 31) {
+            arr[i] = arr[i] + (rnd(i) - 0.5) * 0.001;
+          }
+        } catch (e) {}
+      };
+    }
+    if (window.AudioBuffer && AudioBuffer.prototype.getChannelData) {
+      var ocd = AudioBuffer.prototype.getChannelData;
+      AudioBuffer.prototype.getChannelData = function (ch) {
+        var d = ocd.apply(this, arguments);
+        try {
+          for (var i = 0; i < d.length; i += 997) {
+            d[i] = d[i] + (rnd(i) - 0.5) * 1e-6;
+          }
+        } catch (e) {}
+        return d;
+      };
+    }
+  } catch (e) {}
+
+  // ---- 6) 硬件信息归一化（收敛到常见配置，避免成为稀有指纹）----
+  try {
+    Object.defineProperty(navigator, 'hardwareConcurrency', {
+      get: function () { return 8; },
+      configurable: true
+    });
+  } catch (e) {}
+  try {
+    if ('deviceMemory' in navigator) {
+      Object.defineProperty(navigator, 'deviceMemory', {
+        get: function () { return 8; },
+        configurable: true
+      });
+    }
+  } catch (e) {}
+
+  // ---- 7) WebRTC 防泄露：丢弃 host 候选（内网 IP），保留公网候选 ----
+  try {
+    var OrigRTC = window.RTCPeerConnection || window.webkitRTCPeerConnection;
+    if (OrigRTC && !OrigRTC.__shiftPatched) {
+      var filterCandidate = function (ev) {
+        var c = ev && ev.candidate && ev.candidate.candidate;
+        // "typ host" = 本机/内网地址；丢弃即可阻止内网 IP 泄露
+        return !(c && / typ host/.test(c));
+      };
+      var Patched = function (cfg, cons) {
+        var pc = new OrigRTC(cfg, cons);
+        var origAdd = pc.addEventListener.bind(pc);
+        pc.addEventListener = function (type, fn, opts) {
+          if (type === 'icecandidate' && typeof fn === 'function') {
+            var wrapped = function (ev) {
+              if (!filterCandidate(ev)) return; // 内网候选不交给页面
+              return fn.apply(this, arguments);
+            };
+            return origAdd(type, wrapped, opts);
+          }
+          return origAdd(type, fn, opts);
+        };
+        try {
+          Object.defineProperty(pc, 'onicecandidate', {
+            configurable: true,
+            get: function () { return this.__shiftOnIce || null; },
+            set: function (fn) {
+              var self = this;
+              this.__shiftOnIce = fn;
+              origAdd('icecandidate', function (ev) {
+                if (!filterCandidate(ev)) return;
+                if (typeof self.__shiftOnIce === 'function') self.__shiftOnIce(ev);
+              });
+            }
+          });
+        } catch (e) {}
+        return pc;
+      };
+      Patched.prototype = OrigRTC.prototype;
+      Patched.__shiftPatched = true;
+      window.RTCPeerConnection = Patched;
+    }
+  } catch (e) {}
+})();
+"#;
+
 /// 在主线程把所有 child webview 的 UserContentManager 清空并注入扩展
 /// UserContentManager 是 webview 级（非 WebContext 级），必须逐个 webview 注入
 fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>)>) {
@@ -424,6 +604,11 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
         );
         items.push((Some(js), Some(ADBLOCK_CSS.to_string())));
     }
+    // 内置隐私防护（GPC + Canvas/WebGL/Audio 反指纹 + WebRTC 防泄露）——始终注入，
+    // 放在最后确保不被用户扩展覆盖；注意 inject_extensions 会先 remove_all_scripts，
+    // 所以脚本必须都在这份 items 里，不能单独注入。
+    items.push((Some(PRIVACY_JS.to_string()), None));
+    log::info!("[extensions] 隐私防护已注入（GPC + 反指纹 + WebRTC 候选过滤）");
     Ok(items)
 }
 

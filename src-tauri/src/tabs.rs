@@ -25,10 +25,55 @@ pub const ADDRESS_BAR_HEIGHT: f64 = 42.0;
 pub const BOOKMARKS_BAR_HEIGHT: f64 = 30.0;
 pub const STATUS_BAR_HEIGHT: f64 = 22.0;
 
+/// 清洗 URL 中的跨站追踪参数（隐私防护 P0）
+/// 覆盖 utm_* 系列 + 主流平台点击 ID（fbclid/gclid/msclkid/spm 等）
+fn clean_tracking_params(url: &str) -> String {
+    const TRACKING_KEYS: &[&str] = &[
+        "fbclid", "gclid", "dclid", "msclkid", "yclid", "twclid", "igshid", "ttclid",
+        "mc_eid", "mc_cid", "mkt_tok", "_hsenc", "_hsmi", "vero_id", "oly_enc_id",
+        "ref_src", "ref_url", "spm", "scm", "share_source", "share_medium",
+        "from_source", "wd_uid", "s_kwcid", "elqTrackId", "trk",
+    ];
+    const TRACKING_PREFIXES: &[&str] = &["utm_", "pk_", "hsa_", "at_", "ito_"];
+    // 只处理 http/https/query 存在的 URL
+    if !url.contains('?') || !(url.starts_with("http://") || url.starts_with("https://")) {
+        return url.to_string();
+    }
+    let Some((base, rest)) = url.split_once('?') else {
+        return url.to_string();
+    };
+    let (query, fragment) = match rest.split_once('#') {
+        Some((q, f)) => (q, Some(f)),
+        None => (rest, None),
+    };
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|kv| {
+            let key = kv.split('=').next().unwrap_or("").to_ascii_lowercase();
+            if key.is_empty() {
+                return false;
+            }
+            if TRACKING_KEYS.iter().any(|k| k.eq_ignore_ascii_case(&key)) {
+                return false;
+            }
+            !TRACKING_PREFIXES.iter().any(|p| key.starts_with(p))
+        })
+        .collect();
+    let cleaned = match (kept.is_empty(), fragment) {
+        (true, Some(f)) => format!("{}#{}", base, f),
+        (true, None) => base.to_string(),
+        (false, Some(f)) => format!("{}?{}#{}", base, kept.join("&"), f),
+        (false, None) => format!("{}?{}", base, kept.join("&")),
+    };
+    if cleaned != url {
+        log::info!("[privacy] URL 追踪参数已清洗: {} -> {}", url, cleaned);
+    }
+    cleaned
+}
+
 /// 净化下载文件名（防路径穿越）：
 /// 剥掉 / \ 路径分隔符、空字节/控制字符、首尾点段（防 ../ 与隐藏文件），限长 200 字符
-fn sanitize_filename(name: &str) -> String {
-    let cleaned: String = name
+fn sanitize_filename(name: &str) -> String {    let cleaned: String = name
         .chars()
         .filter(|c| !matches!(c, '/' | '\\' | '\0' | '\n' | '\r' | '\t'))
         .collect();
@@ -450,9 +495,10 @@ impl TabManager {
           if let Some(settings) = webkit2gtk::WebViewExt::settings(&child_gtk) {
             settings.set_javascript_can_open_windows_automatically(true);
             // 设置完整 UA（带 Safari 标记 + 浏览器名）：WebKitGTK 默认 UA 残缺（无 Safari 标记），
-            // 导致 Bing 等网站识别为未知浏览器返回简化版单屏页面（无法滚动）
+            // 导致 Bing 等网站识别为未知浏览器返回简化版单屏页面（无法滚动）。
+            // 版本号跟随 2026 年主流 Chrome（避免"独一份版本号"成为稀有指纹）
             settings.set_user_agent(Some(
-              "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
             ));
           }
           // 监听 child webview 的鼠标点击事件
@@ -951,6 +997,8 @@ pub async fn create_tab(
     state: tauri::State<'_, TabManager>,
     url: String,
 ) -> Result<Tab, String> {
+    // 隐私防护：新建标签前清洗跨站追踪参数（只影响 http/https，内部页面不受影响）
+    let url = clean_tracking_params(&url);
     log::info!("[tabs] create_tab: url={}", url);
     // P2：URL scheme 白名单——只允许 http/https、内部页面（file://newtab、shift://）。
     // 拒绝 file:// 其他路径（本地文件泄露）与 javascript:/data: 等危险 scheme
@@ -1143,6 +1191,8 @@ pub async fn navigate_tab(
     id: String,
     url: String,
 ) -> Result<Option<Tab>, String> {
+    // 隐私防护：导航前清洗跨站追踪参数（utm_*/fbclid/gclid/msclkid/spm 等）
+    let url = clean_tracking_params(&url);
     log::info!("[tabs] navigate_tab: id={} url={}", id, url);
     let window = app
         .get_window("main")
