@@ -201,10 +201,25 @@ const PRIVACY_JS: &str = r#"
     return (x % 1000) / 1000;
   }
 
+  // ---- 1.5) 加噪白名单：命中则跳过"加噪类"防护（保留 GPC/WebRTC/归一化等不破坏功能的项）----
+  // 注入时由 Rust 侧在脚本前拼 window.__SHIFT_PRIVACY_WHITELIST__ = [...]
+  var WL = window.__SHIFT_PRIVACY_WHITELIST__ || [];
+  var NOISE_ON = (function () {
+    var h = String(location.hostname || '').toLowerCase();
+    for (var i = 0; i < WL.length; i++) {
+      var d = String(WL[i] || '').toLowerCase().replace(/^\*\./, '').replace(/^https?:\/\//, '').replace(/\/.*$/, '').trim();
+      if (!d) continue;
+      if (h === d || (h.length > d.length && h.slice(-(d.length + 1)) === '.' + d)) return false;
+    }
+    return true;
+  })();
+  try { window.__shiftNoiseOn = NOISE_ON; } catch (e) {}
+
   // ---- 3) Canvas 加噪（读回路径 toDataURL / toBlob / getImageData）----
   try {
     var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
     HTMLCanvasElement.prototype.toDataURL = function () {
+      if (!NOISE_ON) return origToDataURL.apply(this, arguments);
       try {
         var ctx = this.getContext && this.getContext('2d');
         if (ctx && this.width > 0 && this.height > 0) {
@@ -222,6 +237,7 @@ const PRIVACY_JS: &str = r#"
     var origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
     CanvasRenderingContext2D.prototype.getImageData = function () {
       var d = origGetImageData.apply(this, arguments);
+      if (!NOISE_ON) return d;
       try {
         for (var i = 0; i < d.data.length; i += 4) {
           d.data[i] = (d.data[i] + (rnd(i) < 0.5 ? 0 : 1)) & 255;
@@ -235,6 +251,8 @@ const PRIVACY_JS: &str = r#"
   try {
     var gp = WebGLRenderingContext.prototype.getParameter;
     WebGLRenderingContext.prototype.getParameter = function (p) {
+      // 白名单站点：不加噪、不归一化 GPU 信息（保留站点自己的渲染判断）
+      if (!NOISE_ON) return gp.apply(this, arguments);
       // 37445 = UNMASKED_VENDOR_WEBGL, 37446 = UNMASKED_RENDERER_WEBGL
       if (p === 37445) return 'Google Inc.';
       if (p === 37446) return 'ANGLE (Generic Renderer)';
@@ -243,6 +261,7 @@ const PRIVACY_JS: &str = r#"
     if (window.WebGL2RenderingContext) {
       var gp2 = WebGL2RenderingContext.prototype.getParameter;
       WebGL2RenderingContext.prototype.getParameter = function (p) {
+        if (!NOISE_ON) return gp2.apply(this, arguments);
         if (p === 37445) return 'Google Inc.';
         if (p === 37446) return 'ANGLE (Generic Renderer)';
         return gp2.apply(this, arguments);
@@ -256,6 +275,7 @@ const PRIVACY_JS: &str = r#"
       var ofd = AnalyserNode.prototype.getFloatFrequencyData;
       AnalyserNode.prototype.getFloatFrequencyData = function (arr) {
         ofd.apply(this, arguments);
+        if (!NOISE_ON) return;
         try {
           for (var i = 0; i < arr.length; i += 31) {
             arr[i] = arr[i] + (rnd(i) - 0.5) * 0.001;
@@ -267,6 +287,7 @@ const PRIVACY_JS: &str = r#"
       var ocd = AudioBuffer.prototype.getChannelData;
       AudioBuffer.prototype.getChannelData = function (ch) {
         var d = ocd.apply(this, arguments);
+        if (!NOISE_ON) return d;
         try {
           for (var i = 0; i < d.length; i += 997) {
             d[i] = d[i] + (rnd(i) - 0.5) * 1e-6;
@@ -846,21 +867,95 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
             _ => "standard".to_string(), // 默认标准档
         },
     };
+    // 加噪白名单：命中域名的站点跳过"加噪类"防护（保留 GPC/WebRTC/参数清洗等）
+    let wrow: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_whitelist'")
+            .fetch_optional(&db.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let whitelist: Vec<String> = wrow
+        .and_then(|(v,)| serde_json::from_str::<Vec<String>>(&v).ok())
+        .unwrap_or_default();
+    let wl_prefix = format!(
+        "window.__SHIFT_PRIVACY_WHITELIST__ = {};\n",
+        serde_json::to_string(&whitelist).unwrap_or_else(|_| "[]".to_string())
+    );
     match level.as_str() {
         "off" => log::info!("[extensions] 隐私防护已关闭（off）"),
         "strict" => {
             items.push((
-                Some(format!("{}\n{}", PRIVACY_JS, STRICT_PRIVACY_JS)),
+                Some(format!("{}{}\n{}", wl_prefix, PRIVACY_JS, STRICT_PRIVACY_JS)),
                 None,
             ));
-            log::info!("[extensions] 隐私防护已注入（严格档 strict）");
+            log::info!(
+                "[extensions] 隐私防护已注入（严格档 strict，白名单 {} 个）",
+                whitelist.len()
+            );
         }
         _ => {
-            items.push((Some(PRIVACY_JS.to_string()), None));
-            log::info!("[extensions] 隐私防护已注入（标准档 standard）");
+            items.push((Some(format!("{}{}", wl_prefix, PRIVACY_JS)), None));
+            log::info!(
+                "[extensions] 隐私防护已注入（标准档 standard，白名单 {} 个）",
+                whitelist.len()
+            );
         }
     }
     Ok(items)
+}
+
+/// 保存加噪白名单（域名数组）并立即重新注入
+#[tauri::command]
+pub async fn set_privacy_whitelist(
+    db: State<'_, Db>,
+    app: AppHandle,
+    domains: Vec<String>,
+) -> Result<(), String> {
+    // 清洗：去空、去协议/路径、去重、限长
+    let mut cleaned: Vec<String> = Vec::new();
+    for d in domains {
+        let s = d
+            .trim()
+            .to_lowercase()
+            .replace("https://", "")
+            .replace("http://", "");
+        let s = s.split('/').next().unwrap_or("").trim().to_string();
+        if s.is_empty() {
+            continue;
+        }
+        // 简单域名格式校验（含点且无空格）
+        if !s.contains('.') || s.contains(' ') {
+            continue;
+        }
+        if !cleaned.iter().any(|x| x == &s) {
+            cleaned.push(s);
+        }
+    }
+    log::info!("[extensions] set_privacy_whitelist: {} 个域名", cleaned.len());
+    let json = serde_json::to_string(&cleaned).map_err(|e| e.to_string())?;
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ('privacy_whitelist', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(&json)
+    .execute(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let items = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items);
+    Ok(())
+}
+
+/// 读取加噪白名单
+#[tauri::command]
+pub async fn get_privacy_whitelist(db: State<'_, Db>) -> Result<Vec<String>, String> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_whitelist'")
+            .fetch_optional(&db.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(row
+        .and_then(|(v,)| serde_json::from_str::<Vec<String>>(&v).ok())
+        .unwrap_or_default())
 }
 
 /// 隐私防护档位设置（off / standard / strict），存设置 + 立即重新注入

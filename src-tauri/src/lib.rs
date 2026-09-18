@@ -222,6 +222,8 @@ pub fn run() {
       extensions::get_privacy_shield_enabled,
       extensions::set_privacy_shield_level,
       extensions::get_privacy_shield_level,
+      extensions::set_privacy_whitelist,
+      extensions::get_privacy_whitelist,
       // 新标签页
       newtab::refresh_newtab,
       newtab::get_newtab_url,

@@ -63,6 +63,8 @@ watch(
           console.error('[settings] 加载搜索引擎失败:', e)
           useToastStore().error('加载搜索引擎失败')
         })
+        // 加噪白名单（隐私分区用）
+        loadWhitelist()
         // 打开时清空 AI Key 输入框：不回显掩码，避免用户无意把掩码写回库
         aiKeyInput.value = ''
       }
@@ -175,6 +177,32 @@ async function onChangePrivacyLevel(e: Event) {
   } catch (err) {
     console.error('[settings] 隐私防护档位同步失败:', err)
     useToastStore().error('隐私防护设置失败')
+  }
+}
+
+/** 加噪白名单：这些站点不做加噪（Canvas 敏感站点可加进来），域名按行分隔 */
+const whitelistText = ref('')
+async function loadWhitelist() {
+  try {
+    const list = await invoke<string[]>('get_privacy_whitelist')
+    whitelistText.value = list.join('\n')
+  } catch (e) {
+    console.error('[settings] 读取加噪白名单失败:', e)
+  }
+}
+async function saveWhitelist() {
+  const domains = whitelistText.value
+    .split(/[\n,，\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  try {
+    await invoke('set_privacy_whitelist', { domains })
+    const list = await invoke<string[]>('get_privacy_whitelist')
+    whitelistText.value = list.join('\n')
+    useToastStore().success(`白名单已保存（${list.length} 个站点）`)
+  } catch (e) {
+    console.error('[settings] 保存加噪白名单失败:', e)
+    useToastStore().error('白名单保存失败')
   }
 }
 
@@ -456,6 +484,20 @@ async function onRemoveKeyword(k: string) {
                 <b>严格</b>：在标准之上再移除 WebUSB / 蓝牙 / 串口 / HID / Gamepad / 传感器等高危 API，
                 并归一化语音音色、降级高精度计时（部分网站功能可能受影响）。<br />
                 切换后刷新页面即对已开标签生效。
+              </div>
+              <div class="kw-block" v-if="privacyLevel !== 'off'">
+                <div class="kw-hint">
+                  <b>加噪白名单</b>：下列站点<strong>不做加噪</strong>（Canvas 敏感的在线地图、
+                  设计工具、视频剪辑等可加进来）。每行一个域名，子域名自动包含。
+                </div>
+                <textarea
+                  class="kw-textarea"
+                  v-model="whitelistText"
+                  rows="4"
+                  placeholder="ditu.amap.com&#10;www.figma.com"
+                  spellcheck="false"
+                ></textarea>
+                <button class="mini-btn primary" @click="saveWhitelist">保存白名单</button>
               </div>
               <div class="field">
                 <label>广告拦截</label>
@@ -974,6 +1016,24 @@ async function onRemoveKeyword(k: string) {
   appearance: none;
 }
 .kw-add input:focus {
+  border-color: var(--accent);
+}
+.kw-textarea {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  outline: none;
+  resize: vertical;
+  margin-bottom: 8px;
+  box-sizing: border-box;
+}
+.kw-textarea:focus {
   border-color: var(--accent);
 }
 </style>
