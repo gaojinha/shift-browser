@@ -165,6 +165,19 @@ async function initBrowser() {
 
 onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeydown)
+  // 防重入：app-unlocked 事件与兜底轮询可能同时触发 initBrowser，
+  // 并发跑会同时看到 tabs 为空 → 各建一个标签（重复）
+  let initRunning = false
+  async function initBrowserSafe() {
+    if (initRunning) return
+    initRunning = true
+    try {
+      await initBrowser()
+    } finally {
+      initRunning = false
+    }
+  }
+
   // 锁屏期间（Rust setup 阻塞中）Db/TabManager 尚未就绪，initBrowser 的命令调用
   // 会全部失败——失败由各 store 内部吞掉，这里标记"初始化未完成"，
   // 等 Rust 解锁后 emit app-unlocked 再重试
@@ -175,12 +188,23 @@ onMounted(async () => {
     initFailed = true
   }
   if (initFailed || tabsStore.tabs.length === 0) {
-    // 不管失败还是"成功但没标签"，都监听 app-unlocked 兜底重试（幂等）
+    // 主通道：Rust 解锁后 emit app-unlocked
     listen('app-unlocked', () => {
-      initBrowser().catch((e) => {
+      initBrowserSafe().catch((e) => {
         console.error('[app] 解锁后重试初始化失败:', e)
       })
     }).catch(() => {})
+    // 兜底：万一事件错过（webview 加载慢于 emit），每秒重试一次，最多 10 次，
+    // 直到有标签为止（initBrowser 幂等：已有标签不会重复创建）
+    let tries = 0
+    const retryTimer = window.setInterval(() => {
+      tries++
+      if (tabsStore.tabs.length > 0 || tries > 10) {
+        clearInterval(retryTimer)
+        return
+      }
+      initBrowserSafe().catch(() => {})
+    }, 1000)
   }
   // 无论初始化成功失败，轮询都要启动（Rust 侧状态可能在初始化期间已变化）
   tabsStore.startPolling()
@@ -227,7 +251,10 @@ watch(
     <BookmarksBar v-if="settingsStore.showBookmarksBar" @open-manager="showBookmarks = true" />
     <!-- 内容区：webview 由 Rust 以 (0, 112) 起盖住此区域 -->
     <div class="content-area" id="contentArea"></div>
-    <StatusBar />
+    <StatusBar
+      @open-downloads="showDownloads = true"
+      @open-settings="showSettings = true"
+    />
     <PasswordsDialog :show="showPasswords" @close="showPasswords = false" />
     <GroupsDialog :show="showGroups" @close="showGroups = false" />
     <DownloadsDialog :show="showDownloads" @close="showDownloads = false" />

@@ -676,9 +676,7 @@ fn render_html(
         <div class="recent-list" id="recentList"></div>
       </div>
       <div class="footer">
-        <button id="footerWorldNav">🌐 世界导航</button>
-        <button id="footerRefresh">⟳ 刷新</button>
-        <span style="font-size:12px;color:rgba(255,255,255,0.35);line-height:30px;">v{sb_version}</span>
+        <span style="font-size:12px;color:rgba(255,255,255,0.35);line-height:30px;">Shift Browser v{sb_version}</span>
       </div>
     </div>
     <div class="right-bar" id="rightBar">
@@ -1620,9 +1618,6 @@ fn render_html(
     }} else {{ showToast('⚙️ 设置'); }}
   }});
 
-  // ---- footer ----
-  document.getElementById('footerWorldNav').addEventListener('click', function() {{ window.location.href = 'world-nav.html'; }});
-  document.getElementById('footerRefresh').addEventListener('click', function() {{ window.location.reload(); }});
   }})();
 </script>
 </body>

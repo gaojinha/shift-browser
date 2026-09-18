@@ -2,6 +2,7 @@ mod ai;
 mod db;
 mod extensions;
 mod feed;
+mod netmon;
 mod newtab;
 mod reader;
 mod tabs;
@@ -18,7 +19,7 @@ use tauri::Manager;
 /// 自定义协议（shift://）不走注入，必须在这里手动加响应头。
 /// script-src 允许 'unsafe-inline'：newtab/world-nav 是本地生成的可信内联脚本；
 /// object-src 'none' + base-uri 'self' + connect-src 收紧 防注入面。
-const SHIFT_CSP: &str = "default-src 'self' shift: data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:; media-src 'self' https: http:; frame-src 'self' https: http:; object-src 'none'; base-uri 'self'";
+const SHIFT_CSP: &str = "default-src 'self' shift: data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' ipc: http://ipc.localhost https://wttr.in https://ipinfo.io; font-src 'self' data:; media-src 'self' https: http:; frame-src 'self' https: http:; object-src 'none'; base-uri 'self'";
 
 /// 整页翻译注入脚本（编译期嵌入，运行时 eval 到 child webview）
 const WHOLE_PAGE_TRANSLATE_JS: &str = include_str!("whole_page_translate.js");
@@ -662,6 +663,9 @@ pub fn run() {
 
       // 资讯订阅调度器（62 内置源，启动 6 秒后首轮，之后每 30 分钟）
       feed::start_scheduler(app.handle());
+
+      // 网络状态监测（状态栏：下行/上行/延迟，每 2 秒推送）
+      netmon::start_network_monitor(app.handle().clone());
 
       // 锁屏解锁过 → 通知前端重试初始化（锁屏期间 Db/TabManager 未就绪，
       // 主窗口 Vue 的 onMounted 初始化全部失败，解锁后必须重跑 loadTabs/createTab）
