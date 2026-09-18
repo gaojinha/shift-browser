@@ -321,6 +321,32 @@ function onTabScrollDblClick(e: MouseEvent) {
   invoke('toggle_maximize').catch(() => {})
 }
 
+// ---- 无边框窗口控制（标签栏 = 标题栏，Chrome 式）----
+function onMinimize() {
+  invoke('minimize_window').catch(() => {})
+}
+function onToggleMax() {
+  invoke('toggle_maximize').catch(() => {})
+}
+function onClose() {
+  invoke('close_window').catch(() => {})
+}
+
+/** 标签栏空白处按住拖动窗口（标签/分组头/按钮上有自己的交互，不触发） */
+function onTabBarMouseDown(e: MouseEvent) {
+  if (e.button !== 0) return
+  const t = e.target as HTMLElement
+  if (
+    t.closest('.tab') ||
+    t.closest('.group-head') ||
+    t.closest('.new-tab-btn') ||
+    t.closest('.wc-btn') ||
+    t.closest('.context-menu')
+  )
+    return
+  invoke('start_drag_window').catch(() => {})
+}
+
 // ---- 分组操作 ----
 function onToggleCollapse(groupId: number) {
   const g = groupsStore.groups.find((x) => x.id === groupId)
@@ -335,7 +361,7 @@ function onFaviconError(e: Event) {
 </script>
 
 <template>
-  <div class="tab-bar" @click="closeMenu">
+  <div class="tab-bar" @click="closeMenu" @mousedown="onTabBarMouseDown">
     <div class="tab-scroll" @contextmenu.prevent @dblclick="onTabScrollDblClick">
       <!-- 未分组标签 -->
       <div
@@ -416,6 +442,13 @@ function onFaviconError(e: Event) {
       </template>
     </div>
     <button class="new-tab-btn" title="新建标签" @click="onNewTab">+</button>
+
+    <!-- 窗口控制（标签栏 = 标题栏，无边框窗口） -->
+    <div class="window-controls">
+      <button class="wc-btn" title="最小化" @click="onMinimize">─</button>
+      <button class="wc-btn" title="最大化/还原" @click="onToggleMax">□</button>
+      <button class="wc-btn wc-close" title="关闭" @click="onClose">✕</button>
+    </div>
 
     <!-- 右键菜单（原版标准菜单：固定/静音/关闭/复制网址 + 移动到分组；按住可拖动位置） -->
     <div
@@ -637,6 +670,39 @@ function onFaviconError(e: Event) {
 .new-tab-btn:hover {
   background: var(--bg-active);
   color: var(--text-primary);
+}
+
+/* 窗口控制按钮（无边框窗口：标签栏 = 标题栏） */
+.window-controls {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: 4px;
+  height: 100%;
+}
+.wc-btn {
+  width: 38px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.wc-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.wc-close:hover {
+  background: #e53935;
+  color: #fff;
 }
 
 /* 右键菜单 */

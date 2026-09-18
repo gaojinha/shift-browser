@@ -1487,6 +1487,33 @@ pub async fn toggle_maximize(app: AppHandle) -> Result<bool, String> {
     Ok(!maximized)
 }
 
+/// 最小化主窗口（标题栏/标签栏合并后的窗口控制按钮）
+#[tauri::command]
+pub async fn minimize_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    window.minimize().map_err(|e| e.to_string())
+}
+
+/// 关闭主窗口（标题栏/标签栏合并后的窗口控制按钮）
+#[tauri::command]
+pub async fn close_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    window.close().map_err(|e| e.to_string())
+}
+
+/// 开始拖动主窗口（无边框窗口标题栏拖拽，标签栏空白处按住调用）
+#[tauri::command]
+pub async fn start_drag_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    window.start_dragging().map_err(|e| e.to_string())
+}
+
 /// 判断 URL 是否为内部启动页（标题显示"启动页"）
 /// 协议改版后新标签页 URL 是 shift://newtab（host=newtab），旧 file:// 路径
 /// 含 /newtab/ 的判断匹配不到——必须按 scheme+host 判断，两处调用点（create_tab

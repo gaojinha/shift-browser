@@ -179,6 +179,9 @@ pub fn run() {
       tabs::toggle_pin,
       tabs::toggle_mute,
       tabs::toggle_maximize,
+      tabs::minimize_window,
+      tabs::close_window,
+      tabs::start_drag_window,
       tabs::set_bookmarks_bar_visible,
       tabs::get_nav_state,
       // AI 侧边栏
