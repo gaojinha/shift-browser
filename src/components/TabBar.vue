@@ -511,10 +511,12 @@ function onFaviconError(e: Event) {
   position: relative;
   display: flex;
   align-items: center;
-  min-width: 180px;
+  /* 宽度自适应：标签少时撑到最多 180px，标签变多后自动收窄，
+     压到 64px 下限后再多就由 .tab-scroll 横向滚动兜底 */
+  min-width: 64px;
   max-width: 180px;
   width: 180px;
-  flex: 0 0 180px;
+  flex: 1 1 180px;
   height: 32px;
   padding: 0 10px;
   margin-right: 3px;
