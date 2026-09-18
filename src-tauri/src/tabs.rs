@@ -66,6 +66,7 @@ fn clean_tracking_params(url: &str) -> String {
         (false, None) => format!("{}?{}", base, kept.join("&")),
     };
     if cleaned != url {
+        crate::extensions::CLEANED_PARAMS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         log::info!("[privacy] URL 追踪参数已清洗: {} -> {}", url, cleaned);
     }
     cleaned

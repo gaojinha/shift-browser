@@ -65,6 +65,8 @@ watch(
         })
         // 加噪白名单（隐私分区用）
         loadWhitelist()
+        // 隐私防护统计
+        loadPrivacyStats()
         // 打开时清空 AI Key 输入框：不回显掩码，避免用户无意把掩码写回库
         aiKeyInput.value = ''
       }
@@ -203,6 +205,34 @@ async function saveWhitelist() {
   } catch (e) {
     console.error('[settings] 保存加噪白名单失败:', e)
     useToastStore().error('白名单保存失败')
+  }
+}
+
+/** 隐私防护统计（本次运行期间的内存计数，重启归零） */
+const privacyStats = ref<{
+  cleaned_params: number
+  privacy_injections: number
+  adblock_injections: number
+} | null>(null)
+async function loadPrivacyStats() {
+  try {
+    privacyStats.value = await invoke<{
+      cleaned_params: number
+      privacy_injections: number
+      adblock_injections: number
+    }>('get_privacy_stats')
+  } catch (e) {
+    console.error('[settings] 读取隐私统计失败:', e)
+  }
+}
+async function resetPrivacyStats() {
+  try {
+    await invoke('reset_privacy_stats')
+    await loadPrivacyStats()
+    useToastStore().success('统计已重置')
+  } catch (e) {
+    console.error('[settings] 重置统计失败:', e)
+    useToastStore().error('重置统计失败')
   }
 }
 
@@ -498,6 +528,15 @@ async function onRemoveKeyword(k: string) {
                   spellcheck="false"
                 ></textarea>
                 <button class="mini-btn primary" @click="saveWhitelist">保存白名单</button>
+              </div>
+              <div class="kw-hint" style="margin-top: 10px">
+                <b>防护统计</b>（本次运行）：已清洗追踪参数
+                <b>{{ privacyStats?.cleaned_params ?? 0 }}</b> 次 · 隐私防护注入
+                <b>{{ privacyStats?.privacy_injections ?? 0 }}</b> 次 · 广告拦截注入
+                <b>{{ privacyStats?.adblock_injections ?? 0 }}</b> 次
+                <button class="mini-btn" style="margin-left: 8px" @click="resetPrivacyStats">
+                  重置
+                </button>
               </div>
               <div class="field">
                 <label>广告拦截</label>

@@ -5,7 +5,43 @@
 use crate::db::extensions as ext_db;
 use crate::db::Db;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Manager, State};
+
+// ---- 隐私防护统计（让防护"看得见"）----
+/// URL 追踪参数清洗次数（每次剥离参数 +1）
+pub static CLEANED_PARAMS: AtomicU64 = AtomicU64::new(0);
+/// 隐私防护脚本注入次数（每注入一个 webview +1）
+pub static PRIVACY_INJECTIONS: AtomicU64 = AtomicU64::new(0);
+/// 广告拦截脚本注入次数
+pub static ADBLOCK_INJECTIONS: AtomicU64 = AtomicU64::new(0);
+
+/// 隐私防护统计（前端展示用）
+#[derive(Debug, Serialize, Clone)]
+pub struct PrivacyStats {
+    pub cleaned_params: u64,
+    pub privacy_injections: u64,
+    pub adblock_injections: u64,
+}
+
+/// 读取隐私防护统计
+#[tauri::command]
+pub fn get_privacy_stats() -> PrivacyStats {
+    PrivacyStats {
+        cleaned_params: CLEANED_PARAMS.load(Ordering::Relaxed),
+        privacy_injections: PRIVACY_INJECTIONS.load(Ordering::Relaxed),
+        adblock_injections: ADBLOCK_INJECTIONS.load(Ordering::Relaxed),
+    }
+}
+
+/// 重置隐私防护统计
+#[tauri::command]
+pub fn reset_privacy_stats() {
+    CLEANED_PARAMS.store(0, Ordering::Relaxed);
+    PRIVACY_INJECTIONS.store(0, Ordering::Relaxed);
+    ADBLOCK_INJECTIONS.store(0, Ordering::Relaxed);
+    log::info!("[privacy] 统计已重置");
+}
 
 #[cfg(target_os = "linux")]
 use webkit2gtk::{
@@ -847,6 +883,7 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
             custom.len()
         );
         items.push((Some(js), Some(ADBLOCK_CSS.to_string())));
+        ADBLOCK_INJECTIONS.fetch_add(1, Ordering::Relaxed);
     }
     // 内置隐私防护（三档）：off / standard / strict
     // 兼容早期 privacy_shield='false'（等价 off）
@@ -887,6 +924,7 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
                 Some(format!("{}{}\n{}", wl_prefix, PRIVACY_JS, STRICT_PRIVACY_JS)),
                 None,
             ));
+            PRIVACY_INJECTIONS.fetch_add(1, Ordering::Relaxed);
             log::info!(
                 "[extensions] 隐私防护已注入（严格档 strict，白名单 {} 个）",
                 whitelist.len()
@@ -894,6 +932,7 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
         }
         _ => {
             items.push((Some(format!("{}{}", wl_prefix, PRIVACY_JS)), None));
+            PRIVACY_INJECTIONS.fetch_add(1, Ordering::Relaxed);
             log::info!(
                 "[extensions] 隐私防护已注入（标准档 standard，白名单 {} 个）",
                 whitelist.len()
