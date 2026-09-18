@@ -9,6 +9,38 @@ import { useGroupsStore } from './groups'
 import { useSettingsStore } from './settings'
 import { useToastStore } from './toast'
 
+// ---- 自动分组（按域名归类，替代手动建分组）----
+// 分组色板（循环取色）
+const GROUP_COLORS = [
+  '#4a9eff',
+  '#f06292',
+  '#ffb74d',
+  '#66bb6a',
+  '#ab47bc',
+  '#26c6da',
+  '#ec407a',
+  '#7e57c2',
+  '#8d6e63',
+  '#9ccc65',
+]
+/** 取 URL 注册域名（去 www 前缀）；非 http(s) 返回 null */
+function extractDomain(url: string): string | null {
+  try {
+    const u = new URL(url)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+    let host = u.hostname.toLowerCase()
+    if (host.startsWith('www.')) host = host.slice(4)
+    return host || null
+  } catch {
+    return null
+  }
+}
+/** 用户手动取消分组的标签：会话内豁免，不再被自动归组拉回去 */
+const autoGroupExempt = new Set<string>()
+export function markAutoGroupExempt(tabId: string) {
+  autoGroupExempt.add(tabId)
+}
+
 interface TabsState {
   tabs: Tab[]
   activeTabId: string | null
@@ -66,6 +98,56 @@ export const useTabsStore = defineStore('tabs', {
       if (tab) tab.groupId = groupId
     },
 
+    /** 用户手动取消分组（右键"取消分组"）：会话内豁免，自动分组不再拉回 */
+    exemptFromAutoGroup(tabId: string) {
+      markAutoGroupExempt(tabId)
+    },
+
+    /**
+     * 自动按域名归组：
+     * - 内部页面/非 http(s) 跳过
+     * - 已有该域名分组 → 直接归入
+     * - 无分组时：同域名标签 ≥2 个才懒建组（避免一大堆单标签组占满标签栏）
+     * - 已手动归组/被豁免的标签不动
+     */
+    async autoGroupTab(tabId: string, url: string) {
+      if (autoGroupExempt.has(tabId)) return
+      const tab = this.tabs.find((t) => t.id === tabId)
+      if (!tab || tab.groupId != null) return
+      const domain = extractDomain(url)
+      if (!domain) return
+      const groups = useGroupsStore()
+      if (groups.groups.length === 0) {
+        await groups.loadGroups().catch(() => {})
+      }
+      // 已有该域名分组 → 直接归入
+      const existing = groups.groups.find((g) => g.name === domain)
+      if (existing) {
+        tab.groupId = existing.id
+        return
+      }
+      // 无分组：同域名标签 ≥2 个才建组
+      const same = this.tabs.filter(
+        (t) => t.url && extractDomain(t.url) === domain,
+      )
+      if (same.length >= 2) {
+        try {
+          const id = await groups.createGroup(
+            domain,
+            GROUP_COLORS[groups.groups.length % GROUP_COLORS.length],
+          )
+          const g = groups.groups.find((x) => x.id === id)
+          if (g) {
+            for (const t of same) {
+              if (!autoGroupExempt.has(t.id)) t.groupId = g.id
+            }
+          }
+        } catch {
+          // groups store 已 toast 提示，静默
+        }
+      }
+    },
+
     /** 创建新标签页（无参时按主页设置解析；'newtab' = 本地新标签页）
      *  @param groupId 可选：创建后把新标签归入该分组（group 是前端运行时概念，后端 Tab 无此字段，
      *                 所以在 invoke 返回后由前端补写 groupId，不依赖 Rust 返回） */
@@ -94,6 +176,8 @@ export const useTabsStore = defineStore('tabs', {
         // groupId 是前端运行时概念（Rust Tab 无此字段，参见 54 行注释），
         // 所以通过现有 assignTabToGroup 幂等归组，不依赖后端回传。
         if (groupId != null) this.assignTabToGroup(tab.id, groupId)
+        // 自动按域名归组（fire-and-forget，不阻塞创建流程）
+        this.autoGroupTab(tab.id, tab.url || '').catch(() => {})
         // 取消旧标签激活
         for (const t of this.tabs) {
           if (t.id !== tab.id) t.is_active = false
@@ -384,6 +468,12 @@ export const useTabsStore = defineStore('tabs', {
         const prevUrls = new Map(this.tabs.map((t) => [t.id, t.url]))
         const prevTitles = new Map(this.tabs.map((t) => [t.id, t.title]))
         this.tabs = tabs.map((t) => ({ ...t, groupId: prevGroups.get(t.id) ?? null }))
+        // 自动按域名归组：URL 变化/新标签时触发（fire-and-forget）
+        for (const t of this.tabs) {
+          if (t.url && t.url !== prevUrls.get(t.id)) {
+            this.autoGroupTab(t.id, t.url).catch(() => {})
+          }
+        }
         // 页面加载完成（URL/标题变化）→ 关掉加载指示；webview 内链跳视为可后退
         if (this.loadingTabId) {
           const lid = this.loadingTabId
