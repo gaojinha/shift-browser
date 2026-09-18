@@ -1291,6 +1291,30 @@ pub async fn hibernate_idle_tabs(
     Ok(count)
 }
 
+/// 翻译当前活动标签的整个页面（供前端「翻译当前页面」按钮调用）
+/// 复用既有整页翻译脚本：脚本自包含（进度浮层 + 分批调 shift://__translate__/batch + 回填 DOM），
+/// 放在 tabs.rs 是为了直接访问 TabManager 的 active_id（该字段不对外暴露）
+#[tauri::command]
+pub async fn translate_current_page(
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+) -> Result<(), String> {
+    let id = state
+        .active_id
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "当前没有活动标签".to_string())?;
+    let label = format!("tab-{}", id);
+    let wv = app
+        .get_webview(&label)
+        .ok_or_else(|| "活动标签的 webview 不存在".to_string())?;
+    wv.eval(crate::WHOLE_PAGE_TRANSLATE_JS)
+        .map_err(|e| format!("注入整页翻译脚本失败: {}", e))?;
+    log::info!("[translate] 已对标签 {} 注入整页翻译脚本", id);
+    Ok(())
+}
+
 /// 导航到新 URL
 #[tauri::command]
 pub async fn navigate_tab(

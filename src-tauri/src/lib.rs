@@ -22,7 +22,8 @@ use tauri::Manager;
 const SHIFT_CSP: &str = "default-src 'self' shift: data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' ipc: http://ipc.localhost https://wttr.in https://ipinfo.io; font-src 'self' data:; media-src 'self' https: http:; frame-src 'self' https: http:; object-src 'none'; base-uri 'self'";
 
 /// 整页翻译注入脚本（编译期嵌入，运行时 eval 到 child webview）
-const WHOLE_PAGE_TRANSLATE_JS: &str = include_str!("whole_page_translate.js");
+/// （命令实现见 tabs.rs 的 translate_current_page —— 那里可访问 TabManager 内部字段）
+pub(crate) const WHOLE_PAGE_TRANSLATE_JS: &str = include_str!("whole_page_translate.js");
 
 /// 启动锁屏中标志：setup 弹出 GTK 密码对话框期间为 true。
 /// 前端 onMounted 在锁屏期间调用 Db/TabManager 命令会全部失败并弹"创建/加载标签页失败"
@@ -203,6 +204,8 @@ pub fn run() {
       tabs::switch_tab,
       // 性能：空闲标签休眠（回收渲染进程内存）
       tabs::hibernate_idle_tabs,
+      // 翻译：对当前活动标签整页翻译（复用 whole_page_translate.js）
+      tabs::translate_current_page,
       tabs::navigate_tab,
       tabs::go_back,
       tabs::go_forward,

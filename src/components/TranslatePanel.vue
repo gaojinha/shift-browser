@@ -14,6 +14,17 @@ const loading = ref(false)
 const error = ref('')
 const elapsedMs = ref(0)
 
+/** 翻译当前标签的整个页面：复用 Rust 侧整页翻译脚本（whole_page_translate.js） */
+async function translatePage() {
+  error.value = ''
+  try {
+    await invoke('translate_current_page')
+    emit('close') // 关掉面板，让用户直接看页面上的翻译进度浮层
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e || '整页翻译失败')
+  }
+}
+
 // 弹窗打开时隐藏 webview（HTML 侧边栏盖不住 webview），关闭时恢复
 watch(
   () => props.show,
@@ -142,6 +153,14 @@ const charCount = (s: string) => s.length
             {{ loading ? '⏳ 翻译中…' : '🔄 翻译' }}
           </button>
           <button class="tr-btn" :disabled="loading" @click="clearAll">清空</button>
+          <button
+            class="tr-btn"
+            :disabled="loading"
+            title="翻译当前标签的整个页面（把网页文字换成中文）"
+            @click="translatePage"
+          >
+            📄 翻译当前页面
+          </button>
           <span class="tr-elapsed" v-if="elapsedMs > 0">{{ elapsedMs }} ms</span>
         </div>
 
