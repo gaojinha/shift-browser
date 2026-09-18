@@ -10,6 +10,7 @@ mod translate;
 use db::{
     bookmarks, downloads, history, passwords, sessions, settings, tab_groups, users, workspaces, Db,
 };
+use tauri::Emitter;
 use tauri::Manager;
 
 /// shift:// 自定义协议页面的 CSP（主窗口/新标签页/世界导航页统一）
@@ -439,6 +440,10 @@ pub fn run() {
       }
     })
     .setup(|app| {
+      // 锁屏是否启用过（解锁后通知前端重试初始化——锁屏期间 Db/TabManager 未就绪，
+      // 主窗口 Vue 的 onMounted 命令调用全部失败，必须等 setup 完成后重试）
+      let mut unlocked_after_lock = false;
+
       // 初始化数据库（异步）
       let app_data_dir = app
         .path()
@@ -480,6 +485,7 @@ pub fn run() {
 
         if lock_enabled {
           log::info!("[ShiftBrowser] 启动锁屏已启用，弹出 GTK 密码对话框");
+          unlocked_after_lock = true;
           let parent_win = app
             .get_window("main")
             .and_then(|w| w.gtk_window().ok());
@@ -546,6 +552,11 @@ pub fn run() {
                   dialog.destroy();
                 }
                 std::mem::forget(dialog);
+                // 立即恢复主窗口前台/焦点——否则用户必须点一下窗体才能交互
+                // （modal dialog 关闭后焦点不自动回到父窗口）
+                if let Some(ref pw) = parent_win {
+                  pw.present();
+                }
                 break;
               }
               Ok(false) => {
@@ -632,6 +643,13 @@ pub fn run() {
 
       // 资讯订阅调度器（62 内置源，启动 6 秒后首轮，之后每 30 分钟）
       feed::start_scheduler(app.handle());
+
+      // 锁屏解锁过 → 通知前端重试初始化（锁屏期间 Db/TabManager 未就绪，
+      // 主窗口 Vue 的 onMounted 初始化全部失败，解锁后必须重跑 loadTabs/createTab）
+      if unlocked_after_lock {
+        let _ = app.emit("app-unlocked", ());
+        log::info!("[ShiftBrowser] 已发出 app-unlocked，前端将重试初始化");
+      }
 
       Ok(())
     })

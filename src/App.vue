@@ -126,8 +126,7 @@ function onGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(async () => {
-  window.addEventListener('keydown', onGlobalKeydown)
+async function initBrowser() {
   // 设置尽早加载（主页/搜索引擎/主题/书签栏显隐依赖）
   await settingsStore.loadSettings()
   // 启动锁屏已迁移到 Rust/GTK 层（lib.rs setup 里弹 GTK 原生密码对话框，
@@ -161,6 +160,27 @@ onMounted(async () => {
     if (tabsStore.tabs.length === 0) {
       await tabsStore.createTab().catch(() => {})
     }
+  }
+}
+
+onMounted(async () => {
+  window.addEventListener('keydown', onGlobalKeydown)
+  // 锁屏期间（Rust setup 阻塞中）Db/TabManager 尚未就绪，initBrowser 的命令调用
+  // 会全部失败——失败由各 store 内部吞掉，这里标记"初始化未完成"，
+  // 等 Rust 解锁后 emit app-unlocked 再重试
+  let initFailed = false
+  try {
+    await initBrowser()
+  } catch {
+    initFailed = true
+  }
+  if (initFailed || tabsStore.tabs.length === 0) {
+    // 不管失败还是"成功但没标签"，都监听 app-unlocked 兜底重试（幂等）
+    listen('app-unlocked', () => {
+      initBrowser().catch((e) => {
+        console.error('[app] 解锁后重试初始化失败:', e)
+      })
+    }).catch(() => {})
   }
   // 无论初始化成功失败，轮询都要启动（Rust 侧状态可能在初始化期间已变化）
   tabsStore.startPolling()
