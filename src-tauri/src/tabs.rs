@@ -1232,7 +1232,10 @@ pub async fn reorder_tabs(
 /// 获取所有标签页（按顺序）
 #[tauri::command]
 pub async fn get_tabs(state: tauri::State<'_, TabManager>) -> Result<Vec<Tab>, String> {
-    Ok(state.all_tabs())
+    let tabs = state.all_tabs();
+    // 诊断"前端标签列表为空/标签不显示"问题：记录每次同步的标签数（事件驱动 + 8s 轮询）
+    log::info!("[tabs] get_tabs: {} 个标签", tabs.len());
+    Ok(tabs)
 }
 
 /// 隐藏/显示所有标签页 webview（弹窗/菜单等 Vue UI 覆盖层需要）

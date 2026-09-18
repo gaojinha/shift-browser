@@ -166,8 +166,14 @@ async function initBrowser(skipStartupTab = false) {
 
 onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeydown)
-  // 防重入：app-unlocked 事件与兜底轮询可能同时触发 initBrowser，
-  // 并发跑会同时看到 tabs 为空 → 各建一个标签（重复）
+
+  // 前端日志桥：关键节点写进 Rust 日志（排查前端白屏/事件收不到/初始化不执行）
+  function frontLog(msg: string) {
+    invoke('front_log', { msg }).catch(() => {})
+  }
+  frontLog('onMounted 开始')
+
+  // 初始化只跑一次（app-unlocked 事件、兜底轮询、未锁屏直达三条路径都可能到达）
   let initRunning = false
   async function initBrowserSafe(skipStartupTab = false) {
     if (initRunning) return
@@ -178,38 +184,71 @@ onMounted(async () => {
       initRunning = false
     }
   }
+  // 就绪：初始化 + 保证至少一个标签（解锁来的走"开启动页"，否则沿用主页/恢复会话）
+  let ready = false
+  async function onReady(fromUnlock: boolean) {
+    if (ready) return
+    ready = true
+    setLockedState(false)
+    frontLog('onReady 开始 fromUnlock=' + fromUnlock)
+    await initBrowserSafe(fromUnlock).catch((e) => {
+      frontLog('initBrowser 失败: ' + e)
+    })
+    if (fromUnlock) {
+      // 解锁后自动打开启动页（skipStartupTab=true 时 initBrowser 不建标签，这里统一建）
+      await tabsStore.createTab('newtab').catch((e) => {
+        frontLog('解锁后创建启动页失败: ' + e)
+      })
+    } else if (tabsStore.tabs.length === 0) {
+      await tabsStore.createTab().catch((e) => {
+        frontLog('创建初始标签失败: ' + e)
+      })
+    }
+    tabsStore.startPolling()
+    frontLog('onReady 完成 标签数=' + tabsStore.tabs.length)
+  }
 
-  // 查启动锁屏状态：锁屏期间（Rust setup 里 GTK 对话框阻塞中）Db/TabManager 未就绪，
-  // 任何加载/创建标签的命令都会失败。若照常初始化+每秒重试，会反复弹
-  // "加载标签页失败/创建标签页失败" toast——所以锁屏时静默等待 app-unlocked。
+  // ① 先查锁屏状态：await 一次 IPC 确保 IPC 桥已就绪（之后注册事件监听才可靠）
   let locked = false
   try {
     locked = await invoke<boolean>('is_locked')
-  } catch {
+    frontLog('is_locked=' + locked)
+  } catch (e) {
+    frontLog('is_locked 调用失败: ' + e)
     locked = false
   }
-  // 写入全局缓存：标签命令失败时据此静默（避免锁屏期间反复弹 toast）
   setLockedState(locked)
 
   if (locked) {
-    console.info('[app] 启动锁屏中，静默等待解锁…')
-    listen('app-unlocked', async () => {
-      console.info('[app] 已解锁，初始化并打开启动页')
-      setLockedState(false)
-      // 解锁后自动打开启动页（skipStartupTab=true：不走"恢复上次会话"分支，直接开启动页）
-      await initBrowserSafe(true)
-      await tabsStore.createTab('newtab').catch((e) => {
-        console.error('[app] 解锁后创建启动页失败:', e)
+    // ② 锁屏中：await 注册 app-unlocked（确保注册完成，避免"解锁事件早于注册"丢失）
+    try {
+      await listen('app-unlocked', () => {
+        frontLog('收到 app-unlocked 事件')
+        onReady(true)
       })
-      tabsStore.startPolling()
-    }).catch(() => {})
-  } else {
-    await initBrowserSafe()
-    // 未启用锁屏或本就不在锁屏：无标签时按主页设置兜底建一个标签
-    if (tabsStore.tabs.length === 0) {
-      await tabsStore.createTab().catch(() => {})
+      frontLog('已注册 app-unlocked 监听')
+    } catch (e) {
+      frontLog('注册 app-unlocked 失败: ' + e)
     }
-    tabsStore.startPolling()
+    // ③ 兜底轮询：万一时序问题导致事件丢失，每秒查一次锁屏状态，解开就初始化
+    const lockTimer = window.setInterval(async () => {
+      if (ready) {
+        clearInterval(lockTimer)
+        return
+      }
+      try {
+        const l = await invoke<boolean>('is_locked')
+        if (!l) {
+          frontLog('兜底轮询检测到已解锁')
+          clearInterval(lockTimer)
+          onReady(true)
+        }
+      } catch {
+        /* 忽略：等下一轮 */
+      }
+    }, 1000)
+  } else {
+    onReady(false)
   }
 
   // 启动页右侧栏按钮 → 打开主界面组件（newtab webview 通过 IPC 触发）

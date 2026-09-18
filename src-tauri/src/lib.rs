@@ -36,6 +36,13 @@ fn is_locked() -> bool {
     LOCKED.load(std::sync::atomic::Ordering::SeqCst)
 }
 
+/// 前端日志桥：把前端关键节点的执行情况写进 Rust 日志，
+/// 便于排查"前端白屏/事件收不到/初始化不执行"这类看不到 console 的问题。
+#[tauri::command]
+fn front_log(msg: String) {
+    log::info!("[front] {}", msg);
+}
+
 /// 简易 percent-decode（处理 shift:// query 参数，避免引入 url crate）
 /// 注意：只处理 %XX 和 + → 空格，满足 shift:// 内部用
 fn percent_decode(s: &str) -> String {
@@ -122,6 +129,8 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       // 启动锁屏状态（前端初始化前查询，锁屏期间静默等待解锁）
       is_locked,
+      // 前端日志桥（排查前端执行链路）
+      front_log,
       // 设置
       settings::get_setting,
       settings::get_all_settings,
