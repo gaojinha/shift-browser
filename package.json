@@ -10,6 +10,7 @@
     "tauri": "tauri",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "test": "vitest run",
     "format": "prettier --write src/"
   },
   "dependencies": {
@@ -30,6 +31,7 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "vite": "^8.3.0",
+    "vitest": "^5.0.1",
     "vue-tsc": "^3.3.11"
   }
 }
