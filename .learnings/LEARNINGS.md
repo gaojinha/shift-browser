@@ -554,3 +554,26 @@ Corrections, insights, and knowledge gaps captured during development.
 - 高频同步命令（get_tabs）加 `info` 级条数日志，能一眼看出前端列表是否为空、同步是否在跑。
 **教训**: 在 Tauri/Electron 这类"前端 + 原生"架构里，**前端首个 IPC 调用之前的状态都是不可信的**；`catch(() => {})` 吞掉注册类错误极其危险，至少要 `console.error` + front_log。
 **结果**: 提交 e2b6d5e；解锁后 1 秒内自动建启动页；59 测试全过、clippy 零警告
+
+---
+
+## 2026-09-18 12:20 — 浏览器反指纹在 WebKitGTK 上的工程边界与落地要点（best_practice）
+
+**类别**: best_practice
+**场景**: ShiftBrowser 隐私防护三连（P0 基础防护 → P1/P2 指纹面收敛 → 三档分级）
+**核心结论**:
+1. **反指纹只有两条路，必须先选路线**：
+   - **随机化**（Brave/Safari）：同站点内稳定、跨站点/跨会话变化 → 不破坏功能，适合日常浏览器；
+   - **统一化**（Tor/Mullvad/Firefox RFP）：所有用户长得一样（含 letterboxing）→ 最强但毁功能。
+   ShiftBrowser 选**随机化为主的混合**：基础特征归一化（UA/硬件/GPU 报通用值）+ 高熵特征加噪。
+2. **"每源都变"是新手最易犯的错**：UCSD IMC25 论文指出，商业指纹方正是靠"同一设备每次渲染都不同"来判定"这人在加噪"。正确做法是 **per-origin 确定性伪随机**：FNV-1a 哈希 `location.origin` 得种子 → xorshift32 生成噪声 → 同源稳定、跨源变化。
+3. **WebKitGTK 的 API 边界（实测）**：
+   - ✅ 有 `SettingsExt::set_user_agent` / `set_enable_webrtc` / `set_javascript_can_open_windows_automatically`
+   - ✅ 有 `CookieManagerExt::set_accept_policy(CookieAcceptPolicy::NoThirdParty)`（第三方 Cookie 阻断）
+   - ❌ **没有 `WebView::connect_send_request`** → 无法改请求头，所以 **Sec-GPC 头发不出去**，只能走 W3C 规范里的 `navigator.globalPrivacyControl` JS 属性（这也是规范允许的表达方式）
+   - ❌ 没找到 ITP 显式开关（WebKit 内建行为）
+4. **反指纹脚本的唯一注入点**：`extensions.rs::inject_extensions`（UserContentManager，webview 级）。**关键坑**：它先 `remove_all_scripts()` 再注入 items —— 所以所有脚本（用户扩展 + 广告拦截 + 隐私防护）必须**一起拼在 items 里**，不能单独二次注入，否则会被下一次注入清掉。
+5. **分档设计的价值**：加噪/裁剪 API 必然有兼容性代价，**给用户三档（标准/严格/关）比给一个总开关更好**——日常标准、敏感站点严格、坏站临时关。状态存 `settings` 表并**同步旧布尔键**避免两处状态打架。
+6. **WebRTC 的正确防护姿势**：不要整体 `set_enable_webrtc(false)`（会废掉视频会议），而是**包装 RTCPeerConnection 过滤 `icecandidate` 里 `typ host` 的候选**（内网 IP 泄露主因），保留公网候选。
+7. **必备自测工具**：`creepjs.org`（最严，看熵值）、`coveryourtracks.eff.org`（EFF 唯一性评分）、`browserleaks.com/webrtc`（IP 泄露）、`privacytests.org`（逐项能力对比）。
+**结果**: 提交 696bf7f(调研报告) / d5a0fde(P0) / 0d4d4ea(P1-P2) / a06ada0(三档)；59 测试全过、clippy 零警告
