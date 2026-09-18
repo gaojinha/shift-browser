@@ -506,3 +506,16 @@ Corrections, insights, and knowledge gaps captured during development.
 7. **特权页面（带 IPC 桥/invoke_key）的 URL scheme 白名单**：newtab 是特权页，`javascript:` 渲染成 `<a href>` 点击即任意命令执行——保存（save_quick_sites）和渲染（generate）两头都拦，防历史遗留恶意数据
 8. **翻译端点 callback 白名单**：callback 拼进 JS 变量名 eval 到 webview，必须严格 `[A-Za-z0-9_]{1,64}` 白名单（比转义更干净），入口+写入双保险
 9. **shift:// 自定义协议 handler 是远程页面可控入口**：on_new_window 必须拒绝非 http/https（防 window.open('file:///etc/passwd')），create_tab/navigate_tab 走白名单保留内部页面能力
+
+---
+
+## 2026-09-18 10:25 — 三个踩坑：Vue 编辑重复钩子、GTK3+Wayland 窗口圆角、stdout 缓冲吞日志（correction + insight）
+
+**类别**: correction / insight
+**场景**: ShiftBrowser v5.5.1（加载失败提示 + 解锁自动开启动页 + 窗体圆角）
+**要点**:
+1. **correction：edit 大段替换 Vue script 时别漏删旧块**。给 StatusBar.vue 加 `loadFailed` 监听时，newString 里带了 `onMounted`/`onUnmounted`，而原文件里也有一份 —— 结果出现两个 `onMounted`、`appVersion` 在定义前被引用（const 不 hoist 会 ReferenceError）。`grep -n "onMounted\|onUnmounted"` 自检能立刻发现。改完 Vue 必须数一遍生命周期钩子数量。
+2. **insight：GTK3 + Wayland 下真正的整窗边框圆角做不了**。Wayland 没有 XShape 扩展；GTK3 的 CSS 不支持 `window` 选择器圆角；X11 XShape（`gtk_window_set_shape_from_region`）**只接受矩形区域、不含弧线**，也做不出圆角。唯一可行是**内容圆角**：给各页面 body 加 `border-radius:12px; overflow-x:hidden`（启动页/世界导航页在 newtab.rs 的 format! CSS 里、主界面在根 index.html 模板里）。且**改 dist/ 无效**——`npm run build` 会覆盖，必须改源码模板。
+3. **insight：Rust log 走 stdout 被全缓冲，日志"卡住"不是没输出**。GUI 进程 stdout 重定向到文件时是块缓冲（4-8KB），不 flush 就看不到。启动命令加 `stdbuf -oL`（行缓冲）后日志实时可见——排查"启动页加载失败"这类问题时，这一步比读代码更关键。用 `setsid nohup ... < /dev/null &` 还能让进程完全脱离、启动命令不再挂住 shell 工具。
+4. **insight：定位"加载失败"根因的正确姿势**：Tauri `PageLoadEvent` 只有 Started/Finished（没有 Failed），必须下沉到 GTK 层 `connect_load_failed`（webkit2gtk-2.0 签名是 `Fn(&WebView, LoadEvent, &str, &glib::Error) -> bool`，**返回 bool** 而不是 `glib::Propagation`，返回 true 才阻止 WebKit 默认错误页）。CLI 输出会误导：本地 systemd/沙箱里"创建页面失败"是 WebKit 的 `WEBKIT_ERROR_CANNOT_CREATE_PAGE`（错误码 104），系统 `WebKitGTK-4.1.mo` 里搜不到这个中文串，别死磕翻译文件。
+**结果**: v5.5.1 提交 eb51f88；59 测试全过、clippy 零警告；日志行缓冲后能实时观察解锁→建标签→page_load_finished 全链路

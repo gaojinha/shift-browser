@@ -24,6 +24,18 @@ const SHIFT_CSP: &str = "default-src 'self' shift: data:; script-src 'self' 'uns
 /// 整页翻译注入脚本（编译期嵌入，运行时 eval 到 child webview）
 const WHOLE_PAGE_TRANSLATE_JS: &str = include_str!("whole_page_translate.js");
 
+/// 启动锁屏中标志：setup 弹出 GTK 密码对话框期间为 true。
+/// 前端 onMounted 在锁屏期间调用 Db/TabManager 命令会全部失败并弹"创建/加载标签页失败"
+/// toast（反复重试），必须能查询到锁屏状态并静默等待 app-unlocked。
+/// 用原子变量而非 Db/State：锁屏期间 Db 尚未 manage，命令参数不能依赖 State。
+static LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 查询是否处于启动锁屏状态（前端初始化前调用，不依赖 Db）
+#[tauri::command]
+fn is_locked() -> bool {
+    LOCKED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// 简易 percent-decode（处理 shift:// query 参数，避免引入 url crate）
 /// 注意：只处理 %XX 和 + → 空格，满足 shift:// 内部用
 fn percent_decode(s: &str) -> String {
@@ -108,6 +120,8 @@ pub fn run() {
         .build(),
     )
     .invoke_handler(tauri::generate_handler![
+      // 启动锁屏状态（前端初始化前查询，锁屏期间静默等待解锁）
+      is_locked,
       // 设置
       settings::get_setting,
       settings::get_all_settings,
@@ -511,6 +525,9 @@ pub fn run() {
         if lock_enabled {
           log::info!("[ShiftBrowser] 启动锁屏已启用，弹出 GTK 密码对话框");
           unlocked_after_lock = true;
+          // 标记锁屏中：前端 is_locked 查到 true 后静默等待 app-unlocked，
+          // 不再反复重试建标签（否则弹"创建标签页失败"toast）
+          LOCKED.store(true, std::sync::atomic::Ordering::SeqCst);
           let parent_win = app
             .get_window("main")
             .and_then(|w| w.gtk_window().ok());
@@ -582,6 +599,8 @@ pub fn run() {
                 if let Some(ref pw) = parent_win {
                   pw.present();
                 }
+                // 解锁完成：清除锁屏标志（前端收到 app-unlocked 后开始初始化）
+                LOCKED.store(false, std::sync::atomic::Ordering::SeqCst);
                 break;
               }
               Ok(false) => {

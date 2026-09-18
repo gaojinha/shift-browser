@@ -9,6 +9,23 @@ import { useGroupsStore } from './groups'
 import { useSettingsStore } from './settings'
 import { useToastStore } from './toast'
 
+// ---- 启动锁屏状态（避免锁屏期间反复弹"创建/加载标签页失败"）----
+// Rust setup 弹 GTK 密码对话框期间 Db/TabManager 未就绪，标签命令必然失败。
+// App.vue 初始化前查到 is_locked 后写入缓存，标签命令失败时据此静默。
+let lockedCache: boolean | null = null
+export function setLockedState(v: boolean): void {
+  lockedCache = v
+}
+async function isLockedNow(): Promise<boolean> {
+  if (lockedCache !== null) return lockedCache
+  try {
+    lockedCache = await invoke<boolean>('is_locked')
+  } catch {
+    lockedCache = false
+  }
+  return lockedCache
+}
+
 // ---- 自动分组（按域名归类，替代手动建分组）----
 // 分组色板（循环取色）
 const GROUP_COLORS = [
@@ -88,7 +105,8 @@ export const useTabsStore = defineStore('tabs', {
         this.activeTabId = active?.id ?? null
       } catch (e) {
         console.error('[tabs] 加载标签失败:', e)
-        useToastStore().error('加载标签页失败')
+        // 锁屏期间命令必然失败，静默等待解锁（否则反复弹 toast）
+        if (!(await isLockedNow())) useToastStore().error('加载标签页失败')
       }
     },
 
@@ -192,7 +210,8 @@ export const useTabsStore = defineStore('tabs', {
         return tab
       } catch (e) {
         console.error('[tabs] 创建标签失败:', e)
-        useToastStore().error('创建标签页失败')
+        // 锁屏期间命令必然失败，静默等待解锁（否则反复弹 toast）
+        if (!(await isLockedNow())) useToastStore().error('创建标签页失败')
         return null
       }
     },

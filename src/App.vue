@@ -18,7 +18,7 @@ import HistoryDialog from './components/HistoryDialog.vue'
 import BookmarksDialog from './components/BookmarksDialog.vue'
 import SessionDialog from './components/SessionDialog.vue'
 import AppToast from './components/AppToast.vue'
-import { useTabsStore } from './stores/tabs'
+import { useTabsStore, setLockedState } from './stores/tabs'
 import { useGroupsStore } from './stores/groups'
 import { useSettingsStore } from './stores/settings'
 import { useWorkspacesStore } from './stores/workspaces'
@@ -126,7 +126,7 @@ function onGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
-async function initBrowser() {
+async function initBrowser(skipStartupTab = false) {
   // 设置尽早加载（主页/搜索引擎/主题/书签栏显隐依赖）
   await settingsStore.loadSettings()
   // 启动锁屏已迁移到 Rust/GTK 层（lib.rs setup 里弹 GTK 原生密码对话框，
@@ -147,7 +147,8 @@ async function initBrowser() {
     await workspacesStore.loadWorkspaces()
     // 启动时恢复标签状态（loadTabs 内部已容错）
     await tabsStore.loadTabs()
-    if (tabsStore.tabs.length === 0) {
+    // skipStartupTab：解锁路径由调用方统一建启动页，这里不建（避免与"恢复会话"重复开标签）
+    if (!skipStartupTab && tabsStore.tabs.length === 0) {
       // 无标签：先尝试恢复当前工作区最近会话，失败则创建默认标签
       const restored = await tabsStore.restoreLastSession(workspacesStore.currentId)
       if (!restored) {
@@ -156,8 +157,8 @@ async function initBrowser() {
     }
   } catch (e) {
     console.error('[app] 启动初始化失败:', e)
-    // 兜底：至少保证有一个标签可用
-    if (tabsStore.tabs.length === 0) {
+    // 兜底：至少保证有一个标签可用（解锁路径由调用方建启动页，这里跳过）
+    if (!skipStartupTab && tabsStore.tabs.length === 0) {
       await tabsStore.createTab().catch(() => {})
     }
   }
@@ -168,50 +169,48 @@ onMounted(async () => {
   // 防重入：app-unlocked 事件与兜底轮询可能同时触发 initBrowser，
   // 并发跑会同时看到 tabs 为空 → 各建一个标签（重复）
   let initRunning = false
-  async function initBrowserSafe() {
+  async function initBrowserSafe(skipStartupTab = false) {
     if (initRunning) return
     initRunning = true
     try {
-      await initBrowser()
+      await initBrowser(skipStartupTab)
     } finally {
       initRunning = false
     }
   }
 
-  // 锁屏期间（Rust setup 阻塞中）Db/TabManager 尚未就绪，initBrowser 的命令调用
-  // 会全部失败——失败由各 store 内部吞掉，这里标记"初始化未完成"，
-  // 等 Rust 解锁后 emit app-unlocked 再重试
-  let initFailed = false
+  // 查启动锁屏状态：锁屏期间（Rust setup 里 GTK 对话框阻塞中）Db/TabManager 未就绪，
+  // 任何加载/创建标签的命令都会失败。若照常初始化+每秒重试，会反复弹
+  // "加载标签页失败/创建标签页失败" toast——所以锁屏时静默等待 app-unlocked。
+  let locked = false
   try {
-    await initBrowser()
+    locked = await invoke<boolean>('is_locked')
   } catch {
-    initFailed = true
+    locked = false
   }
-  if (initFailed || tabsStore.tabs.length === 0) {
-    // 主通道：Rust 解锁后 emit app-unlocked
-    listen('app-unlocked', () => {
-      // 解锁后自动打开启动页（newtab）
-      tabsStore.createTab('newtab').catch((e) => {
+  // 写入全局缓存：标签命令失败时据此静默（避免锁屏期间反复弹 toast）
+  setLockedState(locked)
+
+  if (locked) {
+    console.info('[app] 启动锁屏中，静默等待解锁…')
+    listen('app-unlocked', async () => {
+      console.info('[app] 已解锁，初始化并打开启动页')
+      setLockedState(false)
+      // 解锁后自动打开启动页（skipStartupTab=true：不走"恢复上次会话"分支，直接开启动页）
+      await initBrowserSafe(true)
+      await tabsStore.createTab('newtab').catch((e) => {
         console.error('[app] 解锁后创建启动页失败:', e)
       })
-      initBrowserSafe().catch((e) => {
-        console.error('[app] 解锁后重试初始化失败:', e)
-      })
+      tabsStore.startPolling()
     }).catch(() => {})
-    // 兜底：万一事件错过（webview 加载慢于 emit），每秒重试一次，最多 10 次，
-    // 直到有标签为止（initBrowser 幂等：已有标签不会重复创建）
-    let tries = 0
-    const retryTimer = window.setInterval(() => {
-      tries++
-      if (tabsStore.tabs.length > 0 || tries > 10) {
-        clearInterval(retryTimer)
-        return
-      }
-      initBrowserSafe().catch(() => {})
-    }, 1000)
+  } else {
+    await initBrowserSafe()
+    // 未启用锁屏或本就不在锁屏：无标签时按主页设置兜底建一个标签
+    if (tabsStore.tabs.length === 0) {
+      await tabsStore.createTab().catch(() => {})
+    }
+    tabsStore.startPolling()
   }
-  // 无论初始化成功失败，轮询都要启动（Rust 侧状态可能在初始化期间已变化）
-  tabsStore.startPolling()
 
   // 启动页右侧栏按钮 → 打开主界面组件（newtab webview 通过 IPC 触发）
   listen('open-ai-from-newtab', () => {
