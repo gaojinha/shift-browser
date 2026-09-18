@@ -106,7 +106,7 @@ async function onReveal(path: string | null) {
 
 <template>
   <Transition name="fade">
-  <div class="dialog-overlay" v-if="props.show">
+  <div class="dialog-overlay" v-if="props.show" @click.self="emit('close')">
     <div class="dialog">
       <div class="dialog-header">
         <span>下载管理</span>

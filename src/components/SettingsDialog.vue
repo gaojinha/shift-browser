@@ -216,7 +216,7 @@ async function onRemoveKeyword(k: string) {
 
 <template>
   <Transition name="fade">
-  <div class="dialog-overlay" v-if="props.show">
+  <div class="dialog-overlay" v-if="props.show" @click.self="emit('close')">
     <div class="dialog settings-dialog">
       <div class="dialog-header">
         <span>⚙ 设置</span>
