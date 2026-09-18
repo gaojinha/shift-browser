@@ -622,3 +622,34 @@ Corrections, insights, and knowledge gaps captured during development.
 - WebKitGTK 默认 `MultipleSecondaryProcesses`（每标签一进程）。改 `SharedSecondaryProcess` 曾在实测中触发 WebKit bug（WebLoaderStrategy internallyFailedLoad）导致整个应用崩溃 —— 且主 webview 在 setup 前已创建，进程池已固化，运行期切换会被静默忽略。
 - 因此多标签内存的**正经解法**是"休眠/丢弃久未使用的标签"（应用层），而不是改进程模型。
 **结果**: 提交 360d387(合成层) / 3b279c4(内存压力治理)；59 测试全过、clippy 零警告
+
+---
+
+## 2026-09-18 14:35 — WebKitGTK 标签休眠（内存回收）实现要点（best_practice）
+
+**类别**: best_practice
+**场景**: ShiftBrowser 多标签内存治理（9 标签 3.75GB → 应用层回收）
+**背景**：WebKitGTK 默认每标签一个渲染进程、**不主动回收**；改进程模型会触发 WebKit bug（实测崩），
+所以正解是应用层"休眠"：把久未激活标签的 webview **销毁**，点回来再按 URL 重建。
+**实现骨架（可直接复用）**:
+1. **状态**：`Tab` 加 `hibernated: bool`（`#[serde(default)]` 传给前端展示）；
+   `TabManager` 加 `last_active: Mutex<HashMap<String, i64>>` 记录最后激活的 Unix 秒。
+2. **打点**：`create_tab` / `switch_tab` 里调 `touch_active(id)`。
+3. **休眠命令** `hibernate_idle_tabs`：读设置阈值（默认 30 分钟，0=关闭）→ 筛出
+   「非当前激活 + 未休眠 + `last_active < now-阈值`」→ 对每个 `wv.hide()` 后 `wv.close()`
+   → 置 `hibernated=true` → `emit("tabs-updated")`。返回休眠数量便于日志/统计。
+4. **唤醒**：在 `switch_tab` **校验标签存在之后、切换可见性之前**插入恢复分支 ——
+   若 `hibernated`，用保存的 url 调 `create_webview(app, id, url)` 重建（id 复用即可，
+   label 仍是 `tab-{id}`），清标记，并 `extensions::re_inject(&app).await` 重新注入
+   用户脚本/广告拦截/隐私防护（重建的 webview 是干净的，不注入就没有防护）。
+   之后沿用原有激活与可见性逻辑，不必重复实现。
+5. **前端**：复用已有 8s 轮询，每 8 轮（≈64s）`invoke('hibernate_idle_tabs')` 一次；
+   新设置键 `tab_hibernate_minutes` 记得加进后端 `ALLOWED_KEYS`（这个坑刚踩过）。
+**验证方法论（值得复用）**:
+- 默认阈值 30 分钟无法即时验证 → **临时把 settings 里的阈值改成 1 分钟**，
+  请用户在受控场景下操作（开 2-3 个标签、晾着），观察日志闭环：
+  `标签已休眠` → 用户点回 → `唤醒休眠标签: url=...` → `page_load_finished: title=...`。
+- 没有 sqlite3 CLI 时可用 `python3 -c "import sqlite3..."` 直接改运行时设置（WAL 支持并发读写）。
+- **注意**：用户在自然使用中开/关标签会让"内存净效果"不可测（新开的比休眠的多），
+  功能正确性靠日志链路验证，净收益要在受控场景才谈得上。
+**结果**: 提交 966120c；实测休眠 3 个标签 → 点回全部按原 URL 正常恢复；59 测试全过、clippy 零警告
