@@ -32,6 +32,10 @@ const ALLOWED_KEYS: &[&str] = &[
     "wallpaper",
     "show_bg",
     "lock_enabled",
+    // 隐私防护（2026-09-18 补入：此前缺失导致"改变隐私设置不能保存"）
+    "privacy_shield",
+    "privacy_shield_level",
+    "privacy_whitelist",
 ];
 
 /// 是否为敏感设置键
