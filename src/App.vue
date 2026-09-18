@@ -32,6 +32,19 @@ const showGroups = ref(false)
 const showDownloads = ref(false)
 const showSettings = ref(false)
 const showAI = ref(false)
+
+function openPanel(name: 'translate' | 'sessions' | 'history' | 'passwords' | 'groups' | 'downloads' | 'settings' | 'ai' | 'bookmarks') {
+  showTranslate.value = name === 'translate'
+  showSessions.value = name === 'sessions'
+  showHistory.value = name === 'history'
+  showPasswords.value = name === 'passwords'
+  showGroups.value = name === 'groups'
+  showDownloads.value = name === 'downloads'
+  showSettings.value = name === 'settings'
+  showAI.value = name === 'ai'
+  showBookmarks.value = name === 'bookmarks'
+}
+
 const showTranslate = ref(false)
 const showHistory = ref(false)
 const showBookmarks = ref(false)
@@ -68,13 +81,13 @@ function onGlobalKeydown(e: KeyboardEvent) {
     // Ctrl+Shift+T 打开翻译面板（不影响 Ctrl+T 建标签）
     if (k === 't' && e.shiftKey) {
       e.preventDefault()
-      showTranslate.value = true
+      openPanel('translate')
       return
     }
     // Ctrl+Shift+S 打开会话管理
     if (k === 's' && e.shiftKey) {
       e.preventDefault()
-      showSessions.value = true
+      openPanel('sessions')
       return
     }
     if (k === 't' && !e.shiftKey) {
@@ -88,7 +101,7 @@ function onGlobalKeydown(e: KeyboardEvent) {
       if (tabsStore.activeTabId) tabsStore.reloadTab(tabsStore.activeTabId)
     } else if (k === 'h') {
       e.preventDefault()
-      showHistory.value = true
+      openPanel('history')
     }
     return
   }
@@ -184,12 +197,12 @@ watch(
     <TabBar />
     <AddressBar
       ref="addressBarRef"
-      @open-passwords="showPasswords = true"
-      @open-groups="showGroups = true"
-      @open-downloads="showDownloads = true"
-      @open-settings="showSettings = true"
-      @open-ai="showAI = true"
-      @open-translate="showTranslate = true"
+      @open-passwords="openPanel('passwords')"
+      @open-groups="openPanel('groups')"
+      @open-downloads="openPanel('downloads')"
+      @open-settings="openPanel('settings')"
+      @open-ai="openPanel('ai')"
+      @open-translate="openPanel('translate')"
     />
     <BookmarksBar v-if="settingsStore.showBookmarksBar" @open-manager="showBookmarks = true" />
     <!-- 内容区：webview 由 Rust 以 (0, 112) 起盖住此区域 -->
