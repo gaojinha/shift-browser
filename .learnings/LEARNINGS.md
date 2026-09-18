@@ -534,3 +534,23 @@ Corrections, insights, and knowledge gaps captured during development.
 5. **验证手法**：对比"日志安静度"最直观——修复前锁屏 13 秒内 `get_all_settings 被调用` 每秒刷屏且伴随 create_tab 失败；修复后同样 13 秒**日志无任何业务调用**，解锁瞬间才出现 `app-unlocked` → `create_tab` → `page_load_finished`。
 6. **顺带**：`initBrowser()` 加 `skipStartupTab` 参数，把"建标签"职责交给调用方，避免"恢复上次会话"和"解锁后开启动页"两个分支各建一个标签。
 **结果**: 提交 3a13d3b；59 测试全过、clippy 零警告、前端 build+lint 通过；锁屏期间日志完全安静
+
+---
+
+## 2026-09-18 11:15 — Tauri 前端事件监听必须在 IPC 就绪后再注册 + 兜底轮询（correction / best_practice）
+
+**类别**: correction / best_practice
+**场景**: ShiftBrowser 解锁后不自动打开启动页（既不建标签、也不报错，纯静默死等）
+**踩的坑（真实事故）**:
+- 为实现"锁屏期间静默等待解锁"，把 `listen('app-unlocked', ...)` 挪到 `onMounted` 最前面（在 `await invoke('is_locked')` 之前），想着"先注册防漏事件"。
+- 结果：注册请求发出时主窗口 webview 的 IPC 桥还没就绪，`listen` **静默失败**，而调用处是 `listen(...).catch(() => {})` —— 错误被完全吞掉，前端表面无异常。
+- 后果：解锁事件永远收不到，前端卡在"等待解锁"，用户看到**没有标签、页面空白**；手动点 + 号不经过该分支所以正常 —— 症状极具误导性。
+**正确做法（三重保障，缺一不可）**:
+1. **先用 `await invoke(...)` 探一次 IPC**（哪怕只是查状态），确认桥就绪后再 `await listen(...)`；`listen` 要 `await`，不要 fire-and-forget。
+2. **关键状态加兜底轮询**：锁屏期间每秒 `invoke('is_locked')`，一旦变 false 立即初始化。**本次就是兜底先发现解锁的**，事件压根没到。
+3. **初始化函数防重入**（`if (ready) return`），让"事件 / 兜底轮询 / 未锁屏直达"三条路径只跑一次。
+**配套排查利器**:
+- 加一个 `front_log(msg)` Rust 命令把前端关键节点写进服务端日志（`log::info!("[front] {}", msg)`）——**webview 的 console 在服务端完全看不见**，没有这个只能瞎猜。本次正是靠 `[front] onMounted 开始 / is_locked=true / 已注册监听` 才定位到"注册成功但事件没到"。
+- 高频同步命令（get_tabs）加 `info` 级条数日志，能一眼看出前端列表是否为空、同步是否在跑。
+**教训**: 在 Tauri/Electron 这类"前端 + 原生"架构里，**前端首个 IPC 调用之前的状态都是不可信的**；`catch(() => {})` 吞掉注册类错误极其危险，至少要 `console.error` + front_log。
+**结果**: 提交 e2b6d5e；解锁后 1 秒内自动建启动页；59 测试全过、clippy 零警告
