@@ -1149,49 +1149,70 @@ fn render_html(
   var panelBody = document.getElementById('panelBody');
   var current = null;
 
-  // ---- 待办（localStorage 持久化）----
-  function loadTodos() {{ try {{ return JSON.parse(localStorage.getItem('sb_todos') || '[]'); }} catch(e) {{ return []; }} }}
-  function saveTodos(t) {{ localStorage.setItem('sb_todos', JSON.stringify(t)); }}
+  // ---- 待办（IPC 存 settings 表；启动页是 shift:// 自定义协议，localStorage 不可靠）----
+  function loadTodos() {{
+    if (!window.__TAURI_INTERNALS__) {{ try {{ return Promise.resolve(JSON.parse(localStorage.getItem('sb_todos') || '[]')); }} catch(e) {{ return Promise.resolve([]); }} }}
+    return window.__TAURI_INTERNALS__.invoke('todo_list').then(function(json) {{
+      var todos;
+      try {{ todos = JSON.parse(json || '[]'); }} catch(e) {{ todos = []; }}
+      // 迁移旧 localStorage 数据（早期版本待办存在 sb_todos）
+      if (!todos.length) {{
+        var legacy = null;
+        try {{ legacy = JSON.parse(localStorage.getItem('sb_todos') || '[]'); }} catch(e) {{}}
+        if (legacy && legacy.length) {{
+          todos = legacy;
+          saveTodos(todos).catch(function() {{}});
+          try {{ localStorage.removeItem('sb_todos'); }} catch(e) {{}}
+        }}
+      }}
+      return todos;
+    }}).catch(function() {{ return []; }});
+  }}
+  function saveTodos(t) {{
+    if (!window.__TAURI_INTERNALS__) {{ try {{ localStorage.setItem('sb_todos', JSON.stringify(t)); }} catch(e) {{}} return Promise.resolve(); }}
+    return window.__TAURI_INTERNALS__.invoke('todo_save', {{ todos: JSON.stringify(t) }});
+  }}
   function renderTodos() {{
-    var todos = loadTodos();
-    var h2 = '<div class="todo-panel"><div class="todo-add"><input id="todoInput" placeholder="新增待办，回车添加"><button id="todoAddBtn">加</button></div>';
-    if (!todos.length) h2 += '<div class="empty">暂无待办</div>';
-    todos.forEach(function(t, i) {{
-      h2 += '<div class="todo-item' + (t.done ? ' done' : '') + '"><input type="checkbox" data-i="' + i + '"' + (t.done ? ' checked' : '') + '><span class="todo-text">' + t.text.replace(/</g,'&lt;') + '</span><button class="todo-del" data-i="' + i + '">✕</button></div>';
+    return loadTodos().then(function(todos) {{
+      var h2 = '<div class="todo-panel"><div class="todo-add"><input id="todoInput" placeholder="新增待办，回车添加"><button id="todoAddBtn">加</button></div>';
+      if (!todos.length) h2 += '<div class="empty">暂无待办，输入一条开始吧</div>';
+      todos.forEach(function(t, i) {{
+        h2 += '<div class="todo-item' + (t.done ? ' done' : '') + '"><input type="checkbox" data-i="' + i + '"' + (t.done ? ' checked' : '') + '><span class="todo-text">' + String(t.text || '').replace(/</g,'&lt;') + '</span><button class="todo-del" data-i="' + i + '">✕</button></div>';
+      }});
+      h2 += '</div>';
+      return h2;
     }});
-    h2 += '</div>';
-    return h2;
+  }}
+  function refreshTodoPanel() {{
+    renderTodos().then(function(h) {{ if (panelBody) panelBody.innerHTML = h; bindTodos(); }});
   }}
   function bindTodos() {{
     var input = document.getElementById('todoInput');
     var addBtn = document.getElementById('todoAddBtn');
     function add() {{
-      var v = input.value.trim();
+      var v = input ? input.value.trim() : '';
       if (!v) return;
-      var todos = loadTodos();
-      todos.unshift({{ text: v, done: false }});
-      saveTodos(todos);
-      panelBody.innerHTML = renderTodos();
-      bindTodos();
+      loadTodos().then(function(todos) {{
+        todos.unshift({{ text: v, done: false }});
+        return saveTodos(todos);
+      }}).then(refreshTodoPanel).catch(function(e) {{ showToast('保存待办失败：' + e); }});
     }}
     if (addBtn) addBtn.addEventListener('click', add);
     if (input) input.addEventListener('keydown', function(e) {{ if (e.key === 'Enter') add(); }});
     panelBody.querySelectorAll('.todo-item input[type=checkbox]').forEach(function(cb) {{
       cb.addEventListener('change', function() {{
-        var todos = loadTodos();
-        todos[+cb.dataset.i].done = cb.checked;
-        saveTodos(todos);
-        panelBody.innerHTML = renderTodos();
-        bindTodos();
+        loadTodos().then(function(todos) {{
+          if (todos[+cb.dataset.i]) todos[+cb.dataset.i].done = cb.checked;
+          return saveTodos(todos);
+        }}).then(refreshTodoPanel).catch(function(e) {{ showToast('保存待办失败：' + e); }});
       }});
     }});
     panelBody.querySelectorAll('.todo-del').forEach(function(btn) {{
       btn.addEventListener('click', function() {{
-        var todos = loadTodos();
-        todos.splice(+btn.dataset.i, 1);
-        saveTodos(todos);
-        panelBody.innerHTML = renderTodos();
-        bindTodos();
+        loadTodos().then(function(todos) {{
+          todos.splice(+btn.dataset.i, 1);
+          return saveTodos(todos);
+        }}).then(refreshTodoPanel).catch(function(e) {{ showToast('删除待办失败：' + e); }});
       }});
     }});
   }}
@@ -1417,18 +1438,26 @@ fn render_html(
   function switchPanel(name) {{
     var btn = document.querySelector('.icon-btn[data-panel="' + name + '"]');
     if (current === name) {{ closePanel(); return; }}
-    var cfg;
-    if (name === 'todo') cfg = {{ title: '📝 待办清单', html: renderTodos(), bind: bindTodos }};
-    else if (name === 'profile') cfg = {{ title: '👤 我的', html: renderProfile() }};
-    else cfg = PANEL_DATA[name];
-    if (!cfg) return;
-    panelTitle.textContent = cfg.title;
-    panelBody.innerHTML = cfg.html;
-    if (cfg.bind) cfg.bind();
     panel.classList.add('open');
     document.querySelectorAll('.icon-btn[data-panel]').forEach(function(b) {{ b.classList.remove('active'); }});
     if (btn) btn.classList.add('active');
     current = name;
+    if (name === 'todo') {{
+      // 待办是异步 IPC 渲染，需先给"加载中"占位再填充
+      panelTitle.textContent = '📝 待办清单';
+      panelBody.innerHTML = '<div class="empty">⏳ 加载中…</div>';
+      renderTodos().then(function(h) {{
+        if (current === name) {{ panelBody.innerHTML = h; bindTodos(); }}
+      }}).catch(function() {{ panelBody.innerHTML = '<div class="empty">加载失败，请重试</div>'; }});
+      return;
+    }}
+    var cfg;
+    if (name === 'profile') cfg = {{ title: '👤 我的', html: renderProfile() }};
+    else cfg = PANEL_DATA[name];
+    if (!cfg) {{ closePanel(); return; }}
+    panelTitle.textContent = cfg.title;
+    panelBody.innerHTML = cfg.html;
+    if (cfg.bind) cfg.bind();
   }}
   function closePanel() {{
     panel.classList.remove('open');
@@ -1878,6 +1907,49 @@ pub fn open_ai_from_newtab(app: AppHandle) {
 #[tauri::command]
 pub fn open_settings_from_newtab(app: AppHandle) {
     let _ = app.emit("open-settings-from-newtab", ());
+}
+
+/// 待办清单存储键（settings 表）
+const TODO_KEY: &str = "todos";
+
+/// 读待办清单（JSON 数组字符串，默认 "[]"）。
+/// 启动页是 shift:// 自定义协议，localStorage 在 WebKitGTK 下不可靠，
+/// 与快捷访问一样改走 settings 表（IPC）持久化。
+#[tauri::command]
+pub async fn todo_list(db: State<'_, Db>) -> Result<String, String> {
+    let row: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM settings WHERE key = ?",
+    )
+    .bind(TODO_KEY)
+    .fetch_optional(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(row.unwrap_or_else(|| "[]".to_string()))
+}
+
+/// 保存待办清单（JSON 数组字符串）。
+/// P2 防御：限制体积（防滥用撑爆 DB），内容按 JSON 数组校验。
+#[tauri::command]
+pub async fn todo_save(db: State<'_, Db>, todos: String) -> Result<(), String> {
+    if todos.len() > 100 * 1024 {
+        return Err("待办数据过大".to_string());
+    }
+    // 必须是 JSON 数组
+    let parsed: serde_json::Value =
+        serde_json::from_str(&todos).map_err(|e| format!("待办格式错误: {e}"))?;
+    if !parsed.is_array() {
+        return Err("待办格式错误: 需为数组".to_string());
+    }
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(TODO_KEY)
+    .bind(&todos)
+    .execute(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// 保存主区快捷访问（原版 quick-sites-set IPC 迁移）。

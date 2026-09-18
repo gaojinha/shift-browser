@@ -195,6 +195,8 @@ pub fn run() {
       newtab::refresh_newtab,
       newtab::get_newtab_url,
       newtab::save_quick_sites,
+      newtab::todo_list,
+      newtab::todo_save,
       newtab::open_ai_from_newtab,
       newtab::open_settings_from_newtab,
       // 用户账号（个人中心）
