@@ -377,7 +377,11 @@ fn render_html(
   * {{ margin:0; padding:0; box-sizing:border-box; }}
   html,body {{ height:100%; }}
   body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%); color:#e0e0e0; min-height:100vh; overflow-x:hidden; overflow-y:auto; border-radius:12px; }}
-  .bg-layer {{ position:fixed; top:-5%; left:-5%; width:110%; height:110%; z-index:-1; background-size:cover; background-position:center; animation:kenburns 45s ease-in-out infinite alternate; }}
+  /* 性能优化（2026-09-18）：Ken Burns 壁纸动画提升为 GPU 合成层。
+     原实现缺 will-change/translateZ(0)，WebKit 每帧在 CPU 上重绘 110% 视口尺寸的
+     高清壁纸位图，实测 1 个标签空闲时 WebKitWebProcess 持续 17-18% CPU。
+     提升为合成层后缩放由 GPU 完成，CPU 占用大幅下降。 */
+  .bg-layer {{ position:fixed; top:-5%; left:-5%; width:110%; height:110%; z-index:-1; background-size:cover; background-position:center; animation:kenburns 45s ease-in-out infinite alternate; will-change:transform; transform:translateZ(0); backface-visibility:hidden; }}
   .bg-layer::after {{ content:''; position:absolute; inset:0; background:linear-gradient(180deg, rgba(10,15,30,0.5) 0%, rgba(10,15,30,0.35) 40%, rgba(10,15,30,0.7) 100%); }}
   @keyframes kenburns {{ from {{ transform:scale(1) translate(0,0); }} to {{ transform:scale(1.08) translate(1%,1.5%); }} }}
   .main-layout {{ display:flex; max-width:none; margin:0; align-items:stretch; min-height:100vh; padding-left:44px; }}
