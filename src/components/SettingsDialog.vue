@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 设置弹窗（通用 / 外观 / AI 助手 / 隐私 / 扩展）
 // 设置项存 settings 表（key-value），保存即生效
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { setWebviewVisible } from '../utils/webview'
 import { useSettingsStore } from '../stores/settings'
@@ -156,17 +156,25 @@ async function onDeleteExtension(id: number) {
   }
 }
 
-/** 隐私防护开关（GPC + 反指纹加噪 + WebRTC 防泄露），默认开启 */
-async function onTogglePrivacyShield() {
-  const current = settingsStore.get('privacy_shield') !== 'false'
-  const next = (!current).toString()
-  await settingsStore.set('privacy_shield', next)
+/** 隐私防护档位（off / standard / strict），默认标准档 */
+const privacyLevel = computed(() => {
+  const l = settingsStore.get('privacy_shield_level')
+  if (l === 'off' || l === 'standard' || l === 'strict') return l
+  // 兼容旧布尔开关
+  return settingsStore.get('privacy_shield') === 'false' ? 'off' : 'standard'
+})
+
+async function onChangePrivacyLevel(e: Event) {
+  const level = (e.target as HTMLSelectElement).value
+  await settingsStore.set('privacy_shield_level', level)
   try {
-    await invoke('set_privacy_shield_enabled', { enabled: next === 'true' })
-    useToastStore().success(next === 'true' ? '隐私防护已开启' : '隐私防护已关闭')
-  } catch (e) {
-    console.error('[settings] 隐私防护同步失败:', e)
-    useToastStore().error('隐私防护切换失败')
+    await invoke('set_privacy_shield_level', { level })
+    const msg =
+      level === 'off' ? '隐私防护已关闭' : level === 'strict' ? '已切换到严格档' : '已切换到标准档'
+    useToastStore().success(msg)
+  } catch (err) {
+    console.error('[settings] 隐私防护档位同步失败:', err)
+    useToastStore().error('隐私防护设置失败')
   }
 }
 
@@ -436,18 +444,18 @@ async function onRemoveKeyword(k: string) {
               <div class="card-title">🛡 隐私</div>
               <div class="field">
                 <label>隐私防护</label>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('privacy_shield') !== 'false'"
-                    @change="onTogglePrivacyShield"
-                  />
-                  <span class="slider"></span>
-                </label>
+                <select class="privacy-select" :value="privacyLevel" @change="onChangePrivacyLevel">
+                  <option value="standard">标准（推荐）</option>
+                  <option value="strict">严格</option>
+                  <option value="off">关闭</option>
+                </select>
               </div>
-              <div class="kw-hint" v-if="settingsStore.get('privacy_shield') !== 'false'">
-                反指纹加噪（Canvas / WebGL / 音频 / WebGPU）、GPC 隐私信号、WebRTC 内网 IP 防护、
-                字体与设备探针收敛、追踪参数清洗、第三方 Cookie 阻断。刷新页面后对已开标签生效。
+              <div class="kw-hint">
+                <b>标准</b>：Canvas / WebGL / 音频 / WebGPU 反指纹加噪，GPC 隐私信号，WebRTC 内网 IP 防护，
+                字体与设备探针收敛，追踪参数清洗，第三方 Cookie 阻断。<br />
+                <b>严格</b>：在标准之上再移除 WebUSB / 蓝牙 / 串口 / HID / Gamepad / 传感器等高危 API，
+                并归一化语音音色、降级高精度计时（部分网站功能可能受影响）。<br />
+                切换后刷新页面即对已开标签生效。
               </div>
               <div class="field">
                 <label>广告拦截</label>

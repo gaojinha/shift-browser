@@ -220,6 +220,8 @@ pub fn run() {
       // 隐私防护（GPC + 反指纹 + WebRTC 防泄露）
       extensions::set_privacy_shield_enabled,
       extensions::get_privacy_shield_enabled,
+      extensions::set_privacy_shield_level,
+      extensions::get_privacy_shield_level,
       // 新标签页
       newtab::refresh_newtab,
       newtab::get_newtab_url,

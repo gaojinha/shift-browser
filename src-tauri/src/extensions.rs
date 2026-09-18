@@ -474,6 +474,94 @@ const PRIVACY_JS: &str = r#"
 })();
 "#;
 
+/// 严格档隐私脚本（在标准档基础上追加，对标 Brave Aggressive / Tor 的部分做法）
+///
+/// 与标准档的分工：
+/// - 标准档：只做"收敛 + 加噪"，尽量不破坏网站功能（日常默认）
+/// - 严格档：额外**移除高危/高熵 API**，牺牲部分功能换取更小指纹面
+///
+/// 严格档会禁用：WebUSB / Web Bluetooth / Web Serial / WebHID / Gamepad / 传感器 API，
+/// 归一化语音合成音色列表，并把高精度计时降级（抗时序侧信道指纹）。
+const STRICT_PRIVACY_JS: &str = r#"
+(function () {
+  if (window.__shiftPrivacyStrict) return;
+  window.__shiftPrivacyStrict = true;
+
+  // ---- 1) 移除高危设备 API（既是强指纹源，也是攻击面）----
+  var risky = ['usb', 'bluetooth', 'serial', 'hid', 'credentials'];
+  for (var i = 0; i < risky.length; i++) {
+    var k = risky[i];
+    if (k === 'credentials') continue; // 密码管理依赖 Credential Management，保留
+    try {
+      Object.defineProperty(navigator, k, {
+        get: function () { return undefined; },
+        configurable: true
+      });
+    } catch (e) {}
+  }
+
+  // ---- 2) Gamepad：枚举结果恒为空 ----
+  try {
+    if (navigator.getGamepads) {
+      navigator.getGamepads = function () { return []; };
+    }
+  } catch (e) {}
+
+  // ---- 3) 传感器 API：直接抹掉构造函数 ----
+  try {
+    ['Accelerometer', 'Gyroscope', 'Magnetometer', 'AmbientLightSensor',
+     'AbsoluteOrientationSensor', 'RelativeOrientationSensor', 'LinearAccelerationSensor']
+      .forEach(function (name) {
+        try {
+          if (window[name]) {
+            Object.defineProperty(window, name, {
+              get: function () { return undefined; },
+              configurable: true
+            });
+          }
+        } catch (e) {}
+      });
+  } catch (e) {}
+
+  // ---- 4) 语音合成音色列表归一化（voices 列表是稳定指纹）----
+  try {
+    if (window.speechSynthesis) {
+      var origGet = speechSynthesis.getVoices.bind(speechSynthesis);
+      speechSynthesis.getVoices = function () {
+        return [{
+          name: 'Generic Voice', lang: 'zh-CN', localService: true,
+          default: true, voiceURI: 'generic'
+        }];
+      };
+    }
+  } catch (e) {}
+
+  // ---- 5) 高精度计时降级（抗时序侧信道指纹）----
+  // 只把精度降到 2ms 级别：对绝大多数网页无感，但能削弱计时类指纹/攻击
+  try {
+    var origNow = performance.now.bind(performance);
+    var last = 0;
+    performance.now = function () {
+      var t = origNow();
+      var q = Math.floor(t / 2) * 2;
+      if (q <= last) q = last + 2;
+      last = q;
+      return q;
+    };
+  } catch (e) {}
+
+  // ---- 6) 时区/区域保持真实（中文用户体验优先），仅暴露受限的 locale 列表 ----
+  try {
+    if (navigator.languages && navigator.languages.length > 2) {
+      Object.defineProperty(navigator, 'languages', {
+        get: function () { return navigator.language ? [navigator.language, 'zh'] : ['zh-CN', 'zh']; },
+        configurable: true
+      });
+    }
+  } catch (e) {}
+})();
+"#;
+
 /// 在主线程把所有 child webview 的 UserContentManager 清空并注入扩展
 /// UserContentManager 是 webview 级（非 WebContext 级），必须逐个 webview 注入
 fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>)>) {
@@ -739,22 +827,97 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
         );
         items.push((Some(js), Some(ADBLOCK_CSS.to_string())));
     }
-    // 内置隐私防护（GPC + Canvas/WebGL/Audio 反指纹 + WebRTC 防泄露）——默认开启，
-    // 可通过 settings.privacy_shield='false' 关闭；注意 inject_extensions 会先
-    // remove_all_scripts，所以脚本必须都在这份 items 里，不能单独注入。
-    let prow: Option<(String,)> =
+    // 内置隐私防护（三档）：off / standard / strict
+    // 兼容早期 privacy_shield='false'（等价 off）
+    let lrow: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_shield_level'")
+            .fetch_optional(&db.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let srow: Option<(String,)> =
         sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_shield'")
             .fetch_optional(&db.pool)
             .await
             .map_err(|e| e.to_string())?;
-    let privacy_on = prow.map(|r| r.0 != "false").unwrap_or(true); // 默认开启
-    if privacy_on {
-        items.push((Some(PRIVACY_JS.to_string()), None));
-        log::info!("[extensions] 隐私防护已注入（GPC + 反指纹 + WebRTC 候选过滤）");
-    } else {
-        log::info!("[extensions] 隐私防护已被用户关闭，跳过注入");
+    let level = match lrow.map(|r| r.0) {
+        Some(l) => l,
+        None => match srow.map(|r| r.0).as_deref() {
+            Some("false") => "off".to_string(),
+            _ => "standard".to_string(), // 默认标准档
+        },
+    };
+    match level.as_str() {
+        "off" => log::info!("[extensions] 隐私防护已关闭（off）"),
+        "strict" => {
+            items.push((
+                Some(format!("{}\n{}", PRIVACY_JS, STRICT_PRIVACY_JS)),
+                None,
+            ));
+            log::info!("[extensions] 隐私防护已注入（严格档 strict）");
+        }
+        _ => {
+            items.push((Some(PRIVACY_JS.to_string()), None));
+            log::info!("[extensions] 隐私防护已注入（标准档 standard）");
+        }
     }
     Ok(items)
+}
+
+/// 隐私防护档位设置（off / standard / strict），存设置 + 立即重新注入
+#[tauri::command]
+pub async fn set_privacy_shield_level(
+    db: State<'_, Db>,
+    app: AppHandle,
+    level: String,
+) -> Result<(), String> {
+    let level = match level.as_str() {
+        "off" | "standard" | "strict" => level,
+        other => return Err(format!("未知的隐私防护档位: {}", other)),
+    };
+    log::info!("[extensions] set_privacy_shield_level: {}", level);
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ('privacy_shield_level', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(&level)
+    .execute(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    // 同步旧布尔键，避免两处状态不一致
+    let bool_val = if level == "off" { "false" } else { "true" };
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ('privacy_shield', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(bool_val)
+    .execute(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let items = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items);
+    Ok(())
+}
+
+/// 隐私防护档位查询（默认 standard）
+#[tauri::command]
+pub async fn get_privacy_shield_level(db: State<'_, Db>) -> Result<String, String> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_shield_level'")
+            .fetch_optional(&db.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    if let Some((l,)) = row {
+        return Ok(l);
+    }
+    let srow: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_shield'")
+            .fetch_optional(&db.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(match srow.map(|r| r.0).as_deref() {
+        Some("false") => "off".to_string(),
+        _ => "standard".to_string(),
+    })
 }
 
 /// 隐私防护开关（存设置 + 立即重新注入）
