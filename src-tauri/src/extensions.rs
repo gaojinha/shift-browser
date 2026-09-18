@@ -195,6 +195,11 @@ fn read_extension_dir(path: &str) -> Result<ExtensionDirResult, String> {
     ))
 }
 
+/// 右键翻译菜单脚本（编译期嵌入）
+/// 复用 shift://__translate__ 协议（translate.rs + whole_page_translate.js），
+/// 补上一直缺失的 UI 入口：选中文字右键 → 翻译选中/翻译整页。
+const CONTEXT_TRANSLATE_JS: &str = include_str!("context_translate.js");
+
 /// 内置隐私防护脚本（P0：GPC + 反指纹随机化 + WebRTC 防泄露）
 ///
 /// 设计要点（依据 Brave/Tor 的公开实践）：
@@ -927,20 +932,29 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
         "off" => log::info!("[extensions] 隐私防护已关闭（off）"),
         "strict" => {
             items.push((
-                Some(format!("{}{}\n{}", wl_prefix, PRIVACY_JS, STRICT_PRIVACY_JS)),
+                Some(format!(
+                    "{}{}\n{}\n{}",
+                    wl_prefix, PRIVACY_JS, STRICT_PRIVACY_JS, CONTEXT_TRANSLATE_JS
+                )),
                 None,
             ));
             PRIVACY_INJECTIONS.fetch_add(1, Ordering::Relaxed);
             log::info!(
-                "[extensions] 隐私防护已注入（严格档 strict，白名单 {} 个）",
+                "[extensions] 隐私防护已注入（严格档 strict，白名单 {} 个）+ 右键翻译菜单",
                 whitelist.len()
             );
         }
         _ => {
-            items.push((Some(format!("{}{}", wl_prefix, PRIVACY_JS)), None));
+            items.push((
+                Some(format!(
+                    "{}{}\n{}",
+                    wl_prefix, PRIVACY_JS, CONTEXT_TRANSLATE_JS
+                )),
+                None,
+            ));
             PRIVACY_INJECTIONS.fetch_add(1, Ordering::Relaxed);
             log::info!(
-                "[extensions] 隐私防护已注入（标准档 standard，白名单 {} 个）",
+                "[extensions] 隐私防护已注入（标准档 standard，白名单 {} 个）+ 右键翻译菜单",
                 whitelist.len()
             );
         }
