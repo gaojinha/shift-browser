@@ -489,6 +489,41 @@ pub fn run() {
       }
     })
     .setup(|app| {
+      // ===== 性能：WebKitGTK 内存压力治理 =====
+      // 实测痛点：9 个标签时全部 WebKit 进程合计 3.75 GB（每标签一个渲染进程、
+      // 单个 240-500MB，WebKitGTK 默认不主动回收）。
+      // 方案：设置内存压力阈值，超过后 WebKit 分级回收（保守→严格→杀进程）。
+      // 必须在使用任何 WebContext 之前设置（WebsiteDataManager 的静态全局设置）。
+      #[cfg(target_os = "linux")]
+      {
+        use webkit2gtk::{MemoryPressureSettings, WebsiteDataManager};
+        // 读系统总内存（MemTotal，kB）
+        let total_mb: u32 = std::fs::read_to_string("/proc/meminfo")
+          .ok()
+          .and_then(|s| {
+            s.lines()
+              .find(|l| l.starts_with("MemTotal:"))
+              .and_then(|l| l.split_whitespace().nth(1))
+              .and_then(|v| v.parse::<u64>().ok())
+          })
+          .map(|kb| (kb / 1024) as u32)
+          .unwrap_or(8192);
+        // 上限取系统内存 40%：留足余量给系统与其他应用，避免过早回收伤性能
+        let limit = ((total_mb as f64) * 0.4) as u32;
+        let mut mps = MemoryPressureSettings::new();
+        mps.set_memory_limit(limit);
+        mps.set_conservative_threshold(0.33); // 温和回收（清缓存）
+        mps.set_strict_threshold(0.5); // 严格回收（释放渲染树）
+        mps.set_kill_threshold(0.9); // 接近极限才杀进程，避免误杀导致标签崩溃
+        mps.set_poll_interval(1.0);
+        WebsiteDataManager::set_memory_pressure_settings(&mut mps);
+        log::info!(
+          "[perf] WebKit 内存压力治理已启用：上限 {} MB（系统总内存 {} MB 的 40%）",
+          limit,
+          total_mb
+        );
+      }
+
       // 锁屏是否启用过（解锁后通知前端重试初始化——锁屏期间 Db/TabManager 未就绪，
       // 主窗口 Vue 的 onMounted 命令调用全部失败，必须等 setup 完成后重试）
       let mut unlocked_after_lock = false;
