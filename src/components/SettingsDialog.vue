@@ -81,8 +81,15 @@ watch(
   },
 )
 
-const SEARCH_ENGINES = [
-  { id: 'bing', label: '必应', url: 'https://www.bing.com/search?q=' },
+/** 标签休眠超时选项（分钟，0=关闭；后端 hibernate_idle_tabs 读该设置） */
+const HIBERNATE_OPTIONS = [
+  { v: '0', label: '关闭' },
+  { v: '10', label: '10 分钟' },
+  { v: '30', label: '30 分钟' },
+  { v: '60', label: '60 分钟' },
+]
+
+const SEARCH_ENGINES = [  { id: 'bing', label: '必应', url: 'https://www.bing.com/search?q=' },
   { id: 'baidu', label: '百度', url: 'https://www.baidu.com/s?wd=' },
   { id: 'google', label: '谷歌', url: 'https://www.google.com/search?q=' },
 ]
@@ -347,10 +354,26 @@ async function onRemoveKeyword(k: string) {
                   </button>
                 </div>
               </div>
+              <div class="field">
+                <label>标签休眠</label>
+                <div class="seg-group">
+                  <button
+                    v-for="h in HIBERNATE_OPTIONS"
+                    :key="h.v"
+                    class="seg-btn"
+                    :class="{ active: (settingsStore.get('tab_hibernate_minutes') || '30') === h.v }"
+                    @click="onSet('tab_hibernate_minutes', h.v)"
+                  >
+                    {{ h.label }}
+                  </button>
+                </div>
+              </div>
+              <div class="kw-hint">
+                闲置超过该时长的标签会自动休眠：<strong>销毁它的渲染进程、立刻释放内存</strong>（一个标签
+                240-500MB），点击该标签时按原网址重新加载。标签开得多、内存吃紧时特别有用。
+              </div>
             </div>
           </div>
-
-          <!-- 外观 -->
           <div v-if="activeSection === 'appearance'" class="settings-scroll">
             <div class="card">
               <div class="card-title">🎨 外观</div>

@@ -61,19 +61,22 @@ async fn measure_ping() -> i32 {
     }
 }
 
-/// 启动网络状态监测：每 2 秒推送速度，每 10 秒重测一次 ping
+/// 启动网络状态监测：每 5 秒推送速度，每 10 秒重测一次 ping
+/// （2026-09-18 性能优化：原为每 2 秒推送 —— 每次都要读 /proc/net/dev 并 emit
+/// 事件到所有 webview、前端再更新 DOM。2 秒粒度对"看个网速"属于过度频繁，
+/// 降到 5 秒可显著减少空转唤醒，ping 仍保持 10 秒一次不变）
 pub fn start_network_monitor(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut last = read_net_dev();
         let mut last_time = Instant::now();
         let mut ping_ms = measure_ping().await;
         let mut online = ping_ms >= 0;
-        // 循环计数：每 5 轮（10 秒）重测 ping
+        // 循环计数：每 2 轮（10 秒）重测 ping
         let mut tick: u32 = 0;
         loop {
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
             tick += 1;
-            if tick % 5 == 0 {
+            if tick % 2 == 0 {
                 ping_ms = measure_ping().await;
                 online = ping_ms >= 0;
             }
