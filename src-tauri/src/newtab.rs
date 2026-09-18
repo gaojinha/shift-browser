@@ -88,50 +88,56 @@ async fn fetch_bing_wallpapers() -> Vec<String> {
     }
 }
 
-/// 带磁盘缓存的 Bing 壁纸拉取：
-/// - 缓存文件（newtab/wallpapers.json）6 小时内有效 → 直接读缓存，不打网络
-/// - 过期则重新拉；拉取失败（网络问题）回退旧缓存，保证新标签页背景不丢
-async fn fetch_bing_wallpapers_cached(cache_path: &std::path::Path) -> Vec<String> {
-    // 1) 新鲜缓存直接返回
-    if let Ok(meta) = std::fs::metadata(cache_path) {
+/// 只读壁纸缓存（不拉网络）：generate 关键路径绝不能打网络——
+/// 解锁后前端 createTab 的 refresh_newtab 会等 generate 的 GEN_LOCK，
+/// 若 generate 里拉 Bing 壁纸（超时 6 秒）启动页就卡住几秒。
+/// 壁纸由独立后台任务 refresh_wallpapers_background 拉取写缓存。
+fn load_wallpapers_from_cache(cache: &std::path::Path) -> Vec<String> {
+    if let Ok(s) = std::fs::read_to_string(cache) {
+        if let Ok(v) = serde_json::from_str::<Vec<String>>(&s) {
+            if !v.is_empty() {
+                log::debug!("[newtab] 壁纸走缓存 {} 张", v.len());
+                return v;
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// 后台刷新壁纸缓存：拉取成功后写盘，失败静默（下次再试）。
+/// 在 setup 锁屏前 spawn，锁屏期间完成网络拉取，不占解锁时间。
+pub async fn refresh_wallpapers_background(app: &AppHandle) {
+    let Some(path) = newtab_path(app) else { return };
+    let cache = path
+        .parent()
+        .map(|p| p.join("wallpapers.json"))
+        .unwrap_or_else(|| std::path::PathBuf::from("wallpapers.json"));
+    // 缓存新鲜就不拉（避免每次启动都打网络）
+    if let Ok(meta) = std::fs::metadata(&cache) {
         if let Ok(modified) = meta.modified() {
             if modified
                 .elapsed()
                 .map(|d| d.as_secs() < WALLPAPER_CACHE_TTL)
                 .unwrap_or(false)
             {
-                if let Ok(s) = std::fs::read_to_string(cache_path) {
-                    if let Ok(v) = serde_json::from_str::<Vec<String>>(&s) {
-                        if !v.is_empty() {
-                            log::debug!("[newtab] 壁纸走缓存 {} 张", v.len());
-                            return v;
-                        }
-                    }
-                }
+                log::debug!("[newtab] 壁纸缓存新鲜，跳过后台刷新");
+                return;
             }
         }
     }
-    // 2) 拉新
     let fresh = fetch_bing_wallpapers().await;
-    if !fresh.is_empty() {
-        if let Err(e) = std::fs::write(
-            cache_path,
-            serde_json::to_string(&fresh).unwrap_or_default(),
-        ) {
-            log::warn!("[newtab] 壁纸缓存写入失败: {}", e);
-        }
-        return fresh;
+    if fresh.is_empty() {
+        log::warn!("[newtab] 壁纸拉取失败（保留旧缓存或纯色背景）");
+        return;
     }
-    // 3) 拉取失败 → 回退旧缓存（即使已过期）
-    if let Ok(s) = std::fs::read_to_string(cache_path) {
-        if let Ok(v) = serde_json::from_str::<Vec<String>>(&s) {
-            if !v.is_empty() {
-                log::warn!("[newtab] 壁纸拉取失败，回退旧缓存 {} 张", v.len());
-                return v;
-            }
-        }
+    if let Err(e) = std::fs::write(
+        &cache,
+        serde_json::to_string(&fresh).unwrap_or_default(),
+    ) {
+        log::warn!("[newtab] 壁纸缓存写入失败: {}", e);
+    } else {
+        log::info!("[newtab] 壁纸缓存已刷新 {} 张", fresh.len());
     }
-    fresh
 }
 
 /// 生成新标签页 HTML 并写盘。返回文件路径字符串。
@@ -216,12 +222,12 @@ pub async fn generate(db: &Db, path: &std::path::Path) -> Result<String, String>
         .map(|v| v != "0" && v != "false")
         .unwrap_or(true);
     let wallpapers = if show_bg {
-        // 缓存文件放 newtab 目录（与 index.html 同目录）
+        // 关键路径只读缓存（不拉网络）——网络由 refresh_wallpapers_background 后台做
         let cache = path
             .parent()
             .map(|p| p.join("wallpapers.json"))
             .unwrap_or_else(|| std::path::PathBuf::from("wallpapers.json"));
-        fetch_bing_wallpapers_cached(&cache).await
+        load_wallpapers_from_cache(&cache)
     } else {
         Vec::new()
     };

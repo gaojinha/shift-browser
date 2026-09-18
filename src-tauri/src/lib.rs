@@ -464,6 +464,25 @@ pub fn run() {
         }
       }
 
+      // 锁屏前预生成新标签页 + 后台刷新壁纸——锁屏 dialog 阻塞 setup 期间，
+      // 这些异步任务照常跑（tokio 不依赖 GTK 主循环），解锁时 index.html 已就绪，
+      // 前端 createTab 的 refresh_newtab 拿 GEN_LOCK 时防抖直接跳过，秒开启动页。
+      // generate 关键路径已改为只读缓存不拉网络（newtab.rs），纯本地毫秒级。
+      {
+        let app_handle = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+          let db_state = app_handle.state::<Db>();
+          if let Some(path) = newtab::newtab_path(&app_handle) {
+            match newtab::generate(&db_state, &path).await {
+              Ok(p) => log::info!("[ShiftBrowser] 新标签页已预生成: {}", p),
+              Err(e) => log::error!("[ShiftBrowser] 新标签页预生成失败: {}", e),
+            }
+          }
+          // 壁纸后台刷新（独立于 GEN_LOCK，拉取不阻塞任何 generate）
+          newtab::refresh_wallpapers_background(&app_handle).await;
+        });
+      }
+
       // 启动锁屏：设置启用后，在创建任何 webview 之前弹 GTK 原生密码对话框。
       // 注意：必须在 GTK 层面实现——Vue 锁屏覆盖层只能盖住 Vue 自己的 DOM，
       // 盖不住另一个独立的 GTK webview（标签页）。
