@@ -201,6 +201,8 @@ pub fn run() {
       tabs::close_tab,
       tabs::close_all_tabs,
       tabs::switch_tab,
+      // 性能：空闲标签休眠（回收渲染进程内存）
+      tabs::hibernate_idle_tabs,
       tabs::navigate_tab,
       tabs::go_back,
       tabs::go_forward,

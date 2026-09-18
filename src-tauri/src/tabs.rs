@@ -104,6 +104,9 @@ pub struct Tab {
     pub is_active: bool,
     pub is_pinned: bool,
     pub is_muted: bool,
+    /// 是否已休眠（webview 已销毁以释放内存；点击标签时按 url 重建）
+    #[serde(default)]
+    pub hibernated: bool,
 }
 
 /// 标签管理器（Tauri State）
@@ -115,6 +118,16 @@ pub struct TabManager {
     show_bookmarks_bar: Mutex<bool>,
     /// set_webview_visible 已应用的最近 seq（P1-9：丢弃并发乱序的过期指令）
     webview_visible_seq: Mutex<u64>,
+    /// 每个标签最后一次激活时间（Unix 秒），用于"空闲休眠"判定
+    last_active: Mutex<HashMap<String, i64>>,
+}
+
+/// 当前 Unix 时间戳（秒）
+fn now_ts() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 impl TabManager {
@@ -125,7 +138,16 @@ impl TabManager {
             active_id: Mutex::new(None),
             show_bookmarks_bar: Mutex::new(true),
             webview_visible_seq: Mutex::new(0),
+            last_active: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// 记录标签激活时间（休眠判定的输入）
+    pub fn touch_active(&self, id: &str) {
+        self.last_active
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), now_ts());
     }
 
     pub fn set_show_bookmarks_bar(&self, visible: bool) -> f64 {
@@ -1037,7 +1059,9 @@ pub async fn create_tab(
         is_active: true,
         is_pinned: false,
         is_muted: false,
+        hibernated: false,
     };
+    state.touch_active(&id);
 
     // 更新状态：新标签激活，旧标签取消激活
     let old_active = {
@@ -1150,11 +1174,23 @@ pub async fn switch_tab(
     log::info!("[tabs] switch_tab: id={}", id);
     // 先校验标签存在，再写 active_id（否则 active_id 会指向不存在的标签，
     // 导致 go_back/go_forward 报"标签不存在"、UI 显示与实际不符）
-    {
+    let hibernated_info = {
         let tabs = state.tabs.lock().unwrap();
-        if !tabs.contains_key(&id) {
-            return Ok(None);
+        tabs.get(&id).map(|t| (t.hibernated, t.url.clone()))
+    };
+    let Some((is_hibernated, hibernated_url)) = hibernated_info else {
+        return Ok(None);
+    };
+
+    // 休眠标签的恢复：webview 此前已被销毁释放内存，这里按保存的 URL 重建。
+    // 重建后需重新注入扩展/隐私防护脚本，并重新计算布局（create_webview 内部处理）。
+    if is_hibernated {
+        log::info!("[perf] 唤醒休眠标签: id={} url={}", id, hibernated_url);
+        TabManager::create_webview(&app, &id, &hibernated_url)?;
+        if let Some(t) = state.tabs.lock().unwrap().get_mut(&id) {
+            t.hibernated = false;
         }
+        crate::extensions::re_inject(&app).await;
     }
     // 隐藏当前活动 webview
     let old_active = {
@@ -1181,8 +1217,78 @@ pub async fn switch_tab(
         let _ = TabManager::switch_visibility(&app, &id, old_active.as_deref());
     }
 
+    state.touch_active(&id);
     let tabs = state.tabs.lock().unwrap();
     Ok(tabs.get(&id).cloned())
+}
+
+/// 空闲标签休眠：销毁长时间未激活的标签 webview，回收其渲染进程内存
+/// （WebKitGTK 默认不主动回收，实测 9 标签合计 3.75GB）。
+/// 返回本次休眠的标签数。超时分钟数来自 settings.tab_hibernate_minutes（0 = 关闭）。
+#[tauri::command]
+pub async fn hibernate_idle_tabs(
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+    db: tauri::State<'_, Db>,
+) -> Result<u32, String> {
+    // 读取超时配置（默认 30 分钟；0 表示关闭该功能）
+    let minutes: i64 = {
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT value FROM settings WHERE key = 'tab_hibernate_minutes'")
+                .fetch_optional(&db.pool)
+                .await
+                .ok()
+                .flatten();
+        row.and_then(|(v,)| v.parse::<i64>().ok()).unwrap_or(30)
+    };
+    if minutes <= 0 {
+        return Ok(0);
+    }
+    let threshold = now_ts() - minutes * 60;
+    let active = state.active_id.lock().unwrap().clone();
+
+    // 选出候选：非激活、未休眠、且最后激活时间早于阈值
+    let candidates: Vec<String> = {
+        let tabs = state.tabs.lock().unwrap();
+        let last = state.last_active.lock().unwrap();
+        tabs.iter()
+            .filter(|(id, t)| {
+                !t.hibernated
+                    && Some((*id).clone()) != active
+                    && last.get(*id).map(|ts| *ts < threshold).unwrap_or(true)
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
+    };
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+
+    let Some(window) = app.get_window("main") else {
+        return Ok(0);
+    };
+    let mut count = 0u32;
+    for id in candidates {
+        let label = format!("tab-{}", id);
+        if let Some(wv) = window.get_webview(&label) {
+            // 先隐藏再销毁，避免销毁瞬间的残影
+            let _ = wv.hide();
+            if let Err(e) = wv.close() {
+                log::warn!("[perf] 标签休眠失败（close）: id={} err={}", id, e);
+                continue;
+            }
+            if let Some(t) = state.tabs.lock().unwrap().get_mut(&id) {
+                t.hibernated = true;
+            }
+            count += 1;
+            log::info!("[perf] 标签已休眠（释放渲染进程）: id={}", id);
+        }
+    }
+    if count > 0 {
+        let _ = app.emit("tabs-updated", ());
+        log::info!("[perf] 本轮共休眠 {} 个空闲标签", count);
+    }
+    Ok(count)
 }
 
 /// 导航到新 URL

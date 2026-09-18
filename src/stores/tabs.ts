@@ -533,6 +533,8 @@ export const useTabsStore = defineStore('tabs', {
      */
     startPolling(fallbackInterval = 8000) {
       if (this.pollTimer) return
+      // 空闲标签休眠检查的轮次计数（每 8 轮 ≈64s 触发一次）
+      let hibernateTick = 0
       listen('tabs-updated', () => {
         this.syncTabs()
       })
@@ -546,6 +548,15 @@ export const useTabsStore = defineStore('tabs', {
         // 窗口不可见时跳过（省 CPU/GTK 主线程调用；恢复可见后事件或下轮会补上）
         if (document.hidden) return
         this.syncTabs()
+        // 每 8 轮（≈64s）触发一次"空闲标签休眠"检查：销毁久未激活标签的 webview
+        // 回收渲染进程内存（WebKitGTK 默认不主动回收，多标签内存线性增长）。
+        // 阈值由 settings.tab_hibernate_minutes 控制（默认 30 分钟，0=关闭）
+        if (++hibernateTick >= 8) {
+          hibernateTick = 0
+          invoke('hibernate_idle_tabs').catch((e) => {
+            console.error('[tabs] 空闲标签休眠检查失败:', e)
+          })
+        }
       }, fallbackInterval)
     },
 

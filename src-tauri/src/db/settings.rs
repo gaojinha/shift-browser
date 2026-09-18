@@ -36,6 +36,8 @@ const ALLOWED_KEYS: &[&str] = &[
     "privacy_shield",
     "privacy_shield_level",
     "privacy_whitelist",
+    // 性能：空闲标签休眠超时（分钟，0=关闭）
+    "tab_hibernate_minutes",
 ];
 
 /// 是否为敏感设置键
