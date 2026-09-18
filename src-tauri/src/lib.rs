@@ -665,18 +665,34 @@ pub fn run() {
           // 2) 实测强行切换会触发 WebKit bug（WebLoaderStrategy internallyFailedLoad），整个应用崩。
           // 多标签开销靠"切标签前 hide 旧 + 前端连点合并"缓解，进程模型保持默认。
 
-          // 隐私防护 P0：第三方 Cookie 阻断（已回退，2026-09-18）
-          // 回退原因：CookieAcceptPolicy::NoThirdParty 是 WebContext 级全局设置，
-          // 大量国内站点（邮箱、门户、网盘）依赖第三方域加载正文/附件/媒体，
-          // 全量阻断会导致"页面能开、内容空白"。若要恢复，应做成可开关选项，
-          // 且默认关闭，由用户在明确知情下自行开启。
-          // #[cfg(target_os = "linux")]
-          // {
-          //   use webkit2gtk::CookieManagerExt;
-          //   if let Some(cm) = context.cookie_manager() {
-          //     cm.set_accept_policy(webkit2gtk::CookieAcceptPolicy::NoThirdParty);
-          //   }
-          // }
+          // 隐私防护：第三方 Cookie 阻断 —— 仅"严格档"启用（2026-09-18 修订）
+          // 背景：全量阻断曾导致邮箱/网盘等内容空白（站点靠第三方域加载正文/附件），
+          // 故不再默认开启；改为绑定隐私防护档位：用户主动选"严格"才阻断，
+          // 属知情选择。Cookie 策略是 WebContext 级、须在建 webview 前设置，
+          // 因此切换档位后需重启浏览器生效。
+          #[cfg(target_os = "linux")]
+          {
+            use webkit2gtk::CookieManagerExt;
+            let level: String = tauri::async_runtime::block_on(async {
+              let db = app.state::<Db>();
+              let row: Option<(String,)> = sqlx::query_as(
+                "SELECT value FROM settings WHERE key = 'privacy_shield_level'",
+              )
+              .fetch_optional(&db.pool)
+              .await
+              .ok()
+              .flatten();
+              row.map(|r| r.0).unwrap_or_else(|| "standard".to_string())
+            });
+            if level == "strict" {
+              if let Some(cm) = context.cookie_manager() {
+                cm.set_accept_policy(webkit2gtk::CookieAcceptPolicy::NoThirdParty);
+                log::info!("[privacy] 严格档：第三方 Cookie 已阻断（重启后按档位生效）");
+              }
+            } else {
+              log::info!("[privacy] 标准档：第三方 Cookie 保持浏览器默认（不阻断）");
+            }
+          }
         }
       }
 
