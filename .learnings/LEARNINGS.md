@@ -601,3 +601,24 @@ Corrections, insights, and knowledge gaps captured during development.
 2. 防护项按"是否有副作用"分档：无副作用（GPC/参数清洗/加噪）→ 默认开；有副作用（改写返回值/全局 Cookie 策略/TLS 底层）→ 默认关或严格档
 3. 用户报"内容空白"类问题时，**先请用户关闭对应模块做二分**，拿到方向再改代码
 **结果**: 提交 cbae257(字体探针移档) / 69a50de(广告拦截收紧) / 36b90d6(设置白名单补键) / e2bfc90(回退 TLS+三方Cookie+UA)
+
+---
+
+## 2026-09-18 14:10 — WebKitGTK 性能优化：测量方法论 + 两个有效杠杆（best_practice）
+
+**类别**: best_practice
+**场景**: ShiftBrowser 性能优化（CPU / 内存）
+**测量基线（1 标签空闲 / 9 标签使用中）**:
+- 启动到可用：**1 秒**（解锁后），无需优化
+- CPU：主进程 13.7% + 渲染进程 17-18%（单标签空闲）
+- 内存：单标签 ~780MB；**9 标签合计 3.75GB**（每标签一个渲染进程，240-500MB）
+**踩过的测量坑**:
+- 想验证"壁纸动画吃多少 CPU"，直接改磁盘 CSS 让用户刷新后测 —— 结果用户当时开着 9 个标签在正常浏览，**变量完全不可比**，数据作废。
+- 教训：**性能测量必须受控**（固定标签数、无用户操作、静默期采样）。在用户正在使用的实例上测 CPU/内存，只能得到"氛围数据"，不能用来判断某项改动的效果。要么造受控场景（新起实例、只开一个启动页），要么用**同版本前后对比 + 多次采样取稳态**。
+**两个真正有效的杠杆**:
+1. **CSS 动画提升合成层**：`.bg-layer` 的 45s 无限缩放动画缺 `will-change: transform` / `translateZ(0)` 时，WebKit **每帧在 CPU 上重绘**110% 视口的高清壁纸位图。加上后主进程 13.7%→11%、渲染进程 17%→13%。**规律：任何持续 CSS 动画都要检查是否被提升为合成层**（transform/opacity 类动画才可能上 GPU）。
+2. **MemoryPressureSettings（WebKitGTK v2_34+）**：`WebsiteDataManager::set_memory_pressure_settings()` 是**静态全局** API，必须在创建任何 WebContext **之前**调用；参数 `memory_limit`(MB) + `conservative_threshold`(0.33) + `strict_threshold`(0.5) + `kill_threshold`(0.9) + `poll_interval`(1s)。字段名与阈值语义见 webkit2gtk 的 `auto/memory_pressure_settings.rs`。**实践取舍**：kill_threshold 设高（0.9），宁可多回收缓存也不杀渲染进程，否则用户标签会突然崩溃重载。
+**架构性限制（不要硬碰）**:
+- WebKitGTK 默认 `MultipleSecondaryProcesses`（每标签一进程）。改 `SharedSecondaryProcess` 曾在实测中触发 WebKit bug（WebLoaderStrategy internallyFailedLoad）导致整个应用崩溃 —— 且主 webview 在 setup 前已创建，进程池已固化，运行期切换会被静默忽略。
+- 因此多标签内存的**正经解法**是"休眠/丢弃久未使用的标签"（应用层），而不是改进程模型。
+**结果**: 提交 360d387(合成层) / 3b279c4(内存压力治理)；59 测试全过、clippy 零警告
