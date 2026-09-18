@@ -150,9 +150,12 @@ export const useTabsStore = defineStore('tabs', {
       )
       if (same.length >= 2) {
         try {
+          // isAuto=true：按域名自动归类产生的组**不落库**，
+          // 仅存在于内存，标签全部关闭后由 pruneAutoGroups 丢弃
           const id = await groups.createGroup(
             domain,
             GROUP_COLORS[groups.groups.length % GROUP_COLORS.length],
+            true,
           )
           const g = groups.groups.find((x) => x.id === id)
           if (g) {
@@ -233,6 +236,15 @@ export const useTabsStore = defineStore('tabs', {
             }
           }
         }
+        // 关闭后清理"已无标签使用"的自动分组：自动组不落库，标签走完即丢弃
+        // （用户手动创建的分组 isAuto=false，不受影响）
+        useGroupsStore().pruneAutoGroups(
+          new Set(
+            this.tabs
+              .map((t) => t.groupId)
+              .filter((g): g is number => g != null),
+          ),
+        )
       } catch (e) {
         console.error('[tabs] 关闭标签失败:', e)
         useToastStore().error('关闭标签页失败')
