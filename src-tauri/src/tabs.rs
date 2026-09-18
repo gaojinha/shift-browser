@@ -239,7 +239,11 @@ impl TabManager {
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
               let url = payload.url();
               let host = url.host_str().unwrap_or("").to_string();
-              let title = if host.is_empty() {
+              // 内部页面（shift://newtab / shift://worldnav）标题固定"启动页"，
+              // 不显示 host（否则标签页显示 "newtab"）
+              let title = if is_internal_newtab_url(url.as_str()) {
+                "启动页".to_string()
+              } else if host.is_empty() {
                 url.to_string()
               } else {
                 host
@@ -940,9 +944,10 @@ pub async fn create_tab(
         other => return Err(format!("不允许的 URL scheme: {}", other)),
     }
     let id = TabManager::uuid();
-    // 本地新标签页（file:// 路径含 /newtab/）标题显示"启动页"，不显示冗长文件路径
-    let is_newtab = url.contains("/newtab/");
-    let title = if is_newtab {
+    // 本地新标签页（file:// 路径含 /newtab/ 或 shift://newtab/worldnav）标题显示"启动页"，
+    // 不显示冗长 URL/host。注意：协议改版后 URL 是 shift://newtab，旧的 contains("/newtab/")
+    // 判断匹配不到，必须按 scheme+host 判断
+    let title = if is_internal_newtab_url(&url) {
         "启动页".to_string()
     } else {
         url.clone()
@@ -1474,9 +1479,41 @@ pub async fn toggle_maximize(app: AppHandle) -> Result<bool, String> {
     Ok(!maximized)
 }
 
+/// 判断 URL 是否为内部启动页（标题显示"启动页"）
+/// 协议改版后新标签页 URL 是 shift://newtab（host=newtab），旧 file:// 路径
+/// 含 /newtab/ 的判断匹配不到——必须按 scheme+host 判断，两处调用点（create_tab
+/// 初始标题 + on_page_load 覆盖）共用同一逻辑，避免再次漂移
+fn is_internal_newtab_url(url: &str) -> bool {
+    match url.parse::<tauri::Url>() {
+        Ok(u) => match u.scheme() {
+            "shift" => matches!(u.host_str(), Some("newtab") | Some("worldnav")),
+            "file" => url.contains("/newtab/") || url.contains("world-nav.html"),
+            _ => false,
+        },
+        Err(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn internal_newtab_url_detection() {
+        // shift:// 协议（当前实际使用）
+        assert!(is_internal_newtab_url("shift://newtab"));
+        assert!(is_internal_newtab_url("shift://newtab/"));
+        assert!(is_internal_newtab_url("shift://worldnav"));
+        assert!(is_internal_newtab_url("shift://worldnav/world-nav.html"));
+        // 旧 file:// 路径（兼容）
+        assert!(is_internal_newtab_url("file:///home/gao/.local/share/com.shiftbrowser.app/newtab/index.html"));
+        assert!(is_internal_newtab_url("file:///home/gao/.local/share/com.shiftbrowser.app/newtab/world-nav.html"));
+        // 普通网页/其他协议不是启动页
+        assert!(!is_internal_newtab_url("https://example.com"));
+        assert!(!is_internal_newtab_url("http://example.com/newtab/"));
+        assert!(!is_internal_newtab_url("file:///etc/passwd"));
+        assert!(!is_internal_newtab_url("shift://__translate__/text"));
+    }
 
     #[test]
     fn unique_path_adds_suffix_when_exists() {
