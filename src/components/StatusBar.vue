@@ -79,11 +79,17 @@ const netTitle = computed(() => {
 
 // ---- 版本 ----
 const appVersion = ref('')
+
+// 页面加载失败提示（5 秒后自动消失）
+const loadFailed = ref(false)
+const loadFailedUri = ref('')
+let unlistenLoadFailed: (() => void) | null = null
+
 onMounted(async () => {
   try {
     appVersion.value = await getVersion()
   } catch {
-    appVersion.value = '5.5.0'
+    appVersion.value = '5.5.1'
   }
   try {
     unlistenNet = await listen<NetStatus>('net-status-updated', (e) => {
@@ -92,9 +98,21 @@ onMounted(async () => {
   } catch (e) {
     console.error('[status] 监听网络状态失败:', e)
   }
+  try {
+    unlistenLoadFailed = await listen<{ tabId: string; uri: string }>('page-load-failed', (e) => {
+      loadFailed.value = true
+      loadFailedUri.value = e.payload.uri
+      setTimeout(() => {
+        loadFailed.value = false
+      }, 5000)
+    })
+  } catch (e) {
+    console.error('[status] 监听页面加载失败失败:', e)
+  }
 })
 onUnmounted(() => {
   if (unlistenNet) unlistenNet()
+  if (unlistenLoadFailed) unlistenLoadFailed()
 })
 
 const adblockOn = computed(() => settingsStore.get('adblock_enabled') !== 'false')
@@ -111,6 +129,7 @@ function openHelp() {
 <template>
   <div class="status-bar">
     <span class="status-left">
+      <span v-if="loadFailed" class="status-load-failed">⚠️ 页面加载失败</span>
       <span class="status-icon">{{ statusIcon }}</span>
       <span class="status-text">{{ statusText }}</span>
       <span v-if="domainText" class="status-domain">{{ domainText }}</span>
@@ -157,6 +176,15 @@ function openHelp() {
   flex: 1;
   min-width: 0; /* flexbox 默认 min-width:auto 会让长 URL 撑满空间、把 .status-right 挤出可视区 */
   margin-right: 12px;
+}
+.status-load-failed {
+  color: #e53935;
+  font-size: 11px;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 .status-icon {
   width: 14px;

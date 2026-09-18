@@ -190,6 +190,10 @@ onMounted(async () => {
   if (initFailed || tabsStore.tabs.length === 0) {
     // 主通道：Rust 解锁后 emit app-unlocked
     listen('app-unlocked', () => {
+      // 解锁后自动打开启动页（newtab）
+      tabsStore.createTab('newtab').catch((e) => {
+        console.error('[app] 解锁后创建启动页失败:', e)
+      })
       initBrowserSafe().catch((e) => {
         console.error('[app] 解锁后重试初始化失败:', e)
       })

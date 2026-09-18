@@ -351,6 +351,21 @@ impl TabManager {
                 let wv = pwv.inner().clone();
                 let app2 = app_for_title;
                 let tab_id = id_for_title;
+                // 先注册加载失败监听（clone 后再 move 原值给 title_notify）
+                let app_fail = app2.clone();
+                let tab_id_fail = tab_id.clone();
+                wv.connect_load_failed(move |_wv, _load_event, failing_uri, err| {
+                    log::warn!(
+                        "[tabs] load_failed: tab={} uri={} err={}",
+                        tab_id_fail,
+                        failing_uri,
+                        err.message()
+                    );
+                    // 阻止 WebKit 默认错误页显示（返回 true = 阻止默认行为）
+                    let _ = app_fail.emit("page-load-failed", (tab_id_fail.clone(), failing_uri.to_string()));
+                    true
+                });
+                // 监听 WebKit title 变化 → 实时同步标签标题
                 wv.connect_title_notify(move |webview| {
                     if let Some(t) = webview.title() {
                         let title = t.trim().to_string();

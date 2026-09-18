@@ -1,6 +1,6 @@
 [package]
 name = "shift-browser"
-version = "5.5.0"
+version = "5.5.1"
 description = "Shift Browser - AI 增强型浏览器（Tauri 重构版）"
 authors = ["OpenClaw Team"]
 license = ""

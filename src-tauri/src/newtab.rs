@@ -376,7 +376,7 @@ fn render_html(
   :root {{ --accent:#4a9eff; }}
   * {{ margin:0; padding:0; box-sizing:border-box; }}
   html,body {{ height:100%; }}
-  body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%); color:#e0e0e0; min-height:100vh; overflow-y:auto; }}
+  body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%); color:#e0e0e0; min-height:100vh; overflow-x:hidden; overflow-y:auto; border-radius:12px; }}
   .bg-layer {{ position:fixed; top:-5%; left:-5%; width:110%; height:110%; z-index:-1; background-size:cover; background-position:center; animation:kenburns 45s ease-in-out infinite alternate; }}
   .bg-layer::after {{ content:''; position:absolute; inset:0; background:linear-gradient(180deg, rgba(10,15,30,0.5) 0%, rgba(10,15,30,0.35) 40%, rgba(10,15,30,0.7) 100%); }}
   @keyframes kenburns {{ from {{ transform:scale(1) translate(0,0); }} to {{ transform:scale(1.08) translate(1%,1.5%); }} }}
@@ -1681,7 +1681,7 @@ fn render_worldnav_html() -> String {
   :root { --bg2:rgba(255,255,255,0.05); --bg3:rgba(255,255,255,0.1); --fg:#e0e0e0; --muted:rgba(255,255,255,0.45); --accent:#4a9eff; --border:rgba(255,255,255,0.1); }
   * { box-sizing:border-box; margin:0; padding:0; }
   html,body { height:100%; }
-  body { background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%); color:var(--fg); font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; display:flex; flex-direction:column; }
+  body { background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%); color:var(--fg); font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; display:flex; flex-direction:column; border-radius:12px; overflow-x:hidden; }
   .nav-header { display:flex; align-items:center; gap:16px; padding:12px 20px; background:rgba(255,255,255,0.05); border-bottom:1px solid var(--border); flex-shrink:0; }
   .nav-title { font-size:17px; font-weight:600; white-space:nowrap; }
   .nav-title a { color:var(--muted); text-decoration:none; font-size:13px; margin-left:10px; }
