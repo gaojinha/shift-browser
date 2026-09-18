@@ -4,17 +4,7 @@
 // 优先走 ipc:// 自定义协议 fetch（tauri 原生方式，不依赖 web extension），
 // 失败时回退到 window.webkit.messageHandlers['ipc']（wry 已注册）。
 (function () {
-  function showDiag(msg) {
-    try {
-      var d = document.createElement('div');
-      d.style.cssText = 'position:fixed;bottom:10px;right:10px;z-index:99999;background:#c00;color:#fff;padding:8px 12px;font-size:12px;border-radius:6px;max-width:70%;';
-      d.textContent = '[ipc-bridge] ' + msg;
-      document.body.appendChild(d);
-    } catch (_) {}
-  }
-
   if (window.__TAURI_INTERNALS__) {
-    showDiag('TAURI_INTERNALS 已存在（UserScript 执行了）');
     return;
   }
 
@@ -70,7 +60,6 @@
         headers: headers
       })
         .then(function (response) {
-          showDiag('fetch 响应 status=' + response.status);
           var callbackId =
             response.headers.get('Tauri-Response') === 'ok' ? callback : error;
           var ct = (response.headers.get('content-type') || '').split(',')[0];
@@ -88,7 +77,6 @@
         .catch(function (e) {
           // 自定义协议失败，回退到 postMessage 接口
           console.warn('[ipc-bridge] ipc:// fetch 失败，回退 postMessage', e);
-          showDiag('ipc:// fetch 失败: ' + e);
           customProtocolIpcFailed = true;
           sendIpcMessage(message);
         });
@@ -111,7 +99,6 @@
         window.ipc.postMessage(data);
       } else {
         console.error('[ipc-bridge] 无可用 IPC 通道');
-        showDiag('无 IPC 通道（messageHandlers 不存在）');
       }
     }
   }
