@@ -115,6 +115,19 @@ fn valid_callback(cb: &str) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // ===== 隐私防护 P3：TLS 指纹规范化 =====
+    // 背景：JA4/TLS 指纹在 2026 年是最可靠的追踪信号（JS 无法伪造）。
+    // 现实边界：WebKitGTK 走 glib-networking + GnuTLS，Chrome 用 BoringSSL，
+    // 两者的密码套件顺序、扩展列表完全不同（GREASE 等 BoringSSL 特性 GnuTLS 不支持），
+    // 因此**无法把 JA4 伪装成 Chrome**。能做且值得做的是：
+    // 收敛到现代主流配置（仅 TLS 1.2/1.3 + 标准套件），
+    // 让本浏览器的 TLS 特征落在"大量 Linux 应用共用"的常见集合里，
+    // 而不是"独一份的 WebKitGTK + 老旧协议"这种稀有指纹。
+    // 必须在任何网络连接建立前设置，故放在 run() 最开头。
+    std::env::set_var(
+        "G_TLS_GNUTLS_PRIORITY",
+        "NORMAL:-VERS-ALL:+VERS-TLS1.3:+VERS-TLS1.2:-VERS-TLS1.0:-VERS-TLS1.1",
+    );
     tauri::Builder::default()
     .plugin(tauri_plugin_opener::init())
     // 注意：不再注册 shell/dialog/fs 插件——前端只用到 opener，
