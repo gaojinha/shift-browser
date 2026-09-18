@@ -18,7 +18,8 @@ static GEN_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLo
 const WALLPAPER_CACHE_TTL: u64 = 6 * 3600;
 
 /// 新标签页文件路径（app_data_dir/newtab/index.html）
-pub fn newtab_path(app: &AppHandle) -> Option<std::path::PathBuf> {    let dir = app.path().app_data_dir().ok()?;
+pub fn newtab_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    let dir = app.path().app_data_dir().ok()?;
     Some(dir.join("newtab").join("index.html"))
 }
 
@@ -169,13 +170,12 @@ pub async fn generate(db: &Db, path: &std::path::Path) -> Result<String, String>
 
     // ---- 数据：设置（搜索引擎 / 快捷访问）----
     async fn setting(db: &Db, key: &str) -> Option<String> {
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT value FROM settings WHERE key = ?")
-                .bind(key)
-                .fetch_optional(&db.pool)
-                .await
-                .ok()
-                .flatten();
+        let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten();
         row.map(|r| r.0)
     }
     let search_engine = setting(db, "search_engine")
@@ -194,6 +194,11 @@ pub async fn generate(db: &Db, path: &std::path::Path) -> Result<String, String>
                         let icon = v.get("icon")?.as_str()?.to_string();
                         let name = v.get("name")?.as_str()?.to_string();
                         let url = v.get("url")?.as_str()?.to_string();
+                        // P2：过滤危险 scheme（历史遗留/被篡改的 quick_sites 数据），
+                        // 特权页面不允许渲染 javascript: 等
+                        if !is_safe_web_url(&url) {
+                            return None;
+                        }
                         Some((icon, name, url))
                     })
                     .collect()
@@ -241,11 +246,21 @@ pub async fn generate(db: &Db, path: &std::path::Path) -> Result<String, String>
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        std::fs::write(parent.join("world-nav.html"), render_worldnav_html())
+        atomic_write(&parent.join("world-nav.html"), &render_worldnav_html())
             .map_err(|e| e.to_string())?;
     }
-    std::fs::write(path, html).map_err(|e| e.to_string())?;
+    atomic_write(path, &html).map_err(|e| e.to_string())?;
     Ok(path.display().to_string())
+}
+
+/// P3：原子写文件——先写同目录临时文件再 rename。
+/// 原 std::fs::write 先截断再写，中途崩溃/断电会留下半截 HTML，
+/// 新标签页/世界导航页直接打不开（启动页级故障），原子写把损坏窗口缩到零。
+fn atomic_write(path: &std::path::Path, content: &str) -> std::io::Result<()> {
+    // 随机后缀避免并发 generate 互相覆盖临时文件（rename 原子，最后者胜）
+    let tmp = path.with_extension(format!("tmp.{}", uuid::Uuid::new_v4()));
+    std::fs::write(&tmp, content)?;
+    std::fs::rename(&tmp, path)
 }
 
 fn default_quick_sites() -> Vec<(String, String, String)> {
@@ -686,7 +701,12 @@ fn render_html(
     d.textContent = 'JS错误: ' + msg + ' @行' + line;
     document.body.appendChild(d);
   }};
-  function esc(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }}
+  // HTML 转义（属性/文本）：& < > " ' \ 全量转义，防属性断裂与标签注入。
+  // 注意：单引号必须转义——feed URL 来自远端 RSS，clean_text 会把 &quot;/&#39; 等
+  // 实体解码成裸引号，esc 不转义 ' 则 href="...' 类注入仍可逃逸。
+  function esc(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/\\/g,'&#92;'); }}
+  // JS 字符串转义（单引号字符串内联场景，如 onclick="showInlineReader('...')"）
+  function escJs(s) {{ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n').replace(/\r/g,'\\r'); }}
   // 动态背景（Bing 每日壁纸，Ken Burns 缓慢缩放；预加载成功才换图，失败保持渐变）
   var BING_WALLPAPERS = {wallpapers_json};
   function loadBg() {{
@@ -970,7 +990,7 @@ fn render_html(
     var h = '<button class=\"feed-toggle\" id=\"addQuickBtn\">＋ 添加快捷访问</button>';
     var favs = loadUserFavs();
     favs.forEach(function(f) {{
-      h += '<div class=\"item q-item\"><a class=\"q-link\" href=\"' + f.url + '\"><span class=\"it-title\">' + (f.icon || '⭐') + ' ' + f.name.replace(/</g,'&lt;') + '</span><span class=\"it-url\">' + f.url + '</span></a><button class=\"q-del\" data-url=\"' + f.url + '\" title=\"删除收藏\">✕</button></div>';
+      h += '<div class=\"item q-item\"><a class=\"q-link\" href=\"' + esc(f.url) + '\"><span class=\"it-title\">' + esc(f.icon || '⭐') + ' ' + esc(f.name) + '</span><span class=\"it-url\">' + esc(f.url) + '</span></a><button class=\"q-del\" data-url=\"' + esc(f.url) + '\" title=\"删除收藏\">✕</button></div>';
     }});
     var hidden = loadHidden();
     QUICK_BUILTIN.filter(function(b) {{ return hidden.indexOf(b.u) < 0; }}).forEach(function(b) {{
@@ -1034,10 +1054,10 @@ fn render_html(
     h += items.map(function(f) {{
       // f = [title, url, source, published, category]
       var isRead = !!read[f[1]];
-      return '<a class=\"item fs-item' + (isRead ? ' read' : '') + '\" href=\"' + f[1] + '\" data-url=\"' + f[1] + '\">' +
-        '<span class=\"it-title\">' + f[0].replace(/</g,'&lt;') + '</span>' +
-        '<span class=\"it-url\">' + f[2] + (f[3] ? ' · ' + timeAgo(f[3]) : '') + '</span>' +
-        '<span class=\"fs-read\" data-url=\"' + f[1] + '\" title=\"📖 大字阅读（提取正文，面板内就地看\" onclick=\"event.preventDefault();event.stopPropagation();return showInlineReader(\'' + f[1].replace(/'/g,'\\\'') + '\'),false;\">📖</span></a>';
+      return '<a class=\"item fs-item' + (isRead ? ' read' : '') + '\" href=\"' + esc(f[1]) + '\" data-url=\"' + esc(f[1]) + '\">' +
+        '<span class=\"it-title\">' + esc(f[0]) + '</span>' +
+        '<span class=\"it-url\">' + esc(f[2]) + (f[3] ? ' · ' + timeAgo(f[3]) : '') + '</span>' +
+        '<span class=\"fs-read\" data-url=\"' + esc(f[1]) + '\" title=\"📖 大字阅读（提取正文，面板内就地看\" onclick=\"event.preventDefault();event.stopPropagation();return showInlineReader(\'' + escJs(f[1]) + '\'),false;\">📖</span></a>';
     }}).join('');
     return h;
   }}
@@ -1090,7 +1110,7 @@ fn render_html(
       '<button id="inlineBack" title="返回资讯列表">←</button>' +
       '<button class="ir-fs" id="inlineFsDown" title="缩小字号">A−</button>' +
       '<button class="ir-fs" id="inlineFsUp" title="放大字号">A＋</button>' +
-      '<a href="' + f[1] + '" target="_blank" class="ir-src">看原文 ↗</a>' +
+      '<a href="' + esc(f[1]) + '" target="_blank" class="ir-src">看原文 ↗</a>' +
       '</div>';
     h += '<div class="ir-art"><h1>' + a.title.replace(/</g,'&lt;') + '</h1><div id="content">' + a.content.replace(/data-src=/g,'src=').replace(/data-original=/g,'src=').replace(/data-lazy-src=/g,'src=') + '</div></div>';
     return h;
@@ -1442,7 +1462,7 @@ fn render_html(
     var box = document.getElementById('quickSites');
     if (!box) return;
     box.insertAdjacentHTML('afterbegin', favs.map(function(f) {{
-      return '<div class="top-site" data-url="' + f.url + '"><a class="top-site-link" href="' + f.url + '"><span class="icon">' + (f.icon || '⭐') + '</span><span class="name">' + f.name.replace(/</g,'&lt;') + '</span></a><button class="qs-del">×</button></div>';
+      return '<div class="top-site" data-url="' + esc(f.url) + '"><a class="top-site-link" href="' + esc(f.url) + '"><span class="icon">' + esc(f.icon || '⭐') + '</span><span class="name">' + esc(f.name) + '</span></a><button class="qs-del">×</button></div>';
     }}).join(''));
   }})();
 
@@ -1473,7 +1493,7 @@ fn render_html(
     var matches = HISTORY_DATA.filter(function(h) {{ return (h.title || '').toLowerCase().indexOf(q) >= 0 || h.url.toLowerCase().indexOf(q) >= 0; }}).slice(0, 8);
     if (matches.length === 0) {{ suggestBox.style.display = 'none'; return; }}
     suggestBox.innerHTML = matches.map(function(h) {{
-      return '<div class="suggest-item" data-url="' + h.url + '"><span class="s-icon">🔗</span><span>' + (h.title || h.url) + '</span><span class="s-url">' + h.url + '</span></div>';
+      return '<div class="suggest-item" data-url="' + esc(h.url) + '"><span class="s-icon">🔗</span><span>' + esc(h.title || h.url) + '</span><span class="s-url">' + esc(h.url) + '</span></div>';
     }}).join('');
     suggestBox.style.display = 'block';
   }});
@@ -1539,7 +1559,7 @@ fn render_html(
     var card = document.createElement('div');
     card.className = 'top-site';
     card.dataset.url = finalUrl;
-    card.innerHTML = '<a class="top-site-link" href="' + finalUrl + '"><span class="icon">' + icon + '</span><span class="name">' + name + '</span></a><button class="qs-del">×</button>';
+    card.innerHTML = '<a class="top-site-link" href="' + esc(finalUrl) + '"><span class="icon">' + esc(icon) + '</span><span class="name">' + esc(name) + '</span></a><button class="qs-del">×</button>';
     quickSitesBox.insertBefore(card, document.getElementById('qsAddBtn'));
     qsForm.classList.remove('show');
     document.getElementById('qsName').value = '';
@@ -1558,7 +1578,7 @@ fn render_html(
       return;
     }}
     list.innerHTML = items.map(function(f) {{
-      return '<a class="feed-item" href="' + f[1] + '"><span class="feed-title">' + f[0].replace(/</g,'&lt;') + '</span><span class="feed-meta">' + f[2] + (f[3] ? ' · ' + timeAgo(f[3]) : '') + '</span></a>';
+      return '<a class="feed-item" href="' + esc(f[1]) + '"><span class="feed-title">' + esc(f[0]) + '</span><span class="feed-meta">' + esc(f[2]) + (f[3] ? ' · ' + timeAgo(f[3]) : '') + '</span></a>';
     }}).join('');
     document.getElementById('feedMoreBtn').addEventListener('click', function() {{
       switchPanel('feed');
@@ -1575,7 +1595,7 @@ fn render_html(
       return;
     }}
     list.innerHTML = items.map(function(h) {{
-      return '<a class="recent-item" href="' + h.url + '"><span class="recent-title">' + (h.title || h.url).replace(/</g,'&lt;') + '</span><span class="recent-url">' + h.url + '</span></a>';
+      return '<a class="recent-item" href="' + esc(h.url) + '"><span class="recent-title">' + esc(h.title || h.url) + '</span><span class="recent-url">' + esc(h.url) + '</span></a>';
     }}).join('');
   }})();
 
@@ -1709,7 +1729,7 @@ fn render_worldnav_html() -> String {
   var current = CATS[0].id;
   var keyword = '';
 
-  function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/\\/g,'&#92;'); }
 
   function renderTabs() {
     document.getElementById('catTabs').innerHTML = CATS.map(function(c) {
@@ -1864,7 +1884,20 @@ pub async fn save_quick_sites(
     app: AppHandle,
     sites: Vec<serde_json::Value>,
 ) -> Result<(), String> {
-    let json = serde_json::to_string(&sites).map_err(|e| e.to_string())?;
+    // P2：URL scheme 校验——新标签页是带 IPC 桥（invoke_key）的特权页面，
+    // 若允许 javascript: 等 scheme 渲染成 <a href>，点击即在特权上下文执行任意命令
+    let mut cleaned: Vec<serde_json::Value> = Vec::with_capacity(sites.len());
+    for site in &sites {
+        let mut s = site.clone();
+        let url = s
+            .get("url")
+            .and_then(|u| u.as_str())
+            .ok_or_else(|| "快捷站点缺少 url".to_string())?;
+        let norm = normalize_quick_site_url(url)?;
+        s["url"] = serde_json::Value::String(norm);
+        cleaned.push(s);
+    }
+    let json = serde_json::to_string(&cleaned).map_err(|e| e.to_string())?;
     sqlx::query(
         "INSERT INTO settings (key, value) VALUES ('quick_sites', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -1873,9 +1906,100 @@ pub async fn save_quick_sites(
     .execute(&db.pool)
     .await
     .map_err(|e| e.to_string())?;
-    log::info!("[newtab] 快捷访问已保存 {} 条", sites.len());
+    log::info!("[newtab] 快捷访问已保存 {} 条", cleaned.len());
     // 重新生成 HTML，让主区网格立即生效
     let path = newtab_path(&app).ok_or("无法获取数据目录")?;
     generate(&db, &path).await?;
     Ok(())
+}
+
+/// 校验是否为可安全渲染的网页 URL（http/https）
+/// 新标签页是特权页面（带 IPC 桥），javascript:/data: 等 scheme 一旦渲染成
+/// <a href> 点击即可在特权上下文执行任意命令，必须拒绝
+fn is_safe_web_url(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://")
+}
+
+/// 规范化快捷站点 URL：显式危险 scheme 拒绝；无 scheme 自动补 https://
+/// （用户常输入 "example.com"，原版行为是补全协议）
+fn normalize_quick_site_url(url: &str) -> Result<String, String> {
+    let u = url.trim();
+    if u.is_empty() {
+        return Err("快捷站点 URL 不能为空".to_string());
+    }
+    let lower = u.to_ascii_lowercase();
+    for bad in ["javascript:", "data:", "file:", "vbscript:", "blob:"] {
+        if lower.starts_with(bad) {
+            return Err(format!("快捷站点不允许 {} 协议", bad));
+        }
+    }
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        Ok(u.to_string())
+    } else {
+        Ok(format!("https://{}", u))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_accepts_http_https_and_bare_domain() {
+        assert_eq!(
+            normalize_quick_site_url("https://example.com").unwrap(),
+            "https://example.com"
+        );
+        assert_eq!(
+            normalize_quick_site_url("http://example.com").unwrap(),
+            "http://example.com"
+        );
+        // 无 scheme 自动补 https://
+        assert_eq!(
+            normalize_quick_site_url("example.com").unwrap(),
+            "https://example.com"
+        );
+        // 大小写容忍
+        assert_eq!(
+            normalize_quick_site_url("HTTPS://example.com").unwrap(),
+            "HTTPS://example.com"
+        );
+        // 首尾空白裁剪
+        assert_eq!(
+            normalize_quick_site_url("  example.com  ").unwrap(),
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn normalize_rejects_dangerous_schemes() {
+        for bad in [
+            "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "file:///etc/passwd",
+            "vbscript:msgbox(1)",
+            "blob:https://example.com/uuid",
+        ] {
+            assert!(normalize_quick_site_url(bad).is_err(), "应拒绝: {}", bad);
+        }
+        // 大小写变体也拒绝
+        assert!(normalize_quick_site_url("JaVaScRiPt:alert(1)").is_err());
+    }
+
+    #[test]
+    fn normalize_rejects_empty() {
+        assert!(normalize_quick_site_url("").is_err());
+        assert!(normalize_quick_site_url("   ").is_err());
+    }
+
+    #[test]
+    fn is_safe_web_url_filters_schemes() {
+        assert!(is_safe_web_url("https://example.com"));
+        assert!(is_safe_web_url("http://example.com"));
+        assert!(!is_safe_web_url("javascript:alert(1)"));
+        assert!(!is_safe_web_url("file:///etc/passwd"));
+        assert!(!is_safe_web_url("data:text/html,x"));
+        assert!(!is_safe_web_url("example.com")); // 无 scheme 不算安全（渲染前必须规范化）
+    }
 }

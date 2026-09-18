@@ -15,8 +15,10 @@
 -- 允许 NULL username 的重复，但显式同名必须唯一）。
 
 -- 1. 清理重复：保留每组最早一条
+-- 注意：WHERE username IS NOT NULL 必须加——SQLite 的 GROUP BY 把 NULL 归为一组，
+-- 若不加，同一域名下所有 NULL username 的密码（注释明确允许的重复）会被误删。
 DELETE FROM passwords WHERE id NOT IN (
-  SELECT MIN(id) FROM passwords GROUP BY domain, username
+  SELECT MIN(id) FROM passwords WHERE username IS NOT NULL GROUP BY domain, username
 );
 
 -- 2. 唯一索引
