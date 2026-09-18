@@ -23,11 +23,7 @@ struct FeedSource {
 fn load_sources() -> Vec<(String, String, String)> {
     let cats: Vec<FeedCategory> = serde_json::from_str(FEEDS_JSON).unwrap_or_default();
     cats.into_iter()
-        .flat_map(|c| {
-            c.feeds
-                .into_iter()
-                .map(move |f| (f.t, f.u, c.c.clone()))
-        })
+        .flat_map(|c| c.feeds.into_iter().map(move |f| (f.t, f.u, c.c.clone())))
         .collect()
 }
 
@@ -140,17 +136,26 @@ fn parse_entry(block: &str) -> Option<(String, String, String)> {
 /// 解析 RSS/Atom 全文 → [(title, link, published)]
 pub fn parse_feed(xml: &str) -> Vec<(String, String, String)> {
     let mut items = Vec::new();
-    for tag in ["<item>", "<item ", "<entry>", "<entry "] {
+    // P3：硬上限 200 条——调用方只取 50 条入库，恶意/损坏 feed 塞上千条目
+    // 只会白烧 CPU 解析，提前截断
+    'outer: for tag in ["<item>", "<item ", "<entry>", "<entry "] {
         let mut search_from = 0;
         while let Some(rel) = xml[search_from..].find(tag) {
             let start = search_from + rel;
-            let close_tag = if tag.starts_with("<item") { "</item>" } else { "</entry>" };
+            let close_tag = if tag.starts_with("<item") {
+                "</item>"
+            } else {
+                "</entry>"
+            };
             let Some(rel_end) = xml[start..].find(close_tag) else {
                 break;
             };
             let block = &xml[start..rel_end + start];
             if let Some(t) = parse_entry(block) {
                 items.push(t);
+                if items.len() >= 200 {
+                    break 'outer;
+                }
             }
             search_from = start + close_tag.len();
         }
@@ -194,7 +199,13 @@ fn decode_feed_bytes(bytes: &[u8], charset: Option<&str>) -> String {
 }
 
 /// 抓单个源并入库；返回条目数
-async fn fetch_one(client: &reqwest::Client, db: &Db, source: &str, url: &str, category: &str) -> usize {
+async fn fetch_one(
+    client: &reqwest::Client,
+    db: &Db,
+    source: &str,
+    url: &str,
+    category: &str,
+) -> usize {
     let resp = match client.get(url).send().await {
         Ok(r) => r,
         Err(e) => {
@@ -214,17 +225,28 @@ async fn fetch_one(client: &reqwest::Client, db: &Db, source: &str, url: &str, c
                     .map(|c| c.trim().trim_matches('"').to_string())
             })
         });
-    let bytes = match resp.bytes().await {
-        Ok(b) => b,
-        Err(e) => {
-            log::error!("[feed] {} 读取失败: {}", source, e);
-            return 0;
+    // P2：流式读取 + 边读边计数——响应体上限 4MB。
+    // 不能用 resp.bytes() 先读全再检查：恶意/被攻破的 feed 服务器配合 15s 超时
+    // 窗口可高速灌入数百 MB~GB 数据（内存炸弹），事后检查挡不住下载过程的内存峰值。
+    // 边读边计数，超限立即中止读取并断开。
+    use futures_util::StreamExt;
+    let max_bytes = 4 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(c) => {
+                bytes.extend_from_slice(&c);
+                if bytes.len() > max_bytes {
+                    log::warn!("[feed] {} 响应体超过 4MB，中止读取", source);
+                    return 0;
+                }
+            }
+            Err(e) => {
+                log::error!("[feed] {} 读取失败: {}", source, e);
+                return 0;
+            }
         }
-    };
-    // 安全：响应体上限 4MB——个别聚合源可达数 MB，62 源并发时无上限会让内存峰值失控
-    if bytes.len() > 4 * 1024 * 1024 {
-        log::warn!("[feed] {} 响应体过大（{} 字节），跳过", source, bytes.len());
-        return 0;
     }
     let xml = decode_feed_bytes(&bytes, charset.as_deref());
     let items = parse_feed(&xml);
@@ -269,7 +291,10 @@ pub async fn refresh_all(db: &Db) -> usize {
     let sources = load_sources();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
-        .user_agent(format!("ShiftBrowser/{} (RSS reader)", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!(
+            "ShiftBrowser/{} (RSS reader)",
+            env!("CARGO_PKG_VERSION")
+        ))
         .build()
         .unwrap_or_default();
     let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(16));
@@ -284,7 +309,11 @@ pub async fn refresh_all(db: &Db) -> usize {
                 return 0;
             };
             // fetch_one 只使用 pool，key_path 用临时空值（密码相关操作不会走到这里）
-            let db_owned = Db { pool, key_path: std::path::PathBuf::new() };
+            let db_owned = Db {
+                pool,
+                key_path: std::path::PathBuf::new(),
+                master_key: tokio::sync::Mutex::new(None),
+            };
             let n = fetch_one(&client, &db_owned, &name, &url, &category).await;
             if n == 0 {
                 // 失败重试一次：anyfeeder 偶发限流/网络抖动会让单个源整轮丢失，
@@ -422,6 +451,21 @@ mod tests {
         let items = parse_feed(xml);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].0, "正常");
+    }
+
+    #[test]
+    fn parse_feed_caps_at_200_items() {
+        // P3：恶意/损坏 feed 塞上千条目时提前截断，防白烧 CPU
+        let mut xml = String::from("<rss version=\"2.0\"><channel>");
+        for i in 0..250 {
+            xml.push_str(&format!(
+                "<item><title>条目{}</title><link>https://example.com/{}</link></item>",
+                i, i
+            ));
+        }
+        xml.push_str("</channel></rss>");
+        let items = parse_feed(&xml);
+        assert_eq!(items.len(), 200);
     }
 
     #[test]

@@ -96,7 +96,9 @@ fn read_extension_dir(path: &str) -> Result<ExtensionDirResult, String> {
         for js in &cs.js {
             let p = base.join(js);
             // 拒绝含 ".." 组件的路径
-            if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            if p.components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
                 return Err(format!("脚本路径含 ..（拒绝）: {}", js));
             }
             // 词法越界
@@ -109,13 +111,15 @@ fn read_extension_dir(path: &str) -> Result<ExtensionDirResult, String> {
                     return Err(format!("脚本路径经符号链接越界（拒绝）: {}", js));
                 }
             }
-            let content = std::fs::read_to_string(&p)
-                .map_err(|e| format!("读取脚本 {} 失败: {}", js, e))?;
+            let content =
+                std::fs::read_to_string(&p).map_err(|e| format!("读取脚本 {} 失败: {}", js, e))?;
             js_sources.push(content);
         }
         for css in &cs.css {
             let p = base.join(css);
-            if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            if p.components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
                 return Err(format!("样式路径含 ..（拒绝）: {}", css));
             }
             if !p.starts_with(base) {
@@ -127,8 +131,8 @@ fn read_extension_dir(path: &str) -> Result<ExtensionDirResult, String> {
                     return Err(format!("样式路径经符号链接越界（拒绝）: {}", css));
                 }
             }
-            let content = std::fs::read_to_string(&p)
-                .map_err(|e| format!("读取样式 {} 失败: {}", css, e))?;
+            let content =
+                std::fs::read_to_string(&p).map_err(|e| format!("读取样式 {} 失败: {}", css, e))?;
             css_sources.push(content);
         }
     }
@@ -474,7 +478,10 @@ pub async fn set_adblock_keywords(
         .filter(|s| !s.is_empty())
         .collect();
     let json = serde_json::to_string(&cleaned).map_err(|e| e.to_string())?;
-    log::info!("[extensions] set_adblock_keywords: {} 个自定义词", cleaned.len());
+    log::info!(
+        "[extensions] set_adblock_keywords: {} 个自定义词",
+        cleaned.len()
+    );
     sqlx::query(
         "INSERT INTO settings (key, value) VALUES ('adblock_keywords', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -497,7 +504,9 @@ pub async fn load_extension(
 ) -> Result<ExtensionInfo, String> {
     log::info!("[extensions] load_extension: path={}", path);
     let (name, version, description, js, css, js_count, css_count) = read_extension_dir(&path)?;
-    let id = ext_db::create(&db, &name, &path).await.map_err(|e| e.to_string())?;
+    let id = ext_db::create(&db, &name, &path)
+        .await
+        .map_err(|e| e.to_string())?;
     log::info!(
         "[extensions] 已加载扩展: id={} name={} js={} css={}",
         id,
@@ -528,14 +537,13 @@ pub async fn list_extensions(db: State<'_, Db>) -> Result<Vec<ExtensionInfo>, St
     log::info!("[extensions] list_extensions: {} 条", exts.len());
     let mut infos = Vec::new();
     for ext in exts {
-        let (version, description, js_count, css_count) =
-            match read_extension_dir(&ext.path) {
-                Ok((_, v, d, _, _, jc, cc)) => (v, d, jc, cc),
-                Err(e) => {
-                    log::warn!("[extensions] 读取扩展 {} 失败: {}", ext.name, e);
-                    (None, None, 0, 0)
-                }
-            };
+        let (version, description, js_count, css_count) = match read_extension_dir(&ext.path) {
+            Ok((_, v, d, _, _, jc, cc)) => (v, d, jc, cc),
+            Err(e) => {
+                log::warn!("[extensions] 读取扩展 {} 失败: {}", ext.name, e);
+                (None, None, 0, 0)
+            }
+        };
         infos.push(ExtensionInfo {
             id: ext.id,
             name: ext.name,
@@ -559,8 +567,14 @@ pub async fn set_extension_enabled(
     id: i64,
     enabled: bool,
 ) -> Result<(), String> {
-    log::info!("[extensions] set_extension_enabled: id={} enabled={}", id, enabled);
-    ext_db::set_enabled(&db, id, enabled).await.map_err(|e| e.to_string())?;
+    log::info!(
+        "[extensions] set_extension_enabled: id={} enabled={}",
+        id,
+        enabled
+    );
+    ext_db::set_enabled(&db, id, enabled)
+        .await
+        .map_err(|e| e.to_string())?;
     let items = collect_enabled_items(&db).await?;
     inject_extensions(&app, items);
     Ok(())
@@ -568,11 +582,7 @@ pub async fn set_extension_enabled(
 
 /// 删除扩展（重新注入）
 #[tauri::command]
-pub async fn delete_extension(
-    db: State<'_, Db>,
-    app: AppHandle,
-    id: i64,
-) -> Result<(), String> {
+pub async fn delete_extension(db: State<'_, Db>, app: AppHandle, id: i64) -> Result<(), String> {
     log::info!("[extensions] delete_extension: id={}", id);
     ext_db::delete(&db, id).await.map_err(|e| e.to_string())?;
     let items = collect_enabled_items(&db).await?;

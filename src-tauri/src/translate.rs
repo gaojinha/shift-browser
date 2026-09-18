@@ -20,78 +20,89 @@ const CHROME_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
 static CLIENT: OnceLock<Client> = OnceLock::new();
 
 fn client() -> &'static Client {
-  CLIENT.get_or_init(|| {
-    Client::builder()
-      .user_agent(CHROME_UA)
-      .timeout(std::time::Duration::from_secs(15))
-      .build()
-      .expect("reqwest client 初始化失败")
-  })
+    CLIENT.get_or_init(|| {
+        Client::builder()
+            .user_agent(CHROME_UA)
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .expect("reqwest client 初始化失败")
+    })
 }
 
 /// Google 翻译（Chrome dict-chrome-ex 公共端点，无需 API key）
 ///
 /// `target` 默认 zh-CN；源语言自动检测（sl=auto）
 pub async fn translate_google(text: &str, target: &str) -> Result<String, String> {
-  if text.trim().is_empty() {
-    return Ok(String::new());
-  }
-  let url = "https://translate.googleapis.com/translate_a/single";
-  let resp = client()
-    .get(url)
-    .query(&[
-      ("client", "dict-chrome-ex"),
-      ("sl", "auto"),
-      ("tl", target),
-      ("dt", "t"),
-      ("q", text),
-    ])
-    .send()
-    .await
-    .map_err(|e| format!("翻译请求失败: {}", e))?;
+    if text.trim().is_empty() {
+        return Ok(String::new());
+    }
+    let url = "https://translate.googleapis.com/translate_a/single";
+    let resp = client()
+        .get(url)
+        .query(&[
+            ("client", "dict-chrome-ex"),
+            ("sl", "auto"),
+            ("tl", target),
+            ("dt", "t"),
+            ("q", text),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("翻译请求失败: {}", e))?;
 
-  let status = resp.status();
-  let body: serde_json::Value = resp
-    .json()
-    .await
-    .map_err(|e| format!("翻译响应解析失败: {}", e))?;
-  if !status.is_success() {
-    return Err(format!("翻译服务返回 HTTP {}", status));
-  }
+    let status = resp.status();
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("翻译响应解析失败: {}", e))?;
+    if !status.is_success() {
+        return Err(format!("翻译服务返回 HTTP {}", status));
+    }
 
-  // 返回格式：[[["译文","原文",null,null,1],...],null,null,null,...]
-  let segs = body
-    .get(0)
-    .and_then(|v| v.as_array())
-    .ok_or_else(|| "翻译响应格式异常".to_string())?;
-  let result: String = segs
-    .iter()
-    .filter_map(|seg| seg.get(0).and_then(|s| s.as_str()))
-    .collect::<Vec<_>>()
-    .join("");
-  Ok(if result.is_empty() {
-    "（无翻译结果）".to_string()
-  } else {
-    result
-  })
+    // 返回格式：[[["译文","原文",null,null,1],...],null,null,null,...]
+    let segs = body
+        .get(0)
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "翻译响应格式异常".to_string())?;
+    let result: String = segs
+        .iter()
+        .filter_map(|seg| seg.get(0).and_then(|s| s.as_str()))
+        .collect::<Vec<_>>()
+        .join("");
+    Ok(if result.is_empty() {
+        "（无翻译结果）".to_string()
+    } else {
+        result
+    })
 }
 
 /// 前端调用的统一翻译入口（与 SettingsDialog/AddressBar 的 invoke 约定一致）
 ///
 /// 返回 `{ ok: true, data: "译文" }` 或 `{ ok: false, msg: "错误信息" }`
 #[tauri::command]
-pub async fn translate_text(text: String, target: Option<String>) -> Result<TranslateResult, String> {
-  let target = target.unwrap_or_else(|| "zh-CN".to_string());
-  match translate_google(&text, &target).await {
-    Ok(data) => Ok(TranslateResult { ok: true, msg: None, data: Some(data) }),
-    Err(e) => Ok(TranslateResult { ok: false, msg: Some(e), data: None }),
-  }
+pub async fn translate_text(
+    text: String,
+    target: Option<String>,
+) -> Result<TranslateResult, String> {
+    let target = target.unwrap_or_else(|| "zh-CN".to_string());
+    match translate_google(&text, &target).await {
+        Ok(data) => Ok(TranslateResult {
+            ok: true,
+            msg: None,
+            data: Some(data),
+        }),
+        Err(e) => Ok(TranslateResult {
+            ok: false,
+            msg: Some(e),
+            data: None,
+        }),
+    }
 }
 
 /// 与前端 invoke 的返回类型对齐
 #[derive(Debug, Serialize)]
 pub struct TranslateResult {
-  pub ok: bool,
-  pub msg: Option<String>,
-  pub data: Option<String>,
+    pub ok: bool,
+    pub msg: Option<String>,
+    pub data: Option<String>,
 }

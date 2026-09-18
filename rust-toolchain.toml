@@ -1,0 +1,6 @@
+# 固定 Rust 工具链：本地与 CI 完全一致，避免 stable 漂移导致行为差异。
+# 版本 = 当前开发机 rustc 1.97.1（满足 src-tauri/Cargo.toml rust-version 1.77.2 的 MSRV 下限）
+[toolchain]
+channel = "1.97.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

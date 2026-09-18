@@ -32,13 +32,11 @@ pub async fn list(db: &Db) -> DbResult<Vec<Extension>> {
 
 /// 创建扩展记录
 pub async fn create(db: &Db, name: &str, path: &str) -> DbResult<i64> {
-    let result = sqlx::query(
-        "INSERT INTO extensions (name, path, enabled) VALUES (?, ?, 1)",
-    )
-    .bind(name)
-    .bind(path)
-    .execute(&db.pool)
-    .await?;
+    let result = sqlx::query("INSERT INTO extensions (name, path, enabled) VALUES (?, ?, 1)")
+        .bind(name)
+        .bind(path)
+        .execute(&db.pool)
+        .await?;
     Ok(result.last_insert_rowid())
 }
 

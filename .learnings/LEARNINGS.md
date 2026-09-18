@@ -489,3 +489,20 @@ Corrections, insights, and knowledge gaps captured during development.
 - 关键设计：把参数写进 `hash_algo` 字段（如 `pbkdf2-sha512-210000`），验证成功后自动用新参数重算并落库 → **日后想调次数不用锁死老用户**
 - 判断依据要落到实测/推算，别只凭"更安全"就往上加
 **结果**: 34 个测试全过，生产库 gaoge 的 hash_algo 已在锁屏解锁时自动升级为 `pbkdf2-sha512-210000`
+
+---
+
+## 2026-09-18 — P0-P2 三批安全修复心得（best_practice）
+
+**类别**: best_practice
+**场景**: ShiftBrowser 安全加固（P0 XSS/竞态 → P1 假成功链/SSRF → P2 核心模块/CI）
+**要点**:
+1. **reqwest 流式读取要开 `stream` feature**：`resp.bytes_stream()` 在 `features = ["json", "rustls-tls"]` 下不存在（E0599），必须加 `"stream"`；配合 `futures-util` 的 `StreamExt` 才能边读边计数防内存炸弹
+2. **url crate `host_str()` 对 IPv6 返回带方括号**：`parse::<IpAddr>("[::1]")` 会失败，必须先 `trim_start_matches('[')`/`trim_end_matches(']')`——SSRF 校验 IPv6 内网段必踩的坑
+3. **可测性模式**：Tauri 命令带 `State<'_, Db>` 不便单测，把核心逻辑抽成 `xxx_inner(pool, ...)` pool 级函数、命令薄包装（downloads.rs 先例），测试直接调 inner
+4. **测试模块 import 二选一**：要么 `use super::*` 后裸调函数名，要么全限定 `super::xxx`——混用会触发 `unused_imports`（clippy 警告）
+5. **CI 接线 fmt 的坑**：项目从没跑过 rustfmt，`cargo fmt --check` 一接就爆几百处 diff；正确顺序是先本地 `cargo fmt` 全量格式化（rustfmt 不改语义），再 CI 加 `--check`
+6. **rust-toolchain.toml 固定版本**：放仓库根，rustup 自动读取，本地/CI 完全一致（dtolnay/rust-toolchain action 会跟随）
+7. **特权页面（带 IPC 桥/invoke_key）的 URL scheme 白名单**：newtab 是特权页，`javascript:` 渲染成 `<a href>` 点击即任意命令执行——保存（save_quick_sites）和渲染（generate）两头都拦，防历史遗留恶意数据
+8. **翻译端点 callback 白名单**：callback 拼进 JS 变量名 eval 到 webview，必须严格 `[A-Za-z0-9_]{1,64}` 白名单（比转义更干净），入口+写入双保险
+9. **shift:// 自定义协议 handler 是远程页面可控入口**：on_new_window 必须拒绝非 http/https（防 window.open('file:///etc/passwd')），create_tab/navigate_tab 走白名单保留内部页面能力

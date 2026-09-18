@@ -30,15 +30,26 @@ pub async fn save_session(
     workspace_id: Option<i64>,
     tabs: Vec<SessionTab>,
 ) -> DbResult<i64> {
-    let data = serde_json::to_string(&tabs)?;
-    let result = sqlx::query(
-        "INSERT INTO sessions (name, workspace_id, data) VALUES (?, ?, ?)",
-    )
-    .bind(&name)
-    .bind(workspace_id)
-    .bind(&data)
-    .execute(&db.pool)
-    .await?;
+    save_session_inner(&db.pool, &name, workspace_id, &tabs).await
+}
+
+/// 保存会话核心逻辑（pool 级，便于测试）
+pub async fn save_session_inner(
+    pool: &sqlx::SqlitePool,
+    name: &str,
+    workspace_id: Option<i64>,
+    tabs: &[SessionTab],
+) -> DbResult<i64> {
+    let data = serde_json::to_string(tabs)?;
+    // P2：INSERT 与自动保存清理放同一事务——清理失败时整体回滚，
+    // 避免"插入已提交却上报失败"，前端重试产生重复会话
+    let mut tx = pool.begin().await?;
+    let result = sqlx::query("INSERT INTO sessions (name, workspace_id, data) VALUES (?, ?, ?)")
+        .bind(name)
+        .bind(workspace_id)
+        .bind(&data)
+        .execute(&mut *tx)
+        .await?;
     // 自动保存记录只保留最近 100 条，防止 sessions 表无限增长
     // （手动命名的会话不受影响）
     sqlx::query(
@@ -46,8 +57,9 @@ pub async fn save_session(
            SELECT id FROM sessions WHERE name = '自动保存' ORDER BY id DESC LIMIT 100
          )",
     )
-    .execute(&db.pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(result.last_insert_rowid())
 }
 
@@ -75,20 +87,20 @@ pub async fn load_last_session(
         .await?
     };
 
-    Ok(row.map(|(id, name, workspace_id, data, created_at)| Session {
-        id,
-        name,
-        workspace_id,
-        data,
-        created_at,
-    }))
+    Ok(
+        row.map(|(id, name, workspace_id, data, created_at)| Session {
+            id,
+            name,
+            workspace_id,
+            data,
+            created_at,
+        }),
+    )
 }
 
 /// 列出所有会话
 #[tauri::command]
-pub async fn list_sessions(
-    db: tauri::State<'_, Db>,
-) -> DbResult<Vec<Session>> {
+pub async fn list_sessions(db: tauri::State<'_, Db>) -> DbResult<Vec<Session>> {
     let rows = sqlx::query_as::<_, (i64, String, Option<i64>, String, String)>(
         "SELECT id, name, workspace_id, data, created_at FROM sessions ORDER BY id DESC LIMIT 50",
     )
@@ -110,9 +122,104 @@ pub async fn list_sessions(
 /// 删除会话
 #[tauri::command]
 pub async fn delete_session(db: tauri::State<'_, Db>, id: i64) -> DbResult<()> {
-    sqlx::query("DELETE FROM sessions WHERE id = ?")
+    delete_session_inner(&db.pool, id).await
+}
+
+/// 删除会话核心逻辑（pool 级，便于测试）
+pub async fn delete_session_inner(pool: &sqlx::SqlitePool, id: i64) -> DbResult<()> {
+    let res = sqlx::query("DELETE FROM sessions WHERE id = ?")
         .bind(id)
-        .execute(&db.pool)
+        .execute(pool)
         .await?;
+    // 假成功防护：id 不存在时如实上报，前端可提示"会话不存在"
+    if res.rows_affected() == 0 {
+        return Err(crate::db::DbError::Other(format!("会话 {} 不存在", id)));
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
+
+    /// 建临时数据库（含 sessions 表，模拟迁移 v2 后的结构）
+    async fn temp_pool() -> (tempfile::TempDir, SqlitePool) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let options = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE sessions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              workspace_id INTEGER,
+              data TEXT NOT NULL,
+              created_at TEXT DEFAULT (datetime('now'))
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        (dir, pool)
+    }
+
+    #[tokio::test]
+    async fn save_auto_save_keeps_latest_100() {
+        let (_dir, pool) = temp_pool().await;
+        // 写入 105 条自动保存，应只剩最近 100 条
+        for i in 0..105 {
+            save_session_inner(
+                &pool,
+                "自动保存",
+                None,
+                &[super::SessionTab {
+                    url: format!("https://e.com/{}", i),
+                    title: None,
+                    group_id: None,
+                }],
+            )
+            .await
+            .unwrap();
+        }
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 100);
+        // 保留的是最新的（id 大的一侧）
+        let min_id: (i64,) = sqlx::query_as("SELECT MIN(id) FROM sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(min_id.0, 6); // 105 - 100 + 1
+    }
+
+    #[tokio::test]
+    async fn delete_missing_session_reports_error() {
+        let (_dir, pool) = temp_pool().await;
+        // 假成功防护：删不存在的会话必须报错
+        let err = delete_session_inner(&pool, 999).await.unwrap_err();
+        assert!(err.to_string().contains("不存在"));
+    }
+
+    #[tokio::test]
+    async fn delete_existing_session_ok() {
+        let (_dir, pool) = temp_pool().await;
+        let id = save_session_inner(&pool, "手动会话", None, &[])
+            .await
+            .unwrap();
+        delete_session_inner(&pool, id).await.unwrap();
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 0);
+    }
 }

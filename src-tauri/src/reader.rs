@@ -8,10 +8,17 @@ const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// 抓取并解析正文（带超时 + 净化）
 async fn scrape_article(url: &str) -> Result<readability::extractor::Product, String> {
+    // P2：只允许 http/https——fetch_article/enter_reader_mode 共用入口，
+    // 显式拒绝 file:/javascript: 等 scheme（readability 内部 reqwest 不认其他
+    // scheme，但入口拦截更清晰，防下游意外处理）
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("只支持普通网页".to_string());
+    }
     let url = url.to_string();
-    tokio::time::timeout(FETCH_TIMEOUT, tokio::task::spawn_blocking(move || {
-        readability::extractor::scrape(&url)
-    }))
+    tokio::time::timeout(
+        FETCH_TIMEOUT,
+        tokio::task::spawn_blocking(move || readability::extractor::scrape(&url)),
+    )
     .await
     .map_err(|_| "抓取正文超时（20 秒），可能是慢站或网络问题".to_string())?
     .map_err(|e| e.to_string())?
@@ -27,18 +34,66 @@ fn sanitize_html(html: &str) -> String {
     builder
         .tags(HashSet::from([
             // 块级
-            "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li",
-            "blockquote", "pre", "hr", "br", "table", "thead", "tbody", "tr", "td", "th",
-            "figure", "figcaption", "section", "article", "header", "footer", "main", "aside",
+            "p",
+            "div",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "ul",
+            "ol",
+            "li",
+            "blockquote",
+            "pre",
+            "hr",
+            "br",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "td",
+            "th",
+            "figure",
+            "figcaption",
+            "section",
+            "article",
+            "header",
+            "footer",
+            "main",
+            "aside",
             // 行内
-            "span", "a", "img", "strong", "em", "b", "i", "u", "s", "small", "code",
-            "sub", "sup", "mark", "abbr", "cite", "q", "time",
+            "span",
+            "a",
+            "img",
+            "strong",
+            "em",
+            "b",
+            "i",
+            "u",
+            "s",
+            "small",
+            "code",
+            "sub",
+            "sup",
+            "mark",
+            "abbr",
+            "cite",
+            "q",
+            "time",
             // 媒体（src 仅 http/https，data: 一律不放行）
-            "video", "audio", "source", "picture",
+            "video",
+            "audio",
+            "source",
+            "picture",
         ]))
         .tag_attributes(HashMap::from([
             ("a", HashSet::from(["href", "title"])),
-            ("img", HashSet::from(["src", "alt", "title", "width", "height"])),
+            (
+                "img",
+                HashSet::from(["src", "alt", "title", "width", "height"]),
+            ),
             ("td", HashSet::from(["colspan", "rowspan"])),
             ("th", HashSet::from(["colspan", "rowspan"])),
             ("video", HashSet::from(["src", "controls", "poster"])),
@@ -235,7 +290,9 @@ mod tests {
         let s = sanitize_html(r#"<a href="https://ok.com/x">链接</a>"#);
         assert!(s.contains("https://ok.com/x"));
         // iframe/object/embed 删除
-        let s = sanitize_html(r#"<p>a</p><iframe src="https://evil.com"></iframe><object data="x"></object><embed src="y">"#);
+        let s = sanitize_html(
+            r#"<p>a</p><iframe src="https://evil.com"></iframe><object data="x"></object><embed src="y">"#,
+        );
         assert!(!s.contains("iframe"));
         assert!(!s.contains("object"));
         assert!(!s.contains("embed"));
@@ -246,7 +303,9 @@ mod tests {
 
     #[test]
     fn sanitize_keeps_normal_content() {
-        let s = sanitize_html(r#"<h1>标题</h1><p>正文 <strong>粗体</strong> <a href="https://x.com">链接</a></p><ul><li>项</li></ul>"#);
+        let s = sanitize_html(
+            r#"<h1>标题</h1><p>正文 <strong>粗体</strong> <a href="https://x.com">链接</a></p><ul><li>项</li></ul>"#,
+        );
         assert!(s.contains("标题"));
         assert!(s.contains("粗体"));
         assert!(s.contains("链接"));
