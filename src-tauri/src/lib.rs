@@ -201,6 +201,7 @@ pub fn run() {
       bookmarks::export_bookmarks_html,
       // 历史
       history::record_history,
+      history::backfill_history_titles,
       history::get_recent_history,
       history::search_history,
       history::get_most_visited,
@@ -625,6 +626,10 @@ pub fn run() {
         let html = html.replace("__INVOKE_KEY_PLACEHOLDER__", app.invoke_key());
         tauri::http::Response::builder()
           .header(tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
+          // 2026-09-19：WebKit 对自定义协议默认缓存（刷新走缓存不重新请求），
+          // 导致改启动页后高哥刷新看不到变化——强制 no-store，每次加载都读最新文件
+          .header(tauri::http::header::CACHE_CONTROL, "no-store, no-cache, must-revalidate")
+          .header(tauri::http::header::PRAGMA, "no-cache")
           .header(tauri::http::header::CONTENT_SECURITY_POLICY, SHIFT_CSP)
           .body(html.into_bytes())
           .unwrap()
@@ -677,6 +682,43 @@ pub fn run() {
       // 主窗口 Vue 的 onMounted 命令调用全部失败，必须等 setup 完成后重试）
       let mut unlocked_after_lock = false;
 
+      // 2026-09-19：GNOME 49 对无装饰窗口强制四角圆角，但 Tauri/wry 只把 WebView
+      // 背景设为透明，GTK 窗口本身没设透明——圆角外露出黑色窗口背景（四个黑角）。
+      // 手动设置 RGBA visual + app_paintable，让窗口真正透明，圆角外透出桌面。
+      #[cfg(target_os = "linux")]
+      {
+        use gtk::prelude::*;
+        if let Some(win) = app.get_window("main") {
+          if let Ok(gtk_win) = win.gtk_window() {
+            if let Some(screen) = gtk::prelude::WidgetExt::screen(&gtk_win) {
+              if let Some(visual) = screen.rgba_visual() {
+                gtk_win.set_visual(Some(&visual));
+              }
+              // Wayland 下 set_visual 无效（X11 概念），GTK 默认还会画主题背景色——
+              // 用 CSS 强制窗口背景透明，圆角外才能透出桌面
+              let css = gtk::CssProvider::new();
+              css.load_from_data(b"window { background-color: transparent; }")
+                .map_err(|e| format!("CSS 加载失败: {}", e))?;
+              gtk::StyleContext::add_provider_for_screen(
+                &screen,
+                &css,
+                gtk::STYLE_PROVIDER_PRIORITY_USER,
+              );
+              log::info!(
+                "[ShiftBrowser] 窗口透明设置：rgba_visual={}",
+                screen.rgba_visual().is_some()
+              );
+            }
+            gtk_win.set_app_paintable(true);
+            gtk_win.queue_draw();
+            log::info!(
+              "[ShiftBrowser] 窗口透明已启用（app_paintable={}）",
+              gtk_win.is_app_paintable()
+            );
+          }
+        }
+      }
+
       // 初始化数据库（异步）
       let app_data_dir = app
         .path()
@@ -704,6 +746,14 @@ pub fn run() {
       {
         let app_handle = app.handle().clone();
         tauri::async_runtime::spawn(async move {
+          let db_state = app_handle.state::<Db>();
+          // 历史空标题回填（2026-09-19）：页面加载时 document.title 未就绪导致
+          // 历史里存了空标题，最近访问只剩网址——用 URL 域名兜底
+          if let Ok(fixed) = history::backfill_history_titles(db_state).await {
+            if fixed > 0 {
+              log::info!("[ShiftBrowser] 历史空标题回填完成: {} 条", fixed);
+            }
+          }
           let db_state = app_handle.state::<Db>();
           if let Some(path) = newtab::newtab_path(&app_handle) {
             match newtab::generate(&db_state, &path).await {

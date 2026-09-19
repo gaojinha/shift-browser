@@ -376,32 +376,32 @@ fn render_html(
   :root {{ --accent:#4a9eff; }}
   * {{ margin:0; padding:0; box-sizing:border-box; }}
   html,body {{ height:100%; }}
-  body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%); color:#e0e0e0; min-height:100vh; overflow-x:hidden; overflow-y:auto; border-radius:12px; }}
+  body {{ font-family:'PingFang SC','Microsoft YaHei',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:linear-gradient(135deg,#0f172a 0%,#1e1b4b 45%,#172554 100%); color:#e2e8f0; min-height:100vh; overflow-x:hidden; overflow-y:auto; }}
   /* 性能优化（2026-09-18）：Ken Burns 壁纸动画提升为 GPU 合成层。
      原实现缺 will-change/translateZ(0)，WebKit 每帧在 CPU 上重绘 110% 视口尺寸的
      高清壁纸位图，实测 1 个标签空闲时 WebKitWebProcess 持续 17-18% CPU。
      提升为合成层后缩放由 GPU 完成，CPU 占用大幅下降。 */
   .bg-layer {{ position:fixed; top:-5%; left:-5%; width:110%; height:110%; z-index:-1; background-size:cover; background-position:center; animation:kenburns 45s ease-in-out infinite alternate; will-change:transform; transform:translateZ(0); backface-visibility:hidden; }}
-  .bg-layer::after {{ content:''; position:absolute; inset:0; background:linear-gradient(180deg, rgba(10,15,30,0.5) 0%, rgba(10,15,30,0.35) 40%, rgba(10,15,30,0.7) 100%); }}
+  .bg-layer::after {{ content:''; position:absolute; inset:0; background:linear-gradient(180deg, rgba(8,12,28,0.58) 0%, rgba(8,12,28,0.38) 35%, rgba(8,12,28,0.78) 100%); }}
   @keyframes kenburns {{ from {{ transform:scale(1) translate(0,0); }} to {{ transform:scale(1.08) translate(1%,1.5%); }} }}
-  .main-layout {{ display:flex; max-width:none; margin:0; align-items:stretch; min-height:100vh; padding-left:44px; }}
-  .icon-bar {{ position:fixed; top:0; bottom:0; left:0; width:44px; background:rgba(255,255,255,0.05); border-right:1px solid rgba(255,255,255,0.1); display:flex; flex-direction:column; align-items:center; padding:14px 0; gap:4px; overflow-y:auto; scrollbar-width:none; }}
-  .icon-btn {{ position:relative; width:40px; height:40px; display:flex; align-items:center; justify-content:center; font-size:19px; border:none; background:transparent; border-radius:8px; cursor:pointer; transition:all 0.15s; }}
-  .icon-btn:hover {{ background:rgba(255,255,255,0.12); }}
-  .icon-btn.active {{ background:rgba(255,255,255,0.18); box-shadow:inset 0 0 0 2px rgba(255,255,255,0.35); }}
+  .main-layout {{ display:flex; max-width:none; margin:0; align-items:stretch; min-height:100vh; padding-left:56px; }}
+  /* 左右栏：玻璃拟态悬浮卡片（2026-09-19 UI 美化） */
+  .icon-bar {{ position:fixed; top:14px; bottom:14px; left:10px; width:46px; z-index:20; background:rgba(255,255,255,0.06); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border:1px solid rgba(255,255,255,0.12); border-radius:16px; display:flex; flex-direction:column; align-items:center; padding:12px 0; gap:6px; overflow-y:auto; scrollbar-width:none; box-shadow:0 8px 32px rgba(0,0,0,0.25); }}
+  .icon-btn {{ position:relative; width:36px; height:36px; display:flex; align-items:center; justify-content:center; font-size:17px; border:none; background:transparent; border-radius:10px; cursor:pointer; transition:all 0.18s; color:rgba(255,255,255,0.85); }}
+  .icon-btn:hover {{ background:rgba(255,255,255,0.14); transform:translateY(-1px); }}
+  .icon-btn.active {{ background:linear-gradient(135deg,var(--accent),#7c5cff); color:#fff; box-shadow:0 4px 14px rgba(74,158,255,0.4); }}
   .icon-btn.bottom {{ margin-top:auto; }}
-  .right-bar {{ width:44px; flex-shrink:0; background:rgba(255,255,255,0.05); border-left:1px solid rgba(255,255,255,0.1); display:flex; flex-direction:column; align-items:center; padding:14px 0; gap:4px; }}
-  .side-panel {{ width:260px; flex-shrink:0; background:rgba(255,255,255,0.05); border-right:1px solid rgba(255,255,255,0.1); display:none; flex-direction:column; max-height:100vh; position:sticky; top:0; overflow:hidden; }}
+  .side-panel {{ width:280px; flex-shrink:0; background:rgba(15,23,42,0.72); backdrop-filter:blur(24px); -webkit-backdrop-filter:blur(24px); border-right:1px solid rgba(255,255,255,0.1); display:none; flex-direction:column; max-height:100vh; position:sticky; top:0; overflow:hidden; }}
   .side-panel.open {{ display:flex; }}
-  .panel-head {{ display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,0.1); gap:8px; }}
-  .panel-head h2 {{ font-size:14px; color:#fff; white-space:nowrap; }}
+  .panel-head {{ display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid rgba(255,255,255,0.1); gap:8px; background:rgba(255,255,255,0.03); }}
+  .panel-head h2 {{ font-size:15px; color:#fff; white-space:nowrap; font-weight:700; letter-spacing:0.5px; }}
   .panel-actions {{ display:flex; gap:6px; align-items:center; flex-shrink:0; }}
-  .panel-body {{ flex:1; overflow-y:auto; padding:12px; }}
+  .panel-body {{ flex:1; overflow-y:auto; padding:14px; }}
   .panel-body::-webkit-scrollbar {{ width:6px; }}
   .panel-body::-webkit-scrollbar-thumb {{ background:rgba(255,255,255,0.2); border-radius:3px; }}
   .fs-close {{ background:none; border:none; color:rgba(255,255,255,0.5); font-size:18px; cursor:pointer; line-height:1; padding:2px 6px; border-radius:4px; }}
   .fs-close:hover {{ color:#f44; background:rgba(255,255,255,0.08); }}
-  .fs-item {{ display:block; padding:9px 10px; border-radius:8px; cursor:pointer; color:#ddd; font-size:13px; line-height:1.4; margin-bottom:4px; transition:background 0.15s; text-decoration:none; position:relative; }}
+  .fs-item {{ display:block; padding:10px 12px; border-radius:10px; cursor:pointer; color:#ddd; font-size:13px; line-height:1.4; margin-bottom:6px; transition:background 0.15s; text-decoration:none; position:relative; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06); }}
   .fs-item:hover {{ background:rgba(255,255,255,0.1); color:#fff; }}
   .fs-item .fs-title {{ display:block; }}
   .fs-item .fs-meta {{ display:block; font-size:11px; color:rgba(255,255,255,0.4); margin-top:2px; }}
@@ -428,11 +428,11 @@ fn render_html(
   .q-del:hover {{ color:#ff6b6b; }}
   .todo-panel {{ display:flex; flex-direction:column; gap:8px; margin-bottom:10px; }}
   .todo-add {{ display:flex; gap:6px; margin-bottom:8px; }}
-  .todo-add input {{ flex:1; padding:8px 12px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#fff; font-size:13px; outline:none; }}
+  .todo-add input {{ flex:1; padding:9px 12px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:10px; color:#fff; font-size:13px; outline:none; }}
   .todo-add input:focus {{ border-color:var(--accent); }}
-  .todo-add button {{ padding:8px 14px; background:var(--accent); border:none; border-radius:8px; color:#fff; font-size:13px; cursor:pointer; }}
+  .todo-add button {{ padding:9px 16px; background:linear-gradient(135deg,var(--accent),#7c5cff); border:none; border-radius:10px; color:#fff; font-size:13px; cursor:pointer; }}
   .todo-list {{ display:flex; flex-direction:column; gap:6px; }}
-  .todo-item {{ display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,255,255,0.05); border-radius:8px; font-size:13px; cursor:pointer; transition:background 0.15s; }}
+  .todo-item {{ display:flex; align-items:center; gap:8px; padding:10px 12px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.07); border-radius:10px; font-size:13px; cursor:pointer; transition:background 0.15s; }}
   .todo-item:hover {{ background:rgba(255,255,255,0.1); }}
   .todo-item input[type=checkbox] {{ accent-color:var(--accent); width:15px; height:15px; flex-shrink:0; }}
   .todo-item.done .todo-text {{ text-decoration:line-through; color:rgba(255,255,255,0.4); }}
@@ -440,7 +440,7 @@ fn render_html(
   .todo-del {{ border:none; background:transparent; color:rgba(255,255,255,0.4); cursor:pointer; font-size:13px; }}
   .todo-del:hover {{ color:#f44; }}
   .bookmark-list {{ display:flex; flex-wrap:wrap; gap:8px; }}
-  .bookmark-item {{ display:flex; align-items:center; gap:6px; padding:8px 14px; background:rgba(255,255,255,0.05); border-radius:8px; text-decoration:none; color:#e0e0e0; font-size:13px; transition:background 0.15s; max-width:220px; }}
+  .bookmark-item {{ display:flex; align-items:center; gap:6px; padding:9px 14px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.07); border-radius:10px; text-decoration:none; color:#e0e0e0; font-size:13px; transition:background 0.15s; max-width:220px; }}
   .bookmark-item:hover {{ background:rgba(255,255,255,0.1); }}
   .bookmark-name {{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
   .inline-read-loading {{ padding:20px; text-align:center; color:rgba(255,255,255,0.6); font-size:13px; }}
@@ -452,11 +452,11 @@ fn render_html(
   .ir-art img {{ max-width:100%; height:auto; }}
   .profile-info {{ text-align:center; padding:16px 10px; }}
   .profile-info .pi-avatar {{ font-size:44px; line-height:1.2; }}
-  .profile-info .pi-avatar-img {{ width:64px; height:64px; border-radius:50%; object-fit:cover; }}
+  .profile-info .pi-avatar-img {{ width:64px; height:64px; border-radius:50%; object-fit:cover; border:2px solid rgba(255,255,255,0.2); box-shadow:0 4px 16px rgba(0,0,0,0.3); }}
   .profile-info .pi-name {{ font-size:16px; font-weight:600; color:#fff; margin-top:8px; }}
   .profile-info .pi-user {{ font-size:12px; color:rgba(255,255,255,0.45); margin-top:2px; }}
   .profile-info .pi-sig {{ font-size:12px; color:rgba(255,255,255,0.6); margin-top:8px; padding:0 6px; }}
-  .panel-link-item {{ display:flex; align-items:center; gap:8px; padding:9px 10px; border-radius:8px; cursor:pointer; color:#ddd; font-size:13px; margin-bottom:4px; transition:background 0.15s; text-decoration:none; }}
+  .panel-link-item {{ display:flex; align-items:center; gap:8px; padding:10px 12px; border-radius:10px; cursor:pointer; color:#ddd; font-size:13px; margin-bottom:6px; transition:background 0.15s; text-decoration:none; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06); }}
   .panel-link-item:hover {{ background:rgba(255,255,255,0.1); color:#fff; }}
   .panel-link-item .pli-icon {{ font-size:16px; flex-shrink:0; }}
   .panel-link-item .pli-name {{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
@@ -465,18 +465,18 @@ fn render_html(
   .uc-wrap {{ padding:4px 2px; }}
   .uc-tabs {{ display:flex; gap:6px; margin-bottom:14px; background:rgba(255,255,255,0.06); border-radius:10px; padding:4px; }}
   .uc-tab {{ flex:1; padding:8px 0; border:none; background:transparent; color:rgba(255,255,255,0.6); font-size:13px; border-radius:8px; cursor:pointer; transition:all 0.15s; }}
-  .uc-tab.active {{ background:var(--accent); color:#fff; }}
+  .uc-tab.active {{ background:linear-gradient(135deg,var(--accent),#7c5cff); color:#fff; }}
   .uc-form {{ display:flex; flex-direction:column; gap:10px; }}
-  .uc-form input {{ padding:9px 12px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#fff; font-size:13px; outline:none; }}
+  .uc-form input {{ padding:10px 12px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:10px; color:#fff; font-size:13px; outline:none; }}
   .uc-form input:focus {{ border-color:var(--accent); }}
-  .uc-btn {{ padding:9px 0; border:none; border-radius:8px; font-size:13px; cursor:pointer; transition:filter 0.15s; }}
-  .uc-btn.primary {{ background:var(--accent); color:#fff; }}
+  .uc-btn {{ padding:10px 0; border:none; border-radius:10px; font-size:13px; cursor:pointer; transition:filter 0.15s; }}
+  .uc-btn.primary {{ background:linear-gradient(135deg,var(--accent),#7c5cff); color:#fff; }}
   .uc-btn.ghost {{ background:rgba(255,255,255,0.1); color:#ddd; }}
   .uc-btn.danger {{ background:rgba(204,68,68,0.2); color:#f88; }}
   .uc-btn:hover {{ filter:brightness(1.12); }}
   .uc-section {{ margin-top:16px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.08); }}
   .uc-sec-title {{ font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:10px; letter-spacing:0.5px; }}
-  .uc-section input {{ width:100%; padding:8px 10px; margin-bottom:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#fff; font-size:13px; outline:none; box-sizing:border-box; }}
+  .uc-section input {{ width:100%; padding:9px 10px; margin-bottom:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:10px; color:#fff; font-size:13px; outline:none; box-sizing:border-box; }}
   .uc-section input:focus {{ border-color:var(--accent); }}
   .uc-check {{ display:flex; align-items:center; gap:8px; padding:7px 0; font-size:13px; color:#ddd; cursor:pointer; }}
   .uc-check input {{ width:auto; margin:0; accent-color:var(--accent); }}
@@ -484,94 +484,112 @@ fn render_html(
   .uc-row label {{ width:72px; flex-shrink:0; }}
   .uc-row input {{ flex:1; margin:0; }}
   .uc-row input[type=color] {{ width:46px; padding:2px; height:30px; flex:0 0 46px; }}
-  .uc-inline {{ display:none; flex-direction:column; gap:8px; margin-top:10px; padding:12px; background:rgba(255,255,255,0.05); border-radius:8px; }}
+  .uc-inline {{ display:none; flex-direction:column; gap:8px; margin-top:10px; padding:12px; background:rgba(255,255,255,0.05); border-radius:10px; }}
   .uc-inline.show {{ display:flex; }}
-  .uc-inline input {{ width:100%; padding:8px 10px; margin:0; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#fff; font-size:13px; outline:none; box-sizing:border-box; }}
+  .uc-inline input {{ width:100%; padding:9px 10px; margin:0; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:10px; color:#fff; font-size:13px; outline:none; box-sizing:border-box; }}
   .uc-inline input:focus {{ border-color:var(--accent); }}
   .uc-btns {{ display:flex; gap:8px; margin-top:10px; }}
   .uc-btns .uc-btn {{ flex:1; }}
-  .modal-mask {{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50; align-items:center; justify-content:center; }}
+  .modal-mask {{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50; align-items:center; justify-content:center; backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); }}
   .modal-mask.show {{ display:flex; }}
-  .modal-box {{ width:340px; background:#1e2a45; border:1px solid rgba(255,255,255,0.15); border-radius:12px; padding:18px; }}
+  .modal-box {{ width:340px; background:rgba(30,42,69,0.92); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border:1px solid rgba(255,255,255,0.15); border-radius:16px; padding:20px; box-shadow:0 20px 60px rgba(0,0,0,0.4); }}
   .modal-box h3 {{ font-size:15px; margin-bottom:12px; }}
-  .modal-box input {{ width:100%; padding:8px 10px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#fff; font-size:13px; margin-bottom:10px; outline:none; }}
+  .modal-box input {{ width:100%; padding:9px 10px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:10px; color:#fff; font-size:13px; margin-bottom:10px; outline:none; }}
   .modal-box input:focus {{ border-color:var(--accent); }}
   .modal-actions {{ display:flex; justify-content:flex-end; gap:8px; }}
-  .modal-btn {{ border:none; border-radius:8px; padding:7px 16px; cursor:pointer; font-size:13px; }}
+  .modal-btn {{ border:none; border-radius:10px; padding:8px 16px; cursor:pointer; font-size:13px; }}
   .modal-btn.cancel {{ background:rgba(255,255,255,0.1); color:#ddd; }}
-  .modal-btn.ok {{ background:var(--accent); color:#fff; }}
+  .modal-btn.ok {{ background:linear-gradient(135deg,var(--accent),#7c5cff); color:#fff; }}
   .empty {{ text-align:center; padding:20px; color:rgba(255,255,255,0.4); font-size:13px; }}
-  .toast {{ position:fixed; bottom:40px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.8); color:#fff; padding:10px 20px; border-radius:20px; font-size:13px; opacity:0; transition:opacity 0.3s; pointer-events:none; z-index:99; }}
+  .toast {{ position:fixed; bottom:40px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.85); color:#fff; padding:10px 20px; border-radius:20px; font-size:13px; opacity:0; transition:opacity 0.3s; pointer-events:none; z-index:99; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); box-shadow:0 8px 24px rgba(0,0,0,0.3); }}
   .toast.show {{ opacity:1; }}
-  .container {{ position:relative; flex:1; min-width:0; max-width:960px; margin:0 auto; padding:32px 40px 20px; zoom:{font_scale}; }}
-  .hero {{ text-align:center; margin-bottom:20px; }}
-  .hero h1 {{ font-size:34px; font-weight:700; color:#fff; margin-bottom:6px; }}
-  .hero p {{ font-size:14px; color:rgba(255,255,255,0.6); }}
-  .hero .lunar {{ color:rgba(255,255,255,0.45); font-size:13px; margin-top:2px; }}
-  .quote {{ margin-top:10px; font-size:13px; color:rgba(255,255,255,0.55); font-style:italic; max-width:640px; margin-left:auto; margin-right:auto; }}
-  .info-strip {{ display:flex; justify-content:center; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:24px; }}
-  .info-card {{ background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:14px 18px; width:270px; max-width:100%; height:190px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:8px; }}
-  .info-card .ic {{ font-size:24px; }}
-  .info-card .id {{ font-size:13px; color:rgba(255,255,255,0.5); }}
-  .info-card .iv {{ font-size:15px; font-weight:600; color:#fff; }}
-  .info-card .is {{ font-size:12px; color:rgba(255,255,255,0.45); margin-top:2px; line-height:1.5; }}
+  .container {{ position:relative; flex:1; min-width:0; max-width:1100px; margin:0 auto; padding:40px 48px 24px; zoom:{font_scale}; }}
+  .hero {{ text-align:center; margin-bottom:24px; }}
+  .hero h1 {{ font-size:40px; font-weight:800; background:linear-gradient(120deg,#ffffff 25%,#a5d8ff 60%,#c7b9ff 100%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:8px; letter-spacing:1px; }}
+  .hero p {{ font-size:14px; color:rgba(255,255,255,0.65); }}
+  .hero .lunar {{ color:rgba(255,255,255,0.5); font-size:13px; margin-top:4px; }}
+  .hero .quote {{ margin-top:12px; font-size:20px; color:rgba(255,255,255,0.65); font-style:italic; max-width:680px; margin-left:auto; margin-right:auto; letter-spacing:0.3px; line-height:1.7; }}
+  .info-strip {{ display:flex; justify-content:center; align-items:stretch; flex-wrap:wrap; gap:14px; margin-bottom:30px; }}
+  .info-card {{ background:rgba(255,255,255,0.07); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); border:1px solid rgba(255,255,255,0.14); border-radius:16px; padding:18px 20px; width:300px; max-width:100%; min-height:170px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:8px; box-shadow:0 8px 28px rgba(0,0,0,0.18); transition:transform 0.2s, box-shadow 0.2s; }}
+  .info-card:hover {{ transform:translateY(-3px); box-shadow:0 14px 36px rgba(0,0,0,0.28); }}
+  .info-card .ic {{ font-size:28px; }}
+  .info-card .id {{ font-size:12px; color:rgba(255,255,255,0.55); }}
+  .info-card .iv {{ font-size:17px; font-weight:700; color:#fff; }}
+  .info-card .is {{ font-size:12px; color:rgba(255,255,255,0.5); margin-top:2px; line-height:1.6; }}
   .clock-card {{ gap:10px; }}
   .clock-info {{ min-width:0; }}
-  .clock-time {{ font-size:20px; font-weight:700; color:#fff; font-family:monospace; letter-spacing:1px; }}
-  .clock-face {{ width:90px; height:90px; border-radius:50%; flex-shrink:0; background:radial-gradient(circle at 35% 30%, rgba(255,255,255,0.12), rgba(255,255,255,0.04) 45%, rgba(0,0,0,0.25)); border:1px solid rgba(255,255,255,0.18); box-shadow:0 0 16px rgba(74,158,255,0.15), inset 0 0 12px rgba(0,0,0,0.35); position:relative; }}
+  .clock-time {{ font-size:22px; font-weight:700; color:#fff; font-family:monospace; letter-spacing:1px; }}
+  .clock-face {{ width:80px; height:80px; border-radius:50%; flex-shrink:0; background:radial-gradient(circle at 35% 30%, rgba(255,255,255,0.14), rgba(255,255,255,0.05) 45%, rgba(0,0,0,0.25)); border:1px solid rgba(255,255,255,0.2); box-shadow:0 0 20px rgba(74,158,255,0.2), inset 0 0 14px rgba(0,0,0,0.35); position:relative; }}
   .clock-inner {{ position:absolute; inset:0; }}
   .clock-num {{ position:absolute; left:50%; top:50%; width:16px; height:16px; margin:-8px; text-align:center; line-height:16px; font-size:9px; font-weight:600; color:rgba(255,255,255,0.85); transform-origin:center; }}
   .clock-hand {{ position:absolute; left:50%; top:50%; transform-origin:50% 100%; border-radius:3px; }}
-  .hour-hand {{ width:3px; height:20px; margin:-20px 0 0 -1.5px; background:rgba(255,255,255,0.92); box-shadow:0 0 3px rgba(0,0,0,0.4); }}
-  .minute-hand {{ width:2px; height:27px; margin:-27px 0 0 -1px; background:rgba(255,255,255,0.85); box-shadow:0 0 3px rgba(0,0,0,0.4); }}
-  .second-hand {{ width:1.5px; height:31px; margin:-31px 0 0 -0.75px; background:var(--accent); box-shadow:0 0 6px rgba(74,158,255,0.9); }}
+  .hour-hand {{ width:3px; height:18px; margin:-18px 0 0 -1.5px; background:rgba(255,255,255,0.92); box-shadow:0 0 3px rgba(0,0,0,0.4); }}
+  .minute-hand {{ width:2px; height:24px; margin:-24px 0 0 -1px; background:rgba(255,255,255,0.85); box-shadow:0 0 3px rgba(0,0,0,0.4); }}
+  .second-hand {{ width:1.5px; height:28px; margin:-28px 0 0 -0.75px; background:var(--accent); box-shadow:0 0 6px rgba(74,158,255,0.9); }}
   .second-hand::after {{ content:''; position:absolute; bottom:-5px; left:50%; width:3px; height:5px; margin-left:-1.5px; background:var(--accent); border-radius:0 0 2px 2px; }}
   .clock-center {{ position:absolute; left:50%; top:50%; width:5px; height:5px; margin:-2.5px; background:#fff; border-radius:50%; box-shadow:0 0 4px rgba(74,158,255,0.8); }}
   .forecast {{ display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin-top:8px; }}
   .forecast .f-day {{ background:rgba(255,255,255,0.08); border-radius:8px; padding:6px 4px; text-align:center; font-size:11px; color:rgba(255,255,255,0.7); line-height:1.5; }}
   .forecast .f-day b {{ display:block; font-size:14px; color:#fff; }}
   .forecast .f-day span {{ display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
-  .search-box {{ position:relative; margin-bottom:32px; max-width:640px; margin-left:auto; margin-right:auto; }}
-  .search-box input {{ width:100%; padding:14px 24px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:28px; color:#fff; font-size:15px; outline:none; transition:all 0.2s; }}
-  .search-box input:focus {{ background:rgba(255,255,255,0.15); border-color:var(--accent); box-shadow:0 0 20px rgba(74,158,255,0.3); }}
+  .search-box {{ position:relative; margin-bottom:36px; max-width:680px; margin-left:auto; margin-right:auto; }}
+  .search-box input {{ width:100%; padding:16px 56px 16px 28px; background:rgba(255,255,255,0.1); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,0.18); border-radius:32px; color:#fff; font-size:16px; outline:none; transition:all 0.25s; box-shadow:0 6px 24px rgba(0,0,0,0.15); }}
+  .search-box input:focus {{ background:rgba(255,255,255,0.16); border-color:var(--accent); box-shadow:0 0 0 3px rgba(74,158,255,0.2), 0 8px 32px rgba(0,0,0,0.22); }}
   .search-box input::placeholder {{ color:rgba(255,255,255,0.5); }}
-  .search-engine-tag {{ position:absolute; right:16px; top:50%; transform:translateY(-50%); font-size:11px; color:rgba(255,255,255,0.4); pointer-events:none; }}
-  .suggest-box {{ position:absolute; top:calc(100% + 6px); left:0; right:0; background:#1e2a45; border:1px solid rgba(255,255,255,0.15); border-radius:12px; overflow:hidden; display:none; z-index:10; max-height:240px; overflow-y:auto; }}
+  .search-engine-tag {{ position:absolute; right:18px; top:50%; transform:translateY(-50%); font-size:11px; color:rgba(255,255,255,0.4); pointer-events:none; background:rgba(255,255,255,0.08); padding:3px 10px; border-radius:12px; }}
+  .suggest-box {{ position:absolute; top:calc(100% + 8px); left:0; right:0; background:rgba(30,42,69,0.95); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border:1px solid rgba(255,255,255,0.15); border-radius:14px; overflow:hidden; display:none; z-index:10; max-height:240px; overflow-y:auto; box-shadow:0 16px 48px rgba(0,0,0,0.35); }}
   .suggest-item {{ display:flex; align-items:center; gap:8px; padding:10px 16px; cursor:pointer; font-size:13px; color:#ccc; }}
   .suggest-item:hover {{ background:rgba(74,158,255,0.15); }}
   .suggest-item .s-icon {{ color:var(--accent); font-size:12px; }}
   .suggest-item .s-url {{ color:rgba(255,255,255,0.4); font-size:11px; margin-left:auto; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
-  .section {{ margin-bottom:28px; }}
-  .section-head {{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }}
-  .section-head h2 {{ font-size:14px; font-weight:600; color:rgba(255,255,255,0.65); letter-spacing:1px; }}
+  .section {{ margin-bottom:32px; }}
+  .section-head {{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }}
+  .section-head h2 {{ font-size:15px; font-weight:700; color:rgba(255,255,255,0.9); letter-spacing:0.5px; padding-left:12px; position:relative; }}
+  .section-head h2::before {{ content:''; position:absolute; left:0; top:50%; transform:translateY(-50%); width:4px; height:16px; border-radius:2px; background:linear-gradient(180deg,var(--accent),#7c5cff); }}
   .section-actions {{ display:flex; gap:8px; }}
-  .btn-mini {{ padding:4px 12px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15); border-radius:12px; color:#ccc; font-size:12px; cursor:pointer; transition:all 0.15s; }}
+  .btn-mini {{ padding:5px 14px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15); border-radius:14px; color:#ccc; font-size:12px; cursor:pointer; transition:all 0.15s; }}
   .btn-mini:hover {{ background:rgba(255,255,255,0.18); color:#fff; }}
-  .btn-mini.primary {{ background:var(--accent); border-color:var(--accent); color:#fff; }}
-  .btn-mini.primary:hover {{ background:#5aaeff; }}
-  .top-sites {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:12px; }}
-  .top-site {{ position:relative; display:flex; flex-direction:column; align-items:center; padding:14px 8px; background:rgba(255,255,255,0.05); border-radius:12px; transition:all 0.2s; }}
-  .top-site:hover {{ background:rgba(255,255,255,0.1); transform:translateY(-2px); }}
+  .btn-mini.primary {{ background:linear-gradient(135deg,var(--accent),#7c5cff); border-color:transparent; color:#fff; }}
+  .btn-mini.primary:hover {{ filter:brightness(1.12); }}
+  .top-sites {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:14px; }}
+  .top-site {{ position:relative; display:flex; flex-direction:column; align-items:center; padding:16px 8px 14px; background:rgba(255,255,255,0.06); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,0.1); border-radius:16px; transition:all 0.22s; }}
+  .top-site:hover {{ background:rgba(255,255,255,0.11); transform:translateY(-4px); box-shadow:0 10px 28px rgba(0,0,0,0.25); }}
   .top-site-link {{ display:flex; flex-direction:column; align-items:center; text-decoration:none; color:#e0e0e0; }}
-  .top-site .icon {{ font-size:26px; margin-bottom:6px; }}
-  .top-site .name {{ font-size:12px; text-align:center; }}
-  .qs-del {{ position:absolute; top:2px; right:2px; width:20px; height:20px; border-radius:50%; border:none; background:rgba(204,68,68,0.85); color:#fff; font-size:12px; line-height:1; cursor:pointer; display:none; }}
+  .top-site .icon {{ font-size:28px; margin-bottom:8px; width:52px; height:52px; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg, rgba(255,255,255,0.16), rgba(255,255,255,0.04)); border:1px solid rgba(255,255,255,0.12); border-radius:16px; transition:transform 0.22s; box-shadow:0 4px 12px rgba(0,0,0,0.15); }}
+  .top-site:hover .icon {{ transform:scale(1.08); }}
+  .top-site .name {{ font-size:12px; color:rgba(255,255,255,0.85); }}
+  .qs-del {{ position:absolute; top:4px; right:4px; width:20px; height:20px; border-radius:50%; border:none; background:rgba(204,68,68,0.85); color:#fff; font-size:12px; line-height:1; cursor:pointer; display:none; }}
   .top-site.editing .qs-del, #quickSites.editing .qs-del {{ display:block; }}
-  .qs-add {{ display:flex; flex-direction:column; align-items:center; justify-content:center; padding:14px 8px; background:rgba(255,255,255,0.03); border:1px dashed rgba(255,255,255,0.2); border-radius:12px; color:rgba(255,255,255,0.5); font-size:12px; cursor:pointer; transition:all 0.2s; min-height:74px; }}
-  .qs-add:hover {{ background:rgba(255,255,255,0.08); color:#fff; }}
+  .qs-add {{ display:flex; flex-direction:column; align-items:center; justify-content:center; padding:16px 8px; background:rgba(255,255,255,0.03); border:1px dashed rgba(255,255,255,0.25); border-radius:16px; color:rgba(255,255,255,0.5); font-size:12px; cursor:pointer; transition:all 0.2s; min-height:96px; }}
+  .qs-add:hover {{ background:rgba(255,255,255,0.08); color:#fff; border-color:var(--accent); }}
   .qs-add .plus {{ font-size:24px; margin-bottom:4px; }}
-  .qs-form {{ display:none; margin-top:12px; padding:14px; background:rgba(255,255,255,0.06); border-radius:10px; gap:8px; }}
+  .qs-form {{ display:none; margin-top:12px; padding:14px; background:rgba(255,255,255,0.06); border-radius:12px; gap:8px; }}
   .qs-form.show {{ display:flex; flex-wrap:wrap; }}
-  .qs-form input {{ flex:1; min-width:140px; padding:8px 12px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:#fff; font-size:13px; outline:none; }}
+  .qs-form input {{ flex:1; min-width:140px; padding:9px 12px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:10px; color:#fff; font-size:13px; outline:none; }}
   .qs-form input:focus {{ border-color:var(--accent); }}
-  .feed-list {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:8px; }}
-  .feed-item {{ display:flex; flex-direction:column; padding:12px 16px; background:rgba(255,255,255,0.05); border-radius:8px; cursor:pointer; transition:background 0.15s; text-decoration:none; color:#e0e0e0; }}
-  .feed-item:hover {{ background:rgba(255,255,255,0.1); }}
+  .feed-list {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:10px; }}
+  /* 资讯分栏阅读（2026-09-19）：左列表 + 右内容，点一条看一条，不跳标签 */
+  .feed-split-head {{ display:flex; align-items:center; gap:10px; margin-bottom:14px; }}
+  .feed-split-head .feed-split-title-text {{ font-size:15px; font-weight:700; color:rgba(255,255,255,0.9); }}
+  .feed-split {{ display:flex; gap:14px; align-items:flex-start; }}
+  .feed-split-list {{ width:300px; flex-shrink:0; max-height:72vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:4px; }}
+  .feed-split-list::-webkit-scrollbar {{ width:6px; }}
+  .feed-split-list::-webkit-scrollbar-thumb {{ background:rgba(255,255,255,0.2); border-radius:3px; }}
+  .fs-split-item {{ padding:10px 12px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); border-radius:10px; cursor:pointer; transition:all 0.15s; }}
+  .fs-split-item:hover {{ background:rgba(255,255,255,0.1); }}
+  .fs-split-item.active {{ background:rgba(74,158,255,0.18); border-color:var(--accent); }}
+  .fs-split-title {{ display:block; font-size:13px; line-height:1.4; color:#e0e0e0; }}
+  .fs-split-meta {{ display:block; font-size:11px; color:rgba(255,255,255,0.45); margin-top:2px; }}
+  .feed-split-read {{ flex:1; min-width:0; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:20px 24px; max-height:72vh; overflow-y:auto; }}
+  .feed-split-read::-webkit-scrollbar {{ width:6px; }}
+  .feed-split-read::-webkit-scrollbar-thumb {{ background:rgba(255,255,255,0.2); border-radius:3px; }}
+  .feed-item {{ display:flex; flex-direction:column; padding:14px 16px; background:rgba(255,255,255,0.05); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); border:1px solid rgba(255,255,255,0.08); border-radius:12px; cursor:pointer; transition:all 0.2s; text-decoration:none; color:#e0e0e0; }}
+  .feed-item:hover {{ background:rgba(255,255,255,0.1); transform:translateY(-2px); box-shadow:0 8px 20px rgba(0,0,0,0.2); }}
   .feed-title {{ font-size:13px; font-weight:500; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; margin-bottom:4px; }}
   .feed-meta {{ font-size:11px; color:rgba(255,255,255,0.5); }}
-  .recent-list {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:8px; }}
-  .recent-item {{ display:flex; flex-direction:column; padding:12px 16px; background:rgba(255,255,255,0.05); border-radius:8px; cursor:pointer; transition:background 0.15s; text-decoration:none; color:#e0e0e0; }}
-  .recent-item:hover {{ background:rgba(255,255,255,0.1); }}
+  .recent-list {{ display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:10px; }}
+  .recent-item {{ display:flex; flex-direction:column; padding:14px 16px; background:rgba(255,255,255,0.05); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); border:1px solid rgba(255,255,255,0.08); border-radius:12px; cursor:pointer; transition:all 0.2s; text-decoration:none; color:#e0e0e0; }}
+  .recent-item:hover {{ background:rgba(255,255,255,0.1); transform:translateY(-2px); box-shadow:0 8px 20px rgba(0,0,0,0.2); }}
   .recent-title {{ font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:2px; }}
   .recent-url {{ font-size:11px; color:rgba(255,255,255,0.5); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
   .footer {{ display:flex; justify-content:center; gap:12px; padding:20px 0 8px; border-top:1px solid rgba(255,255,255,0.08); margin-top:8px; }}
@@ -585,8 +603,10 @@ fn render_html(
     <button class="icon-btn" data-panel="todo" title="待办">📝</button>
     <button class="icon-btn" data-panel="recent" title="最近访问">🕘</button>
     <button class="icon-btn" data-panel="quick" title="快捷访问">⚡</button>
-    <button class="icon-btn" data-panel="profile" title="我的">👤</button>
     <a class="icon-btn" href="world-nav.html" title="世界导航">🌐</a>
+    <button class="icon-btn" id="aiBtn" title="AI 助手">🤖</button>
+    <button class="icon-btn" id="settingsBtn" title="设置">⚙️</button>
+    <button class="icon-btn bottom" data-panel="profile" title="我的">👤</button>
   </div>
   <div class="main-layout">
     <div class="side-panel" id="sidePanel">
@@ -665,7 +685,7 @@ fn render_html(
           <button class="btn-mini" id="qsCancel">取消</button>
         </div>
       </div>
-      <div class="section">
+      <div class="section" id="feedSection">
         <div class="section-head">
           <h2>📰 资讯</h2>
           <div class="section-actions">
@@ -683,10 +703,6 @@ fn render_html(
       <div class="footer">
         <span style="font-size:12px;color:rgba(255,255,255,0.35);line-height:30px;">Shift Browser v{sb_version}</span>
       </div>
-    </div>
-    <div class="right-bar" id="rightBar">
-      <button class="icon-btn" id="aiBtn" title="AI 助手">🤖</button>
-      <button class="icon-btn" id="settingsBtn" title="设置">⚙️</button>
     </div>
   </div>
   <div class="toast" id="toast"></div>
@@ -760,6 +776,15 @@ fn render_html(
   var h = now.getHours();
   var greet = h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好';
   document.getElementById('greeting').textContent = greet + '，高哥 👋';
+  // 2026-09-19：问候语名字自动化——登录用户有昵称/用户名就用用户的，没登录保持默认
+  if (window.__TAURI_INTERNALS__) {{
+    window.__TAURI_INTERNALS__.invoke('user_get_current').then(function(r) {{
+      if (r && r.ok && r.user) {{
+        var nm = r.user.nickname || r.user.username;
+        if (nm) document.getElementById('greeting').textContent = greet + '，' + nm + ' 👋';
+      }}
+    }}).catch(function() {{}});
+  }}
   var wd = ['日','一','二','三','四','五','六'][now.getDay()];
   // 注意：必须用 innerHTML——dateStr 里嵌了时钟 span，textContent 不当 HTML 解析，
   // 会把 "<span id=\"clockTime\"></span>" 当字面文本显示，且 span 不创建导致时钟不显示。
@@ -850,7 +875,11 @@ fn render_html(
   // ---- 每日一句（内置精选）----
   var QUOTES = ['路虽远，行则将至；事虽难，做则必成。','身体是革命的本钱，健康是最大的财富。','不积跬步，无以至千里；不积小流，无以成江海。','生活明朗，万物可爱，人间值得，未来可期。','种一棵树最好的时间是十年前，其次是现在。','知足者常乐，能忍者自安。','千里之行，始于足下。','日日行，不怕千万里；常常做，不怕千万事。','心若向阳，无谓悲伤；心若向暖，安之若素。','今日事，今日毕；明日事，明日计。'];
   var quoteEl = document.getElementById('quoteText');
-  if (quoteEl) quoteEl.textContent = '💬 ' + QUOTES[new Date().getDate() % QUOTES.length];
+  if (quoteEl) {{
+    quoteEl.textContent = '💬 ' + QUOTES[new Date().getDate() % QUOTES.length];
+    // 调试探针：把实际渲染字号上报日志，排查"改字号不生效"（2026-09-19）
+    try {{ window.__TAURI_INTERNALS__.invoke('front_log', {{ msg: 'QUOTE_FONT=' + getComputedStyle(quoteEl).fontSize + '|css=' + (document.styleSheets[0] ? document.styleSheets[0].cssRules.length : -1) }}); }} catch(e) {{}}
+  }}
 
   // ---- 天气（wttr.in 免费 API，无需 key；英文描述映射中文）----
   var WEATHER_ZH = {{ 'Clear':'晴','Sunny':'晴','Partly cloudy':'多云','Cloudy':'阴','Overcast':'阴天','Mist':'薄雾','Fog':'雾','Light drizzle':'毛毛雨','Drizzle':'毛毛雨','Light rain':'小雨','Moderate rain':'中雨','Heavy rain':'大雨','Torrential rain shower':'暴雨','Light rain shower':'阵雨','Moderate or heavy rain shower':'中到大雨','Patchy rain possible':'局部有雨','Thundery outbreaks possible':'雷阵雨','Thunderstorm':'雷阵雨','Light snow':'小雪','Moderate snow':'中雪','Heavy snow':'大雪','Light sleet':'雨夹雪','Freezing fog':'冻雾','Hail':'冰雹','Windy':'大风','Light rain with thunder':'雷雨' }};
@@ -1085,6 +1114,17 @@ fn render_html(
         read[el.dataset.url] = 1;
         localStorage.setItem('sb_feed_read', JSON.stringify(read));
         el.classList.add('read');
+      }});
+      // 2026-09-19：点资讯标题不再导航新页面，改为在主区（右侧）打开分栏阅读，
+      // 左侧面板保持打开，随时点下一条；📖 按钮走原有内嵌阅读（stopPropagation 已隔开）
+      el.addEventListener('click', function(e) {{
+        e.preventDefault();
+        var url = el.dataset.url;
+        var f = null;
+        for (var i = 0; i < FEED_DATA.length; i++) {{
+          if (FEED_DATA[i][1] === url) {{ f = FEED_DATA[i]; break; }}
+        }}
+        if (f) openFeedSplit(f);
       }});
     }});
   }}
@@ -1647,6 +1687,98 @@ fn render_html(
       return '<a class="recent-item" href="' + esc(h.url) + '"><span class="recent-title">' + esc(h.title || h.url) + '</span><span class="recent-url">' + esc(h.url) + '</span></a>';
     }}).join('');
   }})();
+
+  // ---- 主区资讯分栏阅读：左列表 + 右内容，点一条看一条（2026-09-19）----
+  // 需求：点资讯不跳标签，启动页内"左列表右内容"浏览，随时点下一条
+  var feedSplitActive = false;
+  var feedSplitBackHtml = '';
+  function openFeedSplit(f) {{
+    var sec = document.getElementById('feedSection');
+    if (!sec) return;
+    // 从侧边面板点资讯时主区可能不在资讯区块，滚过去让用户看到分栏
+    try {{ sec.scrollIntoView({{ behavior: 'smooth', block: 'start' }}); }} catch(e) {{ sec.scrollIntoView(); }}
+    if (!feedSplitActive) {{
+      var fl = document.getElementById('feedList');
+      feedSplitBackHtml = fl ? fl.innerHTML : '';
+      feedSplitActive = true;
+    }}
+    var items = FEED_DATA.slice(0, 12);
+    var listHtml = items.map(function(x) {{
+      var active = x[1] === f[1] ? ' active' : '';
+      return '<div class="fs-split-item' + active + '" data-i="' + items.indexOf(x) + '"><span class="fs-split-title">' + esc(x[0]) + '</span><span class="fs-split-meta">' + esc(x[2]) + (x[3] ? ' · ' + timeAgo(x[3]) : '') + '</span></div>';
+    }}).join('');
+    sec.innerHTML = '<div class="feed-split-head">' +
+      '<button id="feedSplitBack" class="btn-mini">← 返回列表</button>' +
+      '<span class="feed-split-title-text">📰 资讯速读</span>' +
+      '</div>' +
+      '<div class="feed-split">' +
+      '<div class="feed-split-list">' + listHtml + '</div>' +
+      '<div class="feed-split-read" id="feedSplitRead"><div class="inline-read-loading">📖 正在提取正文…</div></div>' +
+      '</div>';
+    document.getElementById('feedSplitBack').addEventListener('click', function() {{
+      sec.innerHTML = '<div class="section-head"><h2>📰 资讯</h2><div class="section-actions"><button class="btn-mini" id="feedMoreBtn2">更多</button></div></div>' +
+        '<div class="feed-list" id="feedList">' + feedSplitBackHtml + '</div>';
+      feedSplitActive = false;
+      document.getElementById('feedMoreBtn2').addEventListener('click', function() {{ switchPanel('feed'); }});
+      bindOpenInTab(document.getElementById('feedList'));
+    }});
+    sec.querySelectorAll('.fs-split-item').forEach(function(el) {{
+      el.addEventListener('click', function() {{
+        var idx = +el.dataset.i;
+        var item = items[idx];
+        if (!item) return;
+        sec.querySelectorAll('.fs-split-item').forEach(function(x) {{ x.classList.remove('active'); }});
+        el.classList.add('active');
+        loadFeedSplitRead(item);
+      }});
+    }});
+    loadFeedSplitRead(f);
+  }}
+  function loadFeedSplitRead(f) {{
+    var readEl = document.getElementById('feedSplitRead');
+    if (!readEl) return;
+    readEl.innerHTML = '<div class="inline-read-loading">📖 正在提取正文…</div>';
+    window.__TAURI_INTERNALS__.invoke('fetch_article', {{ url: f[1] }})
+      .then(function(a) {{
+        readEl.innerHTML = renderSplitInline(a, f);
+        var c = document.getElementById('content');
+        if (c) {{ c.style.setProperty('--fs', inlineFs + 'px'); imgFix(c); }}
+      }})
+      .catch(function(e) {{
+        readEl.innerHTML = '<div class="inline-read-loading">⚠️ ' + String(e).replace(/</g,'&lt;') + '<br><a class="ir-src" href="' + esc(f[1]) + '" target="_blank">去原网页看 ↗</a></div>';
+      }});
+  }}
+  function renderSplitInline(a, f) {{
+    var h = '<div class="ir-bar"><a href="' + esc(f[1]) + '" target="_blank" class="ir-src">看原文 ↗</a></div>';
+    h += '<div class="ir-art"><h1>' + a.title.replace(/</g,'&lt;') + '</h1><div id="content">' + a.content.replace(/data-src=/g,'src=').replace(/data-original=/g,'src=').replace(/data-lazy-src=/g,'src=') + '</div></div>';
+    return h;
+  }}
+
+  // ---- 主区外链点击：统一走 window.open（触发 on_new_window → 当前窗口新标签页）----
+  // 原因：启动页是 shift:// 自定义协议，WebKit 对协议内页面的跨 scheme 链接
+  // （http/https）默认弹独立新窗口；on_new_window 回调已把 window.open 统一
+  // 转成当前窗口新标签，这里拦截普通链接点击，避免弹独立窗口。
+  // 例外：资讯（feedList）点击进分栏阅读，不跳标签。
+  function bindOpenInTab(container) {{
+    if (!container) return;
+    container.addEventListener('click', function(e) {{
+      var a = e.target.closest('a[href]');
+      if (!a) return;
+      var href = a.getAttribute('href');
+      if (!href || href.indexOf('http') !== 0) return; // 只拦截 http/https 外链
+      e.preventDefault();
+      if (container.id === 'feedList') {{
+        var all = container.querySelectorAll('.feed-item');
+        var idx = Array.prototype.indexOf.call(all, a);
+        var items = FEED_DATA.slice(0, 12);
+        if (idx >= 0 && items[idx]) {{ openFeedSplit(items[idx]); return; }}
+      }}
+      window.open(href, '_blank');
+    }});
+  }}
+  bindOpenInTab(document.getElementById('feedList'));
+  bindOpenInTab(document.getElementById('recentList'));
+  bindOpenInTab(document.getElementById('quickSites'));
 
   // ---- 右侧栏：AI / 设置（经 IPC 通知主界面打开对应组件）----
   document.getElementById('aiBtn').addEventListener('click', function() {{

@@ -22,6 +22,16 @@ pub async fn record_history(
     url: String,
     title: Option<String>,
 ) -> DbResult<()> {
+    // 2026-09-19：标题为空时用 URL 域名兜底（页面加载完成时 document.title 可能还没就绪，
+    // 历史里存了一堆空标题，最近访问只剩网址没有名字）
+    let title = title
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| {
+            url.parse::<tauri::Url>()
+                .ok()
+                .and_then(|u| u.host_str().map(|h| h.to_string()))
+                .unwrap_or_else(|| url.clone())
+        });
     // UPSERT 原子化：多标签并发加载同一 URL 时不会重复插入（url 有唯一索引）
     sqlx::query(
     "INSERT INTO history (url, title, visit_count, last_visit_at) VALUES (?, ?, 1, datetime('now'))
@@ -63,6 +73,36 @@ pub async fn record_history(
     }
 
     Ok(())
+}
+
+/// 获取最近历史
+#[tauri::command]
+pub async fn backfill_history_titles(
+    db: tauri::State<'_, Db>,
+) -> DbResult<usize> {
+    // 2026-09-19：历史里标题为空的记录用 URL 域名兜底（页面加载时 document.title 未就绪导致）。
+    // 一次性回填旧数据，避免最近访问只剩网址没有名字。
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT id, url FROM history WHERE title IS NULL OR title = ''",
+    )
+    .fetch_all(&db.pool)
+    .await?;
+    let mut fixed = 0usize;
+    for (id, url) in rows {
+        if let Some(host) = url
+            .parse::<tauri::Url>()
+            .ok()
+            .and_then(|u| u.host_str().map(|h| h.to_string()))
+        {
+            sqlx::query("UPDATE history SET title = ? WHERE id = ?")
+                .bind(&host)
+                .bind(id)
+                .execute(&db.pool)
+                .await?;
+            fixed += 1;
+        }
+    }
+    Ok(fixed)
 }
 
 /// 获取最近历史

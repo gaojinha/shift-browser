@@ -182,16 +182,21 @@ function onRefresh() {
 }
 
 function onHome() {
-  const active = tabsStore.activeTab
-  if (!active) return
   const homepage = settingsStore.get('homepage') || 'https://www.bing.com'
   // 默认 homepage='newtab'（本地新标签页关键字），navigateTab 会把它当 URL 解析必失败；
   // 本地新标签页必须走 createTab。统一判断：'newtab' → createTab，其余 → navigateTab
   if (homepage === 'newtab') {
+    // 修复（2026-09-19）：原实现 activeTab 为 null（所有标签已关闭）时直接 return，
+    // 导致主页按钮没反应；主页语义就是"打开主页"，无标签时新建标签打开
     tabsStore.createTab()
-  } else {
-    tabsStore.navigateTab(active.id, homepage)
+    return
   }
+  const active = tabsStore.activeTab
+  if (!active) {
+    tabsStore.createTab(homepage)
+    return
+  }
+  tabsStore.navigateTab(active.id, homepage)
 }
 
 function onBack() {
