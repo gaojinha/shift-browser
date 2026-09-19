@@ -38,6 +38,8 @@ const ALLOWED_KEYS: &[&str] = &[
     "privacy_whitelist",
     // 性能：空闲标签休眠超时（分钟，0=关闭）
     "tab_hibernate_minutes",
+    // 翻译源（google / bing，默认 google；失败自动回退另一方）
+    "translate_engine",
 ];
 
 /// 是否为敏感设置键

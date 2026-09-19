@@ -353,7 +353,12 @@ pub fn run() {
                 .unwrap();
             }
             tauri::async_runtime::spawn(async move {
-              let payload = match translate::translate_google(&text, "zh-CN").await {
+              // 按设置里的翻译源（google/bing）派发，失败自动回退另一方
+              let engine = match app_clone.try_state::<Db>() {
+                Some(db) => translate::current_engine(db.inner()).await,
+                None => "google".to_string(),
+              };
+              let payload = match translate::translate_with(&text, "zh-CN", &engine).await {
                 Ok(t) => serde_json::json!({ "text": t }),
                 Err(e) => serde_json::json!({ "error": e }),
               };
@@ -407,6 +412,11 @@ pub fn run() {
                 return;
               }
               let mut out: Vec<String> = vec![String::new(); texts.len()];
+              // 整页翻译一次要翻几十段，设置只读一次，按引擎派发（失败自动回退另一方）
+              let engine = match app_clone.try_state::<Db>() {
+                Some(db) => translate::current_engine(db.inner()).await,
+                None => "google".to_string(),
+              };
               // 分批并发（每批 5 段），保持顺序
               for chunk_start in (0..texts.len()).step_by(5) {
                 let chunk_end = (chunk_start + 5).min(texts.len());
@@ -414,10 +424,11 @@ pub fn run() {
                 for (offset, t) in texts[chunk_start..chunk_end].iter().enumerate() {
                   let i = chunk_start + offset;
                   let t = t.clone();
+                  let eng = engine.clone();
                   handles.push((
                     i,
                     tauri::async_runtime::spawn(async move {
-                      translate::translate_google(&t, "zh-CN").await
+                      translate::translate_with(&t, "zh-CN", &eng).await
                     }),
                   ));
                 }

@@ -1,12 +1,19 @@
 <script setup lang="ts">
 // 翻译面板：右侧滑出，粘贴文本 → 调 Rust 翻译 API → 显示译文
 // 原版 Electron 翻译功能的核心场景——选不中文本复制到这里翻译
-import { ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { setWebviewVisible } from '../utils/webview'
+import { useSettingsStore } from '../stores/settings'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ close: [] }>()
+
+const settingsStore = useSettingsStore()
+/** 当前翻译源标签（设置 → 通用 可切换 Google / Bing） */
+const engineLabel = computed(() =>
+  settingsStore.get('translate_engine') === 'bing' ? 'Bing' : 'Google',
+)
 
 const input = ref('')
 const output = ref('')
@@ -125,7 +132,7 @@ const charCount = (s: string) => s.length
         <!-- 头部 -->
         <div class="tr-header">
           <span class="tr-title">🌐 翻译</span>
-          <span class="tr-meta">Google 翻译 · →中文</span>
+          <span class="tr-meta">{{ engineLabel }} 翻译 · →中文</span>
           <button class="tr-close" title="关闭 (Esc)" aria-label="关闭" @click="emit('close')">✕</button>
         </div>
 

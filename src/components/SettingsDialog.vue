@@ -89,6 +89,12 @@ const HIBERNATE_OPTIONS = [
   { v: '60', label: '60 分钟' },
 ]
 
+/** 翻译源（后端 translate.rs 按 settings.translate_engine 派发，失败自动回退另一方） */
+const TRANSLATE_ENGINES = [
+  { id: 'google', label: 'Google' },
+  { id: 'bing', label: 'Bing' },
+]
+
 const SEARCH_ENGINES = [  { id: 'bing', label: '必应', url: 'https://www.bing.com/search?q=' },
   { id: 'baidu', label: '百度', url: 'https://www.baidu.com/s?wd=' },
   { id: 'google', label: '谷歌', url: 'https://www.google.com/search?q=' },
@@ -371,6 +377,25 @@ async function onRemoveKeyword(k: string) {
               <div class="kw-hint">
                 闲置超过该时长的标签会自动休眠：<strong>销毁它的渲染进程、立刻释放内存</strong>（一个标签
                 240-500MB），点击该标签时按原网址重新加载。标签开得多、内存吃紧时特别有用。
+              </div>
+              <div class="field">
+                <label>翻译源</label>
+                <div class="seg-group">
+                  <button
+                    v-for="t in TRANSLATE_ENGINES"
+                    :key="t.id"
+                    class="seg-btn"
+                    :class="{ active: (settingsStore.get('translate_engine') || 'google') === t.id }"
+                    @click="onSet('translate_engine', t.id)"
+                  >
+                    {{ t.label }}
+                  </button>
+                </div>
+              </div>
+              <div class="kw-hint">
+                「翻译当前页面」、右键划词翻译、翻译面板都用这个源。<br />
+                <b>Google</b>：译文质量好，但国内网络常连不上；<b>Bing</b>（Edge 端点）国内一般可直连。
+                任一源失败会自动回退到另一方，改用即时生效、无需重启。
               </div>
             </div>
           </div>

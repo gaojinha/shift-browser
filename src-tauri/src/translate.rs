@@ -76,16 +76,130 @@ pub async fn translate_google(text: &str, target: &str) -> Result<String, String
     })
 }
 
+/// Bing token 缓存（Edge 端点签发 JWT，有效期约 10 分钟；缓存 8 分钟保守一点）
+static BING_TOKEN: OnceLock<tokio::sync::Mutex<Option<(String, std::time::Instant)>>> =
+    OnceLock::new();
+
+/// 取 Bing/Edge 翻译 token（免费，无需 API key）
+async fn bing_token() -> Result<String, String> {
+    let cell = BING_TOKEN.get_or_init(|| tokio::sync::Mutex::new(None));
+    let mut guard = cell.lock().await;
+    if let Some((t, at)) = guard.as_ref() {
+        if at.elapsed().as_secs() < 480 {
+            return Ok(t.clone());
+        }
+    }
+    let resp = client()
+        .get("https://edge.microsoft.com/translate/auth")
+        .send()
+        .await
+        .map_err(|e| format!("Bing 取 token 失败: {}", e))?;
+    let t = resp
+        .text()
+        .await
+        .map_err(|e| format!("Bing token 读取失败: {}", e))?;
+    let t = t.trim().to_string();
+    if t.is_empty() {
+        return Err("Bing 返回空 token".to_string());
+    }
+    *guard = Some((t.clone(), std::time::Instant::now()));
+    Ok(t)
+}
+
+/// Bing 翻译（Edge 公共端点，无需 API key）
+///
+/// 与 Google 的语言码差异：Google 用 zh-CN，Bing 用 zh-Hans
+pub async fn translate_bing(text: &str, target: &str) -> Result<String, String> {
+    if text.trim().is_empty() {
+        return Ok(String::new());
+    }
+    let to = match target {
+        "zh-CN" | "zh-cn" | "zh" => "zh-Hans",
+        other => other,
+    };
+    let token = bing_token().await?;
+    let url = format!(
+        "https://api-edge.cognitive.microsofttranslator.com/translate?api-version=3.0&to={}",
+        to
+    );
+    let resp = client()
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!([{ "Text": text }]))
+        .send()
+        .await
+        .map_err(|e| format!("Bing 翻译请求失败: {}", e))?;
+    let status = resp.status();
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Bing 响应解析失败: {}", e))?;
+    if !status.is_success() {
+        return Err(format!("Bing 翻译返回 HTTP {}", status));
+    }
+    // 返回格式：[{"detectedLanguage":{...},"translations":[{"text":"译文","to":"zh-Hans"}]}]
+    let result = v
+        .get(0)
+        .and_then(|x| x.get("translations"))
+        .and_then(|x| x.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|x| x.get("text"))
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    Ok(if result.is_empty() {
+        "（无翻译结果）".to_string()
+    } else {
+        result
+    })
+}
+
+/// 统一派发：按引擎选择翻译，**失败自动回退另一方**
+/// （Google 国内常连不上、Bing 偶发限流，互为兜底可显著提升可用性）
+pub async fn translate_with(text: &str, target: &str, engine: &str) -> Result<String, String> {
+    if engine == "bing" {
+        match translate_bing(text, target).await {
+            Ok(t) => Ok(t),
+            Err(e) => {
+                log::warn!("[translate] Bing 失败，回退 Google: {}", e);
+                translate_google(text, target).await
+            }
+        }
+    } else {
+        match translate_google(text, target).await {
+            Ok(t) => Ok(t),
+            Err(e) => {
+                log::warn!("[translate] Google 失败，回退 Bing: {}", e);
+                translate_bing(text, target).await
+            }
+        }
+    }
+}
+
+/// 读取当前翻译源（settings.translate_engine，默认 google）
+pub async fn current_engine(db: &crate::db::Db) -> String {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'translate_engine'")
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten();
+    row.map(|r| r.0).unwrap_or_else(|| "google".to_string())
+}
+
 /// 前端调用的统一翻译入口（与 SettingsDialog/AddressBar 的 invoke 约定一致）
 ///
 /// 返回 `{ ok: true, data: "译文" }` 或 `{ ok: false, msg: "错误信息" }`
 #[tauri::command]
 pub async fn translate_text(
+    db: tauri::State<'_, crate::db::Db>,
     text: String,
     target: Option<String>,
 ) -> Result<TranslateResult, String> {
     let target = target.unwrap_or_else(|| "zh-CN".to_string());
-    match translate_google(&text, &target).await {
+    let engine = current_engine(db.inner()).await;
+    match translate_with(&text, &target, &engine).await {
         Ok(data) => Ok(TranslateResult {
             ok: true,
             msg: None,
