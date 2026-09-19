@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useTabsStore } from '../stores/tabs'
 import { useSettingsStore } from '../stores/settings'
+import TranslateProgress from './TranslateProgress.vue'
 
 interface Bookmark {
   id: number
@@ -291,6 +292,7 @@ async function onReader() {
       {{ readerLoading ? '⏳' : '📖' }}
     </button>
     <span v-if="readerTip" class="reader-tip" :title="readerTip">{{ readerTip }}</span>
+    <TranslateProgress />
     <button class="action-btn translate-btn" title="翻译（粘贴文本→中文）" @click="emit('openTranslate')">🌐</button>
     <button class="action-btn ai-btn" title="AI 助手" @click="emit('openAi')">AI</button>
     <button class="action-btn" title="密码管理" @click="emit('openPasswords')">🔑</button>

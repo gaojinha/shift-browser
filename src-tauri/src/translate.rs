@@ -76,39 +76,65 @@ pub async fn translate_google(text: &str, target: &str) -> Result<String, String
     })
 }
 
-/// Bing token 缓存（Edge 端点签发 JWT，有效期约 10 分钟；缓存 8 分钟保守一点）
-static BING_TOKEN: OnceLock<tokio::sync::Mutex<Option<(String, std::time::Instant)>>> =
-    OnceLock::new();
+/// Bing 翻译会话参数缓存：(IG, IID, key, token, 抓取时间)
+///
+/// 说明：Edge 的 `edge.microsoft.com/translate/auth` 端点**已下线**（实测 404），
+/// 改用 cn.bing.com/translator 网页端同款接口：先抓 IG/IID + 防滥用 key/token，
+/// 再 POST `cn.bing.com/ttranslatev3`（实测可用，且 cn.bing.com 国内可直连）。
+type BingSession = (String, String, String, String, std::time::Instant);
+static BING_SESSION: OnceLock<tokio::sync::Mutex<Option<BingSession>>> = OnceLock::new();
 
-/// 取 Bing/Edge 翻译 token（免费，无需 API key）
-async fn bing_token() -> Result<String, String> {
-    let cell = BING_TOKEN.get_or_init(|| tokio::sync::Mutex::new(None));
-    let mut guard = cell.lock().await;
-    if let Some((t, at)) = guard.as_ref() {
-        if at.elapsed().as_secs() < 480 {
-            return Ok(t.clone());
-        }
-    }
-    let resp = client()
-        .get("https://edge.microsoft.com/translate/auth")
-        .send()
-        .await
-        .map_err(|e| format!("Bing 取 token 失败: {}", e))?;
-    let t = resp
-        .text()
-        .await
-        .map_err(|e| format!("Bing token 读取失败: {}", e))?;
-    let t = t.trim().to_string();
-    if t.is_empty() {
-        return Err("Bing 返回空 token".to_string());
-    }
-    *guard = Some((t.clone(), std::time::Instant::now()));
-    Ok(t)
+/// 取 start..end 之间的子串（抓页面内嵌参数用，避免为此引入正则依赖）
+fn extract_between(hay: &str, start: &str, end: &str) -> Option<String> {
+    let i = hay.find(start)? + start.len();
+    let rest = &hay[i..];
+    let j = rest.find(end)?;
+    Some(rest[..j].to_string())
 }
 
-/// Bing 翻译（Edge 公共端点，无需 API key）
+/// 抓取 Bing 翻译会话参数（IG / IID / key / token），缓存 30 分钟
+async fn bing_session() -> Result<BingSession, String> {
+    let cell = BING_SESSION.get_or_init(|| tokio::sync::Mutex::new(None));
+    let mut guard = cell.lock().await;
+    if let Some((ig, iid, key, token, at)) = guard.as_ref() {
+        if at.elapsed().as_secs() < 1800 {
+            return Ok((ig.clone(), iid.clone(), key.clone(), token.clone(), *at));
+        }
+    }
+    let html = client()
+        .get("https://cn.bing.com/translator")
+        .send()
+        .await
+        .map_err(|e| format!("Bing 页面加载失败: {}", e))?
+        .text()
+        .await
+        .map_err(|e| format!("Bing 页面读取失败: {}", e))?;
+    let ig = extract_between(&html, "IG:\"", "\"")
+        .ok_or_else(|| "Bing IG 抓取失败".to_string())?;
+    let iid = extract_between(&html, "data-iid=\"", "\"")
+        .ok_or_else(|| "Bing IID 抓取失败".to_string())?;
+    // 页面内嵌：params_AbusePreventionHelper = [key,"token",interval]
+    let helper = extract_between(&html, "params_AbusePreventionHelper = [", "]")
+        .ok_or_else(|| "Bing 防滥用参数抓取失败".to_string())?;
+    let (key, token) = {
+        let (k, rest) = helper
+            .split_once(',')
+            .ok_or_else(|| "Bing 防滥用参数格式异常".to_string())?;
+        let t = rest.trim().trim_start_matches('"');
+        let t = t.split('"').next().unwrap_or("");
+        (k.trim().to_string(), t.to_string())
+    };
+    if key.is_empty() || token.is_empty() {
+        return Err("Bing 会话参数为空".to_string());
+    }
+    let now = std::time::Instant::now();
+    *guard = Some((ig.clone(), iid.clone(), key.clone(), token.clone(), now));
+    Ok((ig, iid, key, token, now))
+}
+
+/// Bing 翻译（cn.bing.com 网页端同款接口，无需 API key）
 ///
-/// 与 Google 的语言码差异：Google 用 zh-CN，Bing 用 zh-Hans
+/// 语言码差异：Google 用 zh-CN，Bing 用 zh-Hans
 pub async fn translate_bing(text: &str, target: &str) -> Result<String, String> {
     if text.trim().is_empty() {
         return Ok(String::new());
@@ -117,16 +143,22 @@ pub async fn translate_bing(text: &str, target: &str) -> Result<String, String> 
         "zh-CN" | "zh-cn" | "zh" => "zh-Hans",
         other => other,
     };
-    let token = bing_token().await?;
+    let (ig, iid, key, token, _) = bing_session().await?;
     let url = format!(
-        "https://api-edge.cognitive.microsofttranslator.com/translate?api-version=3.0&to={}",
-        to
+        "https://cn.bing.com/ttranslatev3?isVertical=1&IG={}&IID={}",
+        ig, iid
     );
+    let form: [(&str, &str); 5] = [
+        ("fromLang", "auto-detect"),
+        ("text", text),
+        ("to", to),
+        ("key", key.as_str()),
+        ("token", token.as_str()),
+    ];
     let resp = client()
         .post(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!([{ "Text": text }]))
+        .header("Referer", "https://cn.bing.com/translator")
+        .form(&form)
         .send()
         .await
         .map_err(|e| format!("Bing 翻译请求失败: {}", e))?;
@@ -138,7 +170,16 @@ pub async fn translate_bing(text: &str, target: &str) -> Result<String, String> 
     if !status.is_success() {
         return Err(format!("Bing 翻译返回 HTTP {}", status));
     }
-    // 返回格式：[{"detectedLanguage":{...},"translations":[{"text":"译文","to":"zh-Hans"}]}]
+    // 失败形态：{"statusCode":205,"errorMessage":""}（key/token 失效或参数被拒）
+    // —— 清掉缓存的会话，下次调用重新抓取（自愈）
+    if let Some(code) = v.get("statusCode") {
+        if let Some(cell) = BING_SESSION.get() {
+            let mut g = cell.lock().await;
+            *g = None;
+        }
+        return Err(format!("Bing 翻译被拒（statusCode={}）", code));
+    }
+    // 成功格式：[{"translations":[{"text":"译文","to":"zh-Hans"}],"detectedLanguage":{...}}]
     let result = v
         .get(0)
         .and_then(|x| x.get("translations"))

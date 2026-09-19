@@ -325,7 +325,8 @@ pub fn run() {
           .collect();
         let callback = params.get("callback").cloned().unwrap_or_default();
         // P2：callback 白名单——不合法直接拒绝，不 eval（防 JS 注入）
-        if !valid_callback(&callback) {
+        // 例外：/progress 只做进度上报（emit 事件给界面），不写回调变量、不 eval，无需 callback
+        if path != "/progress" && !valid_callback(&callback) {
           log::warn!("[translate] 非法 callback 拒绝: {:?}", callback);
           return tauri::http::Response::builder()
             .status(400)
@@ -363,6 +364,29 @@ pub fn run() {
                 Err(e) => serde_json::json!({ "error": e }),
               };
               write_translate_result(&app_clone, &webview_label, &callback, &payload);
+            });
+          }
+          "/progress" => {
+            // 整页翻译进度上报（页面内脚本 → 界面地址栏的进度条）
+            // 参照原版 Electron 的 translate-progress 事件：engine/pct/info/elapsed/eta/fails
+            let p = params.clone();
+            let app_p = app.clone();
+            tauri::async_runtime::spawn(async move {
+              let engine = match app_p.try_state::<Db>() {
+                Some(db) => translate::current_engine(db.inner()).await,
+                None => "google".to_string(),
+              };
+              let num = |k: &str| p.get(k).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+              let payload = serde_json::json!({
+                "state": p.get("state").cloned().unwrap_or_else(|| "update".to_string()),
+                "engine": if engine == "bing" { "Bing" } else { "Google" },
+                "pct": num("pct"),
+                "info": p.get("info").cloned().unwrap_or_default(),
+                "elapsed": num("elapsed"),
+                "eta": num("eta"),
+                "fails": num("fails"),
+              });
+              let _ = app_p.emit("translate-progress", payload);
             });
           }
           "/whole-page" => {

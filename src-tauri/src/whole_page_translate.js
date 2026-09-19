@@ -48,6 +48,22 @@
     }, 2500);
   }
 
+  // ---- 进度上报（→ 界面地址栏的翻译进度条，参照原版 translate-progress 事件）----
+  var startedAt = Date.now();
+  function reportProgress(state, pct, info, fails) {
+    try {
+      var el = Math.round((Date.now() - startedAt) / 1000);
+      var q = 'state=' + state + '&elapsed=' + el;
+      if (pct !== undefined && pct !== null) q += '&pct=' + pct;
+      if (info) q += '&info=' + encodeURIComponent(info);
+      if (fails) q += '&fails=' + fails;
+      // 预计剩余秒数：按当前进度线性外推
+      if (pct > 0 && pct < 100) q += '&eta=' + Math.round(el * (100 - pct) / pct);
+      var im = new Image();
+      im.src = 'shift://__translate__/progress?' + q;
+    } catch (e) {}
+  }
+
   // ---- 收集文本节点 ----
   function collect() {
     var out = [];
@@ -81,6 +97,7 @@
 
   var nodes = collect();
   if (nodes.length === 0) {
+    reportProgress('hide', 0, '', 0);
     finish('没有可翻译的文本');
     return;
   }
@@ -99,9 +116,13 @@
   }
 
   var total = uniq.length;
+  var failCount = 0;
   var translated = new Array(total);
   var batches = [];
   for (var s = 0; s < total; s += BATCH) batches.push([s, Math.min(s + BATCH, total)]);
+
+  // 界面（地址栏）进度条：开始态
+  reportProgress('start', 0, '0/' + total, 0);
 
   // 逐批翻译（顺序批处理，避免瞬时并发过高）
   var bi = 0;
@@ -129,17 +150,31 @@
       if (res) {
         clearInterval(timer);
         if (res.error) {
-          finish('翻译失败：' + res.error);
+          // 单批失败：保留原文继续后面的批次（不中断整页），累计失败段数
+          failCount += range[1] - range[0];
+          bi++;
+          var df = Math.min(range[1], total);
+          setProgress(df, total);
+          reportProgress('update', Math.round(df / total * 100), df + '/' + total, failCount);
+          nextBatch();
           return;
         }
         var arr = res.texts || [];
         for (var k = 0; k < arr.length; k++) translated[range[0] + k] = arr[k];
         bi++;
-        setProgress(Math.min(range[1], total), total);
+        var done = Math.min(range[1], total);
+        setProgress(done, total);
+        reportProgress('update', Math.round(done / total * 100), done + '/' + total, failCount);
         nextBatch();
       } else if (waited >= POLL_MS * POLL_MAX) {
+        // 超时同样不中断：计入失败，继续下一批（进度条上体现）
         clearInterval(timer);
-        finish('翻译超时（网络问题？）');
+        failCount += range[1] - range[0];
+        bi++;
+        var dt = Math.min(range[1], total);
+        setProgress(dt, total);
+        reportProgress('update', Math.round(dt / total * 100), dt + '/' + total, failCount);
+        nextBatch();
       }
     }, POLL_MS);
   }
@@ -147,8 +182,7 @@
   // ---- 回填 ----
   function applyAll() {
     var ok = 0;
-    for (var i = 0; i < nodes.length; i++) {
-      var t = translated[indexOf[i]];
+    for (var i = 0; i < nodes.length; i++) {      var t = translated[indexOf[i]];
       if (t) {
         try {
           nodes[i].nodeValue = t;
@@ -156,7 +190,8 @@
         } catch (e) {}
       }
     }
-    finish('整页翻译完成（' + ok + ' 处）');
+    reportProgress('done', 100, ok + '/' + total, failCount);
+    finish('整页翻译完成（' + ok + ' 处' + (failCount ? '，' + failCount + ' 段未译' : '') + '）');
   }
 
   setProgress(0, total);
