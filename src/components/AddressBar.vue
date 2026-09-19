@@ -4,23 +4,9 @@ import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useTabsStore } from '../stores/tabs'
 import { useSettingsStore } from '../stores/settings'
+import type { Bookmark } from '../types/bookmark'
+import type { HistoryEntry } from '../types/history'
 import TranslateProgress from './TranslateProgress.vue'
-
-interface Bookmark {
-  id: number
-  title: string
-  url: string
-  folder_id: number | null
-  sort_order: number
-  created_at: string
-}
-interface HistoryEntry {
-  id: number
-  url: string
-  title: string | null
-  visit_count: number
-  last_visit_at: string
-}
 
 const tabsStore = useTabsStore()
 const settingsStore = useSettingsStore()

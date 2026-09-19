@@ -640,9 +640,11 @@ fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>
     log::info!("[extensions] 注入到 {} 个 webview", webviews.len());
     let items_owned = items.clone();
     let _ = app.run_on_main_thread(move || {
-        // 只注入 child 标签页（已跳过主 webview），child 都是 http/https 外部网页，
-        // allow_list 留空（全部注入）避免 WebKitGTK 对 "http://*" 通配符格式不识别导致不注入
-        let allow_list: &[&str] = &[];
+        // 只注入 child 标签页（已跳过主 webview），child 都是 http/https 外部网页。
+        // allow_list 必须用 ["*"]（匹配所有页面）：空数组 &[] 会被 WebKit 当作"空匹配列表"，
+        // 一个页面都不注入（UserScript 从此从未生效——2026-09-19 事故根因，广告拦截/隐私/翻译全失效）。
+        // 不能用 "http://*" 这类格式（WebKitGTK 通配符识别有坑，曾导致不注入）。
+        let allow_list: &[&str] = &["*"];
         for wv in &webviews {
             // 跳过主 webview（label="main"，是 Vue UI），只注入 child 标签页（label="tab-*"）
             // remove_all_scripts 会误删 Tauri 主 webview 的 UserScript（Vue UI 桥接），导致界面空白
@@ -667,6 +669,24 @@ fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>
                             &[],
                         );
                         manager.add_script(&script);
+                        // 即时注入：UserScript 只对"之后导航"的页面生效，已加载的标签不会
+                        // 自动执行脚本（右键翻译菜单等注入因此对老标签无效）。这里对当前
+                        // 页面再 evaluate 一次，让已打开的标签也能立即生效。
+                        // 脚本自带幂等保护（__shiftPrivacyInstalled / __shiftTranslateMenu），
+                        // 页面加载时已执行过则直接 return，重复注入无害。
+                        let js_clone = js.clone();
+                        let _ = webview.evaluate_javascript(
+                            &js_clone,
+                            None,
+                            None,
+                            None::<&gtk::gio::Cancellable>,
+                            move |r| {
+                                if let Err(e) = r {
+                                    // 页面未加载完成时 evaluate 会失败，属正常（UserScript 兜底）
+                                    log::debug!("[extensions] 即时注入跳过（页面未就绪）: {}", e);
+                                }
+                            },
+                        );
                     }
                     if let Some(css) = css {
                         let sheet = UserStyleSheet::new(
@@ -786,6 +806,8 @@ const BUILTIN_KEYWORDS: &[&str] = &[
 const ADBLOCK_JS_TEMPLATE: &str = r#"
 // ShiftBrowser 广告拦截：文本特征规则 + 动态监听
 (function () {
+  if (window.__shiftAdblockInstalled) return;
+  window.__shiftAdblockInstalled = true;
   if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
   var keywords = __SB_KEYWORDS__;
   var HIDDEN = 'data-sb-hidden';
@@ -878,15 +900,25 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
             Err(e) => log::warn!("[extensions] 读取扩展 {} 失败: {}", ext.name, e),
         }
     }
+    // 注入相关设置一次查询拿全（2026-09-19 优化：原先 adblock/privacy 三档/白名单/
+    // 自定义关键词/翻译超时 6 次串行查询合并为 1 次）
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key, value FROM settings WHERE key IN \
+         ('adblock_enabled','privacy_shield_level','privacy_shield','privacy_whitelist',\
+          'adblock_keywords','translate_timeout')",
+    )
+    .fetch_all(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let mut kv: std::collections::HashMap<String, String> = rows.into_iter().collect();
+    let mut take = |k: &str| kv.remove(k);
+
     // 广告拦截（内置系统注入，追加在用户扩展后面）
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM settings WHERE key = 'adblock_enabled'")
-            .fetch_optional(&db.pool)
-            .await
-            .map_err(|e| e.to_string())?;
-    let adblock_on = row.map(|r| r.0 == "true").unwrap_or(true); // 默认开启
+    let adblock_on = take("adblock_enabled").map(|v| v == "true").unwrap_or(true); // 默认开启
     if adblock_on {
-        let custom = load_custom_keywords(db).await;
+        let custom: Vec<String> = take("adblock_keywords")
+            .and_then(|v| serde_json::from_str(&v).ok())
+            .unwrap_or_default();
         let js = build_adblock_js(&custom);
         log::info!(
             "[extensions] 广告拦截已开启（内置 {} 词 + 自定义 {} 词）",
@@ -898,35 +930,26 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
     }
     // 内置隐私防护（三档）：off / standard / strict
     // 兼容早期 privacy_shield='false'（等价 off）
-    let lrow: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_shield_level'")
-            .fetch_optional(&db.pool)
-            .await
-            .map_err(|e| e.to_string())?;
-    let srow: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_shield'")
-            .fetch_optional(&db.pool)
-            .await
-            .map_err(|e| e.to_string())?;
-    let level = match lrow.map(|r| r.0) {
+    let level = match take("privacy_shield_level") {
         Some(l) => l,
-        None => match srow.map(|r| r.0).as_deref() {
+        None => match take("privacy_shield").as_deref() {
             Some("false") => "off".to_string(),
             _ => "standard".to_string(), // 默认标准档
         },
     };
     // 加噪白名单：命中域名的站点跳过"加噪类"防护（保留 GPC/WebRTC/参数清洗等）
-    let wrow: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_whitelist'")
-            .fetch_optional(&db.pool)
-            .await
-            .map_err(|e| e.to_string())?;
-    let whitelist: Vec<String> = wrow
-        .and_then(|(v,)| serde_json::from_str::<Vec<String>>(&v).ok())
+    let whitelist: Vec<String> = take("privacy_whitelist")
+        .and_then(|v| serde_json::from_str::<Vec<String>>(&v).ok())
         .unwrap_or_default();
+    // 翻译超时（与 translate::current_timeout 同规则）
+    let timeout: u64 = take("translate_timeout")
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v >= 5 && *v <= 120)
+        .unwrap_or(15);
     let wl_prefix = format!(
-        "window.__SHIFT_PRIVACY_WHITELIST__ = {};\n",
-        serde_json::to_string(&whitelist).unwrap_or_else(|_| "[]".to_string())
+        "window.__SHIFT_PRIVACY_WHITELIST__ = {};\nwindow.__SHIFT_TRANSLATE_TIMEOUT = {};\n",
+        serde_json::to_string(&whitelist).unwrap_or_else(|_| "[]".to_string()),
+        timeout
     );
     match level.as_str() {
         "off" => log::info!("[extensions] 隐私防护已关闭（off）"),
@@ -1290,10 +1313,132 @@ pub async fn re_inject(app: &AppHandle) {
     match collect_enabled_items(&db).await {
         Ok(items) => {
             log::info!("[extensions] re_inject: {} 个注入项", items.len());
-            inject_extensions(app, items);
+            inject_extensions(app, items.clone());
+            // 延迟重试 evaluate：页面加载中 evaluate 会失败（document 未就绪）。
+            // page_load_finished 事件对部分页面（如 understandingwar.org）不触发，
+            // 所以不能只靠 Finished 补注入——这里 1s/3s/8s 重试，页面加载完必然命中。
+            // 脚本自带幂等保护，重复 evaluate 无害。
+            let app2 = app.clone();
+            tauri::async_runtime::spawn(async move {
+                for delay in [1u64, 3, 8] {
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                    evaluate_inject_retry(&app2, items.clone());
+                }
+            });
         }
         Err(e) => log::error!("[extensions] re_inject 失败: {}", e),
     }
+}
+
+/// 延迟重试：对所有 child webview evaluate 注入脚本 + 探针（确认脚本是否执行）
+fn evaluate_inject_retry(app: &AppHandle, items: Vec<(Option<String>, Option<String>)>) {
+    let Some(window) = app.get_window("main") else {
+        return;
+    };
+    let webviews = window.webviews();
+    let items_owned = items.clone();
+    let _ = app.run_on_main_thread(move || {
+        for wv in &webviews {
+            if wv.label() == "main" {
+                continue;
+            }
+            let items_clone = items_owned.clone();
+            let _ = wv.with_webview(move |pwv| {
+                let webview = pwv.inner();
+                for (js, _css) in &items_clone {
+                    if let Some(js) = js {
+                        let js_clone = js.clone();
+                        let _ = webview.evaluate_javascript(
+                            &js_clone,
+                            None,
+                            None,
+                            None::<&gtk::gio::Cancellable>,
+                            move |r| {
+                                if let Err(e) = r {
+                                    log::debug!("[extensions] 延迟重试注入跳过（页面未就绪）: {}", e);
+                                }
+                            },
+                        );
+                    }
+                }
+                // 探针：确认翻译菜单脚本是否已在页面执行（UserScript 生效与否立见分晓）
+                let _ = webview.evaluate_javascript(
+                    "(function(){return 'probe: tr='+(typeof window.__shiftTranslateMenu)+' proto='+location.protocol+' ready='+document.readyState;})()",
+                    None,
+                    None,
+                    None::<&gtk::gio::Cancellable>,
+                    move |r| match r {
+                        Ok(v) => log::info!("[extensions] 延迟探针: {}", v.to_string()),
+                        Err(e) => {
+                            log::info!("[extensions] 延迟探针失败（页面未就绪）: {}", e)
+                        }
+                    },
+                );
+            });
+        }
+    });
+}
+
+/// 页面加载完成后对单个 webview 即时注入（on_page_load Finished 时调用）
+///
+/// 背景：UserScript 只对"之后导航"的页面生效；若 re_inject 发生在页面加载中途
+/// （创建标签时页面刚起步），已加载页面不会执行脚本，右键翻译菜单等注入就失效了。
+/// 页面加载完成时 document 已就绪，evaluate 必然成功，这里补上即时注入。
+/// 各脚本自带幂等保护（__shiftPrivacyInstalled / __shiftTranslateMenu / __shiftAdblockInstalled），
+/// 与 UserScript 重复执行无害。
+pub async fn inject_to_webview(app: &AppHandle, label: &str) {
+    let db = app.state::<Db>();
+    let items = match collect_enabled_items(&db).await {
+        Ok(items) => items,
+        Err(e) => {
+            log::error!("[extensions] inject_to_webview 收集注入项失败: {}", e);
+            return;
+        }
+    };
+    let Some(window) = app.get_window("main") else {
+        return;
+    };
+    let Some(wv) = window.get_webview(label) else {
+        log::debug!("[extensions] inject_to_webview: webview {} 不存在", label);
+        return;
+    };
+    let _ = wv.with_webview(move |pwv| {
+        let webview = pwv.inner();
+        for (js, _css) in &items {
+            if let Some(js) = js {
+                let js_clone = js.clone();
+                let js_len = js_clone.len();
+                let _ = webview.evaluate_javascript(
+                    &js_clone,
+                    None,
+                    None,
+                    None::<&gtk::gio::Cancellable>,
+                    move |r| {
+                        match r {
+                            Ok(_) => log::info!(
+                                "[extensions] 页面加载后即时注入成功 ({} 字节)",
+                                js_len
+                            ),
+                            Err(e) => {
+                                log::info!("[extensions] 页面加载后即时注入失败: {}", e)
+                            }
+                        }
+                    },
+                );
+            }
+        }
+        // 诊断探针：确认翻译菜单脚本是否真的在页面里执行了
+        let _ = webview.evaluate_javascript(
+            "(function(){return 'probe: __shiftTranslateMenu='+(typeof window.__shiftTranslateMenu)+' proto='+location.protocol;})()",
+            None,
+            None,
+            None::<&gtk::gio::Cancellable>,
+            move |r| match r {
+                Ok(v) => log::info!("[extensions] 注入探针: {}", v.to_string()),
+                Err(e) => log::info!("[extensions] 注入探针失败: {}", e),
+            },
+        );
+    });
 }
 
 #[cfg(test)]

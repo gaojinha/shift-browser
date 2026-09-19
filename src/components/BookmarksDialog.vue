@@ -81,8 +81,8 @@ function onOpen(url: string) {
 }
 
 async function onDelete(b: Bookmark) {
-  await bookmarksStore.removeBookmark(b.id)
-  toastStore.success('书签已删除')
+  const ok = await bookmarksStore.removeBookmark(b.id)
+  if (ok) toastStore.success('书签已删除')
 }
 
 // 编辑

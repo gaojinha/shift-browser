@@ -280,7 +280,12 @@ async fn fetch_one(
     .bind(source)
     .execute(&mut *tx)
     .await;
-    let _ = tx.commit().await;
+    // 提交失败要如实上报，不能把未落库的数据当成功（2026-09-19 修复）。
+    // commit 失败时事务已结束、连接归还池自动回滚，无需（也无法）再显式 rollback
+    if let Err(e) = tx.commit().await {
+        log::error!("[feed] {} 事务提交失败: {}", source, e);
+        return 0;
+    }
     count
 }
 

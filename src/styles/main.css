@@ -17,7 +17,7 @@ body,
 }
 
 :root {
-  --tab-bar-height: 40px;
+  --tab-bar-height: 44px;
   --address-bar-height: 42px;
   --bookmark-bar-height: 28px;
   --ui-font: 12px;

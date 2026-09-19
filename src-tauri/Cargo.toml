@@ -1,6 +1,6 @@
 [package]
 name = "shift-browser"
-version = "5.5.1"
+version = "5.6.0"
 description = "Shift Browser - AI 增强型浏览器（Tauri 重构版）"
 authors = ["OpenClaw Team"]
 license = ""
@@ -35,7 +35,7 @@ tokio = { version = "1", features = ["full"] }
 # 流式读取（feed.rs 响应体边读边计数，防内存炸弹）
 futures-util = "0.3"
 thiserror = "2"
-reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream", "blocking"] }
 readability = "0.3.0"
 encoding_rs = "0.8"
 uuid = { version = "1", features = ["v4"] }

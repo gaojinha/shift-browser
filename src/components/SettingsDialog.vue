@@ -95,6 +95,21 @@ const TRANSLATE_ENGINES = [
   { id: 'bing', label: 'Bing' },
 ]
 
+/** 翻译目标语言（Google/Bing 语言码，Bing 后端对 zh-CN 自动映射 zh-Hans） */
+const TRANSLATE_TARGETS = [
+  { id: 'zh-CN', label: '中文（简体）' },
+  { id: 'zh-TW', label: '中文（繁体）' },
+  { id: 'en', label: '英语' },
+  { id: 'ja', label: '日语' },
+  { id: 'ko', label: '韩语' },
+  { id: 'fr', label: '法语' },
+  { id: 'de', label: '德语' },
+  { id: 'ru', label: '俄语' },
+  { id: 'es', label: '西班牙语' },
+  { id: 'pt', label: '葡萄牙语' },
+  { id: 'it', label: '意大利语' },
+]
+
 const SEARCH_ENGINES = [  { id: 'bing', label: '必应', url: 'https://www.bing.com/search?q=' },
   { id: 'baidu', label: '百度', url: 'https://www.baidu.com/s?wd=' },
   { id: 'google', label: '谷歌', url: 'https://www.google.com/search?q=' },
@@ -396,6 +411,35 @@ async function onRemoveKeyword(k: string) {
                 「翻译当前页面」、右键划词翻译、翻译面板都用这个源。<br />
                 <b>Google</b>：译文质量好，但国内网络常连不上；<b>Bing</b>（Edge 端点）国内一般可直连。
                 任一源失败会自动回退到另一方，改用即时生效、无需重启。
+              </div>
+              <div class="field">
+                <label>翻译目标语言</label>
+                <select
+                  :value="settingsStore.get('translate_target') || 'zh-CN'"
+                  @change="onSet('translate_target', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-for="t in TRANSLATE_TARGETS" :key="t.id" :value="t.id">
+                    {{ t.label }}
+                  </option>
+                </select>
+              </div>
+              <div class="kw-hint">
+                翻译面板、划词翻译、整页翻译都按这个目标语言输出，切换即时生效。
+              </div>
+              <div class="field">
+                <label>翻译超时（秒）</label>
+                <input
+                  type="number"
+                  min="5"
+                  max="120"
+                  step="5"
+                  :value="settingsStore.get('translate_timeout') || '15'"
+                  @change="onSet('translate_timeout', ($event.target as HTMLInputElement).value)"
+                />
+              </div>
+              <div class="kw-hint">
+                翻译请求等待的最长时间（5–120 秒，默认 15）。网络慢或译文较长时调大；
+                保存后新打开的页面立即生效，已打开页面刷新后生效。
               </div>
             </div>
           </div>

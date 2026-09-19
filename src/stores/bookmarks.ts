@@ -36,14 +36,16 @@ export const useBookmarksStore = defineStore('bookmarks', {
       }
     },
 
-    /** 删除书签 */
-    async removeBookmark(id: number) {
+    /** 删除书签，成功返回 true，失败返回 false（不再吞错伪装成功，2026-09-19 修复） */
+    async removeBookmark(id: number): Promise<boolean> {
       try {
         await invoke<void>('delete_bookmark', { id })
         this.bookmarks = this.bookmarks.filter((b) => b.id !== id)
+        return true
       } catch (e) {
         console.error('[bookmarks] 删除书签失败:', e)
         useToastStore().error('删除书签失败')
+        return false
       }
     },
 
@@ -91,13 +93,6 @@ export const useBookmarksStore = defineStore('bookmarks', {
         console.error('[bookmarks] 加载文件夹失败:', e)
         return []
       }
-    },
-
-    /** 导入书签（Netscape HTML 内容），返回导入数量 */
-    async importHtml(html: string): Promise<number> {
-      const count = await invoke<number>('import_bookmarks_html', { html })
-      await this.loadBookmarks()
-      return count
     },
 
     /** 导出书签为 Netscape HTML 到下载目录，返回文件路径 */

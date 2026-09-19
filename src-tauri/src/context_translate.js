@@ -19,7 +19,7 @@
 
   var seq = 0;
 
-  /** 调后端翻译，轮询回调变量拿结果（最多等 12 秒） */
+  /** 调后端翻译，轮询回调变量拿结果（等待时长 = 设置里的翻译超时秒数 × 10 次轮询，默认 15 秒） */
   function callTranslate(path, params, cb) {
     var name = '__sb_tr_' + Date.now() + '_' + (++seq);
     window[name] = null;
@@ -36,10 +36,12 @@
       cb({ error: '无法发起翻译请求: ' + e });
       return;
     }
+    var T = (typeof window.__SHIFT_TRANSLATE_TIMEOUT === 'number' && window.__SHIFT_TRANSLATE_TIMEOUT >= 5)
+      ? window.__SHIFT_TRANSLATE_TIMEOUT : 15;
     var tries = 0;
     var timer = setInterval(function () {
       var r = window[name];
-      if (r || ++tries > 120) {
+      if (r || ++tries > T * 10) {
         clearInterval(timer);
         try { delete window[name]; } catch (e) { window[name] = null; }
         cb(r || { error: '翻译超时' });
@@ -91,7 +93,7 @@
     var menu = document.createElement('div');
     menu.className = 'menu';
     menu.style.left = Math.min(x, window.innerWidth - 190) + 'px';
-    menu.style.top = Math.min(y, window.innerHeight - 140) + 'px';
+    menu.style.top = Math.min(y, window.innerHeight - 200) + 'px';
 
     function addItem(label, fn, dim) {
       var it = document.createElement('div');
@@ -112,6 +114,7 @@
       menu.appendChild(s);
     }
 
+    // 翻译入口：整页翻译始终可用；选中翻译仅在选中文字时可点
     addItem('🌐 翻译选中文字', function () {
       translateSelection(selectedText, x, y);
     }, !selectedText);
@@ -126,6 +129,17 @@
         try { navigator.clipboard.writeText(selectedText); } catch (e) {}
       });
     }
+    addSep();
+    // 补齐系统原生菜单的常用项（自定义菜单会覆盖原生菜单，不能丢这些功能）
+    addItem('🔄 刷新页面', function () {
+      try { location.reload(); } catch (e) {}
+    });
+    addItem('◀ 后退', function () {
+      try { history.back(); } catch (e) {}
+    }, history.length <= 1);
+    addItem('▶ 前进', function () {
+      try { history.forward(); } catch (e) {}
+    }, history.length <= 1);
 
     shadow.appendChild(menu);
     menuEl = menu;
@@ -194,15 +208,12 @@
   }
 
   // ---------- 右键拦截 ----------
+  // 无论是否选中文字都弹自定义菜单：保证"翻译整个页面"入口永远可用。
+  // 自定义菜单里补齐了复制/刷新/后退/前进等原生常用项，不丢失功能。
   document.addEventListener(
     'contextmenu',
     function (ev) {
       var sel = String(window.getSelection ? window.getSelection().toString() : '').trim();
-      // 没有选中文字：放行，让系统原生菜单处理（复制/粘贴/检查等）
-      if (!sel) {
-        hideMenu();
-        return;
-      }
       ev.preventDefault();
       ev.stopPropagation();
       var shadow = ensureHost();

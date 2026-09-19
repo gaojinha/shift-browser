@@ -171,8 +171,14 @@ export const useTabsStore = defineStore('tabs', {
 
     /** 创建新标签页（无参时按主页设置解析；'newtab' = 本地新标签页）
      *  @param groupId 可选：创建后把新标签归入该分组（group 是前端运行时概念，后端 Tab 无此字段，
-     *                 所以在 invoke 返回后由前端补写 groupId，不依赖 Rust 返回） */
-    async createTab(url?: string, groupId?: number | null): Promise<Tab | null> {
+     *                 所以在 invoke 返回后由前端补写 groupId，不依赖 Rust 返回）
+     *  @param skipAutoGroup 可选：跳过"按域名自动归组"（会话恢复时用，避免恢复出的
+     *                 自动分组"关闭窗口再打开还在"） */
+    async createTab(
+      url?: string,
+      groupId?: number | null,
+      skipAutoGroup = false,
+    ): Promise<Tab | null> {
       // 参与 _opSeq：防止 create_tab 在途时 syncTabs（轮询）用旧快照整体覆盖，把刚建的标签顶掉
       const my = ++this._opSeq
       let target = url || useSettingsStore().get('homepage') || 'newtab'
@@ -198,7 +204,11 @@ export const useTabsStore = defineStore('tabs', {
         // 所以通过现有 assignTabToGroup 幂等归组，不依赖后端回传。
         if (groupId != null) this.assignTabToGroup(tab.id, groupId)
         // 自动按域名归组（fire-and-forget，不阻塞创建流程）
-        this.autoGroupTab(tab.id, tab.url || '').catch(() => {})
+        // skipAutoGroup=true（会话恢复）：恢复出的标签不做自动归组，
+        // 避免"关闭窗口再打开，自动分组还在"（自动组是临时概念，不应跨会话复活）
+        if (!skipAutoGroup) {
+          this.autoGroupTab(tab.id, tab.url || '').catch(() => {})
+        }
         // 取消旧标签激活
         for (const t of this.tabs) {
           if (t.id !== tab.id) t.is_active = false
@@ -392,15 +402,6 @@ export const useTabsStore = defineStore('tabs', {
       }
     },
 
-    /** 同步标签元数据（标题/图标） */
-    async updateTabMeta(id: string, title?: string, favicon?: string) {
-      const tab = await invoke<Tab | null>('update_tab', { id, title, favicon })
-      if (tab) {
-        const idx = this.tabs.findIndex((t) => t.id === id)
-        if (idx !== -1) this.tabs[idx] = { ...tab, groupId: this.tabs[idx].groupId ?? null }
-      }
-    },
-
     /** 恢复指定工作区最近会话（有会话则逐个恢复标签，返回是否恢复成功） */
     async restoreLastSession(workspaceId: number | null = null): Promise<boolean> {
       let session: Session | null = null
@@ -432,7 +433,9 @@ export const useTabsStore = defineStore('tabs', {
       }
       for (const t of tabs) {
         if (t.url) {
-          const tab = await this.createTab(t.url)
+          // skipAutoGroup=true：恢复会话不触发按域名自动归组，
+          // 自动分组是临时概念，不应在"关闭窗口再打开"后复活
+          const tab = await this.createTab(t.url, undefined, true)
           // 恢复分组归属（groupId 是数据库持久 id，按 session 顺序匹配；分组已删除则回未分组）
           if (t.groupId != null && tab) {
             const exists = groups.groups.some((g) => g.id === t.groupId)
@@ -448,7 +451,8 @@ export const useTabsStore = defineStore('tabs', {
       const tabs: SessionTab[] = this.tabs.map((t) => ({
         url: t.url,
         title: t.title,
-        groupId: t.groupId ?? null,
+        // 自动分组 id 为负（仅内存存在），不落会话快照，避免恢复时引用失效
+        groupId: t.groupId != null && t.groupId > 0 ? t.groupId : null,
       }))
       if (tabs.length === 0) return null
       try {
@@ -464,7 +468,8 @@ export const useTabsStore = defineStore('tabs', {
       const tabs: SessionTab[] = this.tabs.map((t) => ({
         url: t.url,
         title: t.title,
-        groupId: t.groupId ?? null,
+        // 自动分组 id 为负（仅内存存在），不落会话快照，避免恢复时引用失效
+        groupId: t.groupId != null && t.groupId > 0 ? t.groupId : null,
       }))
       if (tabs.length === 0) return
       try {

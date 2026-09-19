@@ -452,6 +452,7 @@ fn render_html(
   .ir-art img {{ max-width:100%; height:auto; }}
   .profile-info {{ text-align:center; padding:16px 10px; }}
   .profile-info .pi-avatar {{ font-size:44px; line-height:1.2; }}
+  .profile-info .pi-avatar-img {{ width:64px; height:64px; border-radius:50%; object-fit:cover; }}
   .profile-info .pi-name {{ font-size:16px; font-weight:600; color:#fff; margin-top:8px; }}
   .profile-info .pi-user {{ font-size:12px; color:rgba(255,255,255,0.45); margin-top:2px; }}
   .profile-info .pi-sig {{ font-size:12px; color:rgba(255,255,255,0.6); margin-top:8px; padding:0 6px; }}
@@ -1320,9 +1321,17 @@ fn render_html(
     var avatar = u.avatar || '👤';
     var name = u.nickname || u.username;
     var sig = u.signature || '这个人很懒，什么都没写';
+    // 安全渲染头像：后端已清洗（禁 < > + MIME 白名单），这里再兜底——
+    // data:image 白名单才当图片，其余一律 esc 后当文本，杜绝 HTML 注入（2026-09-19 修复）
+    function safeAvatar(a) {{
+      if (/^data:image\/(png|jpe?g|gif|webp);/i.test(a)) {{
+        return '<img class="pi-avatar-img" src="' + esc(a) + '" alt="">';
+      }}
+      return esc(a);
+    }}
     var h = '<div class="uc-wrap">';
     h += '<div class="profile-info">';
-    h += '<div class="pi-avatar">' + avatar + '</div>';
+    h += '<div class="pi-avatar">' + safeAvatar(avatar) + '</div>';
     h += '<div class="pi-name">' + esc(name) + '</div>';
     h += '<div class="pi-user">@' + esc(u.username) + '</div>';
     h += '<div class="pi-sig">' + esc(sig) + '</div>';
@@ -1770,7 +1779,7 @@ fn render_worldnav_html() -> String {
 
   function renderTabs() {
     document.getElementById('catTabs').innerHTML = CATS.map(function(c) {
-      return '<button class="cat-tab' + (c.id === current ? ' active' : '') + '" data-cat="' + c.id + '">' + c.icon + '<span>' + esc(c.title) + '</span></button>';
+      return '<button class="cat-tab' + (c.id === current ? ' active' : '') + '" data-cat="' + c.id + '">' + esc(c.icon) + '<span>' + esc(c.title) + '</span></button>';
     }).join('');
   }
 
@@ -1778,13 +1787,13 @@ fn render_worldnav_html() -> String {
     var pct = s.r ? Math.round((parseFloat(s.r) / 5) * 100) : 0;
     var fav = isUser || s.d === '我的收藏';
     return '<div class="site-card" data-url="' + esc(s.u) + '">' +
-      '<div class="sc-icon">' + (s.i || '🔗') + '</div>' +
+      '<div class="sc-icon">' + esc(s.i || '🔗') + '</div>' +
       '<div class="sc-name">' + esc(s.n) + '</div>' +
       '<div class="sc-desc">' + esc(s.d || s.u) + '</div>' +
       (fav ? '' : '<div class="sc-rating"><span class="stars"><span class="stars-bg">★★★★★</span><span class="stars-fill" style="width:' + pct + '%">★★★★★</span></span><span class="rating-num">' + esc(s.r) + '</span></div>') +
       '<div class="sc-meta">' + (fav ? '⭐ 我的收藏' : '👥 ' + esc(s.us) + ' · ⚡ ' + esc(s.sp)) + '</div>' +
       (fav ? '<button class="sc-remove" data-url="' + esc(s.u) + '" title="移除收藏">✕</button>' : '') +
-      '<button class="sc-star' + (isFaved(s.u) ? ' faved' : '') + '" data-url="' + esc(s.u) + '" data-name="' + esc(s.n) + '" data-icon="' + (s.i || '🔗') + '" title="收藏到快捷访问">' + (isFaved(s.u) ? '★' : '☆') + '</button>' +
+      '<button class="sc-star' + (isFaved(s.u) ? ' faved' : '') + '" data-url="' + esc(s.u) + '" data-name="' + esc(s.n) + '" data-icon="' + esc(s.i || '🔗') + '" title="收藏到快捷访问">' + (isFaved(s.u) ? '★' : '☆') + '</button>' +
       '</div>';
   }
 

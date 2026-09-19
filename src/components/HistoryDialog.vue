@@ -7,14 +7,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { setWebviewVisible } from '../utils/webview'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
-
-interface HistoryEntry {
-  id: number
-  url: string
-  title: string | null
-  visit_count: number
-  last_visit_at: string
-}
+import type { HistoryEntry } from '../types/history'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()

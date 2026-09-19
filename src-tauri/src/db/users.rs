@@ -95,7 +95,7 @@ macro_rules! db_try {
 // ===== 密码哈希（PBKDF2-SHA512，迭代次数版本化）=====
 //
 // hash_algo 字段记录参数，便于日后升级迭代次数而不锁死老用户：
-// - 历史值 'pbkdf2'（第二十轮及更早）→ 按 10 万次校验
+// - 历史值 'pbkdf2'（早期版本）→ 按 10 万次校验
 // - 当前值 'pbkdf2-sha512-210000' → 21 万次（OWASP 2023 对 PBKDF2-SHA512 的建议下限）
 // 校验成功后若发现是旧参数，用当前参数重算并透明升级落库。
 //
@@ -553,6 +553,36 @@ pub async fn user_get_current(db: tauri::State<'_, Db>) -> Result<UserResult, St
     }
 }
 
+/// 校验/清洗头像字段（防 HTML 注入，2026-09-19 安全修复）
+///
+/// 背景：avatar 会未经转义渲染进特权新标签页（newtab.rs renderProfileLoggedIn），
+/// 恶意 `<svg onload=...>` 可拿到 invoke key 接管全部 IPC。双管齐下：
+/// - 任何形态都禁止 `<` `>`（杜绝 HTML 注入）
+/// - data:image/ 开头仅允许 png/jpeg/gif/webp（排除 svg+xml 等可执行类型），限 300KB
+/// - 非 data: 开头按 emoji/文本处理，限 20 字符
+fn sanitize_avatar(raw: &str) -> Result<String, String> {
+    let a = raw.trim();
+    if a.contains('<') || a.contains('>') {
+        return Err("头像含有非法字符".to_string());
+    }
+    if a.starts_with("data:image/") {
+        if a.len() > 300_000 {
+            return Err("头像图片过大（限 300KB）".to_string());
+        }
+        let mime_ok = a.starts_with("data:image/png;")
+            || a.starts_with("data:image/jpeg;")
+            || a.starts_with("data:image/jpg;")
+            || a.starts_with("data:image/gif;")
+            || a.starts_with("data:image/webp;");
+        if !mime_ok {
+            return Err("头像图片格式仅支持 png/jpeg/gif/webp".to_string());
+        }
+        Ok(a.to_string())
+    } else {
+        Ok(a.chars().take(20).collect())
+    }
+}
+
 /// 更新个人资料（昵称/头像/签名）
 #[tauri::command]
 pub async fn user_update_profile(
@@ -572,16 +602,7 @@ pub async fn user_update_profile(
         binds.push(n);
     }
     if let Some(a) = avatar {
-        let a = a.trim().to_string();
-        // 图片头像（base64 data URL）限制 300KB；emoji/文本头像限 20 字符
-        let a = if a.starts_with("data:image/") {
-            if a.len() > 300_000 {
-                return Ok(UserResult::err("头像图片过大（限 300KB）"));
-            }
-            a
-        } else {
-            a.chars().take(20).collect()
-        };
+        let a = sanitize_avatar(&a)?;
         sets.push("avatar = ?".into());
         binds.push(a);
     }
@@ -868,6 +889,8 @@ pub async fn user_import(db: tauri::State<'_, Db>) -> Result<UserResult, String>
         .to_string();
     // 字段校验：外部备份文件可能被篡改，逐字段把关（P1-4）
     validate_import_account(&uname, &pwd_hash, &salt, &algo)?;
+    // avatar 是特权页渲染字段（未转义历史问题），导入必须走同一套清洗规则（2026-09-19 修复）
+    let avatar = sanitize_avatar(&avatar)?;
     let exists: Option<(i64,)> = db_try!(sqlx::query_as::<_, (i64,)>(
         "SELECT id FROM users WHERE username = ?"
     )

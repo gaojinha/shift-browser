@@ -7,6 +7,9 @@ use tauri::{AppHandle, Manager};
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// 抓取并解析正文（带超时 + 净化）
+/// 2026-09-19 修复：不再用 readability::extractor::scrape（其内置 reqwest 0.11 blocking，
+/// 无 UA 配置且兼容性差，对部分站点误报 UnexpectedError）。
+/// 改为自己用 reqwest 0.12 抓 HTML（可设 UA/超时/重定向），再调 extract 纯解析。
 async fn scrape_article(url: &str) -> Result<readability::extractor::Product, String> {
     // P2：只允许 http/https——fetch_article/enter_reader_mode 共用入口，
     // 显式拒绝 file:/javascript: 等 scheme（readability 内部 reqwest 不认其他
@@ -14,15 +17,178 @@ async fn scrape_article(url: &str) -> Result<readability::extractor::Product, St
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("只支持普通网页".to_string());
     }
+    // SSRF 防护（2026-09-19 修复）：拒绝内网/环回/链路本地/保留地址。
+    // 此前任意 URL 都能让本机 reqwest 去抓，可被用来探测内网/云元数据（169.254.169.254）。
+    validate_public_url(url).await?;
     let url = url.to_string();
-    tokio::time::timeout(
+    let url_for_log = url.clone();
+    let r = tokio::time::timeout(
         FETCH_TIMEOUT,
-        tokio::task::spawn_blocking(move || readability::extractor::scrape(&url)),
+        tokio::task::spawn_blocking(move || fetch_and_extract(&url)),
     )
-    .await
-    .map_err(|_| "抓取正文超时（20 秒），可能是慢站或网络问题".to_string())?
-    .map_err(|e| e.to_string())?
-    .map_err(|_| "提取不出正文（可能是动态页或内容太短）".to_string())
+    .await;
+    match r {
+        Ok(Ok(Ok(product))) => Ok(product),
+        Ok(Ok(Err(e))) => {
+            // 记日志便于定位（此前静默返回，用户只看到"提取不出正文"）
+            log::warn!("[reader] 抓取/提取失败: {} -> {}", url_for_log, e);
+            Err(e)
+        }
+        Ok(Err(e)) => {
+            log::warn!("[reader] 抓取线程异常: {} -> {}", url_for_log, e);
+            Err("正文提取线程异常".to_string())
+        }
+        Err(_) => Err("抓取正文超时（20 秒），可能是慢站或网络问题".to_string()),
+    }
+}
+
+/// 抓 HTML + readability 纯解析（blocking，必须在 spawn_blocking 里跑）
+/// 2026-09-19：改用系统 curl 抓取——reqwest/rustls 的 TLS 指纹被部分站点 WAF
+/// 识别为爬虫（understandingwar.org 等返回 403），curl/OpenSSL 指纹被主流站信任。
+/// 手动跟随重定向（最多 5 跳），每跳做 SSRF 校验，防重定向绕过。
+fn fetch_and_extract(url: &str) -> Result<readability::extractor::Product, String> {
+    const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+    // UA 双保险：浏览器 UA 优先（多数站正常）；若被反爬拦（非 2xx），
+    // 回退默认 UA（个别站反着来，如 understandingwar.org 拦浏览器 UA 放行默认 UA）
+    let html = match curl_fetch_with_redirects(url, Some(BROWSER_UA)) {
+        Ok(h) => h,
+        Err(_) => curl_fetch_with_redirects(url, None)?,
+    };
+    let parsed = url::Url::parse(url).map_err(|e| format!("URL 解析失败: {}", e))?;
+    readability::extractor::extract(&mut html.as_bytes(), &parsed)
+        .map_err(|e| format!("正文提取失败: {}", e))
+}
+
+/// 用系统 curl 抓取，手动跟随重定向并逐跳 SSRF 校验
+fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<String, String> {
+    let mut cur = url.to_string();
+    for _ in 0..5 {
+        // 单跳探测：拿状态码 + 重定向目标（curl 不带 -L 不自动跟随）
+        let mut cmd = std::process::Command::new("curl");
+        cmd.args(["-s", "--compressed", "--max-time", "20", "-o", "/dev/null", "-w", "%{http_code} %{redirect_url}"]);
+        if let Some(u) = ua {
+            cmd.args(["-A", u]);
+        }
+        cmd.arg(&cur);
+        let out = cmd
+            .output()
+            .map_err(|e| format!("调用 curl 失败: {}", e))?;
+        let meta = String::from_utf8_lossy(&out.stdout);
+        let mut parts = meta.trim().splitn(2, ' ');
+        let code: u16 = parts.next().unwrap_or("0").parse().unwrap_or(0);
+        let loc = parts.next().unwrap_or("").trim().to_string();
+        if (300..400).contains(&code) && !loc.is_empty() {
+            // 重定向目标也必须是公网（防 SSRF 重定向绕过）
+            if let Err(e) = validate_public_host_blocking(&loc) {
+                return Err(e);
+            }
+            cur = loc;
+            continue;
+        }
+        if !(200..300).contains(&code) {
+            return Err(format!("抓取失败: HTTP {}", code));
+        }
+        // 2xx：拿正文
+        let mut cmd2 = std::process::Command::new("curl");
+        cmd2.args(["-s", "--compressed", "--max-time", "20"]);
+        if let Some(u) = ua {
+            cmd2.args(["-A", u]);
+        }
+        cmd2.arg(&cur);
+        let out2 = cmd2
+            .output()
+            .map_err(|e| format!("调用 curl 失败: {}", e))?;
+        if !out2.status.success() {
+            return Err(format!("抓取失败: curl 退出码 {:?}", out2.status.code()));
+        }
+        let html = String::from_utf8_lossy(&out2.stdout).to_string();
+        if html.is_empty() {
+            return Err("抓取结果为空".to_string());
+        }
+        return Ok(html);
+    }
+    Err("重定向次数过多".to_string())
+}
+
+/// 同步版 SSRF 主机校验（重定向逐跳用；初始 URL 用 async 版 validate_public_url）
+fn validate_public_host_blocking(url: &str) -> Result<(), String> {
+    use std::net::ToSocketAddrs;
+    let parsed = url::Url::parse(url).map_err(|_| "重定向目标 URL 不合法".to_string())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "重定向目标缺少主机名".to_string())?;
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return reject_private_ip(&ip);
+    }
+    let addrs = (host, 80)
+        .to_socket_addrs()
+        .map_err(|e| format!("DNS 解析失败: {} ({})", host, e))?;
+    for addr in addrs {
+        reject_private_ip(&addr.ip())?;
+    }
+    Ok(())
+}
+
+/// SSRF 校验：目标主机必须是公网地址。
+/// - IP 字面量（127.0.0.1 / 10.x / 192.168.x / 169.254.x / ::1 / fc00:: / fe80:: 等）直接拒绝
+/// - 域名 host 做 DNS 解析后逐一校验，任一解析结果落在内网即拒绝
+async fn validate_public_url(url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|e| {
+        log::warn!("[reader] URL 解析失败: {} -> {}", url, e);
+        "URL 格式不合法".to_string()
+    })?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "URL 缺少主机名".to_string())?
+        .to_string();
+    // IP 字面量：直接判
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        let r = reject_private_ip(&ip);
+        if r.is_err() {
+            log::warn!("[reader] SSRF 拦截 IP 字面量: {} -> {}", host, ip);
+        }
+        return r;
+    }
+    // 域名：异步解析全部 A/AAAA，任一落在内网即拒绝
+    let addrs = tokio::net::lookup_host((host.as_str(), 80))
+        .await
+        .map_err(|e| {
+            log::warn!("[reader] DNS 解析失败: {} -> {}", host, e);
+            format!("DNS 解析失败: {}", host)
+        })?;
+    for addr in addrs {
+        if let Err(e) = reject_private_ip(&addr.ip()) {
+            log::warn!("[reader] SSRF 拦截域名解析: {} -> {} ({})", host, addr.ip(), e);
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+fn reject_private_ip(ip: &std::net::IpAddr) -> Result<(), String> {
+    let bad = match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_unspecified()
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || {
+                    // fc00::/7（ULA 内网）与 fe80::/10（链路本地）
+                    let segs = v6.segments();
+                    (segs[0] & 0xfe00) == 0xfc00 || (segs[0] & 0xffc0) == 0xfe80
+                }
+        }
+    };
+    if bad {
+        Err("目标地址是内网/保留地址，已拦截（SSRF 防护）".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 /// 净化正文 HTML（防 XSS）：用 ammonia（html5ever 真解析器）白名单模式。

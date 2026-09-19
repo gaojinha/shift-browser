@@ -31,6 +31,45 @@ pub(crate) const WHOLE_PAGE_TRANSLATE_JS: &str = include_str!("whole_page_transl
 /// 用原子变量而非 Db/State：锁屏期间 Db 尚未 manage，命令参数不能依赖 State。
 static LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// translate-progress 事件节流器：同一 webview 至少间隔 300ms 才转发一次，
+/// 防止整页翻译高频上报刷爆 UI 事件通道（2026-09-19 安全修复）
+static PROGRESS_THROTTLE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+> = std::sync::OnceLock::new();
+
+/// 翻译请求速率限制器：同一 webview 每分钟最多 30 次翻译请求，
+/// 防恶意网页批量驱动浏览器外发翻译（2026-09-19）
+static TRANSLATE_RATE: std::sync::OnceLock<
+    std::sync::Mutex<
+        std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
+    >,
+> = std::sync::OnceLock::new();
+
+/// 返回 true = 超频应拒绝
+fn translate_rate_limited(label: &str) -> bool {
+    const MAX: usize = 30;
+    const WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+    let cell = TRANSLATE_RATE
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let mut map = cell.lock().unwrap_or_else(|e| e.into_inner());
+    let now = std::time::Instant::now();
+    let q = map
+        .entry(label.to_string())
+        .or_insert_with(std::collections::VecDeque::new);
+    while let Some(&t) = q.front() {
+        if now.duration_since(t) > WINDOW {
+            q.pop_front();
+        } else {
+            break;
+        }
+    }
+    if q.len() >= MAX {
+        return true;
+    }
+    q.push_back(now);
+    false
+}
+
 /// 查询是否处于启动锁屏状态（前端初始化前调用，不依赖 Db）
 #[tauri::command]
 fn is_locked() -> bool {
@@ -313,6 +352,31 @@ pub fn run() {
       //  菜单 JS 轮询拿到结果）
       if host == "__translate__" {
         let webview_label = ctx.webview_label().to_string();
+        // 来源校验（2026-09-19 安全修复 + 修正）：翻译功能服务两类页面——
+        // ① shift:// 内部页（右键菜单注入在内部页）
+        // ② 普通 http/https 网页（右键菜单注入在网页，用户选中文字翻译）
+        // 因此按"发起请求的 webview 当前 URL 必须是网页或内部页"放行，
+        // 拒绝 file:// 等其他来源（走主线程 proxy 拿 URL，可靠）。
+        // 注：不能用 Referer 校验——WebKit 对 shift:// 请求不带 Referer（恒空）。
+        let wv_url = app
+          .get_webview(&webview_label)
+          .and_then(|wv| wv.url().ok())
+          .map(|u| u.to_string())
+          .unwrap_or_default();
+        let wv_url_ok = wv_url.starts_with("shift://")
+          || wv_url.starts_with("http://")
+          || wv_url.starts_with("https://");
+        if !wv_url_ok {
+          log::warn!(
+            "[translate] 拒绝非网页来源翻译请求: wv_url={:?} label={}",
+            wv_url, webview_label
+          );
+          return tauri::http::Response::builder()
+            .status(403)
+            .header(tauri::http::header::CONTENT_TYPE, "text/plain")
+            .body("Forbidden".as_bytes().to_vec())
+            .unwrap();
+        }
         let query = request.uri().query().unwrap_or("");
         let params: std::collections::HashMap<String, String> = query
           .split('&')
@@ -336,6 +400,19 @@ pub fn run() {
         }
         let app_clone = app.clone();
 
+        // 速率限制：翻译类请求（/text /batch /whole-page）每 webview 每分钟最多 30 次；
+        // /progress 已有 300ms 节流，不占此额度
+        if path != "/progress" && translate_rate_limited(&webview_label) {
+          log::warn!("[translate] 翻译请求超频拒绝: label={}", webview_label);
+          let payload = serde_json::json!({ "error": "翻译请求过于频繁，请稍后再试" });
+          write_translate_result(&app_clone, &webview_label, &callback, &payload);
+          return tauri::http::Response::builder()
+            .status(200)
+            .header(tauri::http::header::CONTENT_TYPE, "image/gif")
+            .body(Vec::<u8>::new())
+            .unwrap();
+        }
+
         match path.as_str() {
           "/text" => {
             let text = params.get("text").cloned().unwrap_or_default();
@@ -355,20 +432,43 @@ pub fn run() {
             }
             tauri::async_runtime::spawn(async move {
               // 按设置里的翻译源（google/bing）派发，失败自动回退另一方
-              let engine = match app_clone.try_state::<Db>() {
-                Some(db) => translate::current_engine(db.inner()).await,
-                None => "google".to_string(),
+              let (engine, timeout) = match app_clone.try_state::<Db>() {
+                Some(db) => (
+                  translate::current_engine(db.inner()).await,
+                  translate::current_timeout(db.inner()).await,
+                ),
+                None => ("google".to_string(), 15),
               };
-              let payload = match translate::translate_with(&text, "zh-CN", &engine).await {
-                Ok(t) => serde_json::json!({ "text": t }),
-                Err(e) => serde_json::json!({ "error": e }),
-              };
+              let payload =
+                match translate::translate_with(&text, "zh-CN", &engine, timeout).await {
+                  Ok(t) => serde_json::json!({ "text": t }),
+                  Err(e) => serde_json::json!({ "error": e }),
+                };
               write_translate_result(&app_clone, &webview_label, &callback, &payload);
             });
           }
           "/progress" => {
             // 整页翻译进度上报（页面内脚本 → 界面地址栏的进度条）
             // 参照原版 Electron 的 translate-progress 事件：engine/pct/info/elapsed/eta/fails
+            // 节流：同一 webview 至少 300ms 一条，防高频上报刷爆 UI 事件通道
+            {
+              let cell = PROGRESS_THROTTLE.get_or_init(|| {
+                std::sync::Mutex::new(std::collections::HashMap::new())
+              });
+              let mut map = cell.lock().unwrap_or_else(|e| e.into_inner());
+              let now = std::time::Instant::now();
+              let last = map.get(&webview_label).copied();
+              if let Some(t0) = last {
+                if now.duration_since(t0).as_millis() < 300 {
+                  return tauri::http::Response::builder()
+                    .status(200)
+                    .header(tauri::http::header::CONTENT_TYPE, "image/gif")
+                    .body(Vec::<u8>::new())
+                    .unwrap();
+                }
+              }
+              map.insert(webview_label.clone(), now);
+            }
             let p = params.clone();
             let app_p = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -437,9 +537,13 @@ pub fn run() {
               }
               let mut out: Vec<String> = vec![String::new(); texts.len()];
               // 整页翻译一次要翻几十段，设置只读一次，按引擎派发（失败自动回退另一方）
-              let engine = match app_clone.try_state::<Db>() {
-                Some(db) => translate::current_engine(db.inner()).await,
-                None => "google".to_string(),
+              let (engine, target, timeout) = match app_clone.try_state::<Db>() {
+                Some(db) => (
+                  translate::current_engine(db.inner()).await,
+                  translate::current_target(db.inner()).await,
+                  translate::current_timeout(db.inner()).await,
+                ),
+                None => ("google".to_string(), "zh-CN".to_string(), 15),
               };
               // 分批并发（每批 5 段），保持顺序
               for chunk_start in (0..texts.len()).step_by(5) {
@@ -449,10 +553,11 @@ pub fn run() {
                   let i = chunk_start + offset;
                   let t = t.clone();
                   let eng = engine.clone();
+                  let tgt = target.clone();
                   handles.push((
                     i,
                     tauri::async_runtime::spawn(async move {
-                      translate::translate_with(&t, "zh-CN", &eng).await
+                      translate::translate_with(&t, &tgt, &eng, timeout).await
                     }),
                   ));
                 }
@@ -467,8 +572,12 @@ pub fn run() {
             });
           }
           "/remove-auto-site" => {
-            log::info!("[translate] 取消本站自动汉化: {}", webview_label);
-            // 暂简化：不实际清理列表
+            // 自动汉化功能尚未实现（前端无入口），此分支为预留。
+            // 明确记录，不做假成功（2026-09-19 清理）
+            log::warn!(
+              "[translate] remove-auto-site 收到请求但自动汉化未实现，忽略: label={}",
+              webview_label
+            );
             tauri::async_runtime::spawn(async move {
               let payload = serde_json::json!({ "ok": true });
               write_translate_result(&app_clone, &webview_label, &callback, &payload);

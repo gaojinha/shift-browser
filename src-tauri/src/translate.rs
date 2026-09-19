@@ -17,22 +17,37 @@ const CHROME_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
   (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 /// reqwest 客户端（共享连接池，全局单例）
+/// 全局超时只做兜底（120s），实际超时由每个请求的 RequestBuilder::timeout() 控制，
+/// 值来自设置 translate_timeout（默认 15 秒，可在设置界面调整）
 static CLIENT: OnceLock<Client> = OnceLock::new();
 
 fn client() -> &'static Client {
     CLIENT.get_or_init(|| {
         Client::builder()
             .user_agent(CHROME_UA)
-            .timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(120))
             .build()
             .expect("reqwest client 初始化失败")
     })
 }
 
+/// 当前翻译超时（秒）：settings.translate_timeout，默认 15，合法范围 5-120
+pub async fn current_timeout(db: &crate::db::Db) -> u64 {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'translate_timeout'")
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten();
+    row.and_then(|r| r.0.parse::<u64>().ok())
+        .filter(|v| *v >= 5 && *v <= 120)
+        .unwrap_or(15)
+}
+
 /// Google 翻译（Chrome dict-chrome-ex 公共端点，无需 API key）
 ///
-/// `target` 默认 zh-CN；源语言自动检测（sl=auto）
-pub async fn translate_google(text: &str, target: &str) -> Result<String, String> {
+/// `target` 默认 zh-CN；源语言自动检测（sl=auto）；`timeout` 秒（设置里可调）
+pub async fn translate_google(text: &str, target: &str, timeout: u64) -> Result<String, String> {
     if text.trim().is_empty() {
         return Ok(String::new());
     }
@@ -46,6 +61,7 @@ pub async fn translate_google(text: &str, target: &str) -> Result<String, String
             ("dt", "t"),
             ("q", text),
         ])
+        .timeout(std::time::Duration::from_secs(timeout))
         .send()
         .await
         .map_err(|e| format!("翻译请求失败: {}", e))?;
@@ -93,7 +109,7 @@ fn extract_between(hay: &str, start: &str, end: &str) -> Option<String> {
 }
 
 /// 抓取 Bing 翻译会话参数（IG / IID / key / token），缓存 30 分钟
-async fn bing_session() -> Result<BingSession, String> {
+async fn bing_session(timeout: u64) -> Result<BingSession, String> {
     let cell = BING_SESSION.get_or_init(|| tokio::sync::Mutex::new(None));
     let mut guard = cell.lock().await;
     if let Some((ig, iid, key, token, at)) = guard.as_ref() {
@@ -103,6 +119,7 @@ async fn bing_session() -> Result<BingSession, String> {
     }
     let html = client()
         .get("https://cn.bing.com/translator")
+        .timeout(std::time::Duration::from_secs(timeout))
         .send()
         .await
         .map_err(|e| format!("Bing 页面加载失败: {}", e))?
@@ -134,8 +151,8 @@ async fn bing_session() -> Result<BingSession, String> {
 
 /// Bing 翻译（cn.bing.com 网页端同款接口，无需 API key）
 ///
-/// 语言码差异：Google 用 zh-CN，Bing 用 zh-Hans
-pub async fn translate_bing(text: &str, target: &str) -> Result<String, String> {
+/// 语言码差异：Google 用 zh-CN，Bing 用 zh-Hans；`timeout` 秒（设置里可调）
+pub async fn translate_bing(text: &str, target: &str, timeout: u64) -> Result<String, String> {
     if text.trim().is_empty() {
         return Ok(String::new());
     }
@@ -143,7 +160,7 @@ pub async fn translate_bing(text: &str, target: &str) -> Result<String, String> 
         "zh-CN" | "zh-cn" | "zh" => "zh-Hans",
         other => other,
     };
-    let (ig, iid, key, token, _) = bing_session().await?;
+    let (ig, iid, key, token, _) = bing_session(timeout).await?;
     let url = format!(
         "https://cn.bing.com/ttranslatev3?isVertical=1&IG={}&IID={}",
         ig, iid
@@ -159,6 +176,7 @@ pub async fn translate_bing(text: &str, target: &str) -> Result<String, String> 
         .post(&url)
         .header("Referer", "https://cn.bing.com/translator")
         .form(&form)
+        .timeout(std::time::Duration::from_secs(timeout))
         .send()
         .await
         .map_err(|e| format!("Bing 翻译请求失败: {}", e))?;
@@ -198,21 +216,27 @@ pub async fn translate_bing(text: &str, target: &str) -> Result<String, String> 
 
 /// 统一派发：按引擎选择翻译，**失败自动回退另一方**
 /// （Google 国内常连不上、Bing 偶发限流，互为兜底可显著提升可用性）
-pub async fn translate_with(text: &str, target: &str, engine: &str) -> Result<String, String> {
+/// `timeout` 秒：来自设置 translate_timeout（默认 15）
+pub async fn translate_with(
+    text: &str,
+    target: &str,
+    engine: &str,
+    timeout: u64,
+) -> Result<String, String> {
     if engine == "bing" {
-        match translate_bing(text, target).await {
+        match translate_bing(text, target, timeout).await {
             Ok(t) => Ok(t),
             Err(e) => {
                 log::warn!("[translate] Bing 失败，回退 Google: {}", e);
-                translate_google(text, target).await
+                translate_google(text, target, timeout).await
             }
         }
     } else {
-        match translate_google(text, target).await {
+        match translate_google(text, target, timeout).await {
             Ok(t) => Ok(t),
             Err(e) => {
                 log::warn!("[translate] Google 失败，回退 Bing: {}", e);
-                translate_bing(text, target).await
+                translate_bing(text, target, timeout).await
             }
         }
     }
@@ -229,6 +253,17 @@ pub async fn current_engine(db: &crate::db::Db) -> String {
     row.map(|r| r.0).unwrap_or_else(|| "google".to_string())
 }
 
+/// 当前翻译目标语言（设置 → 通用 → 翻译目标语言，默认 zh-CN）
+pub async fn current_target(db: &crate::db::Db) -> String {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'translate_target'")
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten();
+    row.map(|r| r.0).unwrap_or_else(|| "zh-CN".to_string())
+}
+
 /// 前端调用的统一翻译入口（与 SettingsDialog/AddressBar 的 invoke 约定一致）
 ///
 /// 返回 `{ ok: true, data: "译文" }` 或 `{ ok: false, msg: "错误信息" }`
@@ -240,7 +275,8 @@ pub async fn translate_text(
 ) -> Result<TranslateResult, String> {
     let target = target.unwrap_or_else(|| "zh-CN".to_string());
     let engine = current_engine(db.inner()).await;
-    match translate_with(&text, &target, &engine).await {
+    let timeout = current_timeout(db.inner()).await;
+    match translate_with(&text, &target, &engine, timeout).await {
         Ok(data) => Ok(TranslateResult {
             ok: true,
             msg: None,

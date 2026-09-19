@@ -40,6 +40,9 @@ const ALLOWED_KEYS: &[&str] = &[
     "tab_hibernate_minutes",
     // 翻译源（google / bing，默认 google；失败自动回退另一方）
     "translate_engine",
+    // 翻译目标语言（zh-CN 等）+ 翻译超时（秒，5-120）
+    "translate_target",
+    "translate_timeout",
 ];
 
 /// 是否为敏感设置键

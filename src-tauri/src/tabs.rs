@@ -20,7 +20,7 @@ use webkit2gtk::WebViewExt;
 use webkit2gtk::{DownloadExt, SettingsExt, URIRequestExt, URIResponseExt, WebContextExt};
 
 // UI 布局常量（与前端 CSS 保持一致）
-pub const TAB_BAR_HEIGHT: f64 = 40.0;
+pub const TAB_BAR_HEIGHT: f64 = 44.0;
 pub const ADDRESS_BAR_HEIGHT: f64 = 42.0;
 pub const BOOKMARKS_BAR_HEIGHT: f64 = 30.0;
 pub const STATUS_BAR_HEIGHT: f64 = 22.0;
@@ -151,13 +151,13 @@ impl TabManager {
     }
 
     pub fn set_show_bookmarks_bar(&self, visible: bool) -> f64 {
-        *self.show_bookmarks_bar.lock().unwrap() = visible;
+        *self.show_bookmarks_bar.lock().unwrap_or_else(|e| e.into_inner()) = visible;
         self.top_offset()
     }
 
     /// 当前内容区顶部偏移（随书签栏显隐变化）
     pub fn top_offset(&self) -> f64 {
-        if *self.show_bookmarks_bar.lock().unwrap() {
+        if *self.show_bookmarks_bar.lock().unwrap_or_else(|e| e.into_inner()) {
             CONTENT_TOP_OFFSET
         } else {
             CONTENT_TOP_OFFSET_NO_BOOKMARKS
@@ -170,8 +170,8 @@ impl TabManager {
     }
 
     fn all_tabs(&self) -> Vec<Tab> {
-        let tabs = self.tabs.lock().unwrap();
-        let order = self.order.lock().unwrap();
+        let tabs = self.tabs.lock().unwrap_or_else(|e| e.into_inner());
+        let order = self.order.lock().unwrap_or_else(|e| e.into_inner());
         order
             .iter()
             .filter_map(|id| tabs.get(id).cloned())
@@ -282,7 +282,7 @@ impl TabManager {
             let url_str = url.to_string();
             // 去重：500ms 内同 URL 已处理过则忽略，防止原生+JS 双通道重复建标签
             {
-              let mut last = last_new_window.lock().unwrap();
+              let mut last = last_new_window.lock().unwrap_or_else(|e| e.into_inner());
               let now = std::time::Instant::now();
               if let Some((prev_url, prev_at)) = last.as_ref() {
                 if *prev_url == url_str && now.duration_since(*prev_at).as_millis() < 500 {
@@ -304,6 +304,26 @@ impl TabManager {
             tauri::webview::NewWindowResponse::Deny
           })
 .on_page_load(move |webview, payload| {
+            // 开启页面 console 输出（诊断 JS 错误用）——任何加载事件都设置，
+            // 不依赖 Finished（部分页面 Finished 不触发）
+            let _ = webview.with_webview(move |pwv| {
+                let gtk_wv = pwv.inner();
+                if let Some(s) = webkit2gtk::WebViewExt::settings(&gtk_wv) {
+                    s.set_enable_write_console_messages_to_stdout(true);
+                }
+            });
+            // 任何加载事件（Started/Finished，含后退/前进缓存恢复）都安排延迟注入：
+            // - UserScript 只对"之后导航"生效，已加载页面必须 evaluate 补注入；
+            // - 后退/前进时 WebKit 从 back-forward 缓存恢复页面，UserScript 不会重新执行，
+            //   返回的页面会丢脚本 → 必须重新 evaluate（800ms/3s/8s 重试，幂等无害）。
+            let app_ext = app_handle2.clone();
+            let label_ext = webview.label().to_string();
+            tauri::async_runtime::spawn(async move {
+                for delay in [800u64, 3000, 8000] {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                    crate::extensions::inject_to_webview(&app_ext, &label_ext).await;
+                }
+            });
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
               let url = payload.url();
               let host = url.host_str().unwrap_or("").to_string();
@@ -336,7 +356,7 @@ impl TabManager {
                         log::debug!("[tabs] favicon: tab={} {}", tab_id_fav, fav);
                         let updated = {
                           let state = app_fav.state::<TabManager>();
-                          let mut tabs = state.tabs.lock().unwrap();
+                          let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
                           match tabs.get_mut(&tab_id_fav) {
                             Some(t) if t.favicon != fav => {
                               t.favicon = fav;
@@ -361,7 +381,7 @@ impl TabManager {
               let title_opt = Some(title.clone());
 
               if let Some(state) = app_handle2.try_state::<TabManager>() {
-                let mut tabs = state.tabs.lock().unwrap();
+                let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(tab) = tabs.get_mut(&tab_id) {
                   tab.url = url.to_string();
                   // 仅当还没有真标题（title-notify 未触发过）时用 host 占位，避免覆盖 document.title
@@ -451,7 +471,7 @@ impl TabManager {
                         // 标题变化 → 更新内存态；仅在真的变化时通知前端（防高频重复 emit）
                         let changed = {
                             if let Some(state) = app2.try_state::<TabManager>() {
-                                let mut tabs = state.tabs.lock().unwrap();
+                                let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
                                 match tabs.get_mut(&tab_id) {
                                     Some(tab) if tab.title != title => {
                                         tab.title = title;
@@ -649,7 +669,7 @@ impl TabManager {
                   )
                   .await;
                   if let Ok(id) = res {
-                    *id_state0.lock().unwrap() = Some(id);
+                    *id_state0.lock().unwrap_or_else(|e| e.into_inner()) = Some(id);
                     log::info!("[downloads] 记录 id={} filename={} total={}", id, filename_db, total);
                     let _ = app0.emit("downloads-updated", ());
                   } else {
@@ -660,7 +680,7 @@ impl TabManager {
                 // 等待下载记录 id 就绪（最多 5 秒）
                 async fn wait_download_id(state: &Arc<Mutex<Option<i64>>>) -> Option<i64> {
                   for _ in 0..100 {
-                    if let Some(id) = *state.lock().unwrap() {
+                    if let Some(id) = *state.lock().unwrap_or_else(|e| e.into_inner()) {
                       return Some(id);
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -679,7 +699,7 @@ impl TabManager {
                   let received = dl.received_data_length() as i64;
                   // 总字节可能下载开始时未知（0），进度回调时再补一次
                   let total_now = dl.response().map(|r| r.content_length() as i64).unwrap_or(0);
-                  let mut last = last_progress.lock().unwrap();
+                  let mut last = last_progress.lock().unwrap_or_else(|e| e.into_inner());
                   if last.elapsed() < std::time::Duration::from_millis(500) {
                     return;
                   }
@@ -689,7 +709,7 @@ impl TabManager {
                   let app3 = app2.clone();
                   let id_state3 = id_state2.clone();
                   tauri::async_runtime::spawn(async move {
-                    let id_now = { *id_state3.lock().unwrap() };
+                    let id_now = { *id_state3.lock().unwrap_or_else(|e| e.into_inner()) };
                     let id = match id_now {
                       Some(id) => Some(id),
                       None => wait_download_id(&id_state3).await,
@@ -711,7 +731,7 @@ impl TabManager {
                   let app5 = app4.clone();
                   let id_state5 = id_state4.clone();
                   tauri::async_runtime::spawn(async move {
-                    let id_now = { *id_state5.lock().unwrap() };
+                    let id_now = { *id_state5.lock().unwrap_or_else(|e| e.into_inner()) };
                     let id = match id_now {
                       Some(id) => Some(id),
                       None => wait_download_id(&id_state5).await,
@@ -733,7 +753,7 @@ impl TabManager {
                   let app7 = app6.clone();
                   let id_state7 = id_state6.clone();
                   tauri::async_runtime::spawn(async move {
-                    let id_now = { *id_state7.lock().unwrap() };
+                    let id_now = { *id_state7.lock().unwrap_or_else(|e| e.into_inner()) };
                     let id = match id_now {
                       Some(id) => Some(id),
                       None => wait_download_id(&id_state7).await,
@@ -932,7 +952,7 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
 
                 // child webviews：Fixed 内位置 (0,0)，尺寸 (w, content_h)；Fixed 本身在窗口 (0, top)
                 if let Some(state) = app_handle.try_state::<TabManager>() {
-                    let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
+                    let ids: Vec<String> = state.tabs.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect();
                     for id in ids {
                         let label = format!("tab-{}", id);
                         if let Some(wv) = app_handle.get_webview(&label) {
@@ -1026,13 +1046,19 @@ pub async fn create_tab(
     log::info!("[tabs] create_tab: url={}", url);
     // P2：URL scheme 白名单——只允许 http/https、内部页面（file://newtab、shift://）。
     // 拒绝 file:// 其他路径（本地文件泄露）与 javascript:/data: 等危险 scheme
+    // 例外：阅读模式生成的 file:///.../reader/r*.html（enter_reader_mode 写入 app_data/reader，
+    // 内容经 sanitize_html 净化，路径固定）——2026-09-19 修复：此前被白名单误拒，
+    // 阅读模式提取成功但新标签打不开
     let parsed = url
         .parse::<tauri::Url>()
         .map_err(|e| format!("URL 解析失败: {}", e))?;
     match parsed.scheme() {
         "http" | "https" | "shift" => {}
         "file" => {
-            if !url.contains("/newtab/") && !url.contains("world-nav.html") {
+            if !url.contains("/newtab/")
+                && !url.contains("world-nav.html")
+                && !url.contains("/reader/")
+            {
                 return Err("不允许打开本地文件".to_string());
             }
         }
@@ -1065,9 +1091,9 @@ pub async fn create_tab(
 
     // 更新状态：新标签激活，旧标签取消激活
     let old_active = {
-        let mut tabs = state.tabs.lock().unwrap();
-        let mut order = state.order.lock().unwrap();
-        let mut active = state.active_id.lock().unwrap();
+        let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
+        let mut order = state.order.lock().unwrap_or_else(|e| e.into_inner());
+        let mut active = state.active_id.lock().unwrap_or_else(|e| e.into_inner());
 
         for t in tabs.values_mut() {
             t.is_active = false;
@@ -1098,9 +1124,9 @@ pub async fn close_tab(
     let mut next_id: Option<String> = None;
 
     {
-        let mut tabs = state.tabs.lock().unwrap();
-        let mut order = state.order.lock().unwrap();
-        let mut active = state.active_id.lock().unwrap();
+        let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
+        let mut order = state.order.lock().unwrap_or_else(|e| e.into_inner());
+        let mut active = state.active_id.lock().unwrap_or_else(|e| e.into_inner());
 
         let was_active = *active == Some(id.clone());
         let removed = tabs.remove(&id);
@@ -1136,7 +1162,7 @@ pub async fn close_tab(
         let _ = TabManager::set_webview_visible(&app, nid, true);
     }
 
-    let tabs = state.tabs.lock().unwrap();
+    let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
     Ok(next_id.and_then(|nid| tabs.get(&nid).cloned()))
 }
 
@@ -1148,9 +1174,9 @@ pub async fn close_all_tabs(
 ) -> Result<(), String> {
     log::info!("[tabs] close_all_tabs");
     let ids: Vec<String> = {
-        let mut tabs = state.tabs.lock().unwrap();
-        let mut order = state.order.lock().unwrap();
-        let mut active = state.active_id.lock().unwrap();
+        let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
+        let mut order = state.order.lock().unwrap_or_else(|e| e.into_inner());
+        let mut active = state.active_id.lock().unwrap_or_else(|e| e.into_inner());
         let collected: Vec<String> = tabs.keys().cloned().collect();
         tabs.clear();
         order.clear();
@@ -1175,7 +1201,7 @@ pub async fn switch_tab(
     // 先校验标签存在，再写 active_id（否则 active_id 会指向不存在的标签，
     // 导致 go_back/go_forward 报"标签不存在"、UI 显示与实际不符）
     let hibernated_info = {
-        let tabs = state.tabs.lock().unwrap();
+        let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
         tabs.get(&id).map(|t| (t.hibernated, t.url.clone()))
     };
     let Some((is_hibernated, hibernated_url)) = hibernated_info else {
@@ -1187,14 +1213,14 @@ pub async fn switch_tab(
     if is_hibernated {
         log::info!("[perf] 唤醒休眠标签: id={} url={}", id, hibernated_url);
         TabManager::create_webview(&app, &id, &hibernated_url)?;
-        if let Some(t) = state.tabs.lock().unwrap().get_mut(&id) {
+        if let Some(t) = state.tabs.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&id) {
             t.hibernated = false;
         }
         crate::extensions::re_inject(&app).await;
     }
     // 隐藏当前活动 webview
     let old_active = {
-        let mut active = state.active_id.lock().unwrap();
+        let mut active = state.active_id.lock().unwrap_or_else(|e| e.into_inner());
         let old = active.clone();
         *active = Some(id.clone());
         old
@@ -1202,7 +1228,7 @@ pub async fn switch_tab(
 
     // 更新激活状态
     {
-        let mut tabs = state.tabs.lock().unwrap();
+        let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
         for t in tabs.values_mut() {
             t.is_active = t.id == id;
         }
@@ -1218,7 +1244,7 @@ pub async fn switch_tab(
     }
 
     state.touch_active(&id);
-    let tabs = state.tabs.lock().unwrap();
+    let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
     Ok(tabs.get(&id).cloned())
 }
 
@@ -1245,12 +1271,12 @@ pub async fn hibernate_idle_tabs(
         return Ok(0);
     }
     let threshold = now_ts() - minutes * 60;
-    let active = state.active_id.lock().unwrap().clone();
+    let active = state.active_id.lock().unwrap_or_else(|e| e.into_inner()).clone();
 
     // 选出候选：非激活、未休眠、且最后激活时间早于阈值
     let candidates: Vec<String> = {
-        let tabs = state.tabs.lock().unwrap();
-        let last = state.last_active.lock().unwrap();
+        let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
+        let last = state.last_active.lock().unwrap_or_else(|e| e.into_inner());
         tabs.iter()
             .filter(|(id, t)| {
                 !t.hibernated
@@ -1277,7 +1303,7 @@ pub async fn hibernate_idle_tabs(
                 log::warn!("[perf] 标签休眠失败（close）: id={} err={}", id, e);
                 continue;
             }
-            if let Some(t) = state.tabs.lock().unwrap().get_mut(&id) {
+            if let Some(t) = state.tabs.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&id) {
                 t.hibernated = true;
             }
             count += 1;
@@ -1351,7 +1377,7 @@ pub async fn navigate_tab(
         .navigate(parsed_url)
         .map_err(|e| format!("导航失败: {}", e))?;
 
-    let mut tabs = state.tabs.lock().unwrap();
+    let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
     let mut tab = tabs.get_mut(&id);
     if let Some(ref mut t) = tab {
         t.url = url.clone();
@@ -1381,7 +1407,7 @@ pub async fn reload_tab(
             webkit2gtk::WebViewExt::reload(&wv);
         })
         .map_err(|e| format!("刷新失败: {}", e))?;
-    let tabs = state.tabs.lock().unwrap();
+    let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
     Ok(tabs.get(&id).cloned())
 }
 
@@ -1392,7 +1418,7 @@ pub async fn reorder_tabs(
     ids: Vec<String>,
 ) -> Result<(), String> {
     let existing_set: std::collections::HashSet<String> = {
-        let tabs = state.tabs.lock().unwrap();
+        let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
         tabs.keys().cloned().collect()
     };
     let mut new_order: Vec<String> = ids
@@ -1400,7 +1426,7 @@ pub async fn reorder_tabs(
         .filter(|id| existing_set.contains(*id))
         .cloned()
         .collect();
-    let mut order = state.order.lock().unwrap();
+    let mut order = state.order.lock().unwrap_or_else(|e| e.into_inner());
     for id in order.iter() {
         if !new_order.contains(id) {
             new_order.push(id.clone());
@@ -1435,7 +1461,7 @@ pub async fn set_webview_visible(
 ) -> Result<(), String> {
     // 过期指令丢弃：并发乱序时只应用最大 seq
     {
-        let mut last = state.webview_visible_seq.lock().unwrap();
+        let mut last = state.webview_visible_seq.lock().unwrap_or_else(|e| e.into_inner());
         if seq <= *last {
             log::info!(
                 "[tabs] set_webview_visible 过期指令丢弃 seq={} last={} source={:?}",
@@ -1452,7 +1478,7 @@ pub async fn set_webview_visible(
         .ok_or_else(|| "主窗口不存在".to_string())?;
     // 注意：child webview 不在 window.webviews() 列表里（只有 main），
     // 必须从 TabManager 拿已知标签逐个 get_webview
-    let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
+    let ids: Vec<String> = state.tabs.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect();
     let mut count = 0usize;
     for id in ids {
         let label = format!("tab-{}", id);
@@ -1495,7 +1521,7 @@ pub async fn go_back(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
 ) -> Result<Option<Tab>, String> {
-    let id = state.active_id.lock().unwrap().clone();
+    let id = state.active_id.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let Some(id) = id else {
         return Ok(None);
     };
@@ -1510,7 +1536,7 @@ pub async fn go_back(
     webview
         .eval("history.back()")
         .map_err(|e| format!("后退失败: {}", e))?;
-    let tabs = state.tabs.lock().unwrap();
+    let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
     Ok(tabs.get(&id).cloned())
 }
 
@@ -1520,7 +1546,7 @@ pub async fn go_forward(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
 ) -> Result<Option<Tab>, String> {
-    let id = state.active_id.lock().unwrap().clone();
+    let id = state.active_id.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let Some(id) = id else {
         return Ok(None);
     };
@@ -1535,7 +1561,7 @@ pub async fn go_forward(
     webview
         .eval("history.forward()")
         .map_err(|e| format!("前进失败: {}", e))?;
-    let tabs = state.tabs.lock().unwrap();
+    let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
     Ok(tabs.get(&id).cloned())
 }
 
@@ -1547,7 +1573,7 @@ pub async fn update_tab(
     title: Option<String>,
     favicon: Option<String>,
 ) -> Result<Option<Tab>, String> {
-    let mut tabs = state.tabs.lock().unwrap();
+    let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
     let mut tab = tabs.get_mut(&id);
     if let Some(ref mut t) = tab {
         if let Some(new_title) = title {
@@ -1586,7 +1612,7 @@ pub async fn set_bookmarks_bar_visible(
         let w_i32 = w as i32;
         let top_i32 = new_top as i32;
 
-        let ids: Vec<String> = state.tabs.lock().unwrap().keys().cloned().collect();
+        let ids: Vec<String> = state.tabs.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect();
         for id in ids {
             let label = format!("tab-{}", id);
             if let Some(wv) = app.get_webview(&label) {
@@ -1614,7 +1640,7 @@ pub async fn get_nav_state(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
 ) -> Result<serde_json::Value, String> {
-    let id = state.active_id.lock().unwrap().clone();
+    let id = state.active_id.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let Some(id) = id else {
         return Ok(json!({ "canGoBack": false, "canGoForward": false }));
     };
@@ -1632,13 +1658,13 @@ pub async fn get_nav_state(
     webview
         .with_webview(move |pwv| {
             let wv = pwv.inner();
-            let mut guard = nav_clone.lock().unwrap();
+            let mut guard = nav_clone.lock().unwrap_or_else(|e| e.into_inner());
             guard.0 = webkit2gtk::WebViewExt::can_go_back(&wv);
             guard.1 = webkit2gtk::WebViewExt::can_go_forward(&wv);
         })
         .map_err(|e| format!("获取导航状态失败: {}", e))?;
 
-    let (can_go_back, can_go_forward) = *nav.lock().unwrap();
+    let (can_go_back, can_go_forward) = *nav.lock().unwrap_or_else(|e| e.into_inner());
     Ok(json!({ "canGoBack": can_go_back, "canGoForward": can_go_forward }))
 }
 
@@ -1648,7 +1674,7 @@ pub async fn toggle_pin(
     state: tauri::State<'_, TabManager>,
     id: String,
 ) -> Result<Option<Tab>, String> {
-    let mut tabs = state.tabs.lock().unwrap();
+    let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
     let mut tab = tabs.get_mut(&id);
     if let Some(ref mut t) = tab {
         t.is_pinned = !t.is_pinned;
@@ -1663,7 +1689,7 @@ pub async fn toggle_mute(
     state: tauri::State<'_, TabManager>,
     id: String,
 ) -> Result<Option<Tab>, String> {
-    let mut tabs = state.tabs.lock().unwrap();
+    let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
     let mut tab = tabs.get_mut(&id);
     if let Some(ref mut t) = tab {
         t.is_muted = !t.is_muted;

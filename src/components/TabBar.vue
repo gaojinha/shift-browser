@@ -489,7 +489,7 @@ function onFaviconError(e: Event) {
 .tab-bar {
   display: flex;
   align-items: center;
-  height: 40px;
+  height: 44px;
   background: var(--bg-primary);
   padding: 0 8px;
   flex-shrink: 0;

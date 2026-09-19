@@ -14,6 +14,24 @@ const settingsStore = useSettingsStore()
 const engineLabel = computed(() =>
   settingsStore.get('translate_engine') === 'bing' ? 'Bing' : 'Google',
 )
+/** 翻译目标语言（设置 → 通用 → 翻译目标语言，默认中文简体） */
+const targetLang = computed(() => settingsStore.get('translate_target') || 'zh-CN')
+const targetLabel = computed(() => {
+  const map: Record<string, string> = {
+    'zh-CN': '中文（简体）',
+    'zh-TW': '中文（繁体）',
+    en: '英语',
+    ja: '日语',
+    ko: '韩语',
+    fr: '法语',
+    de: '德语',
+    ru: '俄语',
+    es: '西班牙语',
+    pt: '葡萄牙语',
+    it: '意大利语',
+  }
+  return map[targetLang.value] || targetLang.value
+})
 
 const input = ref('')
 const output = ref('')
@@ -61,7 +79,7 @@ async function doTranslate() {
   try {
     const r = await invoke<{ ok: boolean; msg?: string; data?: string }>(
       'translate_text',
-      { text, target: 'zh-CN' },
+      { text, target: targetLang.value },
     )
     window.clearInterval(tick)
     if (r && r.ok && r.data) {
@@ -132,7 +150,7 @@ const charCount = (s: string) => s.length
         <!-- 头部 -->
         <div class="tr-header">
           <span class="tr-title">🌐 翻译</span>
-          <span class="tr-meta">{{ engineLabel }} 翻译 · →中文</span>
+          <span class="tr-meta">{{ engineLabel }} 翻译 · →{{ targetLabel }}</span>
           <button class="tr-close" title="关闭 (Esc)" aria-label="关闭" @click="emit('close')">✕</button>
         </div>
 
