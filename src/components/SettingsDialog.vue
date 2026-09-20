@@ -458,6 +458,41 @@ async function resetPrivacyStats() {
   }
 }
 
+/** 隐私防护自测（阶段 2：信任需要证明） */
+interface PrivacySelfCheck {
+  id: string
+  label: string
+  status: string
+  detail: string
+}
+interface PrivacySelfTestReport {
+  shield_level: string
+  hostname: string
+  whitelisted: boolean
+  total: number
+  passed: number
+  checks: PrivacySelfCheck[]
+}
+const privacySelfTest = ref<PrivacySelfTestReport | null>(null)
+const privacySelfTestRunning = ref(false)
+async function runPrivacySelfTest() {
+  privacySelfTestRunning.value = true
+  try {
+    const r = await invoke<PrivacySelfTestReport>('privacy_selftest')
+    privacySelfTest.value = r
+    if (r.passed === r.total) {
+      useToastStore().success(`自测通过：${r.passed}/${r.total} 项防护已生效`)
+    } else {
+      useToastStore().show(`自测完成：${r.passed}/${r.total} 项通过`)
+    }
+  } catch (e) {
+    console.error('[settings] 隐私自测失败:', e)
+    useToastStore().error('自测失败：请先打开一个网页')
+  } finally {
+    privacySelfTestRunning.value = false
+  }
+}
+
 /** 广告拦截开关：settings 表是唯一状态源，set_adblock_enabled 只负责把开关同步给注入器 */
 async function onToggleAdblock() {
   const current = settingsStore.get('adblock_enabled') !== 'false'
@@ -939,6 +974,40 @@ async function onRemoveKeyword(k: string) {
                 <button class="mini-btn" style="margin-left: 8px" @click="resetPrivacyStats">
                   重置
                 </button>
+              </div>
+              <div class="kw-block" v-if="privacyLevel !== 'off'" style="margin-top: 10px">
+                <div class="kw-hint">
+                  <b>防护自测</b>：在当前标签页核对各项防护是否<strong>真的生效</strong>（对齐「信任需要证明」）。
+                  需先打开一个网页。
+                  <button
+                    class="mini-btn primary"
+                    style="margin-left: 8px"
+                    :disabled="privacySelfTestRunning"
+                    @click="runPrivacySelfTest"
+                  >
+                    {{ privacySelfTestRunning ? '自测中…' : '运行自测' }}
+                  </button>
+                </div>
+                <div v-if="privacySelfTest" class="kw-hint" style="margin-top: 6px">
+                  档位 <b>{{ privacySelfTest.shield_level }}</b> · 站点
+                  <b>{{ privacySelfTest.hostname || '(未知)' }}</b> · 通过
+                  <b>{{ privacySelfTest.passed }}/{{ privacySelfTest.total }}</b>
+                  <span v-if="privacySelfTest.whitelisted">（白名单站点，加噪已跳过）</span>
+                </div>
+                <div v-if="privacySelfTest" class="ps-list">
+                  <div
+                    v-for="c in privacySelfTest.checks"
+                    :key="c.id"
+                    class="ps-item"
+                    :class="c.status"
+                  >
+                    <span class="ps-icon">{{
+                      c.status === 'pass' ? '✅' : c.status === 'fail' ? '❌' : '➖'
+                    }}</span>
+                    <span class="ps-label">{{ c.label }}</span>
+                    <span class="ps-detail">{{ c.detail }}</span>
+                  </div>
+                </div>
               </div>
               <div class="field">
                 <label>广告拦截</label>
@@ -1692,5 +1761,35 @@ async function onRemoveKeyword(k: string) {
 }
 .kw-textarea:focus {
   border-color: var(--accent);
+}
+.ps-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ps-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.08);
+}
+.ps-item.fail {
+  background: rgba(220, 60, 60, 0.12);
+}
+.ps-icon {
+  flex: 0 0 auto;
+}
+.ps-label {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+.ps-detail {
+  flex: 1 1 auto;
+  opacity: 0.75;
+  text-align: right;
 }
 </style>

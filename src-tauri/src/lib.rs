@@ -360,6 +360,7 @@ pub fn run() {
       // 隐私防护统计（防护看得见）
       extensions::get_privacy_stats,
       extensions::reset_privacy_stats,
+      extensions::privacy_selftest,
       // 新标签页
       newtab::refresh_newtab,
       newtab::get_newtab_url,
