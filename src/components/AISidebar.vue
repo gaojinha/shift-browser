@@ -92,7 +92,22 @@ interface AgentActionRequest {
   requestId: string
   description: string
 }
+interface AgentStep {
+  step: number
+  action: string
+  selector?: string
+  value?: string
+  direction?: string
+  url?: string
+  ms?: number
+}
+interface MultiStepPlan {
+  requestId: string
+  description: string
+  steps: AgentStep[]
+}
 const pendingAction = ref<AgentActionRequest | null>(null)
+const pendingMultiStep = ref<MultiStepPlan | null>(null)
 
 async function onAgentActionRequest(e: { payload: AgentActionRequest }) {
   pendingAction.value = e.payload
@@ -107,10 +122,24 @@ async function confirmAction(approved: boolean) {
     console.error('[agent] 确认回调失败:', err)
   }
 }
+async function confirmMultiStep(approved: boolean) {
+  const plan = pendingMultiStep.value
+  if (!plan) return
+  pendingMultiStep.value = null
+  try {
+    await invoke('agent_confirm_multi_step', { requestId: plan.requestId, approved })
+  } catch (err) {
+    console.error('[agent] 多步确认回调失败:', err)
+  }
+}
+async function onAgentMultiStepRequest(e: { payload: MultiStepPlan }) {
+  pendingMultiStep.value = e.payload
+}
 
 let unlistenAction: (() => void) | null = null
 onMounted(async () => {
   unlistenAction = await listen<AgentActionRequest>('agent-action-request', onAgentActionRequest)
+  await listen<MultiStepPlan>('agent-multi-step-request', onAgentMultiStepRequest)
 })
 onUnmounted(() => {
   unlistenAction?.()
@@ -166,6 +195,21 @@ onUnmounted(() => {
         <div class="agent-confirm-btns">
           <button class="agent-confirm-allow" @click="confirmAction(true)">允许</button>
           <button class="agent-confirm-deny" @click="confirmAction(false)">拒绝</button>
+        </div>
+      </div>
+
+      <!-- 多步任务确认卡片（阶段 1.6：多步编排提示词） -->
+      <div v-if="pendingMultiStep" class="agent-confirm">
+        <div class="agent-confirm-title">🤖 AI 想执行多步任务</div>
+        <div class="agent-confirm-desc">{{ pendingMultiStep.description }}</div>
+        <div class="multi-step-list">
+          <div v-for="step in pendingMultiStep.steps" :key="step.step" class="multi-step-item">
+            {{ step.step }}. {{ step.action }} {{ step.selector ? '「' + step.selector + '」' : '' }} {{ step.value ? '填「' + step.value + '」' : '' }}
+          </div>
+        </div>
+        <div class="agent-confirm-btns">
+          <button class="agent-confirm-allow" @click="confirmMultiStep(true)">允许全部</button>
+          <button class="agent-confirm-deny" @click="confirmMultiStep(false)">拒绝</button>
         </div>
       </div>
 

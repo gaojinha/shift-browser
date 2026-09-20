@@ -332,6 +332,7 @@ pub fn run() {
       mcp_cmd::mcp_get_audit_log,
       // Agent 执行层（阶段 1.4）
       agent_cmd::agent_confirm_action,
+      agent_cmd::agent_confirm_multi_step,
       agent_cmd::agent_debug_execute,
       // 扩展管理
       extensions::load_extension,

@@ -17,7 +17,64 @@ pub const AGENT_ACTIONS: [&str; 9] = [
     "click", "fill", "scroll", "read", "wait", "navigate", "back", "snapshot", "submit",
 ];
 
-/// OpenAI function calling 工具定义（`browser_action`）
+/// 多步计划中的单步（AI 编排提示词的最小单元）
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct AgentStep {
+    pub step: u32,
+    pub action: String,
+    pub selector: Option<String>,
+    pub value: Option<String>,
+    pub direction: Option<String>,
+    pub url: Option<String>,
+    pub ms: Option<u64>,
+}
+
+/// 多步任务计划（AI 生成的编排提示词）：一步确认、按序执行
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct MultiStepPlan {
+    pub steps: Vec<AgentStep>,
+    pub description: String,
+}
+
+/// 动作描述（前端确认卡片展示用，多步版）
+pub fn describe_multi_step(plan: &MultiStepPlan) -> String {
+    format!("{}（共 {} 步）", plan.description, plan.steps.len())
+}
+
+/// OpenAI function calling 工具定义（`browser_action_plan`：多步编排提示词）
+pub fn browser_action_plan_tool() -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "browser_action_plan",
+            "description": "生成多步任务编排提示词（需用户一次性确认整个计划后按序执行）。steps 为有序动作列表，每步同 browser_action 参数。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": { "type": "string", "description": "计划描述（给用户看）" },
+                    "steps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "action": { "type": "string", "enum": AGENT_ACTIONS },
+                                "selector": { "type": "string" },
+                                "value": { "type": "string" },
+                                "direction": { "type": "string", "enum": ["up", "down"] },
+                                "url": { "type": "string" },
+                                "ms": { "type": "integer" }
+                            },
+                            "required": ["action"]
+                        }
+                    }
+                },
+                "required": ["description", "steps"]
+            }
+        }
+    })
+}
+
+/// /// OpenAI function calling 工具定义（`browser_action`）
 pub fn browser_action_tool() -> Value {
     json!({
         "type": "function",

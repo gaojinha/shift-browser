@@ -334,6 +334,29 @@ pub async fn ai_chat(
                         }
                         Err(e) => format!("动作参数解析失败: {}", e),
                     }
+                } else if call.function.name == "browser_action_plan" {
+                    // 多步任务编排提示词：整体确认 + 按序执行
+                    match serde_json::from_value::<crate::engine::agent::MultiStepPlan>(args.clone()) {
+                        Ok(plan) => {
+                            match crate::agent_cmd::request_multi_step_action(&app, &plan).await {
+                                Ok(true) => {
+                                    let window = app
+                                        .get_webview_window("main")
+                                        .ok_or_else(|| "主窗口不存在".to_string())?;
+                                    let state = app
+                                        .try_state::<crate::tabs::TabManager>()
+                                        .ok_or_else(|| "标签管理器未初始化".to_string())?;
+                                    match crate::agent_cmd::execute_multi_step_action(&app, &window, &state, &plan).await {
+                                        Ok(text) => format!("多步计划已执行：\n{}", text),
+                                        Err(e) => format!("多步计划执行失败: {}", e),
+                                    }
+                                }
+                                Ok(false) => "用户拒绝了该多步计划".to_string(),
+                                Err(e) => format!("多步计划确认失败: {}", e),
+                            }
+                        }
+                        Err(e) => format!("多步计划解析失败: {}", e),
+                    }
                 } else {
                     // MCP 工具
                     let result = crate::engine::mcp::call_tool(&db.pool, &call.function.name, args).await;

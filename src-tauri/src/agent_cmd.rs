@@ -66,7 +66,81 @@ pub fn agent_confirm_action(request_id: String, approved: bool) -> Result<(), St
     Ok(())
 }
 
-/// 执行动作（确认后调用）。仅当前活动标签。
+/// 请求多步动作（AI 工具循环调用）：发确认事件给前端，等待用户一次性确认整个计划。
+pub async fn request_multi_step_action(
+    app: &AppHandle,
+    plan: &crate::engine::agent::MultiStepPlan,
+) -> Result<bool, String> {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let description = crate::engine::agent::describe_multi_step(plan);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+
+    pending().lock().unwrap().insert(request_id.clone(), tx);
+
+    let _ = app.emit(
+        "agent-multi-step-request",
+        serde_json::json!({
+            "requestId": request_id,
+            "description": description,
+            "steps": plan.steps.len(),
+        }),
+    );
+    log::info!("[agent] 请求多步动作确认: {} ({} 步, {})", description, plan.steps.len(), request_id);
+
+    match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
+        Ok(Ok(approved)) => {
+            log::info!("[agent] 多步动作确认结果: approved={}", approved);
+            Ok(approved)
+        }
+        Ok(Err(_)) => Err("多步确认通道已关闭".to_string()),
+        Err(_) => {
+            pending().lock().unwrap().remove(&request_id);
+            Err("多步确认超时（120 秒未响应）".to_string())
+        }
+    }
+}
+
+/// 前端多步确认回调：用户点"允许全部/拒绝"后调用
+#[tauri::command]
+pub fn agent_confirm_multi_step(request_id: String, approved: bool) -> Result<(), String> {
+    let mut map = pending().lock().unwrap();
+    let tx = map
+        .remove(&request_id)
+        .ok_or_else(|| "多步确认请求不存在或已过期".to_string())?;
+    let _ = tx.send(approved);
+    log::info!("[agent] 用户确认多步动作: request={} approved={}", request_id, approved);
+    Ok(())
+}
+
+/// 执行多步动作（确认后调用）。按序执行每步，仅当前活动标签。
+/// 返回动作结果文本（每步结果拼接）。
+pub async fn execute_multi_step_action(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+    state: &crate::tabs::TabManager,
+    plan: &crate::engine::agent::MultiStepPlan,
+) -> Result<String, String> {
+    let mut results = Vec::new();
+    for step in &plan.steps {
+        let params = crate::engine::agent::AgentActionParams {
+            action: step.action.clone(),
+            selector: step.selector.clone(),
+            value: step.value.clone(),
+            direction: step.direction.clone(),
+            url: step.url.clone(),
+            ms: step.ms,
+        };
+        let desc = crate::engine::agent::describe_action(&params);
+        log::info!("[agent] 多步执行第 {} 步: {}", step.step, desc);
+        match execute_agent_action(app, window, state, &params).await {
+            Ok(text) => results.push(format!("第 {} 步 {}：{}", step.step, desc, text)),
+            Err(e) => results.push(format!("第 {} 步 {}：失败 ({})", step.step, desc, e)),
+        }
+    }
+    Ok(results.join("\n"))
+}
+
+/// /// 执行动作（确认后调用）。仅当前活动标签。
 /// 返回动作结果文本（供 AI 继续分析）。
 pub async fn execute_agent_action(
     app: &AppHandle,
