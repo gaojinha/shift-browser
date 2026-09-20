@@ -337,6 +337,7 @@ pub fn run() {
       agent_cmd::agent_action_record,
       agent_cmd::agent_action_history,
       agent_cmd::agent_action_replay_or_retry,
+      agent_cmd::agent_actions_batch_retry,
       agent_cmd::agent_debug_execute,
       // 扩展管理
       extensions::load_extension,

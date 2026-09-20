@@ -296,6 +296,42 @@ pub fn last_failed_step() -> Result<u64, String> {
         .ok_or_else(|| "没有失败过的动作".to_string())
 }
 
+/// 从历史里挑出**所有失败步**并重建参数（整批重试地基）。
+/// 先收集步号再重建，避免与 `rebuild_params` 重复加锁（std Mutex 不可重入）。
+pub fn failed_action_params() -> Result<Vec<(u64, AgentActionParams)>, String> {
+    let steps: Vec<u64> = {
+        let h = action_history();
+        h.iter().filter(|i| !i.ok).map(|i| i.step).collect()
+    };
+    if steps.is_empty() {
+        return Err("历史里没有失败过的动作".to_string());
+    }
+    steps
+        .into_iter()
+        .map(|s| rebuild_params(s).map(|p| (s, p)))
+        .collect()
+}
+
+/// 把批量重建的失败步参数转成多步计划（供 `request_multi_step_action` 整批确认）。
+pub fn batch_retry_plan(pairs: &[(u64, AgentActionParams)]) -> MultiStepPlan {
+    let steps = pairs
+        .iter()
+        .map(|(_, p)| AgentStep {
+            step: 0,
+            action: p.action.clone(),
+            selector: p.selector.clone(),
+            value: p.value.clone(),
+            direction: p.direction.clone(),
+            url: p.url.clone(),
+            ms: p.ms,
+        })
+        .collect();
+    MultiStepPlan {
+        steps,
+        description: format!("整批重试 {} 个失败动作", pairs.len()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,5 +411,38 @@ mod tests {
             ms: None,
         };
         assert_eq!(describe_action(&p), "点击元素「#submit」");
+    }
+
+    #[test]
+    fn failed_action_params_collects_failures() {
+        let p = AgentActionParams {
+            action: "click".to_string(),
+            selector: Some("#nope".to_string()),
+            value: None,
+            direction: None,
+            url: None,
+            ms: None,
+        };
+        let step = record_action(&p, "失败: 元素未找到");
+        let pairs = failed_action_params().expect("应有失败步");
+        assert!(pairs.iter().any(|(s, _)| *s == step), "整批重建应含刚记录的失败步");
+    }
+
+    #[test]
+    fn batch_retry_plan_shape() {
+        let p = AgentActionParams {
+            action: "fill".to_string(),
+            selector: Some("#q".to_string()),
+            value: Some("你好".to_string()),
+            direction: None,
+            url: None,
+            ms: None,
+        };
+        let pairs = vec![(7u64, p)];
+        let plan = batch_retry_plan(&pairs);
+        assert_eq!(plan.steps.len(), 1);
+        assert_eq!(plan.steps[0].action, "fill");
+        assert_eq!(plan.steps[0].value.as_deref(), Some("你好"));
+        assert!(plan.description.contains('1'));
     }
 }

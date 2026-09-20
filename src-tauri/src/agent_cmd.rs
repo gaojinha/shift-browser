@@ -204,6 +204,24 @@ pub async fn agent_action_replay_or_retry(
     }
 }
 
+/// 整批重试：把历史里所有失败步重建参数 → 走多步确认链 → 按序执行。
+/// 铁律①：整体一次人工确认（复用 request_multi_step_action），确认后由
+/// execute_multi_step_action 逐条走 execute_agent_action（白名单 + 仅当前标签）。
+#[tauri::command]
+pub async fn agent_actions_batch_retry(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, crate::tabs::TabManager>,
+) -> Result<String, String> {
+    let pairs = crate::engine::agent::failed_action_params()?;
+    let plan = crate::engine::agent::batch_retry_plan(&pairs);
+    let approved = request_multi_step_action(&app, &plan).await?;
+    if !approved {
+        return Ok("整批重试已被用户拒绝".to_string());
+    }
+    execute_multi_step_action(&app, &window, &state, &plan).await
+}
+
 pub async fn execute_agent_action(
     app: &AppHandle,
     window: &tauri::WebviewWindow,
