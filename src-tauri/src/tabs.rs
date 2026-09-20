@@ -198,6 +198,17 @@ impl TabManager {
         (count, active, ai)
     }
 
+    /// 活动标签的 URL（GPC 站点声明检测等用）
+    pub fn active_url(&self) -> Option<String> {
+        let id = self
+            .active_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()?;
+        let tabs = self.tabs.lock().unwrap_or_else(|e| e.into_inner());
+        tabs.get(&id).map(|t| t.url.clone())
+    }
+
     pub fn top_offset(&self) -> f64 {
         if *self
             .show_bookmarks_bar

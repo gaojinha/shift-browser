@@ -60,7 +60,7 @@ fn fetch_and_extract(url: &str) -> Result<readability::extractor::Product, Strin
 }
 
 /// 用系统 curl 抓取，手动跟随重定向并逐跳 SSRF 校验
-fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<String, String> {
+pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<String, String> {
     let mut cur = url.to_string();
     for _ in 0..5 {
         // 单跳探测：拿状态码 + 重定向目标（curl 不带 -L 不自动跟随）
@@ -139,7 +139,7 @@ fn validate_public_host_blocking(url: &str) -> Result<(), String> {
 /// SSRF 校验：目标主机必须是公网地址。
 /// - IP 字面量（127.0.0.1 / 10.x / 192.168.x / 169.254.x / ::1 / fc00:: / fe80:: 等）直接拒绝
 /// - 域名 host 做 DNS 解析后逐一校验，任一解析结果落在内网即拒绝
-async fn validate_public_url(url: &str) -> Result<(), String> {
+pub(crate) async fn validate_public_url(url: &str) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| {
         log::warn!("[reader] URL 解析失败: {} -> {}", url, e);
         "URL 格式不合法".to_string()

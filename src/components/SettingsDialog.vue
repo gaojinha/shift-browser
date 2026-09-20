@@ -493,6 +493,30 @@ async function runPrivacySelfTest() {
   }
 }
 
+/** GPC 站点声明检测（阶段 2：GPC 完整化） */
+interface GpcSiteStatus {
+  origin: string
+  url: string
+  reachable: boolean
+  declared: boolean | null
+  last_update: string | null
+  summary: string
+  error: string | null
+}
+const gpcSite = ref<GpcSiteStatus | null>(null)
+const gpcChecking = ref(false)
+async function checkGpcSite() {
+  gpcChecking.value = true
+  try {
+    gpcSite.value = await invoke<GpcSiteStatus>('gpc_site_check')
+  } catch (e) {
+    console.error('[settings] GPC 站点检测失败:', e)
+    useToastStore().error('检测失败：请先打开一个网页')
+  } finally {
+    gpcChecking.value = false
+  }
+}
+
 /** 广告拦截开关：settings 表是唯一状态源，set_adblock_enabled 只负责把开关同步给注入器 */
 async function onToggleAdblock() {
   const current = settingsStore.get('adblock_enabled') !== 'false'
@@ -1007,6 +1031,24 @@ async function onRemoveKeyword(k: string) {
                     <span class="ps-label">{{ c.label }}</span>
                     <span class="ps-detail">{{ c.detail }}</span>
                   </div>
+                </div>
+              </div>
+              <div class="kw-block" v-if="privacyLevel !== 'off'" style="margin-top: 10px">
+                <div class="kw-hint">
+                  <b>站点 GPC 声明</b>：抓取本站的
+                  <code>/.well-known/gpc.json</code>，看站点是否声明遵守 GPC（需先打开网页）。
+                  <button
+                    class="mini-btn primary"
+                    style="margin-left: 8px"
+                    :disabled="gpcChecking"
+                    @click="checkGpcSite"
+                  >
+                    {{ gpcChecking ? '检测中…' : '检测本站声明' }}
+                  </button>
+                </div>
+                <div v-if="gpcSite" class="kw-hint" style="margin-top: 6px">
+                  <b>{{ gpcSite.origin }}</b> · {{ gpcSite.summary }}
+                  <span v-if="gpcSite.last_update">（更新于 {{ gpcSite.last_update }}）</span>
                 </div>
               </div>
               <div class="field">

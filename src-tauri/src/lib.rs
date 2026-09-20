@@ -5,6 +5,7 @@ mod db;
 mod engine;
 mod extensions;
 mod feed;
+mod gpc;
 mod mcp_cmd;
 mod netmon;
 mod newtab;
@@ -361,6 +362,8 @@ pub fn run() {
       extensions::get_privacy_stats,
       extensions::reset_privacy_stats,
       extensions::privacy_selftest,
+      // GPC 站点声明感知（阶段 2：GPC 完整化）
+      gpc::gpc_site_check,
       // 新标签页
       newtab::refresh_newtab,
       newtab::get_newtab_url,
