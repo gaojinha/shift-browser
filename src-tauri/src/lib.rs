@@ -1,5 +1,6 @@
 mod agent_cmd;
 mod ai;
+mod audit;
 mod content_cmd;
 mod db;
 mod engine;
@@ -364,6 +365,8 @@ pub fn run() {
       extensions::privacy_selftest,
       // GPC 站点声明感知（阶段 2：GPC 完整化）
       gpc::gpc_site_check,
+      // 零遥测审计（阶段 2：全量网络出口清单）
+      audit::egress_audit,
       // 新标签页
       newtab::refresh_newtab,
       newtab::get_newtab_url,

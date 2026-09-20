@@ -517,6 +517,37 @@ async function checkGpcSite() {
   }
 }
 
+/** 零遥测审计（阶段 2：全量网络出口清单） */
+interface EgressConn {
+  pid: number
+  proto: string
+  remote_ip: string
+  remote_port: number
+  state: string
+}
+interface EgressReport {
+  processes: number
+  connections: EgressConn[]
+  distinct_remotes: number
+  loopback: number
+  external: number
+  checked_at: number
+  note: string
+}
+const egressReport = ref<EgressReport | null>(null)
+const egressRunning = ref(false)
+async function runEgressAudit() {
+  egressRunning.value = true
+  try {
+    egressReport.value = await invoke<EgressReport>('egress_audit')
+  } catch (e) {
+    console.error('[settings] 外联审计失败:', e)
+    useToastStore().error('外联审计失败')
+  } finally {
+    egressRunning.value = false
+  }
+}
+
 /** 广告拦截开关：settings 表是唯一状态源，set_adblock_enabled 只负责把开关同步给注入器 */
 async function onToggleAdblock() {
   const current = settingsStore.get('adblock_enabled') !== 'false'
@@ -1049,6 +1080,41 @@ async function onRemoveKeyword(k: string) {
                 <div v-if="gpcSite" class="kw-hint" style="margin-top: 6px">
                   <b>{{ gpcSite.origin }}</b> · {{ gpcSite.summary }}
                   <span v-if="gpcSite.last_update">（更新于 {{ gpcSite.last_update }}）</span>
+                </div>
+              </div>
+              <div class="kw-block" v-if="privacyLevel !== 'off'" style="margin-top: 10px">
+                <div class="kw-hint">
+                  <b>外联审计</b>：列出本应用及其子进程当前的全部网络出口连接（只读
+                  <code>/proc</code>，零出网）——「可验证无外联」。
+                  <button
+                    class="mini-btn primary"
+                    style="margin-left: 8px"
+                    :disabled="egressRunning"
+                    @click="runEgressAudit"
+                  >
+                    {{ egressRunning ? '审计中…' : '运行审计' }}
+                  </button>
+                </div>
+                <div v-if="egressReport" class="kw-hint" style="margin-top: 6px">
+                  进程 <b>{{ egressReport.processes }}</b> · 连接
+                  <b>{{ egressReport.connections.length }}</b> · 外网
+                  <b>{{ egressReport.external }}</b> · 本机回环
+                  <b>{{ egressReport.loopback }}</b> · 去重端点
+                  <b>{{ egressReport.distinct_remotes }}</b>
+                </div>
+                <div v-if="egressReport && egressReport.connections.length > 0" class="ps-list">
+                  <div
+                    v-for="(c, i) in egressReport.connections"
+                    :key="i"
+                    class="ps-item"
+                    :class="{ fail: c.remote_ip.indexOf('127.') !== 0 && c.remote_ip !== '::1' }"
+                  >
+                    <span class="ps-icon">{{
+                      c.remote_ip.indexOf('127.') === 0 || c.remote_ip === '::1' ? '🏠' : '🌐'
+                    }}</span>
+                    <span class="ps-label">{{ c.remote_ip }}:{{ c.remote_port }}</span>
+                    <span class="ps-detail">{{ c.proto }} · {{ c.state }} · pid {{ c.pid }}</span>
+                  </div>
                 </div>
               </div>
               <div class="field">
