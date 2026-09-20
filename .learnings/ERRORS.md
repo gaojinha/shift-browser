@@ -150,4 +150,12 @@ webkit2gtk::WebInspectorExt::show(&inspector);
 **错误 3（Send）**: `MutexGuard` 跨 `.await` → Tauri 命令 Future 非 `Send` 被拒。光 `drop(guard)` 不够（编译器仍保守判定"maybe used later"），必须用**显式作用域块** `{ let guard = ...; ... }` 把 guard 关死在块内。
 **正确**: ①Tauri 命令带引用参数必须返回 `Result<T,E>`；②同步锁 guard 绝不跨 await，用作用域块限定；③编译错误成堆时，先通读相关函数、把每个值的类型（尤其 Option/Result 嵌套）理清，**一次性重写整段**，禁止逐行补丁。
 **预防**: 编译错误 >3 个 → 停下来通读报错文件的整段逻辑，画清类型流再动手；一个错误改超过 2 次还没对，就说明没读懂，回去重读而不是继续试。
+
+## 2026-09-20 — python 嵌 Rust 字符串混入草稿占位符（TemporaryId 污染）
+
+**类别**: correction
+**场景**: 阶段 1.9 整批重试，用 `python3 - <<'PYEOF'` 在 bash 里拼一大段 Rust 代码做插入。
+**错误**: 插入的代码里混进了 `TemporaryId` 这种**草稿占位符**——`let plan = batch_plan(&pairs TemporaryId);`，编译直接报 `expected one of ..., found TemporaryId`。根因：写 python 字符串时把"设计草稿"里没清理的占位文本一起粘进去了；Rust 代码越长，手滑混入垃圾的概率越高。
+**正确**: **禁止用 python/bash 嵌大段 Rust 代码做插入**。改 Rust 一律用 `edit` 工具做精确 oldString→newString 替换（先 `read` 拿真锚点）。python 只用于"纯文本小替换 + assert 唯一性"这类简单场景。
+**预防**: ①任何"生成代码"的操作，生成后必须 `cargo build` 验证，别信"✓ 已插入"的自我报告；②插入前先 `git status` 确认工作区干净，出问题 `git checkout --` 秒回干净基点；③本会话还犯过"反复 sed 读同一文件，把多次输出叠加当磁盘真身"的幻觉——**磁盘真身只认 `read` 工具或 `git status`，不认 bash 里滚动的碎片输出**。
 ---
