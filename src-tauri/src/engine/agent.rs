@@ -76,7 +76,7 @@ pub fn browser_action_plan_tool() -> Value {
     })
 }
 
-/// /// OpenAI function calling 工具定义（`browser_action`）
+/// OpenAI function calling 工具定义（`browser_action`）
 pub fn browser_action_tool() -> Value {
     json!({
         "type": "function",
@@ -97,6 +97,14 @@ pub fn browser_action_tool() -> Value {
             }
         }
     })
+}
+
+/// Agent 工具定义集合（AI 工具循环注册用）：单步动作 + 多步计划。
+///
+/// 单独抽出来是为了**防止"定义了工具却没注册"**（历史 bug：browser_action_plan
+/// 有定义有处理器，但工具清单里漏了它，模型永远调不到）。
+pub fn agent_tool_defs() -> Vec<Value> {
+    vec![browser_action_tool(), browser_action_plan_tool()]
 }
 
 /// 动作参数（来自 AI 的 tool_call arguments）
@@ -444,5 +452,19 @@ mod tests {
         assert_eq!(plan.steps[0].action, "fill");
         assert_eq!(plan.steps[0].value.as_deref(), Some("你好"));
         assert!(plan.description.contains('1'));
+    }
+
+    #[test]
+    fn agent_tool_defs_include_both_tools() {
+        let defs = agent_tool_defs();
+        let names: Vec<String> = defs
+            .iter()
+            .filter_map(|d| d["function"]["name"].as_str().map(|s| s.to_string()))
+            .collect();
+        assert!(names.contains(&"browser_action".to_string()), "缺 browser_action");
+        assert!(
+            names.contains(&"browser_action_plan".to_string()),
+            "缺 browser_action_plan（多步计划工具必须注册进 AI 工具清单）"
+        );
     }
 }

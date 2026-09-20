@@ -282,7 +282,7 @@ pub async fn ai_chat(
             tool_defs.extend(crate::engine::mcp::to_openai_tools(&t));
         }
     }
-    tool_defs.push(crate::engine::agent::browser_action_tool());
+    tool_defs.extend(crate::engine::agent::agent_tool_defs());
     let tools = Some(tool_defs);
     log::info!("[ai] 本次对话携带 {} 个工具定义（function calling）", tools.as_ref().map(|t| t.len()).unwrap_or(0));
 
