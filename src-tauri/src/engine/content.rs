@@ -23,6 +23,8 @@ pub struct AriaElement {
     pub name: String,
     /// 标签名（button/input/a/…）用于定位回查
     pub tag: String,
+    /// 是否隐藏（aria-hidden="true"）—— Agent 应忽略隐藏元素
+    pub hidden: bool,
 }
 
 /// 语义快照（页面理解层的核心产出）
@@ -45,9 +47,76 @@ pub struct Snapshot {
     /// WebMCP 工具声明（阶段 1.5 polyfill 捕获，最多 10 个）
     #[serde(default)]
     pub webmcp_tools: Vec<WebmcpToolDef>,
-    /// 无障碍树语义元素（阶段 1.5：aria-label/role，最多 15 个，AI Agent 语义定位用）
+    /// 无障碍树语义元素（阶段 1.5：aria-label/role，最多 30 个，AI Agent 语义定位用）
     #[serde(default)]
     pub aria: Vec<AriaElement>,
+}
+
+/// AI 友好度报告（阶段 1.7：对齐 Lighthouse Agentic Browsing 四信号）
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AiFriendlinessReport {
+    /// 综合评分（0-100）
+    pub overall: f32,
+    /// 无障碍树评分（0-100）：有程序化名称的 aria 元素占比
+    pub aria_score: f32,
+    /// 表单可访问性评分（0-100）：有 label 的表单占比
+    pub forms_score: f32,
+    /// 改进建议（评分低时给出）
+    pub suggestions: Vec<String>,
+}
+
+/// 计算页面对 AI 的友好度（基于语义快照的无障碍树 + 表单可访问性）。
+/// 评分逻辑：
+///   aria_score = 有 name 的 aria 元素数 / 总 aria 元素数（忽略 hidden）
+///   forms_score = 有 label 的表单数 / 总表单数
+///   overall = aria_score * 0.6 + forms_score * 0.4
+pub fn ai_friendliness(snap: &Snapshot) -> AiFriendlinessReport {
+    // 无障碍树评分
+    let aria_total = snap.aria.len();
+    let aria_named = snap.aria.iter().filter(|a| !a.hidden && !a.name.is_empty()).count();
+    let aria_score = if aria_total > 0 {
+        (aria_named as f32 / aria_total as f32) * 100.0
+    } else {
+        0.0
+    };
+
+    // 表单可访问性评分：表单有 name 或 label 字段
+    let forms_total = snap.forms.len();
+    let forms_labeled = snap.forms.iter()
+        .filter(|f| !f.name.is_empty() || !f.placeholder.is_empty())
+        .count();
+    let forms_score = if forms_total > 0 {
+        (forms_labeled as f32 / forms_total as f32) * 100.0
+    } else {
+        0.0
+    };
+
+    let overall = aria_score * 0.6 + forms_score * 0.4;
+
+    // 改进建议
+    let mut suggestions = Vec::new();
+    if aria_score < 80.0 {
+        suggestions.push(format!(
+            "无障碍树覆盖不足（{:.0}%）：为可交互元素添加 aria-label",
+            aria_score
+        ));
+    }
+    if forms_score < 80.0 {
+        suggestions.push(format!(
+            "表单可访问性不足（{:.0}%）：为表单字段添加 label 或 aria-label",
+            forms_score
+        ));
+    }
+    if suggestions.is_empty() {
+        suggestions.push("页面 AI 友好度良好".to_string());
+    }
+
+    AiFriendlinessReport {
+        overall,
+        aria_score,
+        forms_score,
+        suggestions,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

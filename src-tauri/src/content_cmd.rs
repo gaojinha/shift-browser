@@ -61,7 +61,14 @@ pub async fn content_extract(url: String) -> Result<ContentExtract, String> {
     })
 }
 
-/// 正文提取结果
+/// 计算页面对 AI 的友好度（基于语义快照的无障碍树 + 表单可访问性）
+#[tauri::command]
+pub async fn ai_friendliness(app: AppHandle) -> Result<crate::engine::content::AiFriendlinessReport, String> {
+    let snap = content_snapshot(app.clone()).await?;
+    Ok(crate::engine::content::ai_friendliness(&snap))
+}
+
+/// /// 正文提取结果
 #[derive(Debug, serde::Serialize)]
 pub struct ContentExtract {
     pub title: String,
