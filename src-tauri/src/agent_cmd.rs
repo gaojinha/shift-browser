@@ -142,6 +142,68 @@ pub async fn execute_multi_step_action(
 
 /// /// 执行动作（确认后调用）。仅当前活动标签。
 /// 返回动作结果文本（供 AI 继续分析）。
+/// 记录一条动作执行（审计/回放/重试的历史地基）。
+#[tauri::command]
+pub async fn agent_action_record(
+    _app: AppHandle,
+    action: String,
+    selector: Option<String>,
+    value: Option<String>,
+    direction: Option<String>,
+    url: Option<String>,
+    ms: Option<u64>,
+    result: String,
+) -> Result<u64, String> {
+    let params = crate::engine::agent::AgentActionParams {
+        action,
+        selector,
+        value,
+        direction,
+        url,
+        ms,
+    };
+    Ok(crate::engine::agent::record_action(&params, &result))
+}
+
+/// 读取动作历史（最新在前）。
+#[tauri::command]
+pub async fn agent_action_history(
+    _app: AppHandle,
+    limit: Option<usize>,
+) -> Vec<crate::engine::agent::ActionHistoryItem> {
+    crate::engine::agent::action_history_list(limit)
+}
+
+/// 回放指定步号 / 重试最后失败动作（都要新的 selector 可覆盖）。
+/// 统一走 execute_agent_action（铁律：重放也必须过白名单 + 当前标签）。
+#[tauri::command]
+pub async fn agent_action_replay_or_retry(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, crate::tabs::TabManager>,
+    step: Option<u64>,
+    retry_last: Option<bool>,
+) -> Result<String, String> {
+    let step_no = if retry_last.unwrap_or(false) {
+        crate::engine::agent::last_failed_step()?
+    } else {
+        step.ok_or_else(|| "需要 step 或 retry_last=true".to_string())?
+    };
+    let params = crate::engine::agent::rebuild_params(step_no)?;
+    let action = params.action.clone();
+    // 重新走执行链（参数已按历史重建；保持每步结果返回）
+    let r = execute_agent_action(&app, &window, &state, &params).await;
+    match &r {
+        Ok(txt) => crate::engine::agent::record_action(&params, txt),
+        Err(e) => crate::engine::agent::record_action(&params, &format!("失败: {}", e)),
+    };
+    let verb = if retry_last.unwrap_or(false) { "重试" } else { "回放" };
+    match r {
+        Ok(txt) => Ok(format!("{}第 {} 步（{}）→ {}", verb, step_no, action, txt)),
+        Err(e) => Err(format!("{}第 {} 步（{}）失败: {}", verb, step_no, action, e)),
+    }
+}
+
 pub async fn execute_agent_action(
     app: &AppHandle,
     window: &tauri::WebviewWindow,
