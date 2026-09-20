@@ -317,6 +317,7 @@ pub async fn refresh_all(db: &Db) -> usize {
             let db_owned = Db {
                 pool,
                 key_path: std::path::PathBuf::new(),
+                vault_path: std::path::PathBuf::new(),
                 master_key: tokio::sync::Mutex::new(None),
             };
             let n = fetch_one(&client, &db_owned, &name, &url, &category).await;

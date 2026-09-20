@@ -257,6 +257,8 @@ watch(
         loadWhitelist()
         // 隐私防护统计
         loadPrivacyStats()
+        // 密码库主密码状态（阶段 2）
+        loadVaultStatus()
         // WebMCP polyfill 试验开关（阶段 1.5）
         loadWebmcpPolyfill()
         // 打开时清空 AI Key 输入框：不回显掩码，避免用户无意把掩码写回库
@@ -565,6 +567,78 @@ async function runEgressAudit() {
     useToastStore().error('外联审计失败')
   } finally {
     egressRunning.value = false
+  }
+}
+
+/** 密码库主密码（阶段 2 · 数据主权底线） */
+interface VaultStatus {
+  protected: boolean
+  unlocked: boolean
+}
+const vaultStatus = ref<VaultStatus | null>(null)
+const vaultPassword = ref('')
+const vaultBusy = ref(false)
+async function loadVaultStatus() {
+  try {
+    vaultStatus.value = await invoke<VaultStatus>('vault_status')
+  } catch (e) {
+    console.error('[settings] 读取密码库状态失败:', e)
+  }
+}
+async function setVaultPassword() {
+  if (vaultPassword.value.length < 8) {
+    useToastStore().error('主密码至少 8 位')
+    return
+  }
+  vaultBusy.value = true
+  try {
+    await invoke('set_vault_password', { password: vaultPassword.value })
+    vaultPassword.value = ''
+    await loadVaultStatus()
+    useToastStore().success('主密码已设置，密码库进入保护状态')
+  } catch (e) {
+    console.error('[settings] 设置主密码失败:', e)
+    useToastStore().error('设置失败：' + e)
+  } finally {
+    vaultBusy.value = false
+  }
+}
+async function unlockVault() {
+  vaultBusy.value = true
+  try {
+    await invoke('unlock_vault', { password: vaultPassword.value })
+    vaultPassword.value = ''
+    await loadVaultStatus()
+    useToastStore().success('密码库已解锁')
+  } catch (e) {
+    console.error('[settings] 解锁失败:', e)
+    useToastStore().error('解锁失败：' + e)
+  } finally {
+    vaultBusy.value = false
+  }
+}
+async function lockVault() {
+  try {
+    await invoke('lock_vault')
+    vaultPassword.value = ''
+    await loadVaultStatus()
+    useToastStore().success('密码库已锁定')
+  } catch (e) {
+    console.error('[settings] 锁定失败:', e)
+  }
+}
+async function removeVaultPassword() {
+  vaultBusy.value = true
+  try {
+    await invoke('remove_vault_password', { password: vaultPassword.value })
+    vaultPassword.value = ''
+    await loadVaultStatus()
+    useToastStore().success('主密码已移除（回到密钥文件模式）')
+  } catch (e) {
+    console.error('[settings] 移除主密码失败:', e)
+    useToastStore().error('移除失败：' + e)
+  } finally {
+    vaultBusy.value = false
   }
 }
 
@@ -1150,6 +1224,57 @@ async function onRemoveKeyword(k: string) {
                     <span class="ps-label">{{ c.remote_ip }}:{{ c.remote_port }}</span>
                     <span class="ps-detail">{{ c.proto }} · {{ c.state }} · pid {{ c.pid }}</span>
                   </div>
+                </div>
+              </div>
+              <div class="kw-block" style="margin-top: 10px">
+                <div class="kw-hint">
+                  <b>密码库主密码</b>：设置后密码库启动即<strong>锁定</strong>，须输入主密码解锁
+                  ——同机拿到密钥文件也无法解密（数据主权底线）。
+                  <span v-if="vaultStatus">
+                    当前：<b>{{
+                      vaultStatus.protected
+                        ? vaultStatus.unlocked
+                          ? '已设主密码 · 已解锁'
+                          : '已设主密码 · 已锁定'
+                        : '未设主密码（仅密钥文件保护）'
+                    }}</b>
+                  </span>
+                </div>
+                <div class="kw-add" style="margin-top: 6px">
+                  <input
+                    v-model="vaultPassword"
+                    type="password"
+                    :placeholder="
+                      vaultStatus?.protected ? '输入主密码' : '设置主密码（至少 8 位）'
+                    "
+                    spellcheck="false"
+                  />
+                  <button
+                    v-if="!vaultStatus?.protected"
+                    class="mini-btn primary"
+                    :disabled="vaultBusy"
+                    @click="setVaultPassword"
+                  >
+                    设置主密码
+                  </button>
+                  <template v-else>
+                    <button
+                      v-if="!vaultStatus.unlocked"
+                      class="mini-btn primary"
+                      :disabled="vaultBusy"
+                      @click="unlockVault"
+                    >
+                      解锁
+                    </button>
+                    <button v-else class="mini-btn" @click="lockVault">锁定</button>
+                    <button
+                      class="mini-btn danger"
+                      :disabled="vaultBusy"
+                      @click="removeVaultPassword"
+                    >
+                      移除主密码
+                    </button>
+                  </template>
                 </div>
               </div>
               <div class="field">

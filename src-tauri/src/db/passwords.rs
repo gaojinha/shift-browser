@@ -107,6 +107,11 @@ fn write_key_file_create_new(path: &Path, encoded: &str) -> DbResult<()> {
     Ok(())
 }
 
+/// 对外暴露主密钥获取（供 db::vault 设置主密码时包裹用）。
+pub(crate) async fn master_key(db: &Db) -> DbResult<[u8; 32]> {
+    get_master_key(db).await
+}
+
 /// 获取主密钥（不存在则生成随机 32 字节并写入独立密钥文件）
 /// 迁移兼容：旧版本主密钥存在 settings 表（key=master_key），首次启动时
 /// 自动迁移到密钥文件并删除数据库里的明文残留。
@@ -114,6 +119,13 @@ fn write_key_file_create_new(path: &Path, encoded: &str) -> DbResult<()> {
 /// 并发安全：Db.master_key 的 tokio Mutex 串行化"检查-生成-写入"整段，
 /// 落盘用 create_new 原子创建——并发首用不会各自生成不同密钥互相覆盖。
 async fn get_master_key(db: &Db) -> DbResult<[u8; 32]> {
+    // 主密码保护（阶段 2）：密钥只来自解锁会话（内存），绝不从磁盘明文读取。
+    // 未解锁 → 直接拒绝，所有密码操作都会被拦在这里（单一闸门）。
+    if crate::db::vault::is_protected(db) {
+        return crate::db::vault::unlocked_key().ok_or_else(|| {
+            DbError::Other("密码库已锁定，请先输入主密码解锁".to_string())
+        });
+    }
     // 串行化整段（含 await 点），防止并发首用各自生成不同密钥互相覆盖
     let mut cache = db.master_key.lock().await;
     if let Some(k) = *cache {
@@ -426,6 +438,7 @@ mod tests {
         let db = Db {
             pool,
             key_path: dir.path().join("master.key"),
+            vault_path: dir.path().join("vault.key"),
             master_key: tokio::sync::Mutex::new(None),
         };
         (dir, db)

@@ -284,6 +284,12 @@ pub fn run() {
       passwords::get_passwords_for_domain,
       passwords::list_passwords,
       passwords::delete_password,
+      // 密码库主密码（阶段 2：数据主权底线）
+      db::vault::vault_status,
+      db::vault::set_vault_password,
+      db::vault::unlock_vault,
+      db::vault::lock_vault,
+      db::vault::remove_vault_password,
       // 标签页
       tabs::create_tab,
       tabs::close_tab,

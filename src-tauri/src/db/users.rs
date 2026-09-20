@@ -1016,11 +1016,13 @@ mod tests {
             .await
             .unwrap();
         let key_path = dir.path().join("master.key");
+        let vault_path = dir.path().join("vault.key");
         (
             dir,
             Db {
                 pool,
                 key_path,
+                vault_path,
                 master_key: tokio::sync::Mutex::new(None),
             },
         )

@@ -277,6 +277,7 @@ mod tests {
         let db = Db {
             pool,
             key_path: dir.path().join("master.key"),
+            vault_path: dir.path().join("vault.key"),
             master_key: tokio::sync::Mutex::new(None),
         };
 
