@@ -123,8 +123,18 @@ pub fn build_privacy_selftest(
     let installed = v["installed"].as_bool().unwrap_or(false);
     let feat = &v["features"];
     let has = |k: &str| feat[k].as_bool().unwrap_or(false);
-    let off = level == "off";
-    let skip_reason = "隐私防护未开启";
+    // 非网页标签（如 tauri:// 新标签页）不会注入防护脚本，此时统一标 skip
+    // 而非 fail——避免"新标签页自测一片红"的误导。
+    let non_web = {
+        let p = v["protocol"].as_str().unwrap_or("");
+        !p.is_empty() && !p.starts_with("http")
+    };
+    let off = level == "off" || non_web;
+    let skip_reason = if non_web {
+        "当前标签不是网页（请先打开一个网页再自测）"
+    } else {
+        "隐私防护未开启"
+    };
 
     let mut checks: Vec<PrivacyCheck> = Vec::new();
 
@@ -895,7 +905,8 @@ const PRIVACY_SELFTEST_JS: &str = r#"
         misc: !!f.misc
       },
       hardwareConcurrency: hc,
-      hostname: String(location.hostname || '')
+      hostname: String(location.hostname || ''),
+      protocol: String(location.protocol || '')
     });
   } catch (e) {
     return JSON.stringify({ error: String(e) });
@@ -1794,6 +1805,17 @@ mod tests {
         let page = r#"{"installed":false,"features":{}}"#;
         let r = build_privacy_selftest("off", "example.com", false, page);
         assert!(r.checks.iter().all(|c| c.status == "skip"), "关闭档应全部跳过");
+        assert_eq!(r.passed, 0);
+    }
+
+    #[test]
+    fn privacy_selftest_non_web_all_skip() {
+        let page = r#"{"installed":false,"features":{},"protocol":"tauri:"}"#;
+        let r = build_privacy_selftest("standard", "", false, page);
+        assert!(
+            r.checks.iter().all(|c| c.status == "skip"),
+            "非网页标签（tauri://）应全部跳过，不误报失败"
+        );
         assert_eq!(r.passed, 0);
     }
 
