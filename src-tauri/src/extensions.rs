@@ -63,6 +63,8 @@ pub struct PrivacyCheck {
 pub struct PrivacySelfTestReport {
     /// 当前档位：off / standard / strict
     pub shield_level: String,
+    /// 反指纹模式：noise（加噪）/ uniform（统一化）
+    pub fp_mode: String,
     /// 活动标签域名
     pub hostname: String,
     /// 该域名是否在加噪白名单里
@@ -203,6 +205,7 @@ pub fn build_privacy_selftest(
     let passed = checks.iter().filter(|c| c.status == "pass").count();
     PrivacySelfTestReport {
         shield_level: level.to_string(),
+        fp_mode: feat["fp_mode"].as_str().unwrap_or("noise").to_string(),
         hostname: hostname.to_string(),
         whitelisted,
         total,
@@ -483,11 +486,32 @@ const PRIVACY_JS: &str = r#"
   })();
   try { window.__shiftNoiseOn = NOISE_ON; } catch (e) {}
 
-  // ---- 3) Canvas 加噪（读回路径 toDataURL / toBlob / getImageData）----
+  // ---- 1.6) 反指纹模式（阶段 2 · 反指纹 2.0）----
+  // noise   = 加噪（默认）：同源稳定、跨源不同的确定性噪声
+  // uniform = 统一化（Tor/Mullvad 派）：Canvas/WebGL/Audio 返回**固定值**，
+  //           让该模式下所有使用者呈现一致指纹，而非各自"独一无二的噪声"
+  // 注入时由 Rust 侧在脚本前拼 window.__SHIFT_FP_MODE__
+  var FP_MODE = (window.__SHIFT_FP_MODE__ === 'uniform') ? 'uniform' : 'noise';
+  var UNIFORM = (FP_MODE === 'uniform');
+  try { window.__shiftFpMode = FP_MODE; } catch (e) {}
+
+  // ---- 3) Canvas 加噪 / 统一化（读回路径 toDataURL / getImageData）----
   try {
     var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
     HTMLCanvasElement.prototype.toDataURL = function () {
       if (!NOISE_ON) return origToDataURL.apply(this, arguments);
+      // 统一化：返回一张固定白图（所有人一致），不暴露真实画布内容
+      if (UNIFORM) {
+        try {
+          var fc = document.createElement('canvas');
+          fc.width = this.width || 1;
+          fc.height = this.height || 1;
+          var fx = fc.getContext && fc.getContext('2d');
+          if (fx) { fx.fillStyle = '#ffffff'; fx.fillRect(0, 0, fc.width, fc.height); }
+          return origToDataURL.apply(fc, arguments);
+        } catch (e) {}
+        return origToDataURL.apply(this, arguments);
+      }
       try {
         var ctx = this.getContext && this.getContext('2d');
         if (ctx && this.width > 0 && this.height > 0) {
@@ -507,8 +531,15 @@ const PRIVACY_JS: &str = r#"
       var d = origGetImageData.apply(this, arguments);
       if (!NOISE_ON) return d;
       try {
-        for (var i = 0; i < d.data.length; i += 4) {
-          d.data[i] = (d.data[i] + (rnd(i) < 0.5 ? 0 : 1)) & 255;
+        if (UNIFORM) {
+          // 统一化：固定为不透明白色（所有人一致）
+          for (var j = 0; j < d.data.length; j += 4) {
+            d.data[j] = 255; d.data[j + 1] = 255; d.data[j + 2] = 255; d.data[j + 3] = 255;
+          }
+        } else {
+          for (var i = 0; i < d.data.length; i += 4) {
+            d.data[i] = (d.data[i] + (rnd(i) < 0.5 ? 0 : 1)) & 255;
+          }
         }
       } catch (e) {}
       return d;
@@ -537,7 +568,7 @@ const PRIVACY_JS: &str = r#"
     }
   } catch (e) {}
 
-  // ---- 5) AudioContext 加噪 ----
+  // ---- 5) AudioContext 加噪 / 统一化 ----
   try {
     if (window.AnalyserNode && AnalyserNode.prototype.getFloatFrequencyData) {
       var ofd = AnalyserNode.prototype.getFloatFrequencyData;
@@ -545,8 +576,12 @@ const PRIVACY_JS: &str = r#"
         ofd.apply(this, arguments);
         if (!NOISE_ON) return;
         try {
-          for (var i = 0; i < arr.length; i += 31) {
-            arr[i] = arr[i] + (rnd(i) - 0.5) * 0.001;
+          if (UNIFORM) {
+            for (var u = 0; u < arr.length; u++) arr[u] = -100;
+          } else {
+            for (var i = 0; i < arr.length; i += 31) {
+              arr[i] = arr[i] + (rnd(i) - 0.5) * 0.001;
+            }
           }
         } catch (e) {}
       };
@@ -557,8 +592,12 @@ const PRIVACY_JS: &str = r#"
         var d = ocd.apply(this, arguments);
         if (!NOISE_ON) return d;
         try {
-          for (var i = 0; i < d.length; i += 997) {
-            d[i] = d[i] + (rnd(i) - 0.5) * 1e-6;
+          if (UNIFORM) {
+            for (var u = 0; u < d.length; u++) d[u] = 0;
+          } else {
+            for (var i = 0; i < d.length; i += 997) {
+              d[i] = d[i] + (rnd(i) - 0.5) * 1e-6;
+            }
           }
         } catch (e) {}
         return d;
@@ -756,7 +795,8 @@ const PRIVACY_JS: &str = r#"
       hardware: true,
       webrtc: true,
       webgpu: !!(navigator.gpu && navigator.gpu.requestAdapter),
-      misc: true
+      misc: true,
+      fp_mode: FP_MODE
     };
   } catch (e) {}
 })();
@@ -1206,7 +1246,7 @@ async fn collect_enabled_items(
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT key, value FROM settings WHERE key IN \
          ('adblock_enabled','privacy_shield_level','privacy_shield','privacy_whitelist',\
-          'adblock_keywords','translate_timeout')",
+          'adblock_keywords','translate_timeout','privacy_fp_mode')",
     )
     .fetch_all(&db.pool)
     .await
@@ -1252,10 +1292,13 @@ async fn collect_enabled_items(
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v >= 5 && *v <= 120)
         .unwrap_or(15);
+    // 反指纹模式（阶段 2）：noise（加噪，默认）/ uniform（统一化）
+    let fp_mode = normalize_fp_mode(take("privacy_fp_mode").as_deref());
     let wl_prefix = format!(
-        "window.__SHIFT_PRIVACY_WHITELIST__ = {};\nwindow.__SHIFT_TRANSLATE_TIMEOUT = {};\n",
+        "window.__SHIFT_PRIVACY_WHITELIST__ = {};\nwindow.__SHIFT_TRANSLATE_TIMEOUT = {};\nwindow.__SHIFT_FP_MODE__ = {};\n",
         serde_json::to_string(&whitelist).unwrap_or_else(|_| "[]".to_string()),
-        timeout
+        timeout,
+        serde_json::to_string(fp_mode).unwrap_or_else(|_| "\"noise\"".to_string())
     );
     match level.as_str() {
         "off" => log::info!("[extensions] 隐私防护已关闭（off）"),
@@ -1441,6 +1484,50 @@ pub async fn get_privacy_shield_level(db: State<'_, Db>) -> Result<String, Strin
         Some("false") => "off".to_string(),
         _ => "standard".to_string(),
     })
+}
+
+/// 归一化反指纹模式（阶段 2）：只接受 noise / uniform，其余（含 None）回落 noise。
+pub fn normalize_fp_mode(v: Option<&str>) -> &'static str {
+    match v {
+        Some("uniform") => "uniform",
+        _ => "noise",
+    }
+}
+
+/// 反指纹模式设置（noise 加噪 / uniform 统一化），存设置 + 立即重新注入
+#[tauri::command]
+pub async fn set_privacy_fp_mode(
+    db: State<'_, Db>,
+    app: AppHandle,
+    mode: String,
+) -> Result<(), String> {
+    let mode = match mode.as_str() {
+        "noise" | "uniform" => mode,
+        other => return Err(format!("未知的反指纹模式: {}", other)),
+    };
+    log::info!("[extensions] set_privacy_fp_mode: {}", mode);
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ('privacy_fp_mode', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(&mode)
+    .execute(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let (items, webmcp_on) = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items, webmcp_on);
+    Ok(())
+}
+
+/// 反指纹模式查询（默认 noise）
+#[tauri::command]
+pub async fn get_privacy_fp_mode(db: State<'_, Db>) -> Result<String, String> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_fp_mode'")
+            .fetch_optional(&db.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(normalize_fp_mode(row.map(|r| r.0).as_deref()).to_string())
 }
 
 /// 隐私防护开关（存设置 + 立即重新注入）
@@ -1827,5 +1914,14 @@ mod tests {
         assert!(is_whitelisted("a.b.foo.cn", &wl));
         assert!(!is_whitelisted("notexample.com", &wl));
         assert!(!is_whitelisted("", &wl));
+    }
+
+    #[test]
+    fn normalize_fp_mode_rules() {
+        assert_eq!(normalize_fp_mode(Some("uniform")), "uniform");
+        assert_eq!(normalize_fp_mode(Some("noise")), "noise");
+        // 非法值/缺失一律回落 noise（默认加噪）
+        assert_eq!(normalize_fp_mode(Some("bogus")), "noise");
+        assert_eq!(normalize_fp_mode(None), "noise");
     }
 }

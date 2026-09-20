@@ -356,6 +356,9 @@ pub fn run() {
       extensions::get_privacy_shield_level,
       extensions::set_privacy_whitelist,
       extensions::get_privacy_whitelist,
+      // 反指纹 2.0 双模式（阶段 2：加噪 / 统一化）
+      extensions::set_privacy_fp_mode,
+      extensions::get_privacy_fp_mode,
       // WebMCP polyfill 试验（阶段 1.5）
       extensions::set_webmcp_polyfill,
       extensions::get_webmcp_polyfill,

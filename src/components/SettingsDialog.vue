@@ -404,6 +404,25 @@ async function onChangePrivacyLevel(e: Event) {
   }
 }
 
+/** 反指纹模式（阶段 2 反指纹 2.0）：noise 加噪（默认）/ uniform 统一化 */
+const fpMode = computed(() => {
+  const m = settingsStore.get('privacy_fp_mode')
+  return m === 'uniform' ? 'uniform' : 'noise'
+})
+async function onChangeFpMode(e: Event) {
+  const mode = (e.target as HTMLSelectElement).value
+  await settingsStore.set('privacy_fp_mode', mode)
+  try {
+    await invoke('set_privacy_fp_mode', { mode })
+    useToastStore().success(
+      mode === 'uniform' ? '已切换到统一化（Tor/Mullvad 派）' : '已切换到加噪（推荐）'
+    )
+  } catch (err) {
+    console.error('[settings] 反指纹模式同步失败:', err)
+    useToastStore().error('反指纹模式设置失败')
+  }
+}
+
 /** 加噪白名单：这些站点不做加噪（Canvas 敏感站点可加进来），域名按行分隔 */
 const whitelistText = ref('')
 async function loadWhitelist() {
@@ -467,6 +486,7 @@ interface PrivacySelfCheck {
 }
 interface PrivacySelfTestReport {
   shield_level: string
+  fp_mode: string
   hostname: string
   whitelisted: boolean
   total: number
@@ -1000,6 +1020,20 @@ async function onRemoveKeyword(k: string) {
                   <option value="off">关闭</option>
                 </select>
               </div>
+              <div class="field">
+                <label>反指纹模式</label>
+                <select class="privacy-select" :value="fpMode" @change="onChangeFpMode">
+                  <option value="noise">加噪（默认）</option>
+                  <option value="uniform">统一化（Tor/Mullvad 派）</option>
+                </select>
+              </div>
+              <div class="kw-hint">
+                <b>加噪</b>：Canvas / WebGL / 音频加"同源稳定、跨源不同"的确定性噪声——
+                网站仍能正常用，但你的指纹不再稳定可追踪。<br />
+                <b>统一化</b>：Canvas / WebGL / 音频返回<strong>固定值</strong>，让所有使用者在该模式下
+                呈现一致指纹（更强匿名，但个别依赖画布/音频的应用可能受影响）。<br />
+                切换后刷新页面即生效。
+              </div>
               <div class="kw-hint">
                 <b>标准</b>：Canvas / WebGL / 音频 / WebGPU 反指纹加噪，GPC 隐私信号，WebRTC 内网 IP 防护，
                 字体与设备探针收敛，追踪参数清洗，第三方 Cookie 阻断。<br />
@@ -1044,7 +1078,8 @@ async function onRemoveKeyword(k: string) {
                   </button>
                 </div>
                 <div v-if="privacySelfTest" class="kw-hint" style="margin-top: 6px">
-                  档位 <b>{{ privacySelfTest.shield_level }}</b> · 站点
+                  档位 <b>{{ privacySelfTest.shield_level }}</b> · 反指纹
+                  <b>{{ privacySelfTest.fp_mode === 'uniform' ? '统一化' : '加噪' }}</b> · 站点
                   <b>{{ privacySelfTest.hostname || '(未知)' }}</b> · 通过
                   <b>{{ privacySelfTest.passed }}/{{ privacySelfTest.total }}</b>
                   <span v-if="privacySelfTest.whitelisted">（白名单站点，加噪已跳过）</span>
