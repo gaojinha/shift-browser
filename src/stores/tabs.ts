@@ -341,11 +341,17 @@ export const useTabsStore = defineStore('tabs', {
       }
     },
 
-    /** 拖拽排序：把 fromId 移到 toId 的位置（前端先乐观更新，再通知 Rust） */
+    /** 拖拽排序：把 fromId 移到 toId 的位置（前端先乐观更新，再通知 Rust）。
+     *  固定标签永远排最前：普通标签不能拖到固定标签前面，固定标签不能拖到普通标签后面 */
     async reorderTabs(fromId: string, toId: string) {
       const from = this.tabs.findIndex((t) => t.id === fromId)
       const to = this.tabs.findIndex((t) => t.id === toId)
       if (from === -1 || to === -1 || from === to) return
+      const fromTab = this.tabs[from]
+      const toTab = this.tabs[to]
+      // 固定标签必须保持在所有普通标签之前
+      if (fromTab.is_pinned && !toTab.is_pinned) return
+      if (!fromTab.is_pinned && toTab.is_pinned) return
       const moved = this.tabs.splice(from, 1)[0]
       this.tabs.splice(to, 0, moved)
       try {

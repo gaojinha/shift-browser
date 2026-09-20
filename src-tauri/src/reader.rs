@@ -65,14 +65,21 @@ fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<String, Stri
     for _ in 0..5 {
         // 单跳探测：拿状态码 + 重定向目标（curl 不带 -L 不自动跟随）
         let mut cmd = std::process::Command::new("curl");
-        cmd.args(["-s", "--compressed", "--max-time", "20", "-o", "/dev/null", "-w", "%{http_code} %{redirect_url}"]);
+        cmd.args([
+            "-s",
+            "--compressed",
+            "--max-time",
+            "20",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code} %{redirect_url}",
+        ]);
         if let Some(u) = ua {
             cmd.args(["-A", u]);
         }
         cmd.arg(&cur);
-        let out = cmd
-            .output()
-            .map_err(|e| format!("调用 curl 失败: {}", e))?;
+        let out = cmd.output().map_err(|e| format!("调用 curl 失败: {}", e))?;
         let meta = String::from_utf8_lossy(&out.stdout);
         let mut parts = meta.trim().splitn(2, ' ');
         let code: u16 = parts.next().unwrap_or("0").parse().unwrap_or(0);
@@ -158,7 +165,12 @@ async fn validate_public_url(url: &str) -> Result<(), String> {
         })?;
     for addr in addrs {
         if let Err(e) = reject_private_ip(&addr.ip()) {
-            log::warn!("[reader] SSRF 拦截域名解析: {} -> {} ({})", host, addr.ip(), e);
+            log::warn!(
+                "[reader] SSRF 拦截域名解析: {} -> {} ({})",
+                host,
+                addr.ip(),
+                e
+            );
             return Err(e);
         }
     }
@@ -175,13 +187,11 @@ fn reject_private_ip(ip: &std::net::IpAddr) -> Result<(), String> {
                 || v4.is_unspecified()
         }
         std::net::IpAddr::V6(v6) => {
-            v6.is_loopback()
-                || v6.is_unspecified()
-                || {
-                    // fc00::/7（ULA 内网）与 fe80::/10（链路本地）
-                    let segs = v6.segments();
-                    (segs[0] & 0xfe00) == 0xfc00 || (segs[0] & 0xffc0) == 0xfe80
-                }
+            v6.is_loopback() || v6.is_unspecified() || {
+                // fc00::/7（ULA 内网）与 fe80::/10（链路本地）
+                let segs = v6.segments();
+                (segs[0] & 0xfe00) == 0xfc00 || (segs[0] & 0xffc0) == 0xfe80
+            }
         }
     };
     if bad {
@@ -286,6 +296,12 @@ pub async fn fetch_article(url: String) -> Result<serde_json::Value, String> {
         "content": content,
         "text": product.text,
     }))
+}
+
+/// 公共包装：供页面理解层（content_extract）复用抓取+readability 管线。
+/// 出网操作，调用方须确保用户已授权。
+pub async fn scrape_article_public(url: &str) -> Result<readability::extractor::Product, String> {
+    scrape_article(url).await
 }
 
 /// 进入阅读模式：提取 url 正文 → 写 file:// 页面 → 返回新页面 URL（前端 createTab 打开）

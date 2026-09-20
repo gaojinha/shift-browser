@@ -1120,3 +1120,335 @@ tabs store 的 4 个核心操作（createTab/closeTab/switchTab/navigateTab）�
 - **整页翻译受第三方页面 CSP 限制**：注入脚本用 `Image().src = 'shift://__translate__/batch?...'` 触发，受目标页自身 `img-src` 约束，严格 CSP 站点可能失效（与既有"翻译选中文本"机制同源限制），待实测确认
 - **UI 层未人工实测**：Ctrl+Shift+S 会话管理、整页翻译、书签文件夹删除确认、历史清空确认弹窗——单测覆盖不到，需要手动点一遍
 - **测试数据规范**：`.learnings/LEARNINGS.md` 新增"单测禁用真实密码"教训（本轮差点把真实锁屏密码提交进仓库，提交前扫描拦住）
+
+## 第三十一章（第二十二轮）：战略规划立档 + 阶段 0 基座（2026-09-19）
+
+### 战略纲领
+- 新增 `docs/strategy-2026.md`：ShiftBrowser 战略规划（定位/五大支柱/阶段 0-4 路线图/架构演进/风险治理）
+- 新增 `docs/spike-engine-capabilities-2026-09-19.md`：引擎能力实测报告
+- 决策记录：**本地模型集成暂缓**（阶段 1.2 只做 provider 抽象 + 云端 provider）
+
+### 引擎实测关键结论（Spike #1-#5）
+- **引擎升级不可行**：Ubuntu 25.10 系统源冻结 WebKitGTK **2.52.3**（2.54.0 需发行版升级），→ 阶段 0 改为"版本冻结 + 跟踪机制"，不自行自编译
+- **GPC 请求头可行**：`WebKitWebPage::send-request`（Web 进程扩展侧）+ `WebKitURIRequest` 可变请求头
+- **WebExtensions 初始 API 存在**（2.52 的 `WebExtension` 类），但能力面窄，需专项 spike
+- **WebAuthn**：引擎有实现（链接 libsecret），平台认证器待运行时实测
+- **WebGPU**：引擎有、无公开运行时开关 → 不作为能力依赖
+- **意外收获**：`WebKitUserContentFilterStore`（引擎级内容过滤）、`enable-developer-extras`（Web Inspector）、`enable-dns-prefetching`/`hardware-acceleration-policy`
+
+### 本轮交付
+1. **DevTools**：`Settings.enable-developer-extras` + GTK 窗口层拦截 F12 / Ctrl+Shift+I → `open_devtools` 命令（`WebInspectorExt::show`）
+2. **广告拦截 2.0 v1**：
+   - 新增 `engine/` 模块（架构解耦第一块砖）+ `engine/content_filter.rs`
+   - **手写 FFI** 对接 WebKit 内容过滤器（gtk-rs 绑定缺失：`auto/` 无 `user_content_filter_store`，`add_filter` 被注释为 Ignored）
+   - 75 条网络层拦截规则（国际广告网络/追踪统计/社交像素/国内广告统计）
+   - 启动时异步编译（5231 字节规则）并缓存 GObject 指针，随注入流程挂到每个 child webview
+   - 开关联动：关闭广告拦截时 `remove_filter_by_id` 摘除
+   - 2 个单测（`rules_json_is_well_formed` / `rules_use_valid_regex_chars`），**抓出 JSON 非法转义 bug**
+3. **批次 0.3 快捷键路由**：
+   - 根因：前端快捷键绑在 HTML 层，**点击网页后焦点落在 child webview，按键到不了 HTML 层** → 所有浏览器级快捷键时灵时不灵
+   - 方案：GTK 顶层窗口统一拦截（`gtk_win.connect_key_press_event`），用 `UI_FOCUSED`（AtomicBool）跟踪焦点归属
+     - 页面持焦（`!UI_FOCUSED`）→ 匹配 Ctrl+T/W/R/L/H、Ctrl+Tab、Ctrl+Shift+T/S 后 `emit("global-shortcut", action)`，返回 `Propagation::Stop`
+     - UI 层持焦 → 放行（前端 keydown 已处理，避免重复触发）
+     - F12 / Ctrl+Shift+I 不依赖焦点，任何情况都响应
+   - 焦点跟踪挂载点：`setup_gtk_layout` 里 `main_gtk.connect_focus_in_event`（UI 层）、`fix_gtk_layout` 里 `child_gtk.connect_focus_in_event`（页面）
+   - 前端：抽出统一动作入口 `handleGlobalAction(action)`，keydown 与 `listen('global-shortcut')` 共用
+
+### 编译铁律（务必遵守）
+**Tauri 发布版把 `dist` 编译期嵌入二进制**：改前端必须 `npm run build && cargo build --release`（前端在前）。顺序反了会跑旧前端（已踩坑，见 `.learnings/ERRORS.md`）。
+
+### 待验证（需人工确认）
+- 各快捷键在页面持焦下是否全部生效（若某个被 WebKit 自身消费需换 GtkAccelGroup 方案）
+- 内容过滤器的实际拦截效果（DevTools Network 面板观察）
+
+### 第三十一章续：广告拦截 2.0 v2（2026-09-19 深夜）
+- **自定义关键词进入网络层**：`build_rules_with_keywords()` 把用户关键词编译成规则（`keyword_to_pattern` 只保留字母/数字/汉字与 `.` `-`，剔除正则元字符；单个关键词 ≥2 字符；上限 200 条）
+- **免重启生效链路**：`set_adblock_keywords` → `collect_enabled_items`（remember_rules 记录新规则指纹）→ `inject_extensions` 主线程闭包 `compile_pending()` → 异步编译 → `on_save_done` 缓存后 spawn `extensions::re_inject` → 挂到所有标签
+- **时序修复**：`register_app`（注册缓存目录 + 应用句柄）必须排在 `inject_on_startup` **之前**；`compile_pending` 在未注册时把规则放回队列而不是丢弃
+- **验证**：单测 3 个通过；实测加 1 个关键词后规则 5231 → 5304 字节，还原后回落 5231
+- 全量测试：**62 个 Rust 单测通过**
+
+### 待办：桥接已知问题
+- 2026-09-19 15:53 高珩在钉钉发"继续"，桥接日志显示 `完成: dm:... 回复 0 字符` —— **消息被接走但回复为空**，未落到当前会话。需排查桥接会话路由/空回复。
+
+### 第三十一章续二：桥接故障修复（2026-09-20 凌晨）
+- **现象**：高珩在钉钉发的"在吗/继续/先1后2"全部无回复，日志只有 `回复 0 字符`
+- **根因**：模型 429 限流被吞——opencode 接口报错时**仍返回 HTTP 200**，错误在 `result.info.error`，桥接只取 `parts` 拿到空串
+- **修复**：桥接 `config.json` 模型 `opencode/big-pickle` → `opencode-go/deepseek-v4.1-flash`；`src/index.js` 加 `promptWithRetry`（识别 error、429 退避重试）+ `friendlyError`（中文提示）+ 空文本告警
+- 详情见桥接侧 `.learnings/ERRORS.md`
+
+### 第三十一章续三：架构解耦批次 0.2 首项 —— 布局几何收敛（2026-09-20 凌晨）
+- **新增 `src-tauri/src/engine/layout.rs`**（引擎抽象层第二块砖）：
+  - 布局常量唯一事实来源：`TAB_BAR_HEIGHT/ADDRESS_BAR_HEIGHT/BOOKMARKS_BAR_HEIGHT/STATUS_BAR_HEIGHT/AI_PANEL_WIDTH/CONTENT_TOP_OFFSET(_NO_BOOKMARKS)/MIN_*`
+  - `ContentGeometry::compute(window, top, ai_active)`：窗口尺寸 + 缩放换算 + AI 分屏让位，一处算清
+  - `apply_to_webview(window, tab_id, geo)`：定位/缩放承载 webview 的 GtkFixed + `queue_resize()`
+  - `content_size()`：建标签用的浮点尺寸
+  - 单测：常量关系校验
+- **消除 6 处重复公式**（`tabs.rs` 原 `inner.width as f64 / scale`、`.max(100.0)`、`.max(400.0)` 等全部清空）：
+  1. `TabManager::content_size`（建标签）
+  2. `switch_visibility`（切标签）
+  3. 窗口 resize 监听（闭包内用克隆的 `win_for_geo` 句柄）
+  4. `set_webview_ai_panel`（AI 分屏）
+  5. `set_bookmarks_bar_visible`（书签栏显隐）
+  6. `apply_tab_geometry`（显示后重应用几何）
+- **常量导出改为 `pub use crate::engine::layout::CONTENT_TOP_OFFSET`**，`lib.rs` 等外部引用不受影响
+- **验证**：`cargo build --release` 零警告；**63 个单测全过**；重启后 `window resized: 1280x800 content=1280x662 top=116` 与重构前一致；书签栏切换日志正常；无 panic
+- **意义**：这是战略"引擎抽象层"从「内容过滤」扩展到「布局」的第一步，后续分屏/垂直标签等新形态可直接复用 `ContentGeometry`，不再各自手写公式
+
+
+### 第三十一章续四：可观测性 —— 自检命令（2026-09-20 凌晨）
+- **新增 `src-tauri/src/selfcheck.rs`** + `selfcheck_cmd` 命令 + 前端设置页「🩺 自检」分区
+- **17 项检查分四组**：
+  1. 版本与环境：ShiftBrowser 版本、**WebKitGTK 运行时版本**（`webkit_get_*_version`）、系统、数据目录存在性
+  2. 数据存储：DB 连通性、表数量、书签/历史/密码行数、**密码主密钥权限（必须 600）**
+  3. 运行时：标签数+活动标签、主窗口尺寸、AI 分屏状态
+  4. 能力状态：内容过滤器就绪/开关、广告拦截开关、隐私档位、启用扩展数
+- **设计原则**：只读不改；单项失败不影响整体；版本/路径等环境事实必须报（避免用户描述问题时说不清环境）
+- **启动自动自检**：`App.vue` onReady 后调一次，日志输出「环境」与「能力」两行快照
+- **封装**：`TabManager` 新增 `runtime_snapshot()`（自检读私有字段改为走公开方法）
+- **验证**：编译零警告、**64 个单测通过**、实测 `[selfcheck] 健康=true`、日志能看到 `WebKitGTK=2.52.3` 与数据目录
+- **顺带发现**：自检报出「广告拦截=关闭」，核对 DB `adblock_enabled=false` —— 功能正常，是真实状态（需与高珩确认是否要开）
+
+### 第三十一章续五：架构解耦批次 0.2 第二项 —— WebView 基础操作收敛（2026-09-20 凌晨）
+- **新增 `src-tauri/src/engine/webview.rs`**（引擎抽象层第三块砖）：
+  - `apply_default_settings(wv)`：页面默认设置（JS 自动开窗 / 开发者工具 / **UA 常量 `DEFAULT_USER_AGENT`**）统一施加
+  - `eval_js(wv, script)`：执行 JS 忽略结果（失败仅 debug——页面未就绪时失败属正常）
+  - `eval_js_with(wv, script, cb)`：执行 JS 并回调结果字符串（`Ok(String)/Err(String)`）
+  - 单测：UA 格式校验
+- **收敛调用点**：`evaluate_javascript` 原先散落 **tabs.rs 3 处 + extensions.rs 5 处**，现全部走引擎层；`settings.set_*` 在 tabs.rs 归零
+- **耦合度变化**（同口径 grep）：
+  | 文件 | WebKit 调用点 |
+  |---|---|
+  | tabs.rs | 25 → **8** |
+  | lib.rs | 15 → **6** |
+  | extensions.rs | 10 → **6** |
+  | newtab.rs | 6 → **0** |
+- **验证**：编译零警告、**65 个单测通过**、重启后实测——延迟探针 `probe: tr=boolean`、注入探针 `__shiftTranslateMenu=boolean`、页面加载后即时注入成功（21730 字节）、隐私防护注入正常、无 panic
+- **坑（已记经验本）**：`wv.settings()` 在同时引入 gtk/webkit prelude 时有歧义，须显式 `webkit2gtk::WebViewExt::settings(wv)`
+
+### 第三十一章续六：架构解耦批次 0.2 第三项 —— WebView 基础操作补全（2026-09-20 凌晨）
+- **`engine/webview.rs` 补 4 个 API**（公开 API 达 7 个）：
+  - `enable_console_output(wv)`：页面 console 输出到 stdout（诊断 JS 错误）
+  - `reload(wv)`：刷新页面
+  - `navigation_state(wv) -> (bool,bool)`：能否后退/前进
+  - `open_inspector(wv)`：打开开发者工具（内部显式 `WebInspectorExt::show` 避免与 WidgetExt::show 歧义）
+- **tabs.rs 4 处调用收敛**：console 输出 / reload / can_go_back+forward / inspector show 全走引擎层
+- **耦合度**：tabs.rs webkit 依赖 **25 → 1**（仅剩 use 行）；lib.rs 5；extensions.rs 1
+- **边界结论（重要）**：`connect_*` 信号连接方法（connect_load_failed / connect_title_notify / context()）**不能**从 tabs.rs 移除——它们是业务回调载体，依赖 `WebViewExt` trait 在作用域；引擎层只收敛"基础操作"，**信号回调留在业务层**（封装会把业务逻辑拖进引擎，得不偿失）。曾误删 use 导致 4 个 E0599，已恢复。
+- **验证**：编译零警告、65 单测通过、重启实测健康、隐私注入正常、无 panic
+
+### 第三十一章续七：架构解耦批次 0.2 第四项 —— GTK 布局操作收敛（2026-09-20 凌晨）
+- **`engine/layout.rs` 补 3 个 API**（公开 API 达 5 个）：
+  - `parent_vbox(wv)`：从 webview 向上找父级 GtkBox（不调 window 方法避免主线程死锁）
+  - `find_or_create_fixed(vbox)`：从 GtkOverlay 找 GtkFixed，不存在则建（从 tabs.rs 原函数迁移，含 set_halign/set_valign）
+  - `set_fixed_visible(wv, visible)`：GtkFixed 显隐（弹窗打开时 Fixed 会拦截点击，必须一起隐藏）
+- **tabs.rs 4 处收敛**：fix_gtk_layout 的 vbox 查找、setup 的 main vbox 查找、原 find_or_create_fixed 函数删除、弹窗 Fixed 显隐
+- **验证**：编译零警告、65 单测通过、重启实测 `GtkOverlay 布局初始化完成 top=116` + `child_webview reparent 到 Fixed: pos=(0,116) size=(1280,662)` 正常、无 panic
+- **坑（已记经验本）**：python 批量替换脚本里断言失败被静默跳过（缩进不匹配），导致 2 处替换没生效还编译通过了（因为 parent_vbox 报 never used 才发现）——脚本必须断言失败即退出
+
+### 第三十一章续八：测试网（E2E 冒烟）—— scripts/smoke.sh（2026-09-20）
+- **新增 `scripts/smoke.sh`**：E2E 冒烟测试，把解耦各批次关键链路钉死
+  - `scripts/smoke.sh`：完整模式（重启浏览器 → 等启动 → 逐项检查）
+  - `scripts/smoke.sh --no-restart`：只检查当前实例
+- **12 项检查**：进程存活 / 数据库存在 / 自检健康 / 环境快照 / WebKitGTK 版本 / 快捷键挂载 / GtkOverlay 布局初始化 / child reparent 到 Fixed / 隐私防护注入 / 翻译菜单探针 / 扩展即时注入 / 无 panic
+- **退出码**：0=全过，1=有失败，2=用法错误
+- **实测**：完整模式 12/12 通过、--no-restart 12/12 通过、失败路径正确报 FAIL
+- **使用**：以后每次改完 Rust/前端，跑 `scripts/smoke.sh` 即可确认无回归
+
+### 第三十一章续九：技术债清算 1+2 —— 静音真实现 + 阅读列表死表删除（2026-09-20）
+- **标签静音真实现**（原为假实现：只翻转内存 is_muted 字段，注释误称"WebKitGTK 无 per-tab 音量 API"）：
+  - 事实：WebKitGTK 2.36+ 有 `webkit_web_view_set_is_muted`，gtk-rs 绑定 `WebViewExt::set_is_muted` 存在（web_view.rs 1950 行）——当初调研不仔细
+  - `engine/webview.rs` 新增 `set_muted(wv, muted)` API
+  - `toggle_mute` 改为：翻转状态（作用域内取 cloned 避免借用冲突）+ 异步派发到主线程调 `set_muted`（参考 open_devtools_for_active 模式，避免主线程重入）
+- **阅读列表死表删除**：`reading_list` 表 v5.0.0 建表但功能从未实现、代码零引用、数据零行
+  - 新增迁移 `20260920000000_drop_reading_list.sql`（DROP TABLE IF EXISTS，注释保留重建线索）
+  - 迁移 10 注册 `drop_reading_list_dead_table`，实测执行成功、表已删、迁移记录正确
+- **验证**：编译零警告、65 单测通过、冒烟 12/12 通过
+
+### 第三十一章续十：技术债清算 3 —— 固定标签排序（2026-09-20）
+- **问题**：固定标签（📌）与普通标签混排，按创建顺序，无"固定永远最前"语义
+- **修复**（纯前端，两处）：
+  - `TabBar.vue`：`groupedTabs` 计算属性加 `pinnedFirst()` 排序——未分组区与分组内都固定优先（固定之间保持原顺序）
+  - `stores/tabs.ts`：`reorderTabs` 加拖拽保护——普通标签不能拖到固定标签前面、固定标签不能拖到普通标签后面（store 权威顺序与 Rust 一致）
+- **验证**：vue-tsc 类型检查通过、npm build + cargo build 零警告、65 单测通过、冒烟 12/12
+
+### 第四十章：阶段 1 启动 —— 1.1 页面理解层（2026-09-20）
+- **新增 `engine/content.rs`**（页面理解层核心）：
+  - `Snapshot` 结构体：标题/URL/语言/正文文本/可交互元素统计（链接·按钮·输入框·文本域·下拉·iframe）/表单字段/链接列表
+  - `SNAPSHOT_JS`：内嵌 DOM 提取脚本（JSON.stringify 返回，文本截断 4000/表单 20/链接 30）
+  - `extract_snapshot(wv)`：eval_js_with + channel 同步等待（5s 超时），全程本地不出网
+  - `summarize_text()`：本地规则摘要（供 AI 上下文）
+  - 单测 ×2：JS 结构校验 + 摘要截断
+- **新增 `content_cmd.rs`**：
+  - `content_snapshot`：取活动标签 webview → 提取语义快照（用 `TabManager::runtime_snapshot().1` 拿 active_id，避免私有字段）
+  - `content_extract`：正文提取（复用 `reader::scrape_article_public`，出网操作由调用方授权）
+- **reader.rs**：加 `scrape_article_public` 公共包装（复用 curl+readability 管线）
+- **前端接入**（stores/ai.ts）：`sendMessage` 前先 `content_snapshot`，成功则把正文摘要+交互元素附进 system prompt（AI 真正"理解页面"）；失败降级为标题+地址，不阻断对话
+- **类型**：新增 `src/types/content.ts`（Snapshot 前端类型）
+- **验证**：编译零警告、**67 单测通过**（+2）、冒烟 12/12、vue-tsc 通过
+- **待高哥实测**：AI 面板发消息 → 后端日志应出现 `[content] 语义快照: tab=... title=...`
+
+### 第四十章补：content_snapshot 死锁修复（2026-09-20）
+- **bug**：`extract_snapshot` 的 `recv_timeout(5s)` 在 `with_webview` 闭包内（主线程）执行 → 主线程阻塞 → evaluate 回调无法执行 → 死锁 5 秒卡 UI → 高哥"发送不了消息"
+- **修复**：拆成 `extract_snapshot_async(wv, tx)`（只发起不等待），`content_cmd.rs` 的 `recv_timeout` 移到闭包外（async 线程）等待
+- **铁律**：with_webview 闭包内绝不阻塞等待（channel/锁/睡眠）
+- **验证**：67 单测、冒烟 12/12、新二进制运行中
+
+## 第三十二章（阶段 1.2）：推理层 Provider 抽象（2026-09-20）
+
+### 目标
+阶段 1（AI 原生内核）的 1.2 推理层：把"AI 对话"从单一 AGNES 硬编码升级为**多 provider 抽象**，为将来接本地模型/其他云端留接口（本地模型集成按 2026-09-19 决策暂缓，只留 stub）。
+
+### 交付内容
+1. **`engine/ai_provider.rs`**（新文件，引擎层第三块业务砖）：
+   - `AiProvider` trait（`#[async_trait]`，`Send + Sync`）：`id`/`name`/`is_configured`/`chat`/`chat_stream`（on_delta 用 `Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>`——dyn trait 不能用泛型方法）
+   - `AgnesProvider`：持有 base_url + api_key，委托 `crate::ai::agnes_chat_impl` / `agnes_chat_stream_impl`
+   - `LocalProvider`：stub，`chat` 返回"本地模型集成暂缓"错误（2026-09-19 决策）
+   - `resolve_provider(id, base_url, api_key)`：空/未知 id 回退 agnes；key 掩码（****）过滤 + 环境变量回退
+   - `list_providers()` → `ProviderInfo`（设置页展示）
+2. **`ai.rs` 重构**：
+   - 抽离 `agnes_chat_impl(base_url, api_key, req)`：SSRF 校验（`validate_base_url` + `validate_resolved_host`）+ 非流式请求 + 429 友好提示 + 错误体截断（按字符非字节）
+   - 抽离 `agnes_chat_stream_impl<F>(base_url, api_key, req, cancel, on_delta)`：SSE 解析循环 + cancel 中断（返回"已停止生成"）+ on_delta 回调 Err 时提前返回（前端关通道）
+   - `ai_chat`/`ai_chat_stream` 命令：新增 `provider: Option<String>` 参数，经 `resolve_provider` 路由；cancel 标志注册/移除、Channel 推送留在命令层（impl 只回调）
+3. **前端**：设置页 AI 区新增"推理服务（Provider）"下拉（`ai_list_providers` 加载，local 置灰标"暂缓"）；`stores/ai.ts` sendMessage 透传 `ai_provider` 设置；`ai_provider` 设置键（默认 'agnes'）
+
+### 技术要点（踩坑记录）
+- **dyn trait 不能有泛型方法**：`chat_stream` 的 `impl Fn` 参数导致 E0038 → 改 `Box<dyn Fn + Send + 'static>`（Box 本身也是 dyn 兼容的）
+- **async fn in trait 的 dyn 兼容**：Rust 1.97 原生支持 async fn in trait，但 dyn 场景受限 → 引入 `async-trait` crate（Cargo.toml 新增依赖）
+- **tauri Channel 是 Clone 的**：`Box::new(move |delta| on_event.send(...))` move 了 on_event，后续 Done/Error 还要用 → 闭包前 `on_event.clone()`
+- **测试环境无关性**：`resolve_agnes_default` 原假设"无 key 必 Err"，但测试机设置了 AGNES_API_KEY → 改测"掩码 key 被过滤"语义（Ok 则回退环境变量成功 / Err 则未配置，两分支都合法）
+
+### 验证
+- 71 单测通过（70+1，新增 4 个 provider 测试、修正 1 个环境依赖测试）
+- 编译零警告（`req.stream` 字段被 impl 实际使用消除 1 个；trait 元数据方法 `#[allow(dead_code)]` 注明设置页接入后移除）
+- 冒烟 12/12
+- 待高哥实测：设置页选 Provider + AI 对话走新路由（日志应显示 provider=agnes）
+
+### 下一步
+- 阶段 1.3 工具层（MCP 客户端）——按 strategy-2026.md 路线图
+- 或先做设置页 provider 多端点配置完善（当前 agnes 端点可配，local 置灰）
+
+## 第三十三章（阶段 1.3）：工具层 MCP 客户端（2026-09-20）
+
+### 目标
+阶段 1（AI 原生内核）的 1.3 工具层：AI 面板能调用外部工具。落地为 **MCP 客户端**（Model Context Protocol）——接本地/远端 MCP server，工具注册表 + 权限白名单 + 调用审计日志。
+
+### 交付内容
+1. **迁移 11**（`20260920000001_mcp_tools.sql`）：
+   - `mcp_servers`：name（唯一）/command/args（JSON 数组）/enabled/allowed_tools（白名单 JSON，空=全部）
+   - `tool_audit_log`：server/tool/arguments/result_summary/success/created_at + 索引
+2. **`engine/mcp.rs`**（引擎层）：
+   - `McpConnection`：子进程（stdlib）+ JSON-RPC 2.0 请求/通知
+   - **协议细节**：`initialize` 握手（协议版本 2025-03-26）→ `notifications/initialized`（**无 id 通知，server 不应答**）→ `tools/list` → `tools/call`
+   - **30s 请求超时**：server 卡死不响应时返回错误，不挂起调用方（端到端测试抓出死等 bug）
+   - 连接缓存：server_id → 长驻进程（删除/停用时断开）
+   - 工具注册表：`list_tools` 汇总启用 server 工具，白名单过滤，全局名 `{server}__{tool}`
+   - `call_tool`：统一执行入口（白名单校验 + 审计写库 + 结果拼接）
+   - `to_openai_tools`：转 OpenAI function calling 格式
+3. **`mcp_cmd.rs`**：7 个命令（`mcp_list_servers`/`mcp_add_server`/`mcp_remove_server`/`mcp_set_server_enabled`/`mcp_list_tools`/`mcp_call_tool`/`mcp_get_audit_log`）
+4. **`ai.rs` function calling 支持**：
+   - `ChatMessage` 加 `tool_call_id`/`tool_calls`（OpenAI 兼容）；新增 `ToolCall`/`ToolCallFunction`
+   - `ChatRequest` 加 `tools`
+   - `agnes_chat_impl` 返回结构化 `ChatMessage`（含 tool_calls）
+   - **`ai_chat` 工具执行循环**：≤6 轮（模型请求工具 → 逐个 `call_tool` → 结果回传 → 再请求）；自动携带启用工具（前端调用签名不变）
+5. **前端**：
+   - `stores/ai.ts`：`tools`/`toolsLoaded` 状态 + `loadTools()`；**有工具走非流式 `ai_chat`（function calling）**，无工具保持流式
+   - 设置页 MCP 分区：server 列表（启用开关/删除/工具数）、添加表单（name/command/args/白名单）、可用工具列表、手动调用测试、审计日志
+6. **端到端测试**（`mcp_end_to_end_with_fake_server`）：node 假 server 脚本 + 临时 DB，验证 spawn→握手→tools/list→tools/call→审计写库→白名单过滤全链路
+
+### 踩坑记录（重要）
+- **MCP notification 无 id 不应答**：`notifications/initialized` 是 JSON-RPC 通知（无 id），server 不响应。用 `request()` 发会带 id 死等 → 新增 `notify()` 方法（只写不读）。**这是端到端测试卡死抓出来的**
+- **MCP 请求必须有超时**：server 卡死会挂起调用方 → 30s 超时保护
+- **Vue 模板单引号属性值内不能含裸双引号**：`placeholder='参数 JSON（如 ["-y",...]）'` 编译报错 → 换 `&quot;` 实体
+- **python 写 Rust 源码的转义**：`"["other"]"` 在 python 里写进文件会变 `["other"]`（裸引号断 Rust 字符串）→ 用 `r#"..."#` 原始字符串
+
+### 验证
+- 74 单测全过（+1 端到端）、编译零警告、冒烟 12/12
+- 端到端实测：假 server 握手/工具列表/调用/审计/白名单全链路 0.08s 跑通
+- 待高哥实测：设置页 MCP 分区加一个真实 server（如 `npx -y @modelcontextprotocol/server-filesystem /tmp`），AI 面板对话让其调工具
+
+### 下一步
+- 阶段 1.4 执行层（Agent：语义快照 → LLM function calling → 动作执行，安全铁律：动作白名单/每步人工确认/仅当前标签）
+- 或 MCP 增强：streamable HTTP 远端 server、工具热更新
+
+## 第三十四章（阶段 1.4）：执行层 Agent（2026-09-20）
+
+### 目标
+里程碑 M1 的最后一块：AI 助手能在授权下执行多步任务（点击/填写/滚动/读取/导航）。
+安全铁律（strategy 1.4）：动作白名单、每步人工确认、仅当前标签、凭据永不外泄、注入防护。
+
+### 交付内容
+1. **`engine/agent.rs`**：
+   - 动作白名单 9 项：click/fill/scroll/read/wait/navigate/back/snapshot/submit
+   - JS 模板生成：selector/value 等参数 **JSON 序列化后嵌入**（引号/反斜杠逃逸防护，单测覆盖）
+   - **密码框拒绝**：fill/read 对 `input[type=password]` 直接拒绝（凭据永不外泄）
+   - `browser_action` OpenAI 工具定义（enum 约束动作）
+   - `describe_action` 人类可读描述（确认卡片展示）
+2. **`agent_cmd.rs`（每步人工确认）**：
+   - `request_agent_action`：生成 request_id → emit `agent-action-request` 事件（前端弹卡片）→ oneshot 等待确认（60s 超时）
+   - `agent_confirm_action(request_id, approved)`：前端回调，发送确认结果
+   - `execute_agent_action`：仅当前活动标签（TabManager.runtime_snapshot 取 active_id）；wait/navigate/back/snapshot 后端动作 + click/fill/scroll/read/submit 页面 JS
+   - `agent_debug_execute`：设置页调试入口（绕过确认，仅调试用）
+3. **`ai.rs` 工具循环接入**：tools 恒带 `browser_action`（与 MCP 工具合并）；循环里 `call.function.name == "browser_action"` 走确认流程（允许→执行→结果回传 / 拒绝→"用户拒绝了该动作"），否则走 MCP
+4. **前端 AISidebar**：`listen('agent-action-request')` 弹确认卡片（允许/拒绝按钮）；footer 显示工具数
+
+### 安全铁律落地对照
+| 铁律 | 落地 |
+|---|---|
+| 动作白名单 | 固定 9 动作，白名单外（如 eval）直接拒绝（单测覆盖） |
+| 每步人工确认 | 所有动作执行前 emit 事件 + oneshot 等用户确认，60s 超时 |
+| 仅当前标签 | 动作只作用于 runtime_snapshot 的活动标签 webview |
+| 凭据永不外泄 | fill/read 拒绝密码框；快照提取排除密码 |
+| 注入防护 | 参数 JSON 序列化嵌入 JS 模板，单测验证选择器含引号不逃逸 |
+
+### 踩坑记录
+- **tauri 2 取窗口**：`app.get_window("main")` 返回 `Window`，与 `WebviewWindow` 不匹配 → 用 `get_webview_window("main")`
+- **`wv.navigate` 要 `Url`**：`url::Url::parse` 转换
+- **evaluate 回调嵌套 Result**：`recv_timeout` 解一层后 raw 仍是 `Result<String,String>`（回调错误），需再 `?` 解一层
+
+### 验证
+- 80 单测全过（+6 agent：转义/密码框/白名单/后端动作/解析/描述）、编译零警告、冒烟 12/12
+- 待高哥实测：AI 面板说"往下滚动一点"→ 弹确认卡片 → 允许后页面滚动
+
+### 下一步
+- 阶段 1.5 标准跟踪（WebMCP/Agentic Browsing 审计）
+- 或 Agent 增强：多步任务编排提示词、动作回放/重试、跨标签任务（需放松"仅当前标签"）
+## 第三十五章 标准跟踪（WebMCP + Agentic Browsing 审计）
+
+> 阶段 1.5 · 2026-09-20 · 交付⑯ · 单测 81（+1）· 零警告 · 冒烟 12/12
+
+### 背景与结论一句话
+WebMCP 已从原型进入 Chrome 149–156 公开 origin trial（2026-05-18 批准，Google I/O 2026 宣布），
+Lighthouse 13.3 加了 Agentic Browsing 类别（2026-05-07 入默认）；但 ShiftBrowser 引擎
+**WebKitGTK 2.52.3（冻结）不支持 `navigator.modelContext` 且无法升级** → 走**客户端 polyfill 试验**
+（捕获网站 WebMCP 工具声明，不冒充能力）。
+
+### 交付内容
+1. **调研报告** `docs/standard-tracking-2026-09-20.md`：WebMCP 现状（origin trial+字符预算+W3C Web ML CG 孵化）、
+   Agentic Browsing 四信号（WebMCP 注册/schema、无障碍树、CLS、llms.txt·pass-fail 比率制）、差距分析、
+   落地路径四项（polyfill 试验>llms.txt 检测>无障碍增强>agentic 自测）、**标准跟踪机制**（季度复核，下次 2026-12-20）。
+2. **WebMCP polyfill 试验（最小可行·默认关）**：
+   - 新增 `engine/webmcp.rs`：`WEBMCP_POLYFILL_JS`（document_start 幂等注入，捕获 `navigator.modelContext.registerTool`
+     到 `window.__webmcp_tools`；**只捕获声明、不伪造执行能力**，其他 modelContext API 不实现）；结构 + 单测。
+   - `engine/content.rs`：`Snapshot` 加 `webmcp_tools`（`#[serde(default)]` 向后兼容）+ `SNAPSHOT_JS` 附带提取内联。
+   - `extensions.rs`：`collect_enabled_items` 返回 `(items, webmcp_on)`；`inject_extensions` 加 `webmcp_on` 参数
+     （循环内 Start 注入 polyfill + 即时 eval，**8 处调用点全适配**）；`get/set_webmcp_polyfill` 命令 + lib.rs 注册。
+   - 前端：`content.ts` Snapshot 加 `webmcpTools`（可选）、`ai.ts` 快照描述附带页面暴露的 WebMCP 工具、
+     `SettingsDialog.vue` WebMCP polyfill 试验开关（默认关 + "试验中"徽标 + 说明文字）。
+
+### 踩坑
+- **`#[serde(default)]` 必须加在字段上**：Snapshot 新字段若不加，旧前端（TypeScript 无此字段）反序列化会失败——
+  语义快照是跨端契约，加字段必须向后兼容。
+- **WebMCP polyfill 必须 Start 注入**（网站脚本 feature-detect 前）；End 注入（UserScript 默认）会让网站
+  feature-detect 落空、不注册工具 → 单独加 Start UserScript + 即时 eval。
+- **改函数签名要全文搜**：`collect_enabled_items`/`inject_extensions` 有 8 处调用点分散在 extensions.rs，
+  改返回值类型/参数必须一次搜全（编译错误 E0308/E0061 逐点暴露）。
+
+### 标准跟踪机制（strategy 承诺兑现）
+跟踪对象：WebMCP（origin trial 进度/正式化）、MCP 协议版本、llms.txt、Lighthouse Agentic Browsing、agent 流量治理。
+节奏：**每季度复核**（下次 2026-12-20），任一对象重大进展即时复核。王二狗每季度主动提醒高哥。
+
+### 验证
+- 81 单测（+1 webmcp polyfill 幂等/只捕获不伪造），零警告；冒烟 12/12。
+- 前端生产构建零错误，Cargo 全量 release 零警告。
+

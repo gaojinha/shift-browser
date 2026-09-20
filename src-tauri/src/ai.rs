@@ -1,11 +1,49 @@
 // AI 侧边栏：对接 AGNES AI（OpenAI 兼容 API）
 // baseURL: https://apihub.agnes-ai.com/v1（从环境变量 AGNES_API_KEY 读 key）
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use tauri::{ipc::Channel, Manager};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    /// 工具结果回传时填（role=tool 时必填，对应 assistant 的 tool_call.id）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// assistant 消息请求工具调用时填
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+}
+
+impl ChatMessage {
+    /// 便捷构造（工具执行循环/测试用）
+    #[allow(dead_code)]
+    pub fn new(role: &str, content: impl Into<String>) -> Self {
+        Self {
+            role: role.to_string(),
+            content: content.into(),
+            tool_call_id: None,
+            tool_calls: None,
+        }
+    }
+}
+
+/// OpenAI function calling 的工具调用请求（assistant 消息里）
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub call_type: String,
+    pub function: ToolCallFunction,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ToolCallFunction {
+    pub name: String,
+    pub arguments: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -13,6 +51,9 @@ struct ChatRequest {
     model: String,
     messages: Vec<ChatMessage>,
     stream: bool,
+    /// function calling 工具定义（OpenAI 格式）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -23,6 +64,50 @@ struct ChatResponse {
 #[derive(Debug, Deserialize)]
 struct ChatChoice {
     message: ChatMessage,
+}
+
+/// 流式响应的事件（经 tauri Channel 推给前端）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum StreamEvent {
+    /// 增量内容（逐块推）
+    Delta { content: String },
+    /// 完整回复（流结束）
+    Done { full: String },
+    /// 出错（中断）
+    Error { message: String },
+}
+
+/// SSE 流式响应解析结构（OpenAI 兼容）
+#[derive(Debug, Deserialize)]
+struct ChatStreamResponse {
+    choices: Vec<ChatStreamChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatStreamChoice {
+    delta: Option<ChatStreamDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatStreamDelta {
+    content: Option<String>,
+}
+
+/// 取消注册表：request_id -> 取消标志。前端点"停止"时置 true，流式循环检测后退出。
+static CANCEL_FLAGS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+
+fn cancel_flags() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    CANCEL_FLAGS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 取消指定 request_id 的流式请求（前端"停止生成"按钮调用）
+#[tauri::command]
+pub fn ai_cancel_stream(request_id: String) {
+    if let Some(flag) = cancel_flags().lock().unwrap().get(&request_id) {
+        flag.store(true, Ordering::Relaxed);
+        log::info!("[ai] 已请求取消流式请求 {}", request_id);
+    }
 }
 
 /// 校验 AI API 地址（SSRF 防护）：
@@ -172,32 +257,119 @@ async fn validate_resolved_host(host: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// AI 对话（AGNES API，OpenAI 兼容）
-/// model：agnes-2.0-flash（默认，稳定）/ agnes-2.5-pro / agnes-2.5-flash（可能超时）
-/// base_url：API 地址（默认 https://apihub.agnes-ai.com/v1，仅允许 https 且非内网）
-/// api_key：API Key（留空/未传时用环境变量 AGNES_API_KEY）
-/// messages：对话消息（role: system/user/assistant）
+/// AI 对话（经 Provider 抽象路由，默认 AGNES 云端）
+/// provider：provider id（"agnes" 默认 / "local" 预留）
+/// model / base_url / api_key：透传给 provider（缺省用 AGNES 默认值）
 #[tauri::command]
 pub async fn ai_chat(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, crate::db::Db>,
+    provider: Option<String>,
     messages: Vec<ChatMessage>,
     model: Option<String>,
     base_url: Option<String>,
     api_key: Option<String>,
 ) -> Result<String, String> {
-    let api_key = api_key
-        .filter(|k| !k.trim().is_empty())
-        // 掩码（前4后4 ****）不是真 key：get_all_settings 对 ai_api_key 返回掩码，
-        // 前端若误把掩码回传，这里忽略并回退环境变量，避免用无效 key 请求
-        .filter(|k| !k.contains("****"))
-        .or_else(|| std::env::var("AGNES_API_KEY").ok())
-        .ok_or_else(|| {
-            "未配置 API Key（在设置里填写，或设置 AGNES_API_KEY 环境变量）".to_string()
-        })?;
+    let provider_id = provider.unwrap_or_default();
+    let provider = crate::engine::ai_provider::resolve_provider(&provider_id, base_url, api_key)?;
     let model = model.unwrap_or_else(|| "agnes-2.0-flash".to_string());
-    let base_url = base_url
-        .filter(|u| !u.trim().is_empty())
-        .unwrap_or_else(|| "https://apihub.agnes-ai.com/v1".to_string());
-    let base_url = validate_base_url(&base_url)?;
+
+    // 工具层（阶段 1.3/1.4）：MCP 工具（有启用时）+ Agent 浏览器动作（总是带上）。
+    // Agent 动作执行前会弹确认框等用户批准，安全铁律。
+    let mut tool_defs: Vec<serde_json::Value> = Vec::new();
+    if let Ok(t) = crate::engine::mcp::list_tools(&db.pool).await {
+        if !t.is_empty() {
+            tool_defs.extend(crate::engine::mcp::to_openai_tools(&t));
+        }
+    }
+    tool_defs.push(crate::engine::agent::browser_action_tool());
+    let tools = Some(tool_defs);
+    log::info!("[ai] 本次对话携带 {} 个工具定义（function calling）", tools.as_ref().map(|t| t.len()).unwrap_or(0));
+
+    // 多轮循环：模型请求工具 → 执行 → 结果回传 → 再请求（上限 6 轮防死循环）
+    let mut current = messages;
+    for round in 0..6 {
+        let req = crate::engine::ai_provider::ProviderRequest {
+            model: model.clone(),
+            messages: current.clone(),
+            stream: false,
+            tools: tools.clone(),
+        };
+        let reply = provider.chat(&req).await?;
+
+        // 模型请求调用工具
+        if let Some(calls) = reply.tool_calls.clone() {
+            if calls.is_empty() {
+                return Ok(reply.content);
+            }
+            log::info!("[ai] 第 {} 轮模型请求 {} 个工具调用", round + 1, calls.len());
+            // 追加 assistant 消息（含 tool_calls）
+            current.push(reply);
+            // 逐个执行工具并追加 tool 结果消息
+            for call in &calls {
+                let args: serde_json::Value =
+                    serde_json::from_str(&call.function.arguments).unwrap_or(serde_json::Value::Null);
+                let content = if call.function.name == "browser_action" {
+                    // Agent 动作：每步人工确认（安全铁律）
+                    match serde_json::from_value::<crate::engine::agent::AgentActionParams>(args.clone()) {
+                        Ok(params) => {
+                            // 请求确认（前端弹卡片，60s 超时）
+                            match crate::agent_cmd::request_agent_action(&app, &params).await {
+                                Ok(true) => {
+                                    // 用户允许 → 执行（仅当前活动标签）
+                                    let window = app
+                                        .get_webview_window("main")
+                                        .ok_or_else(|| "主窗口不存在".to_string())?;
+                                    let state = app
+                                        .try_state::<crate::tabs::TabManager>()
+                                        .ok_or_else(|| "标签管理器未初始化".to_string())?;
+                                    match crate::agent_cmd::execute_agent_action(&app, &window, &state, &params).await {
+                                        Ok(text) => format!("动作已执行：{}", text),
+                                        Err(e) => format!("动作执行失败: {}", e),
+                                    }
+                                }
+                                Ok(false) => "用户拒绝了该动作".to_string(),
+                                Err(e) => format!("动作确认失败: {}", e),
+                            }
+                        }
+                        Err(e) => format!("动作参数解析失败: {}", e),
+                    }
+                } else {
+                    // MCP 工具
+                    let result = crate::engine::mcp::call_tool(&db.pool, &call.function.name, args).await;
+                    match result {
+                        Ok(text) => text,
+                        Err(e) => format!("工具执行失败: {}", e),
+                    }
+                };
+                current.push(ChatMessage {
+                    role: "tool".to_string(),
+                    content,
+                    tool_call_id: Some(call.id.clone()),
+                    tool_calls: None,
+                });
+            }
+            continue;
+        }
+
+        // 无工具调用 → 最终回复
+        log::info!(
+            "[ai] 对话成功: provider={} 回复 {} 字符",
+            provider_id,
+            reply.content.chars().count()
+        );
+        return Ok(reply.content);
+    }
+    Err("AI 工具调用超过 6 轮上限，已终止".to_string())
+}
+
+/// AGNES 非流式对话实现（provider 内部调用，含 SSRF 校验）
+pub async fn agnes_chat_impl(
+    base_url: &str,
+    api_key: &str,
+    req: &crate::engine::ai_provider::ProviderRequest,
+) -> Result<ChatMessage, String> {
+    let base_url = validate_base_url(base_url)?;
     // 实际解析域名，校验解析结果不指向本机/内网（P1-8）
     let host = url::Url::parse(&base_url)
         .map_err(|_| "API 地址格式不合法".to_string())?
@@ -213,22 +385,30 @@ pub async fn ai_chat(
         .timeout(std::time::Duration::from_secs(90))
         .build()
         .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
-    let req = ChatRequest {
-        model: model.clone(),
-        messages,
-        stream: false,
+    let req_body = ChatRequest {
+        model: req.model.clone(),
+        messages: req.messages.clone(),
+        stream: req.stream,
+        tools: req.tools.clone(),
     };
 
     let resp = client
         .post(url)
         .header("Authorization", format!("Bearer {}", api_key))
-        .json(&req)
+        .json(&req_body)
         .send()
         .await
         .map_err(|e| format!("AI 请求失败: {}", e))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
+        // 429 = 服务端限流（免费额度/并发限制），给友好提示，别透传一坨错误体
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let msg = "AI 服务限流（429）：请求太频繁，请稍等片刻再试。若持续出现，可能是当日额度已用完。"
+                .to_string();
+            log::error!("[ai] 服务限流 429");
+            return Err(msg);
+        }
         let body = resp.text().await.unwrap_or_default();
         // 截断过长错误体（有些网关返回整页 HTML，原样透传会让前端显示一坨）
         // 注意按字符截断而非字节切片——中文等多字节字符的字节边界会 panic
@@ -251,14 +431,210 @@ pub async fn ai_chat(
         .choices
         .into_iter()
         .next()
-        .map(|c| c.message.content)
+        .map(|c| c.message)
         .ok_or_else(|| "AI 无回复".to_string())?;
-    log::info!(
-        "[ai] 对话成功: model={} 回复 {} 字符",
-        model,
-        reply.chars().count()
-    );
     Ok(reply)
+}
+
+/// AI 对话（流式，SSE 逐块推送）——经 Provider 抽象路由（默认 AGNES）
+/// 前端点"停止"时调 ai_cancel_stream(request_id)，本命令检测到取消标志后提前返回。
+#[tauri::command]
+pub async fn ai_chat_stream(
+    request_id: String,
+    provider: Option<String>,
+    messages: Vec<ChatMessage>,
+    on_event: Channel<StreamEvent>,
+    model: Option<String>,
+    base_url: Option<String>,
+    api_key: Option<String>,
+) -> Result<(), String> {
+    let provider_id = provider.unwrap_or_default();
+    let provider =
+        match crate::engine::ai_provider::resolve_provider(&provider_id, base_url, api_key) {
+            Ok(p) => p,
+            Err(e) => {
+                on_event
+                    .send(StreamEvent::Error { message: e.clone() })
+                    .ok();
+                return Err(e);
+            }
+        };
+    let model = model.unwrap_or_else(|| "agnes-2.0-flash".to_string());
+    let req = crate::engine::ai_provider::ProviderRequest {
+        model,
+        messages,
+        stream: true,
+        tools: None,
+    };
+
+    // 注册取消标志（请求结束无论成败都移除）
+    let cancel = Arc::new(AtomicBool::new(false));
+    cancel_flags()
+        .lock()
+        .unwrap()
+        .insert(request_id.clone(), cancel.clone());
+
+    let result = provider
+        .chat_stream(
+            &req,
+            cancel.clone(),
+            Box::new({
+                let on_event = on_event.clone();
+                move |delta| {
+                    on_event
+                        .send(StreamEvent::Delta { content: delta })
+                        .map_err(|_| ())
+                }
+            }),
+        )
+        .await;
+
+    cancel_flags().lock().unwrap().remove(&request_id);
+
+    match result {
+        Ok(full) => {
+            log::info!(
+                "[ai] 流式对话成功: provider={} 回复 {} 字符",
+                provider_id,
+                full.chars().count()
+            );
+            on_event.send(StreamEvent::Done { full }).ok();
+            Ok(())
+        }
+        Err(e) => {
+            // 用户主动停止不算错误（impl 里 cancel 时返回"已停止生成"）
+            if e != "已停止生成" {
+                on_event
+                    .send(StreamEvent::Error { message: e.clone() })
+                    .ok();
+            }
+            Err(e)
+        }
+    }
+}
+
+/// AGNES 流式对话实现（provider 内部调用，含 SSRF 校验 + SSE 解析）。
+/// `cancel` 为 true 时中断（返回"已停止生成"）；`on_delta` 每块增量回调，
+/// 返回 Err 表示前端通道已关闭，停止推送。
+pub async fn agnes_chat_stream_impl<F>(
+    base_url: &str,
+    api_key: &str,
+    req: &crate::engine::ai_provider::ProviderRequest,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    on_delta: F,
+) -> Result<String, String>
+where
+    F: Fn(String) -> Result<(), ()>,
+{
+    let base_url = validate_base_url(base_url)?;
+    let host = url::Url::parse(&base_url)
+        .map_err(|_| "API 地址格式不合法".to_string())?
+        .host_str()
+        .ok_or_else(|| "API 地址缺少主机名".to_string())?
+        .to_string();
+    if host.parse::<std::net::IpAddr>().is_err() {
+        validate_resolved_host(&host).await?;
+    }
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
+    let req_body = ChatRequest {
+        model: req.model.clone(),
+        messages: req.messages.clone(),
+        stream: req.stream,
+        tools: req.tools.clone(),
+    };
+
+    let resp = client
+        .post(url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&req_body)
+        .send()
+        .await
+        .map_err(|e| format!("AI 请求失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let msg = "AI 服务限流（429）：请求太频繁，请稍等片刻再试。若持续出现，可能是当日额度已用完。"
+                .to_string();
+            log::error!("[ai] 流式服务限流 429");
+            return Err(msg);
+        }
+        let body = resp.text().await.unwrap_or_default();
+        let body = if body.chars().count() > 200 {
+            let truncated: String = body.chars().take(200).collect();
+            format!("{}…(截断)", truncated)
+        } else {
+            body
+        };
+        let msg = format!("AI 服务错误 {}: {}", status, body);
+        log::error!("[ai] 流式服务错误 {}: {}", status, body);
+        return Err(msg);
+    }
+
+    // 读取 SSE 流，逐块解析 delta.content 推送
+    use futures_util::StreamExt;
+    let mut stream = resp.bytes_stream();
+    let mut buf = String::new();
+    let mut full = String::new();
+    let mut done = false;
+
+    while let Some(chunk) = stream.next().await {
+        if cancel.load(Ordering::Relaxed) {
+            log::info!("[ai] 流式请求被用户取消");
+            return Err("已停止生成".to_string());
+        }
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => return Err(format!("流读取失败: {}", e)),
+        };
+        buf.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(pos) = buf.find('\n') {
+            let line = buf[..pos].to_string();
+            buf = buf[pos + 1..].to_string();
+            let line = line.trim();
+            if let Some(data) = line.strip_prefix("data:") {
+                let data = data.trim();
+                if data == "[DONE]" {
+                    done = true;
+                    break;
+                }
+                if let Ok(parsed) = serde_json::from_str::<ChatStreamResponse>(data) {
+                    if let Some(delta) = parsed.choices.first().and_then(|c| c.delta.as_ref()) {
+                        if let Some(content) = delta.content.as_ref() {
+                            if !content.is_empty() {
+                                full.push_str(content);
+                                // 前端已关闭通道时回调返回 Err → 停止推送
+                                if on_delta(content.clone()).is_err() {
+                                    log::info!("[ai] 前端已关闭流式通道，停止推送");
+                                    return Ok(full);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if done {
+            break;
+        }
+    }
+
+    if done {
+        Ok(full)
+    } else {
+        Err("AI 响应流意外中断".to_string())
+    }
+}
+
+/// 可用 AI Provider 列表（设置页展示）
+#[tauri::command]
+pub fn ai_list_providers() -> Vec<crate::engine::ai_provider::ProviderInfo> {
+    crate::engine::ai_provider::list_providers()
 }
 
 #[cfg(test)]

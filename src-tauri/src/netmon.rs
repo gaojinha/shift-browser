@@ -84,7 +84,8 @@ pub fn start_network_monitor(app: AppHandle) {
             let cur = read_net_dev();
             let dt = now.duration_since(last_time).as_secs_f64();
             if dt > 0.0 {
-                let down_kb = ((cur.rx.saturating_sub(last.rx)) as f64 / 1024.0 / dt).max(0.0) as u32;
+                let down_kb =
+                    ((cur.rx.saturating_sub(last.rx)) as f64 / 1024.0 / dt).max(0.0) as u32;
                 let up_kb = ((cur.tx.saturating_sub(last.tx)) as f64 / 1024.0 / dt).max(0.0) as u32;
                 let _ = app.emit(
                     "net-status-updated",

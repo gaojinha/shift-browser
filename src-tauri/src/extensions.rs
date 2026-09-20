@@ -629,7 +629,11 @@ const STRICT_PRIVACY_JS: &str = r#"
 
 /// 在主线程把所有 child webview 的 UserContentManager 清空并注入扩展
 /// UserContentManager 是 webview 级（非 WebContext 级），必须逐个 webview 注入
-fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>)>) {
+fn inject_extensions(
+    app: &AppHandle,
+    items: Vec<(Option<String>, Option<String>)>,
+    webmcp_on: bool,
+) {
     // 注意：主窗口是 Window 类型（tabs.rs 用 get_window("main")），
     // get_webview_window("main") 会返回 None 导致注入被跳过
     let Some(window) = app.get_window("main") else {
@@ -640,6 +644,8 @@ fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>
     log::info!("[extensions] 注入到 {} 个 webview", webviews.len());
     let items_owned = items.clone();
     let _ = app.run_on_main_thread(move || {
+        // 引擎层内容过滤器：如有规则变更，在主线程编译（编译完成会回来触发一次重新注入）
+        crate::engine::content_filter::compile_pending();
         // 只注入 child 标签页（已跳过主 webview），child 都是 http/https 外部网页。
         // allow_list 必须用 ["*"]（匹配所有页面）：空数组 &[] 会被 WebKit 当作"空匹配列表"，
         // 一个页面都不注入（UserScript 从此从未生效——2026-09-19 事故根因，广告拦截/隐私/翻译全失效）。
@@ -657,8 +663,25 @@ fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>
                 let Some(manager) = webview.user_content_manager() else {
                     return;
                 };
+                // 引擎级内容过滤器（网络层规则拦截）：开启时挂载，关闭时移除。
+                // 与脚本/样式注入相互独立——它拦的是"请求"，不是"渲染结果"。
+                crate::engine::content_filter::apply_to_manager(&manager);
                 manager.remove_all_scripts();
                 manager.remove_all_style_sheets();
+                // WebMCP polyfill 试验（阶段 1.5）：document_start 注入（网站脚本
+                // feature-detect 前），捕获 registerTool 声明。可开关，默认关。
+                if webmcp_on {
+                    let polyfill = UserScript::new(
+                        crate::engine::webmcp::WEBMCP_POLYFILL_JS,
+                        UserContentInjectedFrames::AllFrames,
+                        UserScriptInjectionTime::Start,
+                        allow_list,
+                        &[],
+                    );
+                    manager.add_script(&polyfill);
+                    // 即时注入：已加载的标签立即生效（幂等，重复无害）
+                    crate::engine::webview::eval_js(&webview, crate::engine::webmcp::WEBMCP_POLYFILL_JS);
+                }
                 for (js, css) in &items_clone {
                     if let Some(js) = js {
                         let script = UserScript::new(
@@ -674,19 +697,8 @@ fn inject_extensions(app: &AppHandle, items: Vec<(Option<String>, Option<String>
                         // 页面再 evaluate 一次，让已打开的标签也能立即生效。
                         // 脚本自带幂等保护（__shiftPrivacyInstalled / __shiftTranslateMenu），
                         // 页面加载时已执行过则直接 return，重复注入无害。
-                        let js_clone = js.clone();
-                        let _ = webview.evaluate_javascript(
-                            &js_clone,
-                            None,
-                            None,
-                            None::<&gtk::gio::Cancellable>,
-                            move |r| {
-                                if let Err(e) = r {
-                                    // 页面未加载完成时 evaluate 会失败，属正常（UserScript 兜底）
-                                    log::debug!("[extensions] 即时注入跳过（页面未就绪）: {}", e);
-                                }
-                            },
-                        );
+                        // 引擎层统一封装（失败仅 debug：页面未就绪时属正常，UserScript 兜底）
+                        crate::engine::webview::eval_js(&webview, js);
                     }
                     if let Some(css) = css {
                         let sheet = UserStyleSheet::new(
@@ -888,7 +900,9 @@ async fn load_custom_keywords(db: &Db) -> Vec<String> {
 }
 
 /// 读取所有启用扩展的注入内容 + 广告拦截（如开启）
-async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<String>)>, String> {
+async fn collect_enabled_items(
+    db: &Db,
+) -> Result<(Vec<(Option<String>, Option<String>)>, bool), String> {
     let exts = ext_db::list(db).await.map_err(|e| e.to_string())?;
     let mut items = Vec::new();
     for ext in exts {
@@ -915,6 +929,8 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
 
     // 广告拦截（内置系统注入，追加在用户扩展后面）
     let adblock_on = take("adblock_enabled").map(|v| v == "true").unwrap_or(true); // 默认开启
+                                                                                   // 同步给引擎层内容过滤器（网络层拦截）：开关变化时立即生效
+    crate::engine::content_filter::set_enabled(adblock_on);
     if adblock_on {
         let custom: Vec<String> = take("adblock_keywords")
             .and_then(|v| serde_json::from_str(&v).ok())
@@ -927,6 +943,9 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
         );
         items.push((Some(js), Some(ADBLOCK_CSS.to_string())));
         ADBLOCK_INJECTIONS.fetch_add(1, Ordering::Relaxed);
+        // 引擎层网络拦截规则：内置规则 + 自定义关键词（规则变化时会触发重新编译）
+        let rules = crate::engine::content_filter::build_rules_with_keywords(&custom);
+        crate::engine::content_filter::remember_rules(&rules);
     }
     // 内置隐私防护（三档）：off / standard / strict
     // 兼容早期 privacy_shield='false'（等价 off）
@@ -982,7 +1001,12 @@ async fn collect_enabled_items(db: &Db) -> Result<Vec<(Option<String>, Option<St
             );
         }
     }
-    Ok(items)
+    // WebMCP polyfill 试验开关（阶段 1.5，默认关）
+    let webmcp_on = take("webmcp_polyfill").map(|v| v == "true").unwrap_or(false);
+    if webmcp_on {
+        log::info!("[extensions] WebMCP polyfill 试验已开启");
+    }
+    Ok((items, webmcp_on))
 }
 
 /// 保存加噪白名单（域名数组）并立即重新注入
@@ -1012,7 +1036,10 @@ pub async fn set_privacy_whitelist(
             cleaned.push(s);
         }
     }
-    log::info!("[extensions] set_privacy_whitelist: {} 个域名", cleaned.len());
+    log::info!(
+        "[extensions] set_privacy_whitelist: {} 个域名",
+        cleaned.len()
+    );
     let json = serde_json::to_string(&cleaned).map_err(|e| e.to_string())?;
     sqlx::query(
         "INSERT INTO settings (key, value) VALUES ('privacy_whitelist', ?)
@@ -1022,8 +1049,40 @@ pub async fn set_privacy_whitelist(
     .execute(&db.pool)
     .await
     .map_err(|e| e.to_string())?;
-    let items = collect_enabled_items(&db).await?;
-    inject_extensions(&app, items);
+    let (items, webmcp_on) = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items, webmcp_on);
+    Ok(())
+}
+
+/// 读取 WebMCP polyfill 试验开关（阶段 1.5，默认关）
+#[tauri::command]
+pub async fn get_webmcp_polyfill(db: State<'_, Db>) -> Result<bool, String> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'webmcp_polyfill'")
+            .fetch_optional(&db.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(row.map(|(v,)| v == "true").unwrap_or(false))
+}
+
+/// 设置 WebMCP polyfill 试验开关（存设置 + 立即重新注入）
+#[tauri::command]
+pub async fn set_webmcp_polyfill(
+    db: State<'_, Db>,
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    log::info!("[extensions] set_webmcp_polyfill: {}", enabled);
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ('webmcp_polyfill', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(if enabled { "true" } else { "false" })
+    .execute(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let (items, webmcp_on) = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items, webmcp_on);
     Ok(())
 }
 
@@ -1070,8 +1129,8 @@ pub async fn set_privacy_shield_level(
     .execute(&db.pool)
     .await
     .map_err(|e| e.to_string())?;
-    let items = collect_enabled_items(&db).await?;
-    inject_extensions(&app, items);
+    let (items, webmcp_on) = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items, webmcp_on);
     Ok(())
 }
 
@@ -1113,8 +1172,8 @@ pub async fn set_privacy_shield_enabled(
     .execute(&db.pool)
     .await
     .map_err(|e| e.to_string())?;
-    let items = collect_enabled_items(&db).await?;
-    inject_extensions(&app, items);
+    let (items, webmcp_on) = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items, webmcp_on);
     Ok(())
 }
 
@@ -1145,8 +1204,8 @@ pub async fn set_adblock_enabled(
     .execute(&db.pool)
     .await
     .map_err(|e| e.to_string())?;
-    let items = collect_enabled_items(&db).await?;
-    inject_extensions(&app, items);
+    let (items, webmcp_on) = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items, webmcp_on);
     Ok(())
 }
 
@@ -1192,8 +1251,8 @@ pub async fn set_adblock_keywords(
     .execute(&db.pool)
     .await
     .map_err(|e| e.to_string())?;
-    let items = collect_enabled_items(&db).await?;
-    inject_extensions(&app, items);
+    let (items, webmcp_on) = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items, webmcp_on);
     Ok(())
 }
 
@@ -1217,8 +1276,8 @@ pub async fn load_extension(
         css.as_ref().map(|s| s.len()).unwrap_or(0)
     );
     // 注入（重新注入全部启用扩展，保持一致性）
-    let items = collect_enabled_items(&db).await?;
-    inject_extensions(&app, items);
+    let (items, webmcp_on) = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items, webmcp_on);
     Ok(ExtensionInfo {
         id,
         name,
@@ -1277,8 +1336,8 @@ pub async fn set_extension_enabled(
     ext_db::set_enabled(&db, id, enabled)
         .await
         .map_err(|e| e.to_string())?;
-    let items = collect_enabled_items(&db).await?;
-    inject_extensions(&app, items);
+    let (items, webmcp_on) = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items, webmcp_on);
     Ok(())
 }
 
@@ -1287,15 +1346,15 @@ pub async fn set_extension_enabled(
 pub async fn delete_extension(db: State<'_, Db>, app: AppHandle, id: i64) -> Result<(), String> {
     log::info!("[extensions] delete_extension: id={}", id);
     ext_db::delete(&db, id).await.map_err(|e| e.to_string())?;
-    let items = collect_enabled_items(&db).await?;
-    inject_extensions(&app, items);
+    let (items, webmcp_on) = collect_enabled_items(&db).await?;
+    inject_extensions(&app, items, webmcp_on);
     Ok(())
 }
 
 /// 启动时注入所有启用扩展（在 setup 阶段调用，db 已就绪）
 pub fn inject_on_startup(app: &AppHandle, db: &Db) {
-    let items = match tauri::async_runtime::block_on(collect_enabled_items(db)) {
-        Ok(items) => items,
+    let (items, webmcp_on) = match tauri::async_runtime::block_on(collect_enabled_items(db)) {
+        Ok(v) => v,
         Err(e) => {
             log::error!("[extensions] 启动注入失败: {}", e);
             return;
@@ -1303,7 +1362,7 @@ pub fn inject_on_startup(app: &AppHandle, db: &Db) {
     };
     if !items.is_empty() {
         log::info!("[extensions] 启动注入 {} 个启用扩展", items.len());
-        inject_extensions(app, items);
+        inject_extensions(app, items, webmcp_on);
     }
 }
 
@@ -1311,9 +1370,9 @@ pub fn inject_on_startup(app: &AppHandle, db: &Db) {
 pub async fn re_inject(app: &AppHandle) {
     let db = app.state::<Db>();
     match collect_enabled_items(&db).await {
-        Ok(items) => {
+        Ok((items, webmcp_on)) => {
             log::info!("[extensions] re_inject: {} 个注入项", items.len());
-            inject_extensions(app, items.clone());
+            inject_extensions(app, items.clone(), webmcp_on);
             // 延迟重试 evaluate：页面加载中 evaluate 会失败（document 未就绪）。
             // page_load_finished 事件对部分页面（如 understandingwar.org）不触发，
             // 所以不能只靠 Finished 补注入——这里 1s/3s/8s 重试，页面加载完必然命中。
@@ -1347,31 +1406,16 @@ fn evaluate_inject_retry(app: &AppHandle, items: Vec<(Option<String>, Option<Str
                 let webview = pwv.inner();
                 for (js, _css) in &items_clone {
                     if let Some(js) = js {
-                        let js_clone = js.clone();
-                        let _ = webview.evaluate_javascript(
-                            &js_clone,
-                            None,
-                            None,
-                            None::<&gtk::gio::Cancellable>,
-                            move |r| {
-                                if let Err(e) = r {
-                                    log::debug!("[extensions] 延迟重试注入跳过（页面未就绪）: {}", e);
-                                }
-                            },
-                        );
+                        crate::engine::webview::eval_js(&webview, js);
                     }
                 }
                 // 探针：确认翻译菜单脚本是否已在页面执行（UserScript 生效与否立见分晓）
-                let _ = webview.evaluate_javascript(
+                crate::engine::webview::eval_js_with(
+                    &webview,
                     "(function(){return 'probe: tr='+(typeof window.__shiftTranslateMenu)+' proto='+location.protocol+' ready='+document.readyState;})()",
-                    None,
-                    None,
-                    None::<&gtk::gio::Cancellable>,
                     move |r| match r {
-                        Ok(v) => log::info!("[extensions] 延迟探针: {}", v.to_string()),
-                        Err(e) => {
-                            log::info!("[extensions] 延迟探针失败（页面未就绪）: {}", e)
-                        }
+                        Ok(v) => log::info!("[extensions] 延迟探针: {}", v),
+                        Err(e) => log::info!("[extensions] 延迟探针失败（页面未就绪）: {}", e),
                     },
                 );
             });
@@ -1388,8 +1432,8 @@ fn evaluate_inject_retry(app: &AppHandle, items: Vec<(Option<String>, Option<Str
 /// 与 UserScript 重复执行无害。
 pub async fn inject_to_webview(app: &AppHandle, label: &str) {
     let db = app.state::<Db>();
-    let items = match collect_enabled_items(&db).await {
-        Ok(items) => items,
+    let (items, _webmcp_on) = match collect_enabled_items(&db).await {
+        Ok(v) => v,
         Err(e) => {
             log::error!("[extensions] inject_to_webview 收集注入项失败: {}", e);
             return;
@@ -1406,35 +1450,21 @@ pub async fn inject_to_webview(app: &AppHandle, label: &str) {
         let webview = pwv.inner();
         for (js, _css) in &items {
             if let Some(js) = js {
-                let js_clone = js.clone();
-                let js_len = js_clone.len();
-                let _ = webview.evaluate_javascript(
-                    &js_clone,
-                    None,
-                    None,
-                    None::<&gtk::gio::Cancellable>,
-                    move |r| {
-                        match r {
-                            Ok(_) => log::info!(
-                                "[extensions] 页面加载后即时注入成功 ({} 字节)",
-                                js_len
-                            ),
-                            Err(e) => {
-                                log::info!("[extensions] 页面加载后即时注入失败: {}", e)
-                            }
-                        }
-                    },
-                );
+                let js_len = js.len();
+                crate::engine::webview::eval_js_with(&webview, js, move |r| match r {
+                    Ok(_) => {
+                        log::info!("[extensions] 页面加载后即时注入成功 ({} 字节)", js_len)
+                    }
+                    Err(e) => log::info!("[extensions] 页面加载后即时注入失败: {}", e),
+                });
             }
         }
         // 诊断探针：确认翻译菜单脚本是否真的在页面里执行了
-        let _ = webview.evaluate_javascript(
+        crate::engine::webview::eval_js_with(
+            &webview,
             "(function(){return 'probe: __shiftTranslateMenu='+(typeof window.__shiftTranslateMenu)+' proto='+location.protocol;})()",
-            None,
-            None,
-            None::<&gtk::gio::Cancellable>,
             move |r| match r {
-                Ok(v) => log::info!("[extensions] 注入探针: {}", v.to_string()),
+                Ok(v) => log::info!("[extensions] 注入探针: {}", v),
                 Err(e) => log::info!("[extensions] 注入探针失败: {}", e),
             },
         );

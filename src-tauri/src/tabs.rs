@@ -15,24 +15,49 @@ use crate::db::{downloads, history, Db};
 #[cfg(target_os = "linux")]
 use gtk::glib::translate::ToGlibPtr;
 use gtk::prelude::*;
-use webkit2gtk::WebViewExt;
 #[cfg(target_os = "linux")]
-use webkit2gtk::{DownloadExt, SettingsExt, URIRequestExt, URIResponseExt, WebContextExt};
+use webkit2gtk::{DownloadExt, URIRequestExt, URIResponseExt, WebContextExt, WebViewExt};
 
-// UI 布局常量（与前端 CSS 保持一致）
-pub const TAB_BAR_HEIGHT: f64 = 44.0;
-pub const ADDRESS_BAR_HEIGHT: f64 = 42.0;
-pub const BOOKMARKS_BAR_HEIGHT: f64 = 30.0;
-pub const STATUS_BAR_HEIGHT: f64 = 22.0;
+// UI 布局常量：统一由引擎层提供（唯一事实来源，见 engine/layout.rs）
+pub use crate::engine::layout::CONTENT_TOP_OFFSET;
+use crate::engine::layout::CONTENT_TOP_OFFSET_NO_BOOKMARKS;
+
+/// 键盘焦点是否在 UI 层（主 webview，跑 Vue 界面）。
+/// 前端快捷键监听的是 HTML 层的 keydown，只在主 webview 持焦时触发；
+/// 用户点击网页后焦点落到 child webview，按键到不了 HTML 层——此时由 GTK 顶层窗口
+/// 兜底拦截并转发（emit `global-shortcut`），保证 Ctrl+T/W/R/L/H 等始终可用。
+static UI_FOCUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// 清洗 URL 中的跨站追踪参数（隐私防护 P0）
 /// 覆盖 utm_* 系列 + 主流平台点击 ID（fbclid/gclid/msclkid/spm 等）
 fn clean_tracking_params(url: &str) -> String {
     const TRACKING_KEYS: &[&str] = &[
-        "fbclid", "gclid", "dclid", "msclkid", "yclid", "twclid", "igshid", "ttclid",
-        "mc_eid", "mc_cid", "mkt_tok", "_hsenc", "_hsmi", "vero_id", "oly_enc_id",
-        "ref_src", "ref_url", "spm", "scm", "share_source", "share_medium",
-        "from_source", "wd_uid", "s_kwcid", "elqTrackId", "trk",
+        "fbclid",
+        "gclid",
+        "dclid",
+        "msclkid",
+        "yclid",
+        "twclid",
+        "igshid",
+        "ttclid",
+        "mc_eid",
+        "mc_cid",
+        "mkt_tok",
+        "_hsenc",
+        "_hsmi",
+        "vero_id",
+        "oly_enc_id",
+        "ref_src",
+        "ref_url",
+        "spm",
+        "scm",
+        "share_source",
+        "share_medium",
+        "from_source",
+        "wd_uid",
+        "s_kwcid",
+        "elqTrackId",
+        "trk",
     ];
     const TRACKING_PREFIXES: &[&str] = &["utm_", "pk_", "hsa_", "at_", "ito_"];
     // 只处理 http/https/query 存在的 URL
@@ -74,7 +99,8 @@ fn clean_tracking_params(url: &str) -> String {
 
 /// 净化下载文件名（防路径穿越）：
 /// 剥掉 / \ 路径分隔符、空字节/控制字符、首尾点段（防 ../ 与隐藏文件），限长 200 字符
-fn sanitize_filename(name: &str) -> String {    let cleaned: String = name
+fn sanitize_filename(name: &str) -> String {
+    let cleaned: String = name
         .chars()
         .filter(|c| !matches!(c, '/' | '\\' | '\0' | '\n' | '\r' | '\t'))
         .collect();
@@ -88,11 +114,6 @@ fn sanitize_filename(name: &str) -> String {    let cleaned: String = name
     }
     s
 }
-
-/// 内容区顶部偏移（书签栏开启时）= 标签栏 + 地址栏 + 书签栏
-pub const CONTENT_TOP_OFFSET: f64 = TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT + BOOKMARKS_BAR_HEIGHT;
-/// 书签栏关闭时的顶部偏移 = 标签栏 + 地址栏
-pub const CONTENT_TOP_OFFSET_NO_BOOKMARKS: f64 = TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT;
 
 /// 标签页元数据（运行时状态，不持久化；会话保存走 sessions 表）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +139,8 @@ pub struct TabManager {
     show_bookmarks_bar: Mutex<bool>,
     /// set_webview_visible 已应用的最近 seq（P1-9：丢弃并发乱序的过期指令）
     webview_visible_seq: Mutex<u64>,
+    /// AI 面板是否占用右侧（child webview 宽度让出 AI_PANEL_WIDTH，方便边看页面边对话）
+    ai_panel_active: Mutex<bool>,
     /// 每个标签最后一次激活时间（Unix 秒），用于"空闲休眠"判定
     last_active: Mutex<HashMap<String, i64>>,
 }
@@ -138,6 +161,7 @@ impl TabManager {
             active_id: Mutex::new(None),
             show_bookmarks_bar: Mutex::new(true),
             webview_visible_seq: Mutex::new(0),
+            ai_panel_active: Mutex::new(false),
             last_active: Mutex::new(HashMap::new()),
         }
     }
@@ -151,13 +175,35 @@ impl TabManager {
     }
 
     pub fn set_show_bookmarks_bar(&self, visible: bool) -> f64 {
-        *self.show_bookmarks_bar.lock().unwrap_or_else(|e| e.into_inner()) = visible;
+        *self
+            .show_bookmarks_bar
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = visible;
         self.top_offset()
     }
 
     /// 当前内容区顶部偏移（随书签栏显隐变化）
+    /// 运行时快照（自检/可观测性用）：标签数、活动标签、AI 分屏状态
+    pub fn runtime_snapshot(&self) -> (usize, Option<String>, bool) {
+        let count = self.tabs.lock().unwrap_or_else(|e| e.into_inner()).len();
+        let active = self
+            .active_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let ai = *self
+            .ai_panel_active
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        (count, active, ai)
+    }
+
     pub fn top_offset(&self) -> f64 {
-        if *self.show_bookmarks_bar.lock().unwrap_or_else(|e| e.into_inner()) {
+        if *self
+            .show_bookmarks_bar
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+        {
             CONTENT_TOP_OFFSET
         } else {
             CONTENT_TOP_OFFSET_NO_BOOKMARKS
@@ -179,14 +225,9 @@ impl TabManager {
     }
 
     /// 根据窗口尺寸计算内容区域大小（逻辑像素）；top 随书签栏显隐变化
-    fn content_size(window: &tauri::Window, top: f64) -> (f64, f64) {
-        let inner = window
-            .inner_size()
-            .unwrap_or(tauri::PhysicalSize::new(1280, 800));
-        let scale = window.scale_factor().unwrap_or(1.0);
-        let w = inner.width as f64 / scale;
-        let h = inner.height as f64 / scale;
-        (w, (h - top - STATUS_BAR_HEIGHT).max(100.0))
+    /// 实现已收敛到引擎层（engine/layout.rs），避免公式散落多处导致布局漂移
+    fn content_size(window: &tauri::Window, top: f64, ai_active: bool) -> (f64, f64) {
+        crate::engine::layout::content_size(window, top, ai_active)
     }
 
     /// 创建嵌入式 webview
@@ -239,7 +280,15 @@ impl TabManager {
                 CONTENT_TOP_OFFSET
             }
         };
-        let (w, h) = Self::content_size(&window, top);
+        let ai_active = if let Some(state) = app.try_state::<TabManager>() {
+            *state
+                .ai_panel_active
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+        } else {
+            false
+        };
+        let (w, h) = Self::content_size(&window, top, ai_active);
         log::info!(
             "[tabs] create_webview: inner={:?} content=({:.0},{:.0}) top={}",
             window.inner_size(),
@@ -307,10 +356,7 @@ impl TabManager {
             // 开启页面 console 输出（诊断 JS 错误用）——任何加载事件都设置，
             // 不依赖 Finished（部分页面 Finished 不触发）
             let _ = webview.with_webview(move |pwv| {
-                let gtk_wv = pwv.inner();
-                if let Some(s) = webkit2gtk::WebViewExt::settings(&gtk_wv) {
-                    s.set_enable_write_console_messages_to_stdout(true);
-                }
+                crate::engine::webview::enable_console_output(&pwv.inner());
             });
             // 任何加载事件（Started/Finished，含后退/前进缓存恢复）都安排延迟注入：
             // - UserScript 只对"之后导航"生效，已加载页面必须 evaluate 补注入；
@@ -344,14 +390,11 @@ impl TabManager {
               let tab_id_fav = tab_id.clone();
               let _ = webview.with_webview(move |pwv| {
                 let gtk_wv = pwv.inner();
-                gtk_wv.evaluate_javascript(
+                crate::engine::webview::eval_js_with(
+                  &gtk_wv,
                   "(function(){var l=document.querySelector('link[rel=\"icon\"],link[rel=\"shortcut icon\"]');var u=l?l.href:'';if(!u&&location.protocol!=='file:')u=location.origin+'/favicon.ico';return u;})()",
-                  None,
-                  None,
-                  None::<&gtk::gio::Cancellable>,
                   move |res| {
-                    if let Ok(v) = res {
-                      let fav = v.to_string();
+                    if let Ok(fav) = res {
                       if !fav.is_empty() && !fav.starts_with("about:") {
                         log::debug!("[tabs] favicon: tab={} {}", tab_id_fav, fav);
                         let updated = {
@@ -450,7 +493,10 @@ impl TabManager {
                         err.message()
                     );
                     // 阻止 WebKit 默认错误页显示（返回 true = 阻止默认行为）
-                    let _ = app_fail.emit("page-load-failed", (tab_id_fail.clone(), failing_uri.to_string()));
+                    let _ = app_fail.emit(
+                        "page-load-failed",
+                        (tab_id_fail.clone(), failing_uri.to_string()),
+                    );
                     true
                 });
                 // 监听 WebKit title 变化 → 实时同步标签标题
@@ -518,11 +564,9 @@ impl TabManager {
       .with_webview(move |pwv| {
         let child_gtk = pwv.inner();
         // 从 parent 拿 vbox（不调 window 方法，避免主线程死锁）
-        if let Some(vbox) = child_gtk
-          .parent()
-          .and_then(|p| p.dynamic_cast::<gtk::Box>().ok())
+        if let Some(vbox) = crate::engine::layout::parent_vbox(&child_gtk)
         {
-          let fixed = find_or_create_fixed(&vbox);
+          let fixed = crate::engine::layout::find_or_create_fixed(&vbox);
           // 标准 reparent（gtk_widget_reparent FFI）：正确处理 GDK 窗口/输入窗口跟随新 parent，
           // 避免 remove+put 导致 WebKitWebView 输入窗口不跟随（链接点击失效）
           unsafe {
@@ -532,19 +576,16 @@ impl TabManager {
             );
           }
           child_gtk.set_size_request(w as i32, h as i32);
+          // 焦点跟踪：页面（child webview）获得焦点 —— 此时前端收不到按键，GTK 层兜底转发
+          child_gtk.connect_focus_in_event(|_, _| {
+            UI_FOCUSED.store(false, std::sync::atomic::Ordering::Relaxed);
+            gtk::glib::Propagation::Proceed
+          });
           // 允许 JS 自动打开窗口（target=_blank / window.open 触发 create 信号）
           // 注意：不能新建 Settings 替换（会丢失 Tauri 默认设置导致链接点击失效），
           // 只能修改现有 Settings 的属性
-          if let Some(settings) = webkit2gtk::WebViewExt::settings(&child_gtk) {
-            settings.set_javascript_can_open_windows_automatically(true);
-            // 设置完整 UA（带 Safari 标记 + 浏览器名）：WebKitGTK 默认 UA 残缺（无 Safari 标记），
-            // 导致 Bing 等网站识别为未知浏览器返回简化版单屏页面（无法滚动）。
-            // 版本号回退到保守的 Chrome 120（2026-09-18）：曾升到 152，但 UA 是唯一
-            // 直接影响服务端响应的指纹项，个别站点对高版本 UA 有兼容分支，先保守。
-            settings.set_user_agent(Some(
-              "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            ));
-          }
+          // 页面默认设置（UA / 开发者工具 / JS 弹窗）统一由引擎层施加
+          crate::engine::webview::apply_default_settings(&child_gtk);
           // 监听 child webview 的鼠标点击事件
           child_gtk.connect_button_press_event(|wv, event| {
               let (x, y) = (event.position().0, event.position().1);
@@ -562,14 +603,8 @@ impl TabManager {
                   "(function(){{var el=document.elementFromPoint({},{});var a=el&&el.closest?el.closest('a[href]'):null;if(a&&a.target==='_blank'&&a.href)window.open(a.href);}})()",
                   x, y
               );
-              // WebKit 2.40+ 弃用 run_javascript，改用 evaluate_javascript
-              wv.evaluate_javascript(
-                  &js,
-                  None,
-                  None,
-                  None::<&gtk::gio::Cancellable>,
-                  |_| {},
-              );
+              // 引擎层统一封装（WebKit 2.40+ 弃用 run_javascript，改用 evaluate_javascript）
+              crate::engine::webview::eval_js(wv, &js);
               false.into() // 不拦截，让 webview 处理
           });
           child_gtk.connect_button_release_event(|_wv, event| {
@@ -595,17 +630,11 @@ impl TabManager {
               static SCROLL_DIAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
               if !SCROLL_DIAG.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 let js = "(function(){return 'url='+location.href+' ua='+navigator.userAgent.substring(0,80)+' vh='+window.innerHeight+' sh='+document.documentElement.scrollHeight+' bh='+(document.body?document.body.scrollHeight:0)+' dpr='+window.devicePixelRatio;})()";
-                wv.evaluate_javascript(
-                    js,
-                    None,
-                    None,
-                    None::<&gtk::gio::Cancellable>,
-                    move |res| {
-                      if let Ok(v) = res {
-                        log::debug!("[tabs] 滚动诊断: {}", v);
-                      }
-                    },
-                );
+                crate::engine::webview::eval_js_with(wv, js, move |res| {
+                    if let Ok(info) = res {
+                        log::debug!("[tabs] 滚动诊断: {}", info);
+                    }
+                });
               }
               false.into() // 不拦截，交给 webview 处理 DOM 滚动
           });
@@ -845,23 +874,16 @@ impl TabManager {
         } else {
             CONTENT_TOP_OFFSET
         };
-        let inner = window
-            .inner_size()
-            .unwrap_or(tauri::PhysicalSize::new(1280, 800));
-        let scale = window.scale_factor().unwrap_or(1.0);
-        let w = (inner.width as f64 / scale) as i32;
-        let h = ((inner.height as f64 / scale) - top - STATUS_BAR_HEIGHT).max(100.0) as i32;
-        let _ = show_wv.with_webview(move |pwv| {
-            let gtk_wv = pwv.inner();
-            if let Some(fixed) = gtk_wv
-                .parent()
-                .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
-            {
-                fixed.move_(&gtk_wv, 0, 0);
-                fixed.set_size_request(w, h);
-            }
-            gtk_wv.set_size_request(w, h);
-        });
+        let ai_active = if let Some(state) = app.try_state::<TabManager>() {
+            *state
+                .ai_panel_active
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+        } else {
+            false
+        };
+        let geo = crate::engine::layout::ContentGeometry::compute(&window, top, ai_active);
+        crate::engine::layout::apply_to_webview(&window, show_id, geo);
         Ok(())
     }
 
@@ -895,10 +917,7 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
             .with_webview(move |pwv| {
                 let main_gtk = pwv.inner();
                 // 从 parent 拿 vbox（不调 window 方法，避免主线程死锁）
-                if let Some(vbox) = main_gtk
-                    .parent()
-                    .and_then(|p| p.dynamic_cast::<gtk::Box>().ok())
-                {
+                if let Some(vbox) = crate::engine::layout::parent_vbox(&main_gtk) {
                     // 创建 GtkOverlay 挂到 vbox（填满窗口）
                     let overlay = gtk::Overlay::new();
                     vbox.remove(&main_gtk);
@@ -911,10 +930,19 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
                     main_gtk.set_size_request(800, 600);
                     main_gtk.show();
 
+                    // 焦点跟踪：主 webview（UI 层）获得焦点
+                    main_gtk.connect_focus_in_event(|_, _| {
+                        UI_FOCUSED.store(true, std::sync::atomic::Ordering::Relaxed);
+                        gtk::glib::Propagation::Proceed
+                    });
+
                     // GtkFixed 放上层：child webviews 绝对定位
                     // 关键：Fixed 用 margin_top 定位到内容区（y=top 起），避免覆盖地址栏拦截点击事件
                     // 同样只设最小尺寸，避免撑大窗口；resize 时 on_window_event 会更新为实际尺寸
+                    // halign=Start：Fixed 只占自身请求宽度（默认 fill 会横跨全宽，
+                    // 在 AI 分屏等"内容区变窄"场景下会拦截右侧 HTML 层（AI 面板）的点击）
                     let fixed = gtk::Fixed::new();
+                    fixed.set_halign(gtk::Align::Start);
                     fixed.set_valign(gtk::Align::Start);
                     fixed.set_margin_top(top as i32);
                     fixed.set_size_request(800, 600);
@@ -932,6 +960,8 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
     // 注册窗口 resize 监听：同步 child webviews 和 Fixed 容器（主 webview 在 overlay 主层自动跟随窗口）
     let app_handle = app.handle().clone();
     if let Some(window) = app.get_window("main") {
+        // 闭包需按当前窗口尺寸重算几何，这里克隆一份句柄（Window 是引用计数句柄）
+        let win_for_geo = window.clone();
         window.on_window_event(move |event| {
             if let tauri::WindowEvent::Resized(size) = event {
                 let w = size.width as i32;
@@ -941,40 +971,102 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
                 } else {
                     CONTENT_TOP_OFFSET
                 };
-                let content_h = (h as f64 - top - STATUS_BAR_HEIGHT).max(100.0) as i32;
+                let ai_active = if let Some(state) = app_handle.try_state::<TabManager>() {
+                    *state
+                        .ai_panel_active
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                } else {
+                    false
+                };
+                // 几何计算统一走引擎层（避免公式散落多处漂移）
+                let geo =
+                    crate::engine::layout::ContentGeometry::compute(&win_for_geo, top, ai_active);
                 log::info!(
-                    "[tabs] window resized: {}x{} content_h={} top={}",
+                    "[tabs] window resized: {}x{} content={}x{} top={} ai={}",
                     w,
                     h,
-                    content_h,
-                    top
+                    geo.width,
+                    geo.height,
+                    geo.top,
+                    ai_active
                 );
-
-                // child webviews：Fixed 内位置 (0,0)，尺寸 (w, content_h)；Fixed 本身在窗口 (0, top)
                 if let Some(state) = app_handle.try_state::<TabManager>() {
-                    let ids: Vec<String> = state.tabs.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect();
+                    let ids: Vec<String> = state
+                        .tabs
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .keys()
+                        .cloned()
+                        .collect();
                     for id in ids {
-                        let label = format!("tab-{}", id);
-                        if let Some(wv) = app_handle.get_webview(&label) {
-                            let _ = wv.with_webview(move |pwv| {
-                                let gtk_wv = pwv.inner();
-                                if let Some(fixed) = gtk_wv
-                                    .parent()
-                                    .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
-                                {
-                                    fixed.move_(&gtk_wv, 0, 0);
-                                    fixed.set_size_request(w, content_h);
-                                }
-                                gtk_wv.set_size_request(w, content_h);
-                                // 隐藏的 webview 不触发重新分配；标记 queue_resize，
-                                // show() 时 GTK 会按最新 size_request 分配（避免切回后停留旧尺寸）
-                                gtk_wv.queue_resize();
-                            });
-                        }
+                        crate::engine::layout::apply_to_webview(&win_for_geo, &id, geo);
                     }
                 }
             }
         });
+    }
+
+    // ===== 全局快捷键（GTK 顶层窗口拦截）=====
+    // 背景：HTML 层（主 webview）的 JS 监听器只在主 webview 持有键盘焦点时触发；
+    // 用户一旦点击网页，焦点落到 child webview，所有前端快捷键都会失效（时灵时不灵）。
+    // 子控件未消费的按键会沿焦点链冒泡到顶层窗口，因此在 GTK 窗口层兜底最可靠。
+    // 本批先兜底「开发者工具（F12 / Ctrl+Shift+I）」；其余浏览器级快捷键的路由见战略文档批次 0.3。
+    if let Some(window) = app.get_window("main") {
+        if let Ok(gtk_win) = window.gtk_window() {
+            let app_handle = app.handle().clone();
+            gtk_win.connect_key_press_event(move |_, event| {
+                // 直接用 GDK 键值常量比对（避免 gdk 版本间 keys 常量路径差异）
+                // F12=0xFFC9 I/i=0x49/0x69 T/t=0x54/0x74 W/w=0x57/0x77 R/r=0x52/0x72
+                // L/l=0x4C/0x6C H/h=0x48/0x68 S/s=0x53/0x73 Tab=0xFF09
+                const KEY_F12: u32 = 0xFFC9;
+                const KEY_TAB: u32 = 0xFF09;
+                let key: u32 = *event.keyval();
+                let state = event.state();
+                let ctrl = state.contains(gtk::gdk::ModifierType::CONTROL_MASK);
+                let shift = state.contains(gtk::gdk::ModifierType::SHIFT_MASK);
+                let is = |lo: u32, up: u32| key == lo || key == up;
+
+                // ① 开发者工具：不依赖焦点，任何情况都响应
+                if key == KEY_F12 || (ctrl && shift && is(0x69, 0x49)) {
+                    open_devtools_for_active(&app_handle);
+                    return gtk::glib::Propagation::Stop;
+                }
+
+                // ② 其余浏览器级快捷键：仅在「页面持焦」时兜底。
+                // UI 层持焦时前端 keydown 已处理，这里必须放行，否则会重复触发（如建两个标签）。
+                if ctrl && !UI_FOCUSED.load(std::sync::atomic::Ordering::Relaxed) {
+                    let action = if is(0x74, 0x54) && !shift {
+                        Some("new-tab")
+                    } else if is(0x74, 0x54) && shift {
+                        Some("translate-panel")
+                    } else if is(0x77, 0x57) {
+                        Some("close-tab")
+                    } else if is(0x72, 0x52) {
+                        Some("reload")
+                    } else if is(0x6C, 0x4C) {
+                        Some("focus-address")
+                    } else if is(0x68, 0x48) {
+                        Some("history")
+                    } else if is(0x73, 0x53) && shift {
+                        Some("sessions")
+                    } else if key == KEY_TAB && !shift {
+                        Some("next-tab")
+                    } else if key == KEY_TAB && shift {
+                        Some("prev-tab")
+                    } else {
+                        None
+                    };
+                    if let Some(action) = action {
+                        log::debug!("[tabs] GTK 层转发快捷键: {}", action);
+                        let _ = app_handle.emit("global-shortcut", action);
+                        return gtk::glib::Propagation::Stop;
+                    }
+                }
+                gtk::glib::Propagation::Proceed
+            });
+            log::info!("[tabs] 全局快捷键已挂载：F12 / Ctrl+Shift+I 打开开发者工具");
+        }
     }
 
     Ok(())
@@ -1000,38 +1092,14 @@ fn unique_download_path(dir: &str, filename: &str) -> String {
     }
 }
 
-/// 从 vbox 查找 GtkOverlay 里的 GtkFixed 容器，不存在则创建并挂到 vbox（兜底）
+/// 应用某个标签 webview 的内容区几何（按当前窗口尺寸重算）。
+/// 用于"显示之后"重新分配：Fixed/webview 隐藏期间尺寸变更不会触发 GTK 重新分配，
+/// 且 WebKit 内部输入窗口不跟随尺寸变化，表现为"页面能看到但点不动"。
+/// 实现委托引擎层（engine/layout.rs）。
 #[cfg(target_os = "linux")]
-fn find_or_create_fixed(vbox: &gtk::Box) -> gtk::Fixed {
-    // 优先：vbox → GtkOverlay → GtkFixed
-    if let Some(overlay) = vbox
-        .children()
-        .iter()
-        .find(|c| c.type_().name() == "GtkOverlay")
-        .and_then(|c| c.dynamic_cast_ref::<gtk::Overlay>().cloned())
-    {
-        if let Some(f) = overlay
-            .children()
-            .iter()
-            .find(|c| c.type_().name() == "GtkFixed")
-            .and_then(|c| c.dynamic_cast_ref::<gtk::Fixed>().cloned())
-        {
-            return f;
-        }
-    }
-    // 兜底：vbox 直接找 Fixed
-    if let Some(f) = vbox
-        .children()
-        .iter()
-        .find(|c| c.type_().name() == "GtkFixed")
-        .and_then(|c| c.dynamic_cast_ref::<gtk::Fixed>().cloned())
-    {
-        return f;
-    }
-    let f = gtk::Fixed::new();
-    vbox.pack_start(&f, true, true, 0);
-    f.show();
-    f
+fn apply_tab_geometry(window: &tauri::Window, id: &str, top: f64, ai_active: bool) {
+    let geo = crate::engine::layout::ContentGeometry::compute(window, top, ai_active);
+    crate::engine::layout::apply_to_webview(window, id, geo);
 }
 
 /// 创建新标签页
@@ -1213,7 +1281,12 @@ pub async fn switch_tab(
     if is_hibernated {
         log::info!("[perf] 唤醒休眠标签: id={} url={}", id, hibernated_url);
         TabManager::create_webview(&app, &id, &hibernated_url)?;
-        if let Some(t) = state.tabs.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&id) {
+        if let Some(t) = state
+            .tabs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(&id)
+        {
             t.hibernated = false;
         }
         crate::extensions::re_inject(&app).await;
@@ -1271,7 +1344,11 @@ pub async fn hibernate_idle_tabs(
         return Ok(0);
     }
     let threshold = now_ts() - minutes * 60;
-    let active = state.active_id.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let active = state
+        .active_id
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
 
     // 选出候选：非激活、未休眠、且最后激活时间早于阈值
     let candidates: Vec<String> = {
@@ -1303,7 +1380,12 @@ pub async fn hibernate_idle_tabs(
                 log::warn!("[perf] 标签休眠失败（close）: id={} err={}", id, e);
                 continue;
             }
-            if let Some(t) = state.tabs.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&id) {
+            if let Some(t) = state
+                .tabs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get_mut(&id)
+            {
                 t.hibernated = true;
             }
             count += 1;
@@ -1403,8 +1485,7 @@ pub async fn reload_tab(
         .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
     webview
         .with_webview(|pwv| {
-            let wv = pwv.inner();
-            webkit2gtk::WebViewExt::reload(&wv);
+            crate::engine::webview::reload(&pwv.inner());
         })
         .map_err(|e| format!("刷新失败: {}", e))?;
     let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
@@ -1461,7 +1542,10 @@ pub async fn set_webview_visible(
 ) -> Result<(), String> {
     // 过期指令丢弃：并发乱序时只应用最大 seq
     {
-        let mut last = state.webview_visible_seq.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last = state
+            .webview_visible_seq
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if seq <= *last {
             log::info!(
                 "[tabs] set_webview_visible 过期指令丢弃 seq={} last={} source={:?}",
@@ -1478,8 +1562,15 @@ pub async fn set_webview_visible(
         .ok_or_else(|| "主窗口不存在".to_string())?;
     // 注意：child webview 不在 window.webviews() 列表里（只有 main），
     // 必须从 TabManager 拿已知标签逐个 get_webview
-    let ids: Vec<String> = state.tabs.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect();
+    let ids: Vec<String> = state
+        .tabs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .keys()
+        .cloned()
+        .collect();
     let mut count = 0usize;
+    let ids_for_geometry = ids.clone();
     for id in ids {
         let label = format!("tab-{}", id);
         if let Some(wv) = window.get_webview(&label) {
@@ -1487,16 +1578,7 @@ pub async fn set_webview_visible(
             let _ = wv.with_webview(move |pwv| {
                 let gtk_wv = pwv.inner();
                 // 同时隐藏/显示 Fixed 容器：Fixed 覆盖内容区会拦截弹窗点击，必须一起隐藏
-                if let Some(fixed) = gtk_wv
-                    .parent()
-                    .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
-                {
-                    if visible {
-                        fixed.show();
-                    } else {
-                        fixed.hide();
-                    }
-                }
+                crate::engine::layout::set_fixed_visible(&gtk_wv, visible);
                 if visible {
                     let _ = wv2.show();
                 } else {
@@ -1504,6 +1586,18 @@ pub async fn set_webview_visible(
                 }
             });
             count += 1;
+        }
+    }
+    // 恢复显示后重新应用几何：隐藏期间（弹窗打开时）可能改过书签栏显隐/AI 分屏/窗口尺寸，
+    // 不重设会导致 webview 尺寸或位置滞后，WebKit 输入窗口不跟随 → 页面点不动
+    if visible {
+        let top = state.top_offset();
+        let ai_active = *state
+            .ai_panel_active
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        for id in &ids_for_geometry {
+            apply_tab_geometry(&window, id, top, ai_active);
         }
     }
     log::info!(
@@ -1515,13 +1609,73 @@ pub async fn set_webview_visible(
     Ok(())
 }
 
+/// AI 面板占用右侧空间（分屏对话）：active=true 时 child webview 宽度让出
+/// AI_PANEL_WIDTH，右侧留给 HTML 层 AI 侧边栏；active=false 恢复全宽。
+/// 与 set_webview_visible 不同：这里不隐藏 webview，页面保持可见可交互。
+#[tauri::command]
+pub async fn set_webview_ai_panel(
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+    active: bool,
+) -> Result<(), String> {
+    *state
+        .ai_panel_active
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = active;
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    let top = state.top_offset();
+    let geo = crate::engine::layout::ContentGeometry::compute(&window, top, active);
+    let ids: Vec<String> = state
+        .tabs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .keys()
+        .cloned()
+        .collect();
+    for id in ids {
+        crate::engine::layout::apply_to_webview(&window, &id, geo);
+    }
+    log::info!(
+        "[tabs] set_webview_ai_panel: active={} content={}x{}",
+        active,
+        geo.width,
+        geo.height
+    );
+    // 焦点切换：AI 面板打开时把 GTK 键盘焦点交给主 webview（HTML 层），
+    // 否则焦点留在 child webview（页面）上，AI 输入框收不到键盘事件。
+    // 关闭时把焦点还给当前活动标签的 webview。
+    if let Some(main_wv) = window.get_webview("main") {
+        if active {
+            let _ = main_wv.set_focus();
+        } else {
+            let active_id = state
+                .active_id
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            if let Some(id) = active_id {
+                if let Some(wv) = window.get_webview(&format!("tab-{}", id)) {
+                    let _ = wv.set_focus();
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// 后退（对当前活动标签执行 history.back()）
 #[tauri::command]
 pub async fn go_back(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
 ) -> Result<Option<Tab>, String> {
-    let id = state.active_id.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let id = state
+        .active_id
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     let Some(id) = id else {
         return Ok(None);
     };
@@ -1546,7 +1700,11 @@ pub async fn go_forward(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
 ) -> Result<Option<Tab>, String> {
-    let id = state.active_id.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let id = state
+        .active_id
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     let Some(id) = id else {
         return Ok(None);
     };
@@ -1600,34 +1758,23 @@ pub async fn set_bookmarks_bar_visible(
         new_top
     );
 
-    // 即时重算：不依赖下次窗口 Resize，直接调整 GTK Fixed 的 margin_top 与所有 child webviews 尺寸
+    // 即时重算：不依赖下次窗口 Resize，直接按新的 top_offset 重算几何并应用
+    // （几何计算统一走引擎层，见 engine/layout.rs）
     if let Some(window) = app.get_window("main") {
-        let inner = window
-            .inner_size()
-            .unwrap_or(tauri::PhysicalSize::new(1280, 800));
-        let scale = window.scale_factor().unwrap_or(1.0);
-        let w = inner.width as f64 / scale;
-        let h = inner.height as f64 / scale;
-        let content_h = (h - new_top - STATUS_BAR_HEIGHT).max(100.0) as i32;
-        let w_i32 = w as i32;
-        let top_i32 = new_top as i32;
-
-        let ids: Vec<String> = state.tabs.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect();
+        let ai_active = *state
+            .ai_panel_active
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let geo = crate::engine::layout::ContentGeometry::compute(&window, new_top, ai_active);
+        let ids: Vec<String> = state
+            .tabs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect();
         for id in ids {
-            let label = format!("tab-{}", id);
-            if let Some(wv) = app.get_webview(&label) {
-                let _ = wv.with_webview(move |pwv| {
-                    let gtk_wv = pwv.inner();
-                    if let Some(fixed) = gtk_wv
-                        .parent()
-                        .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
-                    {
-                        fixed.set_margin_top(top_i32);
-                        fixed.set_size_request(w_i32, content_h);
-                    }
-                    gtk_wv.set_size_request(w_i32, content_h);
-                });
-            }
+            crate::engine::layout::apply_to_webview(&window, &id, geo);
         }
     }
 
@@ -1640,7 +1787,11 @@ pub async fn get_nav_state(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
 ) -> Result<serde_json::Value, String> {
-    let id = state.active_id.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let id = state
+        .active_id
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     let Some(id) = id else {
         return Ok(json!({ "canGoBack": false, "canGoForward": false }));
     };
@@ -1657,15 +1808,58 @@ pub async fn get_nav_state(
     let nav_clone = nav.clone();
     webview
         .with_webview(move |pwv| {
-            let wv = pwv.inner();
+            let (back, forward) = crate::engine::webview::navigation_state(&pwv.inner());
             let mut guard = nav_clone.lock().unwrap_or_else(|e| e.into_inner());
-            guard.0 = webkit2gtk::WebViewExt::can_go_back(&wv);
-            guard.1 = webkit2gtk::WebViewExt::can_go_forward(&wv);
+            guard.0 = back;
+            guard.1 = forward;
         })
         .map_err(|e| format!("获取导航状态失败: {}", e))?;
 
     let (can_go_back, can_go_forward) = *nav.lock().unwrap_or_else(|e| e.into_inner());
     Ok(json!({ "canGoBack": can_go_back, "canGoForward": can_go_forward }))
+}
+
+/// 打开活动标签的开发者工具（命令与 GTK 全局快捷键共用）。
+/// 走异步任务派发：从 GTK 信号处理器里直接调 `with_webview` 有主线程重入风险，
+/// 异步派发由 Tauri 正确调度到主线程执行。
+pub fn open_devtools_for_active(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Some(state) = app.try_state::<TabManager>() else {
+            return;
+        };
+        let id = state
+            .active_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let Some(id) = id else {
+            return;
+        };
+        let Some(window) = app.get_window("main") else {
+            return;
+        };
+        let label = format!("tab-{}", id);
+        if let Some(wv) = window.get_webview(&label) {
+            let _ = wv.with_webview(move |pwv| {
+                crate::engine::webview::open_inspector(&pwv.inner());
+            });
+            log::info!("[tabs] 已打开开发者工具: tab={}", id);
+        }
+    });
+}
+
+/// 打开当前活动标签的开发者工具（Web Inspector）。
+/// 依赖创建 webview 时设置的 `Settings.enable-developer-extras`（本文件 create 流程中已开启）。
+/// 快捷键入口在 GTK 窗口层统一拦截（F12 / Ctrl+Shift+I），见 `setup_gtk_layout`：
+/// 页面（child webview）持有焦点时 HTML 层收不到按键，必须在 GTK 层兜底。
+#[tauri::command]
+pub async fn open_devtools(
+    app: AppHandle,
+    _state: tauri::State<'_, TabManager>,
+) -> Result<(), String> {
+    open_devtools_for_active(&app);
+    Ok(())
 }
 
 /// 固定/取消固定标签（原版 tab-pin IPC）
@@ -1683,19 +1877,42 @@ pub async fn toggle_pin(
     Ok(tab.cloned())
 }
 
-/// 静音/取消静音标签（原版 tab-mute IPC；WebKitGTK 无 per-tab 音量 API，标记状态由前端展示）
+/// 静音/取消静音标签。
+/// 真实现：翻转内存状态 + 异步派发到主线程调 WebKit `set_is_muted`
+/// （WebKitGTK 2.36+ 支持 per-webview 静音，绑定里 `WebViewExt::set_is_muted` 存在）。
 #[tauri::command]
 pub async fn toggle_mute(
+    app: AppHandle,
     state: tauri::State<'_, TabManager>,
     id: String,
 ) -> Result<Option<Tab>, String> {
-    let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-    let mut tab = tabs.get_mut(&id);
-    if let Some(ref mut t) = tab {
-        t.is_muted = !t.is_muted;
-        log::info!("[tabs] toggle_mute: id={} muted={}", id, t.is_muted);
-    }
-    Ok(tab.cloned())
+    let result = {
+        let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
+        let mut tab = tabs.get_mut(&id);
+        if let Some(ref mut t) = tab {
+            t.is_muted = !t.is_muted;
+            log::info!("[tabs] toggle_mute: id={} muted={}", id, t.is_muted);
+        }
+        tab.cloned()
+    };
+    let muted = result.as_ref().map(|t| t.is_muted).unwrap_or(false);
+
+    // 真静音：异步派发到主线程（从 GTK 信号/异步上下文直接调 with_webview 有主线程重入风险）
+    let app2 = app.clone();
+    let id2 = id.clone();
+    tauri::async_runtime::spawn(async move {
+        let Some(window) = app2.get_window("main") else {
+            return;
+        };
+        let label = format!("tab-{}", id2);
+        if let Some(wv) = window.get_webview(&label) {
+            let _ = wv.with_webview(move |pwv| {
+                crate::engine::webview::set_muted(&pwv.inner(), muted);
+            });
+        }
+    });
+
+    Ok(result)
 }
 
 /// 最大化/还原主窗口（双击标签栏空白处调用）
@@ -1767,8 +1984,12 @@ mod tests {
         assert!(is_internal_newtab_url("shift://worldnav"));
         assert!(is_internal_newtab_url("shift://worldnav/world-nav.html"));
         // 旧 file:// 路径（兼容）
-        assert!(is_internal_newtab_url("file:///home/gao/.local/share/com.shiftbrowser.app/newtab/index.html"));
-        assert!(is_internal_newtab_url("file:///home/gao/.local/share/com.shiftbrowser.app/newtab/world-nav.html"));
+        assert!(is_internal_newtab_url(
+            "file:///home/gao/.local/share/com.shiftbrowser.app/newtab/index.html"
+        ));
+        assert!(is_internal_newtab_url(
+            "file:///home/gao/.local/share/com.shiftbrowser.app/newtab/world-nav.html"
+        ));
         // 普通网页/其他协议不是启动页
         assert!(!is_internal_newtab_url("https://example.com"));
         assert!(!is_internal_newtab_url("http://example.com/newtab/"));

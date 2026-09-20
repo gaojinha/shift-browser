@@ -21,9 +21,59 @@ const SECTIONS = [
   { id: 'general', icon: '🏠', label: '通用' },
   { id: 'appearance', icon: '🎨', label: '外观' },
   { id: 'ai', icon: '🤖', label: 'AI 助手' },
+  { id: 'mcp', icon: '🔌', label: 'MCP 工具' },
   { id: 'extensions', icon: '🧩', label: '扩展' },
   { id: 'privacy', icon: '🛡', label: '隐私' },
+  { id: 'selfcheck', icon: '🩺', label: '自检' },
 ]
+
+// ---- 系统自检（可观测性）：一键汇总版本/存储/运行时/能力状态 ----
+interface CheckItem {
+  name: string
+  ok: boolean
+  detail: string
+}
+interface SelfCheckReport {
+  healthy: boolean
+  timestamp: number
+  versions: CheckItem[]
+  storage: CheckItem[]
+  runtime: CheckItem[]
+  capabilities: CheckItem[]
+}
+const selfCheckReport = ref<SelfCheckReport | null>(null)
+const selfCheckLoading = ref(false)
+const selfCheckError = ref('')
+
+async function runSelfCheck() {
+  if (selfCheckLoading.value) return
+  selfCheckLoading.value = true
+  selfCheckError.value = ''
+  try {
+    selfCheckReport.value = await invoke<SelfCheckReport>('selfcheck_cmd')
+  } catch (e) {
+    selfCheckError.value = String(e)
+  } finally {
+    selfCheckLoading.value = false
+  }
+}
+
+/** 自检项分组（模板里遍历用） */
+const selfCheckGroups = computed(() => {
+  const r = selfCheckReport.value
+  if (!r) return []
+  return [
+    { title: '版本与环境', items: r.versions },
+    { title: '数据存储', items: r.storage },
+    { title: '运行时', items: r.runtime },
+    { title: '能力状态', items: r.capabilities },
+  ]
+})
+
+/** 打开自检分区时自动跑一次 */
+watch(activeSection, (v) => {
+  if (v === 'selfcheck' && !selfCheckReport.value) runSelfCheck()
+})
 
 // AI Key 输入框：不回显掩码（get_all_settings 返回前4后4掩码），
 // 留空 = 保持原值；输入新值才保存。hasAiKey 判断是否已配置（掩码非空即已配置）
@@ -38,6 +88,146 @@ async function onAiKeyChange() {
     await settingsStore.set('ai_api_key', v)
   }
   aiKeyInput.value = ''
+}
+
+// AI Provider 列表（阶段 1.2：多 provider 抽象，设置页可配）
+const aiProviders = ref<Array<{ id: string; name: string; configured: boolean; description: string }>>([])
+async function loadAiProviders() {
+  try {
+    aiProviders.value = await invoke('ai_list_providers')
+  } catch (e) {
+    console.error('[settings] 加载 provider 列表失败:', e)
+  }
+}
+watch(
+  () => props.show,
+  (v) => {
+    if (v) loadAiProviders()
+  },
+)
+
+// ---- MCP 工具层（阶段 1.3）：server 配置 + 工具列表 + 手动调用 + 审计 ----
+interface McpServer {
+  id: number
+  name: string
+  command: string
+  args: string[]
+  enabled: boolean
+  allowedTools: string[]
+  toolCount: number
+}
+interface McpTool {
+  name: string
+  serverName: string
+  description: string
+  inputSchema: Record<string, unknown>
+}
+interface AuditEntry {
+  id: number
+  serverName: string
+  toolName: string
+  arguments: string
+  resultSummary: string
+  success: boolean
+  createdAt: string
+}
+
+const mcpServers = ref<McpServer[]>([])
+const mcpTools = ref<McpTool[]>([])
+const mcpAudit = ref<AuditEntry[]>([])
+const mcpLoading = ref(false)
+const mcpError = ref('')
+// 新增表单
+const mcpNewName = ref('')
+const mcpNewCommand = ref('')
+const mcpNewArgs = ref('')
+const mcpNewAllowed = ref('')
+// 手动调用
+const mcpCallTool = ref('')
+const mcpCallArgs = ref('{}')
+const mcpCallResult = ref('')
+const mcpCalling = ref(false)
+
+async function loadMcp() {
+  mcpLoading.value = true
+  mcpError.value = ''
+  try {
+    mcpServers.value = await invoke<McpServer[]>('mcp_list_servers')
+    mcpTools.value = await invoke<McpTool[]>('mcp_list_tools')
+    mcpAudit.value = await invoke<AuditEntry[]>('mcp_get_audit_log', { limit: 30 })
+  } catch (e) {
+    mcpError.value = String(e)
+  } finally {
+    mcpLoading.value = false
+  }
+}
+
+async function addMcpServer() {
+  mcpError.value = ''
+  const name = mcpNewName.value.trim()
+  const command = mcpNewCommand.value.trim()
+  if (!name || !command) {
+    mcpError.value = '名称与命令不能为空'
+    return
+  }
+  let args: string[] = []
+  let allowed: string[] = []
+  try {
+    args = mcpNewArgs.value.trim() ? JSON.parse(mcpNewArgs.value) : []
+    allowed = mcpNewAllowed.value.trim() ? JSON.parse(mcpNewAllowed.value) : []
+  } catch {
+    mcpError.value = '参数/白名单必须是合法 JSON 数组'
+    return
+  }
+  try {
+    await invoke('mcp_add_server', { name, command, args, allowedTools: allowed })
+    mcpNewName.value = ''
+    mcpNewCommand.value = ''
+    mcpNewArgs.value = ''
+    mcpNewAllowed.value = ''
+    useToastStore().success('MCP server 已添加')
+    await loadMcp()
+  } catch (e) {
+    mcpError.value = String(e)
+  }
+}
+
+async function removeMcpServer(id: number) {
+  try {
+    await invoke('mcp_remove_server', { id })
+    useToastStore().success('已删除')
+    await loadMcp()
+  } catch (e) {
+    mcpError.value = String(e)
+  }
+}
+
+async function toggleMcpServer(s: McpServer) {
+  try {
+    await invoke('mcp_set_server_enabled', { id: s.id, enabled: !s.enabled })
+    s.enabled = !s.enabled
+    await loadMcp()
+  } catch (e) {
+    mcpError.value = String(e)
+  }
+}
+
+async function callMcpTool() {
+  if (!mcpCallTool.value) return
+  mcpCalling.value = true
+  mcpCallResult.value = ''
+  mcpError.value = ''
+  try {
+    const args = JSON.parse(mcpCallArgs.value || '{}')
+    mcpCallResult.value = await invoke<string>('mcp_call_tool', {
+      name: mcpCallTool.value,
+      arguments: args,
+    })
+  } catch (e) {
+    mcpCallResult.value = `❌ ${String(e)}`
+  } finally {
+    mcpCalling.value = false
+  }
 }
 
 // 弹窗显示时隐藏所有标签 webview（child 盖在 Vue UI 上），关闭时恢复
@@ -67,8 +257,12 @@ watch(
         loadWhitelist()
         // 隐私防护统计
         loadPrivacyStats()
+        // WebMCP polyfill 试验开关（阶段 1.5）
+        loadWebmcpPolyfill()
         // 打开时清空 AI Key 输入框：不回显掩码，避免用户无意把掩码写回库
         aiKeyInput.value = ''
+        // MCP 工具配置（阶段 1.3）
+        loadMcp()
       }
     } catch (e) {
       console.error('[settings] 加载失败:', e)
@@ -274,6 +468,28 @@ async function onToggleAdblock() {
   } catch (e) {
     console.error('[settings] 广告拦截同步失败:', e)
     useToastStore().error('广告拦截切换失败')
+  }
+}
+
+/** WebMCP polyfill 试验开关（阶段 1.5，默认关）：捕获页面暴露的 WebMCP 工具声明 */
+const webmcpPolyfill = ref(false)
+async function loadWebmcpPolyfill() {
+  try {
+    webmcpPolyfill.value = await invoke<boolean>('get_webmcp_polyfill')
+  } catch (e) {
+    console.error('[settings] 读取 WebMCP polyfill 开关失败:', e)
+  }
+}
+async function onToggleWebmcpPolyfill() {
+  const next = !webmcpPolyfill.value
+  webmcpPolyfill.value = next
+  try {
+    await invoke('set_webmcp_polyfill', { enabled: next })
+    useToastStore().success(next ? 'WebMCP polyfill 已开启（刷新页面后生效）' : 'WebMCP polyfill 已关闭')
+  } catch (e) {
+    webmcpPolyfill.value = !next
+    console.error('[settings] WebMCP polyfill 切换失败:', e)
+    useToastStore().error('WebMCP polyfill 切换失败')
   }
 }
 
@@ -514,6 +730,26 @@ async function onRemoveKeyword(k: string) {
             <div class="card">
               <div class="card-title">🤖 AI 助手</div>
               <div class="field">
+                <label>推理服务（Provider）</label>
+                <select
+                  :value="settingsStore.get('ai_provider') || 'agnes'"
+                  @change="onSet('ai_provider', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option
+                    v-for="p in aiProviders"
+                    :key="p.id"
+                    :value="p.id"
+                    :disabled="p.id === 'local'"
+                  >
+                    {{ p.name }}{{ p.id === 'local' ? '（暂缓）' : '' }}
+                  </option>
+                  <option v-if="aiProviders.length === 0" value="agnes">AGNES 云端</option>
+                </select>
+                <div class="field-hint" v-if="settingsStore.get('ai_provider') === 'local'">
+                  本地模型集成暂缓（2026-09-19 决策），请选择 AGNES 云端。
+                </div>
+              </div>
+              <div class="field">
                 <label>模型</label>
                 <select
                   :value="settingsStore.get('ai_model')"
@@ -543,6 +779,80 @@ async function onRemoveKeyword(k: string) {
                   spellcheck="false"
                   @change="onAiKeyChange"
                 />
+              </div>
+            </div>
+          </div>
+
+          <!-- MCP 工具（阶段 1.3：AI 面板可调用外部工具） -->
+          <div v-if="activeSection === 'mcp'" class="settings-scroll">
+            <div class="card">
+              <div class="card-title">🔌 MCP 工具</div>
+              <div class="field-hint">
+                配置 MCP server（本地进程，stdio 传输）后，AI 助手对话会自动携带这些工具（function
+                calling），可让 AI 读写文件、查日历等。每次工具调用都会写入审计日志。
+              </div>
+              <div v-if="mcpError" class="ext-error">{{ mcpError }}</div>
+
+              <div class="mcp-add-row">
+                <input v-model="mcpNewName" type="text" placeholder="名称（如 filesystem）" spellcheck="false" />
+                <input v-model="mcpNewCommand" type="text" placeholder="命令（如 npx）" spellcheck="false" />
+                <input v-model="mcpNewArgs" type="text" placeholder='参数 JSON（如 &quot;-y&quot;,&quot;@modelcontextprotocol/server-filesystem&quot;,&quot;/tmp&quot;）' spellcheck="false" />
+                <input v-model="mcpNewAllowed" type="text" placeholder='工具白名单 JSON（空=全部，如 &quot;read_file&quot;）' spellcheck="false" />
+                <button class="mini-btn primary" @click="addMcpServer" :disabled="mcpLoading">添加</button>
+              </div>
+
+              <div v-if="mcpServers.length === 0 && !mcpLoading" class="field-hint">
+                还没有 MCP server。示例：命令 <code>npx</code>，参数
+                <code>["-y","@modelcontextprotocol/server-filesystem","/tmp"]</code>
+              </div>
+              <div v-for="s in mcpServers" :key="s.id" class="mcp-server-row">
+                <button
+                  class="mini-btn"
+                  :class="s.enabled ? 'primary' : ''"
+                  @click="toggleMcpServer(s)"
+                  :title="s.enabled ? '点击停用' : '点击启用'"
+                >
+                  {{ s.enabled ? '✅ 启用' : '⏸ 停用' }}
+                </button>
+                <span class="mcp-server-name">{{ s.name }}</span>
+                <span class="mcp-server-command">{{ s.command }} {{ s.args.join(' ') }}</span>
+                <span class="mcp-server-count">{{ s.toolCount }} 个工具</span>
+                <button class="mini-btn danger" @click="removeMcpServer(s.id)">删除</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-title">🧰 可用工具（{{ mcpTools.length }}）</div>
+              <div v-if="mcpTools.length === 0" class="field-hint">暂无可用工具（需启用且能连通的 server）</div>
+              <div v-for="t in mcpTools" :key="t.name" class="mcp-tool-row">
+                <span class="mcp-tool-name">{{ t.name }}</span>
+                <span class="mcp-tool-desc">{{ t.description || '(无描述)' }}</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-title">🖐 手动调用测试</div>
+              <div class="mcp-add-row">
+                <select v-model="mcpCallTool">
+                  <option value="">选择工具…</option>
+                  <option v-for="t in mcpTools" :key="t.name" :value="t.name">{{ t.name }}</option>
+                </select>
+                <input v-model="mcpCallArgs" type="text" placeholder='参数 JSON（如 {"path":"/tmp/a.txt"}）' spellcheck="false" />
+                <button class="mini-btn primary" @click="callMcpTool" :disabled="mcpCalling || !mcpCallTool">
+                  {{ mcpCalling ? '调用中…' : '调用' }}
+                </button>
+              </div>
+              <pre v-if="mcpCallResult" class="mcp-result">{{ mcpCallResult }}</pre>
+            </div>
+
+            <div class="card">
+              <div class="card-title">📋 审计日志（最近 {{ mcpAudit.length }} 条）</div>
+              <div v-if="mcpAudit.length === 0" class="field-hint">暂无工具调用记录</div>
+              <div v-for="a in mcpAudit" :key="a.id" class="mcp-audit-row" :class="{ fail: !a.success }">
+                <span class="mcp-audit-time">{{ a.createdAt }}</span>
+                <span class="mcp-audit-tool">{{ a.serverName }} · {{ a.toolName }}</span>
+                <span class="mcp-audit-args">{{ a.arguments }}</span>
+                <span class="mcp-audit-result">{{ a.resultSummary || (a.success ? '(成功)' : '(失败)') }}</span>
               </div>
             </div>
           </div>
@@ -641,6 +951,25 @@ async function onRemoveKeyword(k: string) {
                   <span class="slider"></span>
                 </label>
               </div>
+              <div class="field webmcp-field" :class="{ 'experiment-tag': webmcpPolyfill }">
+                <label>
+                  WebMCP polyfill <span class="exp-badge" v-if="webmcpPolyfill">试验中</span>
+                </label>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="webmcpPolyfill"
+                    @change="onToggleWebmcpPolyfill"
+                  />
+                  <span class="slider"></span>
+                </label>
+                <div class="kw-hint" style="width: 100%">
+                  试验特性（阶段 1.5）· 默认关。开启后向页面注入
+                  <code>navigator.modelContext.registerTool</code> polyfill，捕获网站声明的 WebMCP
+                  工具，让 AI 助手能感知「网站为智能体暴露了哪些工具」。仅捕获声明、不伪造执行
+                  能力，试验完不留痕，可随时关闭。
+                </div>
+              </div>
               <div class="kw-block" v-if="settingsStore.get('adblock_enabled') !== 'false'">
                 <div class="kw-hint">
                   内置已含「关闭广告 / 头条报 / 推广」等。下面可手工加词，刷新页面后生效。
@@ -692,6 +1021,32 @@ async function onRemoveKeyword(k: string) {
                   <span v-if="clearedMsg" class="cleared-msg">{{ clearedMsg }}</span>
                 </div>
               </div>
+            </div>
+          </div>
+          <!-- 自检 -->
+          <div v-if="activeSection === 'selfcheck'" class="settings-scroll">
+            <div class="card">
+              <div class="card-title">
+                🩺 系统自检
+                <button class="selfcheck-btn" :disabled="selfCheckLoading" @click="runSelfCheck">
+                  {{ selfCheckLoading ? '检查中…' : '重新检查' }}
+                </button>
+              </div>
+              <div v-if="selfCheckError" class="selfcheck-error">{{ selfCheckError }}</div>
+              <div v-else-if="!selfCheckReport" class="selfcheck-hint">点击「重新检查」开始体检</div>
+              <template v-else>
+                <div class="selfcheck-summary" :class="selfCheckReport.healthy ? 'ok' : 'bad'">
+                  {{ selfCheckReport.healthy ? '✅ 一切正常' : '⚠️ 发现异常项' }}
+                </div>
+                <div v-for="g in selfCheckGroups" :key="g.title" class="selfcheck-group">
+                  <div class="selfcheck-group-title">{{ g.title }}</div>
+                  <div v-for="it in g.items" :key="g.title + it.name" class="selfcheck-row">
+                    <span class="selfcheck-mark">{{ it.ok ? '✅' : '❌' }}</span>
+                    <span class="selfcheck-name">{{ it.name }}</span>
+                    <span class="selfcheck-detail">{{ it.detail }}</span>
+                  </div>
+                </div>
+              </template>
             </div>
           </div>
         </div>
@@ -781,6 +1136,71 @@ async function onRemoveKeyword(k: string) {
 /* 卡片 */
 .card {
   margin-bottom: 12px;
+}
+.selfcheck-btn {
+  float: right;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.selfcheck-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.selfcheck-summary {
+  margin: 8px 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.selfcheck-summary.ok {
+  background: rgba(46, 160, 67, 0.15);
+  color: #3fb950;
+}
+.selfcheck-summary.bad {
+  background: rgba(229, 57, 53, 0.12);
+  color: #e53935;
+}
+.selfcheck-hint {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 12px 0;
+}
+.selfcheck-error {
+  color: #e53935;
+  font-size: 12px;
+  padding: 8px 0;
+}
+.selfcheck-group {
+  margin-bottom: 12px;
+}
+.selfcheck-group-title {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.selfcheck-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+.selfcheck-mark {
+  flex-shrink: 0;
+}
+.selfcheck-name {
+  flex-shrink: 0;
+  min-width: 96px;
+  color: var(--text-primary);
+}
+.selfcheck-detail {
+  color: var(--text-muted);
+  word-break: break-all;
 }
 .card-title {
   font-size: 13px;
@@ -1020,6 +1440,112 @@ async function onRemoveKeyword(k: string) {
 }
 .ext-item:hover {
   border-color: var(--border-color);
+}
+/* MCP 工具层（阶段 1.3） */
+.mcp-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.mcp-add-row input,
+.mcp-add-row select {
+  flex: 1 1 180px;
+  min-width: 120px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.mcp-server-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.mcp-server-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mcp-server-command {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.mcp-server-count {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.mcp-tool-row {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  border-bottom: 1px dashed var(--border-subtle);
+}
+.mcp-tool-name {
+  font-family: var(--font-mono, monospace);
+  color: var(--accent);
+  white-space: nowrap;
+}
+.mcp-tool-desc {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mcp-result {
+  margin-top: 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 160px;
+  overflow: auto;
+}
+.mcp-audit-row {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  border-bottom: 1px dashed var(--border-subtle);
+  align-items: baseline;
+}
+.mcp-audit-row.fail {
+  color: #ff6b6b;
+}
+.mcp-audit-time {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.mcp-audit-tool {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mcp-audit-args {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.mcp-audit-result {
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ext-info {
   display: flex;

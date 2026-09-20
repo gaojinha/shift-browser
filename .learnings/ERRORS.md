@@ -75,3 +75,79 @@ let s = format!("{:08x}{:08x}{:08x}{:08x}", r1, r2, r3, r4);
 - gtk 对象**非 Send**，不能存 Tauri State、不能跨线程捕获进 `with_webview` 闭包 → 所有 gtk 对象在 `with_webview` 闭包内创建/查找；vbox 从 webview 的 `parent()` 拿（`window.default_vbox()` 会发消息回主线程，在闭包内调用会死锁）
 - `setup_gtk_layout()` 在 setup 阶段初始化（主线程），`fix_gtk_layout()` 处理每个 child
 **预防**: Linux 上 add_child 的位置/大小参数不可信；调试 GUI 布局用 `child.position()/size()` + 截图采样验证实际渲染位置。
+
+## 2026-09-19 10:45 — Tauri 发布版改了前端却不生效（dist 编译期嵌入，构建顺序反了）
+
+**类别**: correction
+**场景**: ShiftBrowser，改完前端（AISidebar 改成调用 set_webview_ai_panel）后，依次跑 `cargo build --release`（后端）→ `npm run build`（前端）→ 重启。结果应用里跑的还是**旧前端**（日志仍见 `set_webview_visible source=ai-sidebar`），白折腾一轮。
+**错误**: `tauri.conf.json` 里 `frontendDist: "../dist"`，发布构建时 Tauri 用 `generate_context!` 在**编译期**把 dist 目录**嵌进二进制**。所以必须**先构建前端、再编译 Rust**；顺序反了，二进制里嵌的是上一次的旧 dist。
+**正确**: 铁律——改前端必按此顺序：
+```bash
+npm run build && cargo build --release   # 前端在前，Rust 在后
+```
+(改纯 Rust 时前端可省，但只要碰过前端就必须重打。)
+**排查手法**: 日志里的行为特征能反推跑的是哪版前端（如旧版仍调用已删除的命令/带旧 source 标识 `ai-sidebar`）。
+**预防**: 怀疑"改了没生效"时，先确认二进制里的 dist 是不是最新——看日志行为特征，或对比 dist 产物 hash 与编译时间。
+---
+
+## 2026-09-19 11:40 — gtk-rs 方法名歧义：WebInspector::show 被 gtk 的 show 抢（E0599）
+
+**类别**: correction
+**场景**: ShiftBrowser 启用 Web Inspector（`open_devtools` 命令），`inspector.show()`
+**错误**: 编译报 `E0599: the method 'show' exists for struct 'WebInspector', but its trait bounds were not satisfied` —— 因为 `WebInspector` 同时受 `webkit2gtk::WebInspectorExt` 和 `gtk::prelude::WidgetExt/NativeDialogExt` 影响，同名 `show()` 解析到了 gtk 的 trait，而 `WebInspector` 并不实现 `IsA<gtk::Widget>`。
+**正确**: 显式走 trait 全路径调用（tabs.rs 里已 `use gtk::prelude` 等，add import 会引入歧义）：
+```rust
+webkit2gtk::WebInspectorExt::show(&inspector);
+```
+**预防**: gtk-rs 生态里 `show/hide/set_size_request` 等通用名在多个 trait 里重名，遇到 E0599 优先用 `TraitName::method(&obj)` 全路径形式，别盲目加 use。
+---
+
+## 2026-09-19 15:10 — 内容过滤器规则 JSON 非法转义 + glib::Object 非 Send/Sync（FFI 两坑）
+
+**类别**: correction
+**场景**: ShiftBrowser 广告拦截 2.0，手写 FFI 对接 WebKit 内容过滤器（`WebKitUserContentFilterStore`）
+**错误 1（JSON 转义）**: 规则常量写成普通字符串 `".*adservice\\.google.*"`，Rust 解码后是**单个**反斜杠 `\`，嵌进 JSON 成为 `"\.` —— **JSON 不认 `\.` 转义**，`serde_json::from_str` 解析失败（单测抓到）。要 JSON 里出现一个反斜杠必须写 `\\`，即 Rust 侧需**两个**反斜杠（raw 串同理）。
+→ 最终改用**不含反斜杠**的规则（`.*adservice.*`，正则 `.` 匹配任意字符含字面点），彻底绕开转义歧义。
+**错误 2（Send/Sync）**: `static OnceLock<Mutex<Option<glib::Object>>>` 编译失败——`glib::Object` 内含裸指针，**不满足 Send/Sync**。改为存 `usize`（指针数值）并注释说明"自己持有 GObject 引用、故意不释放，生命周期覆盖进程"。
+**正确**: 跨线程共享 GObject 指针的正确姿势：存 `usize`/裸指针 + 明确所有权与释放策略；不要试图把 glib 对象塞进 static。
+**预防**: 给引擎写 FFI 时①任何"字符串嵌 JSON"的场景先写单测验证可解析；②跨线程共享 GObject 一律用裸指针+显式所有权，glib 对象默认不是 Send/Sync。
+---
+
+## 2026-09-20 01:40 — 批量替换代码时误伤同名调用点（Python 全局 replace 的坑）
+
+**类别**: correction
+**场景**: ShiftBrowser 架构解耦，用 Python 脚本把 tabs.rs 里 6 处重复的布局公式替换成引擎层调用
+**错误**: 用 `s.replace(old, new)` 做**全局**替换时，同一句代码在多个上下文出现（如 `apply_to_webview(&window, ...)` 在 resize 闭包、AI 面板命令、书签栏命令里都有），结果把**不需要改的位置也改了**——resize 闭包里引入了只在该作用域存在的 `win_for_geo`，AI 面板命令里被替换成未定义变量，编译报 3 个 `E0425/E0505`。
+**正确**: 批量替换前先 `grep -c` 确认目标片段出现次数；多次出现时用 `replace(old, new, 1)` 限定次数，或按行号定位修改；替换后立刻 `grep -n 新标识符` 检查所有落点是否都在预期作用域内。
+**预防**: 代码改写脚本必须"替换前数出现次数 + 替换后查落点"，尤其在**闭包/不同作用域**并存的文件里。全局替换只适用于确定唯一的片段。
+
+## 2026-09-20：删 WebViewExt use 导致 4 个 E0599（tabs.rs）
+- **现象**：把 `use webkit2gtk::WebViewExt;` 删掉后，`connect_load_failed`/`connect_title_notify`/`context()` 全部报 E0599 "trait bounds were not satisfied"。
+- **根因**：GTK 信号连接方法（connect_*）是 trait 方法，必须 trait 在作用域才能调用；它们不是引擎能封装的"基础操作"（回调体内是大量业务逻辑）。
+- **纠正**：恢复 use。**边界原则**：引擎层收敛"基础操作"（设置/JS 执行/刷新/导航/检查器），信号回调留在业务层；删 use 前先 grep 确认所有 trait 方法调用点。
+
+## 2026-09-20：python 批量替换断言失败被静默跳过（tabs.rs 两处未生效）
+- **现象**：批量替换 2 处 vbox 查找，脚本里 `assert old in s` 失败但没退出（python 默认 assert 失败抛异常，但当时用了 `if old in s` 分支且只 print 不退出），编译通过（因为新函数 parent_vbox 报 never used 才暴露）。
+- **根因**：实际文件缩进与脚本假设不一致（8/16 空格 vs 脚本里的不同缩进），替换被跳过。
+- **纠正**：批量替换脚本必须 `assert old in s, "标识"` 失败即抛异常退出；替换后 grep 验证目标函数零残留、新函数有调用点。
+
+## 2026-09-20：标签静音"假实现"的教训（toggle_mute 只翻转内存字段）
+- **现象**：前端点"静音"只有图标变化，声音照常出。代码注释写着"WebKitGTK 无 per-tab 音量 API"。
+- **真相**：WebKitGTK 2.36+ 有 `webkit_web_view_set_is_muted`（系统库符号确认），gtk-rs 绑定 `WebViewExt::set_is_muted` 完整存在（auto/web_view.rs 1950 行）。
+- **纠正**：新功能/修复前先查引擎能力（系统库 nm + 绑定源码），不要轻信旧注释；"无 API"类结论要留证据。
+
+## 2026-09-20：content_snapshot 死锁 bug（recv_timeout 在 with_webview 闭包内）
+- **现象**：AI 面板发消息"发送不了"——实际是主线程被卡 5 秒（UI 冻结），快照超时降级后才发出。
+- **根因**：`extract_snapshot` 内部 `recv_timeout(5s)` 被调在 `with_webview` 闭包里（主线程执行），阻塞主线程 → evaluate_javascript 回调也要主线程 → 互相等待死锁 → 5 秒超时。
+- **纠正**：拆成 `extract_snapshot_async(wv, tx)`（只发起不等待），`recv_timeout` 移到 with_webview 闭包外（async 线程）等待。**铁律：with_webview 闭包内绝不能做同步阻塞等待**（channel/锁/睡眠），只能发起异步操作。
+
+## 2026-09-20 — llms.txt 引擎幽灵符号 + 碎片化打补丁（Rust 7 错修到 0）
+
+**类别**: correction
+**场景**: ShiftBrowser 阶段 1.5 llms.txt 引擎收口，cargo build 报 7 个错，其中 4 个是"幽灵符号"
+**错误 1（幽灵符号）**: 引擎里引用了**根本不存在**的东西——`fetch_llmstxt_raw`（凭空编的出网函数名）、`LlmsCacheEntry`（真名是 `CacheEntry`）、`read_llmstxt` 漏标 `#[tauri::command]`、`content.rs` 用了 `WebmcpToolDef` 却没 `use`。E0425/E0422/E0433 全指向这些。
+**错误 2（碎片化·最严重）**: 修的时候"改一行→编译→再看"，结果在 `Option` 嵌套上反复改了五六遍——`fetch` 块返回 `Option<LlmsSummary>`、`CacheEntry.summary` 是 `Option<LlmsSummary>`、函数返回 `Option<LlmsSummary>`，三层没一次理清，白白耗掉一下午。用户点破："一下午了？？？"
+**错误 3（Send）**: `MutexGuard` 跨 `.await` → Tauri 命令 Future 非 `Send` 被拒。光 `drop(guard)` 不够（编译器仍保守判定"maybe used later"），必须用**显式作用域块** `{ let guard = ...; ... }` 把 guard 关死在块内。
+**正确**: ①Tauri 命令带引用参数必须返回 `Result<T,E>`；②同步锁 guard 绝不跨 await，用作用域块限定；③编译错误成堆时，先通读相关函数、把每个值的类型（尤其 Option/Result 嵌套）理清，**一次性重写整段**，禁止逐行补丁。
+**预防**: 编译错误 >3 个 → 停下来通读报错文件的整段逻辑，画清类型流再动手；一个错误改超过 2 次还没对，就说明没读懂，回去重读而不是继续试。
+---

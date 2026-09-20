@@ -1,10 +1,15 @@
+mod agent_cmd;
 mod ai;
+mod content_cmd;
 mod db;
+mod engine;
 mod extensions;
 mod feed;
+mod mcp_cmd;
 mod netmon;
 mod newtab;
 mod reader;
+mod selfcheck;
 mod tabs;
 mod translate;
 
@@ -49,8 +54,8 @@ static TRANSLATE_RATE: std::sync::OnceLock<
 fn translate_rate_limited(label: &str) -> bool {
     const MAX: usize = 30;
     const WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
-    let cell = TRANSLATE_RATE
-        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let cell =
+        TRANSLATE_RATE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
     let mut map = cell.lock().unwrap_or_else(|e| e.into_inner());
     let now = std::time::Instant::now();
     let q = map
@@ -81,6 +86,46 @@ fn is_locked() -> bool {
 #[tauri::command]
 fn front_log(msg: String) {
     log::info!("[front] {}", msg);
+}
+
+/// 一键自检：汇总版本/存储/运行时/能力状态（只读，不修改任何状态）
+#[tauri::command]
+async fn selfcheck_cmd(app: tauri::AppHandle) -> Result<selfcheck::SelfCheckReport, String> {
+    let report = selfcheck::run(&app).await;
+    log::info!(
+        "[selfcheck] 健康={} 版本项={} 存储项={} 运行时项={} 能力项={}",
+        report.healthy,
+        report.versions.len(),
+        report.storage.len(),
+        report.runtime.len(),
+        report.capabilities.len()
+    );
+    // 关键环境事实写入日志（排查问题时第一手资料：版本/引擎/路径）
+    let env_line: Vec<String> = report
+        .versions
+        .iter()
+        .map(|i| format!("{}={}", i.name, i.detail))
+        .collect();
+    log::info!("[selfcheck] 环境: {}", env_line.join(" | "));
+    // 能力状态也记一行（过滤器是否就绪、拦截是否开启、隐私档位）
+    let cap_line: Vec<String> = report
+        .capabilities
+        .iter()
+        .map(|i| format!("{}={}", i.name, i.detail))
+        .collect();
+    log::info!("[selfcheck] 能力: {}", cap_line.join(" | "));
+    for item in report
+        .versions
+        .iter()
+        .chain(report.storage.iter())
+        .chain(report.runtime.iter())
+        .chain(report.capabilities.iter())
+    {
+        if !item.ok {
+            log::warn!("[selfcheck] 异常项: {} - {}", item.name, item.detail);
+        }
+    }
+    Ok(report)
 }
 
 /// 简易 percent-decode（处理 shift:// query 参数，避免引入 url crate）
@@ -262,8 +307,32 @@ pub fn run() {
       tabs::start_drag_window,
       tabs::set_bookmarks_bar_visible,
       tabs::get_nav_state,
+      tabs::set_webview_ai_panel,
+      tabs::open_devtools,
+      // 自检（可观测性）
+      selfcheck_cmd,
       // AI 侧边栏
       ai::ai_chat,
+      ai::ai_chat_stream,
+      ai::ai_cancel_stream,
+      ai::ai_list_providers,
+      // 页面理解层（阶段 1.1）
+      content_cmd::content_snapshot,
+      content_cmd::content_extract,
+      // llms.txt 信号（阶段 1.5 标准跟踪 · Lighthouse Agentic 信号③/④落地；
+      // 走 LlmsCache 会话缓存 + 每域限次 + 3s 超时 + 失败静默——Agent 导航用的"站点自述"）
+      crate::engine::llmstxt::read_llmstxt,
+      // MCP 工具层（阶段 1.3）
+      mcp_cmd::mcp_list_servers,
+      mcp_cmd::mcp_add_server,
+      mcp_cmd::mcp_remove_server,
+      mcp_cmd::mcp_set_server_enabled,
+      mcp_cmd::mcp_list_tools,
+      mcp_cmd::mcp_call_tool,
+      mcp_cmd::mcp_get_audit_log,
+      // Agent 执行层（阶段 1.4）
+      agent_cmd::agent_confirm_action,
+      agent_cmd::agent_debug_execute,
       // 扩展管理
       extensions::load_extension,
       extensions::list_extensions,
@@ -279,6 +348,9 @@ pub fn run() {
       extensions::get_privacy_shield_level,
       extensions::set_privacy_whitelist,
       extensions::get_privacy_whitelist,
+      // WebMCP polyfill 试验（阶段 1.5）
+      extensions::set_webmcp_polyfill,
+      extensions::get_webmcp_polyfill,
       // 隐私防护统计（防护看得见）
       extensions::get_privacy_stats,
       extensions::reset_privacy_stats,
@@ -728,7 +800,7 @@ pub fn run() {
       log::info!("[ShiftBrowser] app_data_dir = {:?}", app_data_dir);
       log::info!("[ShiftBrowser] 目录存在: {}", app_data_dir.exists());
 
-      let db_handle = tauri::async_runtime::block_on(Db::init(app_data_dir));
+      let db_handle = tauri::async_runtime::block_on(Db::init(app_data_dir.clone()));
       match db_handle {
         Ok(db) => {
           app.manage(db);
@@ -937,6 +1009,15 @@ pub fn run() {
           Ok(()) => log::info!("[ShiftBrowser] GTK 布局初始化成功"),
           Err(e) => log::error!("[ShiftBrowser] GTK 布局初始化失败: {}", e),
         }
+      }
+
+      // 引擎层：注册内容过滤器（网络层规则拦截）的缓存目录与应用句柄。
+      // 必须在下面的注入流程之前注册：规则编译由注入流程触发（在主线程进行），
+      // 编译完成后会自动重新注入，把过滤器挂到已打开标签上；
+      // 加/删自定义关键词因此无需重启即可生效。
+      {
+        let cache_dir = app_data_dir.join("content-filters");
+        engine::content_filter::register_app(app.handle().clone(), cache_dir);
       }
 
       // 启动时注入所有启用扩展（UserContentManager 用户脚本/样式）

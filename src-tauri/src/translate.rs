@@ -126,8 +126,7 @@ async fn bing_session(timeout: u64) -> Result<BingSession, String> {
         .text()
         .await
         .map_err(|e| format!("Bing 页面读取失败: {}", e))?;
-    let ig = extract_between(&html, "IG:\"", "\"")
-        .ok_or_else(|| "Bing IG 抓取失败".to_string())?;
+    let ig = extract_between(&html, "IG:\"", "\"").ok_or_else(|| "Bing IG 抓取失败".to_string())?;
     let iid = extract_between(&html, "data-iid=\"", "\"")
         .ok_or_else(|| "Bing IID 抓取失败".to_string())?;
     // 页面内嵌：params_AbusePreventionHelper = [key,"token",interval]

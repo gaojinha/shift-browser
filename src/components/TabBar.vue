@@ -18,12 +18,17 @@ const DEFAULT_FAVICON =
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="var(--accent)"/><ellipse cx="8" cy="8" rx="3" ry="6.5" fill="none" stroke="#fff" stroke-width="0.8"/><path d="M1.5 8h13" stroke="#fff" stroke-width="0.8"/></svg>',
   )
 
+// 固定标签永远排最前（固定标签之间保持原相对顺序），普通标签按原顺序
+function pinnedFirst(tabs: Tab[]): Tab[] {
+  return [...tabs].sort((a, b) => Number(b.is_pinned) - Number(a.is_pinned))
+}
+
 // 分组后的标签结构
 const groupedTabs = computed(() => {
-  const ungrouped = tabsStore.tabs.filter((t) => t.groupId == null)
+  const ungrouped = pinnedFirst(tabsStore.tabs.filter((t) => t.groupId == null))
   const groups = groupsStore.groups.map((g) => ({
     group: g,
-    tabs: tabsStore.tabs.filter((t) => t.groupId === g.id),
+    tabs: pinnedFirst(tabsStore.tabs.filter((t) => t.groupId === g.id)),
   }))
   return { ungrouped, groups }
 })

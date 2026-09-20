@@ -158,6 +158,16 @@ impl Db {
                 "index_cleanup",
                 include_str!("../../migrations/20260918000003_index_cleanup.sql"),
             ),
+            (
+                10,
+                "drop_reading_list_dead_table",
+                include_str!("../../migrations/20260920000000_drop_reading_list.sql"),
+            ),
+            (
+                11,
+                "mcp_tools",
+                include_str!("../../migrations/20260920000001_mcp_tools.sql"),
+            ),
         ];
 
         for (version, name, sql) in migrations {

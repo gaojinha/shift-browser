@@ -4540,6 +4540,7 @@ version = "5.6.0"
 dependencies = [
  "aes-gcm",
  "ammonia",
+ "async-trait",
  "base64 0.22.1",
  "encoding_rs",
  "futures-util",

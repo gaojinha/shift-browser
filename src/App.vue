@@ -53,15 +53,76 @@ const addressBarRef = ref<InstanceType<typeof AddressBar> | null>(null)
 let saveTimer: number | null = null
 
 /** Esc 关闭最上层弹窗（AI 侧栏优先，再设置/下载/分组/密码）；Ctrl 组合键为浏览器标配快捷键 */
+/** 弹窗是否打开（弹窗打开时标签级快捷键不响应，避免误关/误建标签） */
+function anyDialogOpen() {
+  return (
+    showTranslate.value ||
+    showAI.value ||
+    showSettings.value ||
+    showDownloads.value ||
+    showGroups.value ||
+    showPasswords.value ||
+    showHistory.value ||
+    showSessions.value ||
+    showBookmarks.value
+  )
+}
+
+/**
+ * 统一快捷键动作入口。
+ * 两个来源共用：① 前端 keydown（UI 层持焦时）② GTK 窗口层转发（页面持焦时，
+ * 前端收不到按键，由 Rust 在 GTK 层拦截后 emit `global-shortcut`）。
+ */
+function handleGlobalAction(action: string) {
+  switch (action) {
+    case 'new-tab':
+      tabsStore.createTab()
+      break
+    case 'close-tab':
+      if (tabsStore.activeTabId) tabsStore.closeTab(tabsStore.activeTabId)
+      break
+    case 'reload':
+      if (tabsStore.activeTabId) tabsStore.reloadTab(tabsStore.activeTabId)
+      break
+    case 'focus-address':
+      addressBarRef.value?.focusInput()
+      break
+    case 'history':
+      openPanel('history')
+      break
+    case 'translate-panel':
+      openPanel('translate')
+      break
+    case 'sessions':
+      openPanel('sessions')
+      break
+    case 'next-tab':
+    case 'prev-tab': {
+      const tabs = tabsStore.tabs
+      if (tabs.length < 2) break
+      const idx = tabs.findIndex((t) => t.id === tabsStore.activeTabId)
+      const step = action === 'next-tab' ? 1 : -1
+      tabsStore.switchTab(tabs[(idx + step + tabs.length) % tabs.length].id)
+      break
+    }
+    case 'devtools':
+      invoke('open_devtools').catch(() => {})
+      break
+  }
+}
+
 function onGlobalKeydown(e: KeyboardEvent) {
+  // F12 / Ctrl+Shift+I：打开当前标签的开发者工具（Web Inspector）
+  if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i'))) {
+    e.preventDefault()
+    handleGlobalAction('devtools')
+    return
+  }
+
   // Ctrl+Tab / Ctrl+Shift+Tab：切换前后标签
   if (e.ctrlKey && e.key === 'Tab') {
     e.preventDefault()
-    const tabs = tabsStore.tabs
-    if (tabs.length < 2) return
-    const idx = tabs.findIndex((t) => t.id === tabsStore.activeTabId)
-    const next = e.shiftKey ? (idx - 1 + tabs.length) % tabs.length : (idx + 1) % tabs.length
-    tabsStore.switchTab(tabs[next].id)
+    handleGlobalAction(e.shiftKey ? 'prev-tab' : 'next-tab')
     return
   }
 
@@ -71,42 +132,39 @@ function onGlobalKeydown(e: KeyboardEvent) {
     // Ctrl+L 聚焦地址栏（任何情况下都生效，含输入框内）
     if (k === 'l') {
       e.preventDefault()
-      addressBarRef.value?.focusInput()
+      handleGlobalAction('focus-address')
       return
     }
     // 弹窗打开时，其余标签快捷键不响应（避免误关标签/新建标签）
-    if (showTranslate.value || showAI.value || showSettings.value || showDownloads.value || showGroups.value || showPasswords.value || showHistory.value || showSessions.value || showBookmarks.value) {
-      return
-    }
-    // Ctrl+Shift+T 打开翻译面板（不影响 Ctrl+T 建标签）
+    if (anyDialogOpen()) return
+    // Ctrl+Shift+T 打开翻译面板 / Ctrl+Shift+S 会话管理（不影响 Ctrl+T 建标签）
     if (k === 't' && e.shiftKey) {
       e.preventDefault()
-      openPanel('translate')
+      handleGlobalAction('translate-panel')
       return
     }
-    // Ctrl+Shift+S 打开会话管理
     if (k === 's' && e.shiftKey) {
       e.preventDefault()
-      openPanel('sessions')
+      handleGlobalAction('sessions')
       return
     }
-    if (k === 't' && !e.shiftKey) {
+    if (k === 't') {
       e.preventDefault()
-      tabsStore.createTab()
+      handleGlobalAction('new-tab')
     } else if (k === 'w') {
       e.preventDefault()
-      if (tabsStore.activeTabId) tabsStore.closeTab(tabsStore.activeTabId)
+      handleGlobalAction('close-tab')
     } else if (k === 'r') {
       e.preventDefault()
-      if (tabsStore.activeTabId) tabsStore.reloadTab(tabsStore.activeTabId)
+      handleGlobalAction('reload')
     } else if (k === 'h') {
       e.preventDefault()
-      openPanel('history')
+      handleGlobalAction('history')
     }
     return
   }
 
-   if (e.key !== 'Escape') return
+  if (e.key !== 'Escape') return
   if (showTranslate.value) {
     showTranslate.value = false
   } else if (showAI.value) {
@@ -206,6 +264,10 @@ onMounted(async () => {
     }
     tabsStore.startPolling()
     frontLog('onReady 完成 标签数=' + tabsStore.tabs.length)
+    // 启动自检：把版本/存储/运行时/能力状态写进 Rust 日志（只读，便于事后排查）
+    invoke<{ healthy: boolean }>('selfcheck_cmd')
+      .then((r) => frontLog('启动自检完成 健康=' + r?.healthy))
+      .catch((e) => frontLog('启动自检失败: ' + e))
   }
 
   // ① 先查锁屏状态：await 一次 IPC 确保 IPC 桥已就绪（之后注册事件监听才可靠）
@@ -257,6 +319,12 @@ onMounted(async () => {
   }).catch(() => {})
   listen('open-settings-from-newtab', () => {
     showSettings.value = true
+  }).catch(() => {})
+
+  // GTK 窗口层转发的全局快捷键：页面（child webview）持焦时，前端 keydown 收不到按键，
+  // 由 Rust 在 GTK 顶层窗口拦截后发事件过来（见 tabs.rs 的 UI_FOCUSED 焦点跟踪）。
+  listen<string>('global-shortcut', (ev) => {
+    handleGlobalAction(ev.payload)
   }).catch(() => {})
 })
 

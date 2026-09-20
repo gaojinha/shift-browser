@@ -1,12 +1,21 @@
 // AI 侧边栏状态管理（Pinia）
-// 对接 AGNES AI（Rust ai_chat 命令，OpenAI 兼容）
+// 对接 AGNES AI（Rust ai_chat_stream 流式命令，OpenAI 兼容）
 import { defineStore } from 'pinia'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, Channel } from '@tauri-apps/api/core'
 import { useSettingsStore } from './settings'
+import type { Snapshot } from '../types/content'
 
 export interface AIMessage {
   role: 'user' | 'assistant'
   content: string
+}
+
+/** 后端流式事件（与 ai.rs StreamEvent 对应） */
+interface StreamEvent {
+  type: 'delta' | 'done' | 'error'
+  content?: string
+  full?: string
+  message?: string
 }
 
 interface AIState {
@@ -15,6 +24,12 @@ interface AIState {
   /** 当前页面上下文（URL + 标题，供 AI 分析） */
   pageContext: { url: string; title: string } | null
   error: string | null
+  /** 当前流式请求 id（用于停止生成） */
+  streamingId: string | null
+  /** 可用 MCP 工具（阶段 1.3：有工具时对话走 function calling） */
+  tools: Array<{ name: string; serverName: string; description: string }>
+  /** 工具是否已加载 */
+  toolsLoaded: boolean
 }
 
 export const useAIStore = defineStore('ai', {
@@ -23,6 +38,9 @@ export const useAIStore = defineStore('ai', {
     loading: false,
     pageContext: null,
     error: null,
+    streamingId: null,
+    tools: [],
+    toolsLoaded: false,
   }),
 
   actions: {
@@ -31,18 +49,73 @@ export const useAIStore = defineStore('ai', {
       this.pageContext = { url, title }
     },
 
-    /** 发送消息（带系统提示 + 页面上下文） */
+    /** 加载可用 MCP 工具（阶段 1.3） */
+    async loadTools() {
+      if (this.toolsLoaded) return
+      try {
+        this.tools = await invoke('mcp_list_tools')
+      } catch {
+        this.tools = []
+      }
+      this.toolsLoaded = true
+    },
+
+    /** 发送消息（流式：先占位空回复，逐块追加） */
     async sendMessage(content: string) {
       const text = content.trim()
       if (!text || this.loading) return
       this.messages.push({ role: 'user', content: text })
+      // 先推一个空 assistant 消息占位，流式增量往里面追加
+      this.messages.push({ role: 'assistant', content: '' })
       this.loading = true
       this.error = null
+      const requestId = crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      this.streamingId = requestId
       try {
         const ctx = this.pageContext
-        const system = ctx
-          ? `你是 ShiftBrowser 内置 AI 助手。当前用户正在浏览的页面：标题「${ctx.title}」，地址 ${ctx.url}。回答要简洁实用，中文回复。`
-          : '你是 ShiftBrowser 内置 AI 助手。回答要简洁实用，中文回复。'
+        // 阶段 1.1（页面理解层）：发送前取活动标签语义快照（本地提取，不出网），
+        // 让 AI 真正"理解页面"——正文摘要 + 可交互元素。失败则降级为标题/地址。
+        let snapshotDesc = ''
+        try {
+          const snap = await invoke<Snapshot>('content_snapshot')
+          if (snap && snap.title) {
+            const text = (snap.text || '').slice(0, 800)
+            snapshotDesc = `【页面语义快照】标题：${snap.title}；地址：${snap.url}；正文摘要：${text || '(无可读文本)'}；可交互元素：链接 ${snap.interactive?.links ?? 0} 个、按钮 ${snap.interactive?.buttons ?? 0} 个、输入框 ${snap.interactive?.inputs ?? 0} 个。`
+            // 阶段 1.5 WebMCP polyfill 试验：页面暴露的工具声明附给 AI（供理解与引导操作）
+            if (snap.webmcpTools && snap.webmcpTools.length > 0) {
+              const toolsDesc = snap.webmcpTools
+                .map((t) => `${t.name}：${t.description || '(无描述)'}`)
+                .join('；')
+              snapshotDesc += ` 页面通过 WebMCP 暴露了 ${snap.webmcpTools.length} 个工具：${toolsDesc}。`
+            }
+            // Lighthouse Agentic 信号②·代理为中心无障碍→Agent 定位（阶段 1.5 落地）：
+            // 把程序化名称（aria-label/labelledby）+ 有效角色 + 隐藏态提炼成"Agent 可执行的
+            // 语义定位清单"——Agent 不再靠裸 CSS 选择器猜元素，而是用站点已声明好的
+            // 无障碍自述来**语义定位**（对齐乘 4.2.1"程序化名称"+信号③"树完整性"）。
+            if (snap.aria && snap.aria.length > 0) {
+              const usual = snap.aria.filter((a) => !a.hidden)
+              if (usual.length > 0) {
+                const ariaList = usual
+                  .slice(0, 10)
+                  .map(
+                    (a, idx) =>
+                      `${idx + 1}. ${a.tag}[role=${a.role}]「${a.label || '(无名)'}」`,
+                  )
+                  .join('；')
+                snapshotDesc += ` 页面带程序化名称的可交互元素：${ariaList}。要对"「${usual[0].label || '首页'}」按钮"操作时,优先用无障碍自述里的语义定位（角色+名称）而不是猜 CSS。`
+              }
+            }
+          }
+        } catch {
+          // 快照失败不阻断对话（可能页面未就绪/无活动标签），降级用标题+地址
+        }
+        const system = snapshotDesc
+          ? `你是 ShiftBrowser 内置 AI 助手。${snapshotDesc}回答要简洁实用，中文回复；代码用围栏代码块，列表用 Markdown 语法。`
+          : ctx
+            ? `你是 ShiftBrowser 内置 AI 助手。当前用户正在浏览的页面：标题「${ctx.title}」，地址 ${ctx.url}。回答要简洁实用，中文回复；代码用围栏代码块，列表用 Markdown 语法。`
+            : '你是 ShiftBrowser 内置 AI 助手。回答要简洁实用，中文回复；代码用围栏代码块，列表用 Markdown 语法。'
         // 从设置读取 AI 参数（模型/API 地址/API Key）
         const settingsStore = useSettingsStore()
         const model = settingsStore.get('ai_model') || 'agnes-2.0-flash'
@@ -51,21 +124,92 @@ export const useAIStore = defineStore('ai', {
         // get_all_settings 返回的是掩码（前4后4 ****），不是真 key：
         // 不回传（避免网络层泄露），后端也会忽略掩码并回退环境变量
         const realKey = apiKey.includes('****') ? '' : apiKey
-        const reply = await invoke<string>('ai_chat', {
+        // 历史 = 去掉最后一条空占位，再取最近 20 条
+        const history = this.messages.slice(0, -1).slice(-20)
+
+        // 阶段 1.3（工具层）：有可用 MCP 工具时走非流式 ai_chat（function calling 多轮执行），
+        // 无工具保持流式体验。工具场景需要多轮工具执行，流式反而卡顿。
+        await this.loadTools()
+        if (this.tools.length > 0) {
+          const reply = await invoke<string>('ai_chat', {
+            provider: settingsStore.get('ai_provider') || 'agnes',
+            messages: [
+              { role: 'system', content: system },
+              ...history.map((m) => ({ role: m.role, content: m.content })),
+            ],
+            model,
+            baseUrl: baseUrl || undefined,
+            apiKey: realKey || undefined,
+          })
+          const last = this.messages[this.messages.length - 1]
+          if (last && last.role === 'assistant') last.content = reply
+          this.loading = false
+          this.streamingId = null
+          return
+        }
+
+        const channel = new Channel<StreamEvent>()
+        channel.onmessage = (event) => {
+          if (event.type === 'delta' && event.content) {
+            // 增量追加到当前 assistant 回复
+            const last = this.messages[this.messages.length - 1]
+            if (last && last.role === 'assistant') last.content += event.content
+          } else if (event.type === 'done') {
+            // 用完整回复兜底（保证一致）
+            const last = this.messages[this.messages.length - 1]
+            if (last && last.role === 'assistant' && event.full) {
+              last.content = event.full
+            }
+            this.loading = false
+            this.streamingId = null
+          } else if (event.type === 'error') {
+            // 用户主动停止不算错误
+            if (event.message !== '已停止生成') {
+              this.error = event.message || 'AI 请求失败'
+            }
+            this.dropEmptyAssistant()
+            this.loading = false
+            this.streamingId = null
+          }
+        }
+
+        await invoke('ai_chat_stream', {
+          requestId,
+          provider: settingsStore.get('ai_provider') || 'agnes',
           messages: [
             { role: 'system', content: system },
-            // 只回传最近 20 条历史，长对话 payload 不会无限膨胀（省 token、防超时）
-            ...this.messages.slice(-20).map((m) => ({ role: m.role, content: m.content })),
+            ...history.map((m) => ({ role: m.role, content: m.content })),
           ],
+          onEvent: channel,
           model,
           baseUrl: baseUrl || undefined,
           apiKey: realKey || undefined,
         })
-        this.messages.push({ role: 'assistant', content: reply })
       } catch (e) {
         this.error = String(e)
-      } finally {
+        this.dropEmptyAssistant()
         this.loading = false
+        this.streamingId = null
+      }
+    },
+
+    /** 停止当前流式生成 */
+    async stopStreaming() {
+      if (!this.streamingId) return
+      const id = this.streamingId
+      this.streamingId = null
+      try {
+        await invoke('ai_cancel_stream', { requestId: id })
+      } catch {
+        // 忽略取消失败（后端流式循环会在 send 失败/超时后自行退出）
+      }
+    },
+
+    /** 移除最后一条空 assistant 占位（出错/停止时） */
+    dropEmptyAssistant() {
+      const last = this.messages[this.messages.length - 1]
+      if (last && last.role === 'assistant' && !last.content.trim()) {
+        this.messages.pop()
       }
     },
 
@@ -107,6 +251,7 @@ export const useAIStore = defineStore('ai', {
     clearConversation() {
       this.messages = []
       this.error = null
+      this.streamingId = null
     },
   },
 })

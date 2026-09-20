@@ -130,10 +130,7 @@ pub async fn refresh_wallpapers_background(app: &AppHandle) {
         log::warn!("[newtab] 壁纸拉取失败（保留旧缓存或纯色背景）");
         return;
     }
-    if let Err(e) = std::fs::write(
-        &cache,
-        serde_json::to_string(&fresh).unwrap_or_default(),
-    ) {
+    if let Err(e) = std::fs::write(&cache, serde_json::to_string(&fresh).unwrap_or_default()) {
         log::warn!("[newtab] 壁纸缓存写入失败: {}", e);
     } else {
         log::info!("[newtab] 壁纸缓存已刷新 {} 张", fresh.len());
@@ -2062,13 +2059,11 @@ const TODO_KEY: &str = "todos";
 /// 与快捷访问一样改走 settings 表（IPC）持久化。
 #[tauri::command]
 pub async fn todo_list(db: State<'_, Db>) -> Result<String, String> {
-    let row: Option<String> = sqlx::query_scalar(
-        "SELECT value FROM settings WHERE key = ?",
-    )
-    .bind(TODO_KEY)
-    .fetch_optional(&db.pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    let row: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
+        .bind(TODO_KEY)
+        .fetch_optional(&db.pool)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(row.unwrap_or_else(|| "[]".to_string()))
 }
 
