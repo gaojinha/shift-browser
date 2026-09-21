@@ -158,4 +158,14 @@ webkit2gtk::WebInspectorExt::show(&inspector);
 **错误**: 插入的代码里混进了 `TemporaryId` 这种**草稿占位符**——`let plan = batch_plan(&pairs TemporaryId);`，编译直接报 `expected one of ..., found TemporaryId`。根因：写 python 字符串时把"设计草稿"里没清理的占位文本一起粘进去了；Rust 代码越长，手滑混入垃圾的概率越高。
 **正确**: **禁止用 python/bash 嵌大段 Rust 代码做插入**。改 Rust 一律用 `edit` 工具做精确 oldString→newString 替换（先 `read` 拿真锚点）。python 只用于"纯文本小替换 + assert 唯一性"这类简单场景。
 **预防**: ①任何"生成代码"的操作，生成后必须 `cargo build` 验证，别信"✓ 已插入"的自我报告；②插入前先 `git status` 确认工作区干净，出问题 `git checkout --` 秒回干净基点；③本会话还犯过"反复 sed 读同一文件，把多次输出叠加当磁盘真身"的幻觉——**磁盘真身只认 `read` 工具或 `git status`，不认 bash 里滚动的碎片输出**。
+
+## 2026-09-21 — 第45章 sync.rs：凭记忆写"幽灵 API"复发 + 目录幻觉 + 长文件截断
+
+**类别**: correction
+**场景**: 上云 E2E 加密同步（第45章），新写 `src-tauri/src/db/sync.rs`。
+**错误 1（幽灵 API，复发）**: 直接凭记忆写 sync.rs，引用了一堆**真身不存在**的符号——`Db::app_data_dir`（Db 只有 pool/key_path/vault_path/master_key 四个字段）、`passwords::encrypt/decrypt`（当时还是私有 `fn`）、自造的 `master_key_or_reject`/`write_atomic_060`/`read_internal_str` 等。`cargo build` 报 14 个 `E0433`（`cannot find __cmd__* in passwords` 是连带症状）。
+**错误 2（目录幻觉）**: 一度把项目根记成 `/home/gao/sync-browser-tauri`（真身是 `/home/gao/shift-browser-tauri`），把代码写进误建的空壳目录，靠 `git -C <dir> log` 对不上历史才识破。
+**错误 3（长文件 write 截断）**: 一次性 write 超长 Rust 文件，JSON 被截断成 `Unterminated string`，落盘成半截残稿（因未在 `db/mod.rs` 注册而未参与编译，但污染工作区）。
+**正确**: ①**写跨模块调用前，先 grep 被调符号的真身签名贴进对话，再从输出抄**，绝不从记忆造；②项目根只认 `git -C <dir> log` 能对上历史提交的那个；③长文件用 `write` 分块（≤250 行）+ `edit` 拼接，每块后 `cargo build` 验证；④残稿立即 `rm` + `git checkout --` 回绿线，不留尸。
+**预防**: 编译错误成堆时，**先怀疑"我引用的 API 是不是真的存在"**，grep 一遍再说。这与 2026-09-20「llms.txt 幽灵符号」是**同一类病**——"凭记忆写 API"是本模型高频失误，必须靠"先 grep 后写"的流程硬约束，不能靠记性。本次最终以"先 grep 真身 → 分块写 → build 全绿 → 108 测试过 → 冒烟 12/12 → 真 Nextcloud WebDAV 验证"收口。
 ---
