@@ -1,6 +1,6 @@
 # ShiftBrowser v5.0.0（Tauri 重构）交接文档
 
-> 最后更新：2026-09-12（广告拦截自定义关键词 ✅：设置里可手工加词 + CSS 规则扩充，误杀选择器已收紧）
+> 最后更新：2026-09-21（补记第 36–52 章：阶段 1.5–2 隐私主权收尾、阶段 3 交互形态/平台化、扩展体系网络层拦截原型）
 > 交接人：王二狗 → 下任 agent
 
 ---
@@ -13,7 +13,9 @@
 
 **路线图**：`/home/gao/ShiftBrowser/doc/UPGRADE-ROADMAP.md`（v2.0，含 Phase 0-4 完整规划）
 
-**当前进度**：**Phase 0 完成**（环境搭建+核心骨架+数据库链路验证通过），进入 Phase 1（核心浏览器框架）。
+**当前进度**：**阶段 0–2 完成 + 阶段 3 进行中**（详见文末逐章记录）。
+- 阶段 0 基座加固 ✅、阶段 1 AI 原生内核 ✅（持续增强）、阶段 2 隐私主权 ✅（Passkeys 待运行时实测）；
+- 阶段 3 交互形态与平台化：命令栏 / 垂直标签 / 分屏 / 空间 ✅，真扩展体系（网络层拦截）已出原型。
 
 ---
 
@@ -1451,4 +1453,147 @@ Lighthouse 13.3 加了 Agentic Browsing 类别（2026-05-07 入默认）；但 S
 ### 验证
 - 81 单测（+1 webmcp polyfill 幂等/只捕获不伪造），零警告；冒烟 12/12。
 - 前端生产构建零错误，Cargo 全量 release 零警告。
+
+---
+
+## 第三十六章 ~ 第四十三章（阶段 1.5–2 补记 · 2026-09-20）
+
+> 补记说明：这几章逐章记录此前遗漏（HANDOFF 一度停在第三十五章），2026-09-21 依 git 历史按主题补记。
+
+### 阶段 1.5 收口：llms.txt 引擎 + WebMCP polyfill 试验 + 快照无障碍语义（da360ba）
+llms.txt 引擎竣工；WebMCP polyfill 试验（默认关，只捕获声明不伪造执行）；内容快照加无障碍语义。
+**踩坑**：引擎"幽灵符号"（凭空编的函数名）+ 碎片化打补丁 → 编译错误成堆时先通读整段、一次重写。
+
+### 阶段 1.6–1.9：Agent 执行层增强
+- **1.6 多步任务编排**（af60328）：`browser_action_plan` 整体确认 + 按序执行。
+- **1.7 AI 友好度检测**（590a9fd）：对齐 Lighthouse Agentic Browsing 四信号。
+- **1.8 动作回放/重试**（d77ab54）：多步任务可信审计 + 断点续跑地基。
+- **1.9 整批重试**（953f6e0）：多步编排的批量失败恢复。
+- 修复：补注册 `browser_action_plan` 工具（f28e94c，多步编排断点）。
+
+### 阶段 2 隐私主权（骨架）
+- **隐私防护自测面板**（48de317 + 9365af3）："信任需要证明"；非网页标签容错。
+- **GPC 站点声明感知**（3bb7890）：`/.well-known/gpc.json`，从"发了信号"到"可验证站点认不认"。
+- **零遥测审计**（999ba21）：全量网络出口清单 + 可验证"无外联"。
+- **反指纹 2.0 双模式**（d475535）：加噪（现）/ 统一化（Tor/Mullvad 派）。
+
+---
+
+## 第四十四章（阶段 2）：密码库主密码（数据主权底线）— 6e152fe
+
+**背景一句话**：密码库主密钥原先靠机器自动生成的 `master.key`（同机拿到即可解密）；本批补上**用户主密码**：
+主密码经 PBKDF2-HMAC-SHA256（随机 salt，200k 轮）派生包裹密钥，用它 AES-256-GCM 加密"真正的主密钥"存
+`vault.key`（600）。设主密码后密码库启动即**锁定**，须解锁后主密钥才在内存可用——同机拿到文件也解不开。
+
+**交付**：`db/vault.rs`（`is_protected`/`is_unlocked`/`unlocked_key`/`lock`/`derive_key`/`wrap_key`/`unwrap_key`
++ 5 条命令）；前端隐私分区"密码库主密码"块。
+
+**验证**：108 测试（+5 vault）；零警告；冒烟 12/12。
+
+---
+
+## 第四十五章（阶段 2）：上云 E2E 加密同步（服务器零知识）— 4bb2e04
+
+**背景一句话**：密码库加密推到自建 Nextcloud，**服务器只存密文**。复用第44章主密码闸门：未设/未解锁一律拒绝上云。
+
+**交付**：`db/sync.rs`（WebDAV 客户端 + 主钥整包 AES-256-GCM 的 E2E 包；凭据主钥包裹落盘 `sync.key` 600；
+拉取按 domain+username UPSERT 合并、不删本地独有）；5 条命令 + 前端卡片。
+
+**踩坑**：**凭记忆写"幽灵 API"复发**（`Db::app_data_dir` 不存在、自造 `write_atomic_060` → 14 个 E0433）+
+目录幻觉 + 长文件 write 截断。铁律：写跨模块调用前先 grep 真身签名；长文件分块写。
+
+**验证**：cargo 0/0；108 测试；前端构建；冒烟 12/12；**真 Nextcloud WebDAV** MKCOL/PUT/GET/DELETE 实测通过。
+
+---
+
+## 第四十六章（阶段 3.1）：命令栏 Ctrl+K 万能入口 — 83f4661
+
+**背景一句话**：一个输入框统一入口（命令 / 切标签 / 搜历史 / 开网址 / 问 AI）。
+
+**交付**：`CommandPalette.vue`（五类候选 + 键盘导航 + 打开时隐藏 webview）；**Ctrl+K 双通道**
+（前端 keydown + GTK 层转发 0x6B）；「问 AI」走 `aiStore.pendingPrompt`。
+
+**验证**：cargo 0/0；108 测试；前端构建；vitest 2/2；eslint 干净；冒烟 12/12。
+
+---
+
+## 第四十七章（阶段 3.1）：垂直标签栏 — 1fb9fd7 + 修复 91de7b0
+
+**背景一句话**：标签栏可切到左侧竖排（默认关）；`ContentGeometry` 加 `left`，`top_offset()` 随模式变。
+
+**踩坑（已记 learnings）**：①开关放"外观"而默认开"通用"→找不到（735d770）；②**新建标签没应用几何定位**
+（初始化同步时 0 标签空转）→ webview 落在 (0,116) 盖住左栏；③**`margin_start` 把 Fixed 压成 1×1** →
+改用 GtkFixed 内部 `move_(left,0)`，实测 `wv_toplevel_pos=(220,72)` 对齐；④窗口按钮随 TabBar 隐藏 → 补到竖栏。
+
+**验证**：cargo 0/0；112 测试（+4 几何单测）；前端构建；冒烟 12/12。
+
+---
+
+## 第四十八章（阶段 3.1）：分屏浏览 — 2d990b8 + 修复 2b20200
+
+**背景一句话**：标签可"在右侧分屏"，内容区左右对半，两个 webview 同时可见可交互。
+
+**交付**：`ContentGeometry::split()`（+2 单测）；`split_tab` 状态 + `apply_split_layout` + 3 条命令；
+switch_tab/resize 感知分屏；TabBar 右键菜单「在右侧分屏」。
+
+**踩坑**：**右键菜单关闭时"恢复全部 webview"覆盖分屏** → 分屏时改走 `apply_split_layout`。
+
+**验证**：cargo 0/0；114 测试；前端构建；冒烟 12/12；用户实测可用。
+
+---
+
+## 第四十九章（阶段 3.2）：空间 Spaces — 282ee20
+
+**背景一句话**：工作区升级为"上下文隔离容器"（每空间独立标签集 + 主题色）。
+
+**交付**：迁移 v12 `space_color`；`Workspace.color`；`SpaceSwitcher.vue`（切换/新建/重命名/删除，下拉隐藏 webview）；
+App.vue 监听空间色 → 全局 `--accent`。
+
+**验证**：cargo 0/0；114 测试；前端构建；vitest 2/2；eslint 干净；冒烟 12/12；迁移 v12 完成。
+
+---
+
+## 第五十章（阶段 3.2）：扩展体系能力 spike — 3e27564
+
+**背景一句话**：真扩展体系前置——引擎能否**网络层拦截**？只读实证（GIR + 系统库符号）。
+
+**结论**：**可行**，走「Web 进程扩展」机制（独立 .so + C FFI），**非 chrome.\***：
+`WebKitWebPage::send-request`（请求出网前可改 `WebKitURIRequest`、返回 TRUE 取消，不含响应体改写）；
+加载靠 `.so` 导出 `webkit_web_extension_initialize` + UI 侧 `set_web_extensions_directory`；
+2.52 新增 `WebExtension` 类只是消息通道骨架；gtk-rs 未覆盖 → 需裸 FFI。
+报告：`docs/spike-extension-capabilities-2026-09-21.md`。
+
+---
+
+## 第五十一章（阶段 3.2）：Web 进程扩展最小原型（阶段 A）— 53e4160
+
+**背景一句话**：把 spike 落成能跑的东西——独立扩展 .so 端到端证明网络层拦截可用。
+
+**交付**：`src-tauri/web-extension/`（Rust `cdylib` + 裸 FFI，无第三方依赖）；`scripts/build-extension.sh`；
+复用 `lib.rs` 早已设置的 `set_web_extensions_directory`（指向 exe 目录）。
+
+**运行实证**：`Web 进程扩展已加载` → `page-created` → `send-request: https://…`（每个请求）→
+`拦截（取消）: …`（返回 TRUE 生效）。
+
+---
+
+## 第五十二章（阶段 3.2）：网络层按规则文件拦截（阶段 B 最小版）— 821c2e9
+
+**背景一句话**：把硬编码标记升级为可配置规则：扩展读
+`~/.local/share/com.shiftbrowser.app/shift-ext-rules.txt`（每行 URL 子串，`#` 注释），命中即取消。
+
+**交付**：`web-extension/src/lib.rs` 用 `OnceLock` 缓存规则；`should_block()`；未命中不再逐条打日志。
+
+**运行实证**：`已加载 1 条规则（…/shift-ext-rules.txt）` + `拦截（取消）: …/ds.js`。
+
+**遗留**：规则文件由主程序写入（同步广告词库）；请求头改写（需 SoupHeaders FFI）；.so 生产打包。
+
+---
+
+## 下一步（截至第五十二章）
+
+- **扩展体系**：主程序 → 规则文件打通（广告词库自动落盘）；请求头改写；.so 进 Tauri 打包流程。
+- **阶段 2 收尾**：Passkeys 运行时实测（引擎有 WebAuthn 实现，平台认证器待验）。
+- **阶段 3 剩余**：用户脚本生态（Tampermonkey 风格）、自动化/工作流。
+- **工程**：HANDOFF 逐章记录机制（本批已补 36–52，后续每章随提交更新）。
 
