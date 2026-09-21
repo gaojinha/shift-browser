@@ -15,6 +15,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   search_engine: 'bing', // bing | baidu | google
   theme: 'dark', // dark | light
   show_bookmarks_bar: 'true',
+  vertical_tabs: 'false', // 垂直标签栏（阶段 3.1）：标签栏移到左侧
   record_history: 'true',
   ai_model: 'agnes-2.0-flash', // AI 模型（agnes-2.0-flash 稳定 / agnes-2.5-pro / agnes-2.5-flash 可能超时）
   ai_base_url: 'https://apihub.agnes-ai.com/v1', // AI API 地址

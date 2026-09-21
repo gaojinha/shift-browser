@@ -20,7 +20,9 @@ use webkit2gtk::{DownloadExt, URIRequestExt, URIResponseExt, WebContextExt, WebV
 
 // UI 布局常量：统一由引擎层提供（唯一事实来源，见 engine/layout.rs）
 pub use crate::engine::layout::CONTENT_TOP_OFFSET;
-use crate::engine::layout::CONTENT_TOP_OFFSET_NO_BOOKMARKS;
+use crate::engine::layout::{
+    BOOKMARKS_BAR_HEIGHT, CONTENT_TOP_OFFSET_NO_BOOKMARKS, TAB_BAR_HEIGHT, VERTICAL_TAB_BAR_WIDTH,
+};
 
 /// 键盘焦点是否在 UI 层（主 webview，跑 Vue 界面）。
 /// 前端快捷键监听的是 HTML 层的 keydown，只在主 webview 持焦时触发；
@@ -141,6 +143,8 @@ pub struct TabManager {
     webview_visible_seq: Mutex<u64>,
     /// AI 面板是否占用右侧（child webview 宽度让出 AI_PANEL_WIDTH，方便边看页面边对话）
     ai_panel_active: Mutex<bool>,
+    /// 垂直标签模式（true 时左侧让出 VERTICAL_TAB_BAR_WIDTH，顶部不再含标签栏）
+    vertical_tabs: Mutex<bool>,
     /// 每个标签最后一次激活时间（Unix 秒），用于"空闲休眠"判定
     last_active: Mutex<HashMap<String, i64>>,
 }
@@ -162,6 +166,7 @@ impl TabManager {
             show_bookmarks_bar: Mutex::new(true),
             webview_visible_seq: Mutex::new(0),
             ai_panel_active: Mutex::new(false),
+            vertical_tabs: Mutex::new(false),
             last_active: Mutex::new(HashMap::new()),
         }
     }
@@ -209,16 +214,38 @@ impl TabManager {
         tabs.get(&id).map(|t| t.url.clone())
     }
 
-    pub fn top_offset(&self) -> f64 {
-        if *self
-            .show_bookmarks_bar
+    /// 是否垂直标签模式（阶段 3.1）
+    pub fn vertical_tabs(&self) -> bool {
+        *self
+            .vertical_tabs
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-        {
-            CONTENT_TOP_OFFSET
-        } else {
-            CONTENT_TOP_OFFSET_NO_BOOKMARKS
+    }
+
+    /// 设置垂直标签模式
+    pub fn set_vertical_tabs(&self, on: bool) {
+        *self
+            .vertical_tabs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = on;
+    }
+
+    /// 当前内容区顶部偏移（随书签栏显隐 + 垂直标签模式变化）
+    pub fn top_offset(&self) -> f64 {
+        let bookmarks = *self
+            .show_bookmarks_bar
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // 基准：标签栏 + 地址栏
+        let mut t = CONTENT_TOP_OFFSET_NO_BOOKMARKS;
+        if self.vertical_tabs() {
+            // 垂直标签：标签栏移到左侧，顶部不再占标签栏高度
+            t -= TAB_BAR_HEIGHT;
         }
+        if bookmarks {
+            t += BOOKMARKS_BAR_HEIGHT;
+        }
+        t
     }
 
     /// 生成 UUID v4（真随机，crypto 级）
@@ -237,8 +264,13 @@ impl TabManager {
 
     /// 根据窗口尺寸计算内容区域大小（逻辑像素）；top 随书签栏显隐变化
     /// 实现已收敛到引擎层（engine/layout.rs），避免公式散落多处导致布局漂移
-    fn content_size(window: &tauri::Window, top: f64, ai_active: bool) -> (f64, f64) {
-        crate::engine::layout::content_size(window, top, ai_active)
+    fn content_size(
+        window: &tauri::Window,
+        top: f64,
+        ai_active: bool,
+        vertical: bool,
+    ) -> (f64, f64) {
+        crate::engine::layout::content_size(window, top, ai_active, vertical)
     }
 
     /// 创建嵌入式 webview
@@ -299,7 +331,11 @@ impl TabManager {
         } else {
             false
         };
-        let (w, h) = Self::content_size(&window, top, ai_active);
+        let vertical = app
+            .try_state::<TabManager>()
+            .map(|s| s.vertical_tabs())
+            .unwrap_or(false);
+        let (w, h) = Self::content_size(&window, top, ai_active, vertical);
         log::info!(
             "[tabs] create_webview: inner={:?} content=({:.0},{:.0}) top={}",
             window.inner_size(),
@@ -465,7 +501,10 @@ impl TabManager {
               });
             }
           }),
-        LogicalPosition::new(0.0, top),
+        LogicalPosition::new(
+          if vertical { VERTICAL_TAB_BAR_WIDTH } else { 0.0 },
+          top,
+        ),
         LogicalSize::new(w, h),
       )
       .map_err(|e| format!("创建 webview 失败: {}", e))?;
@@ -893,7 +932,12 @@ impl TabManager {
         } else {
             false
         };
-        let geo = crate::engine::layout::ContentGeometry::compute(&window, top, ai_active);
+        let vertical = app
+            .try_state::<TabManager>()
+            .map(|s| s.vertical_tabs())
+            .unwrap_or(false);
+        let geo =
+            crate::engine::layout::ContentGeometry::compute(&window, top, ai_active, vertical);
         crate::engine::layout::apply_to_webview(&window, show_id, geo);
         Ok(())
     }
@@ -991,8 +1035,16 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
                     false
                 };
                 // 几何计算统一走引擎层（避免公式散落多处漂移）
-                let geo =
-                    crate::engine::layout::ContentGeometry::compute(&win_for_geo, top, ai_active);
+                let vertical = app_handle
+                    .try_state::<TabManager>()
+                    .map(|s| s.vertical_tabs())
+                    .unwrap_or(false);
+                let geo = crate::engine::layout::ContentGeometry::compute(
+                    &win_for_geo,
+                    top,
+                    ai_active,
+                    vertical,
+                );
                 log::info!(
                     "[tabs] window resized: {}x{} content={}x{} top={} ai={}",
                     w,
@@ -1111,7 +1163,12 @@ fn unique_download_path(dir: &str, filename: &str) -> String {
 /// 实现委托引擎层（engine/layout.rs）。
 #[cfg(target_os = "linux")]
 fn apply_tab_geometry(window: &tauri::Window, id: &str, top: f64, ai_active: bool) {
-    let geo = crate::engine::layout::ContentGeometry::compute(window, top, ai_active);
+    let vertical = window
+        .app_handle()
+        .try_state::<TabManager>()
+        .map(|s| s.vertical_tabs())
+        .unwrap_or(false);
+    let geo = crate::engine::layout::ContentGeometry::compute(window, top, ai_active, vertical);
     crate::engine::layout::apply_to_webview(window, id, geo);
 }
 
@@ -1639,7 +1696,8 @@ pub async fn set_webview_ai_panel(
         .get_window("main")
         .ok_or_else(|| "主窗口不存在".to_string())?;
     let top = state.top_offset();
-    let geo = crate::engine::layout::ContentGeometry::compute(&window, top, active);
+    let vertical = state.vertical_tabs();
+    let geo = crate::engine::layout::ContentGeometry::compute(&window, top, active, vertical);
     let ids: Vec<String> = state
         .tabs
         .lock()
@@ -1778,7 +1836,47 @@ pub async fn set_bookmarks_bar_visible(
             .ai_panel_active
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let geo = crate::engine::layout::ContentGeometry::compute(&window, new_top, ai_active);
+        let vertical = state.vertical_tabs();
+        let geo =
+            crate::engine::layout::ContentGeometry::compute(&window, new_top, ai_active, vertical);
+        let ids: Vec<String> = state
+            .tabs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect();
+        for id in ids {
+            crate::engine::layout::apply_to_webview(&window, &id, geo);
+        }
+    }
+
+    Ok(new_top)
+}
+
+/// 切换垂直标签模式（阶段 3.1），返回新的 top_offset
+#[tauri::command]
+pub async fn set_vertical_tabs(
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+    active: bool,
+) -> Result<f64, String> {
+    state.set_vertical_tabs(active);
+    let new_top = state.top_offset();
+    log::info!(
+        "[tabs] 垂直标签模式切换: active={} 新 top_offset={}",
+        active,
+        new_top
+    );
+
+    // 即时重算：标签栏从顶部移到左侧，影响内容区 top 与 left，直接重算几何并应用到所有标签
+    if let Some(window) = app.get_window("main") {
+        let ai_active = *state
+            .ai_panel_active
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let geo =
+            crate::engine::layout::ContentGeometry::compute(&window, new_top, ai_active, active);
         let ids: Vec<String> = state
             .tabs
             .lock()

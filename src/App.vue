@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // 浏览器主窗口布局
 // 结构：TabBar(40) + AddressBar(42) + BookmarksBar(30) + 内容区(webview) + StatusBar(22)
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import TabBar from './components/TabBar.vue'
+import VerticalTabBar from './components/VerticalTabBar.vue'
 import AddressBar from './components/AddressBar.vue'
 import BookmarksBar from './components/BookmarksBar.vue'
 import StatusBar from './components/StatusBar.vue'
@@ -30,6 +31,20 @@ const groupsStore = useGroupsStore()
 const settingsStore = useSettingsStore()
 const workspacesStore = useWorkspacesStore()
 const aiStore = useAIStore()
+
+// 垂直标签模式（阶段 3.1）：标签栏在左（true）vs 在上（false）
+const verticalTabs = computed(() => settingsStore.get('vertical_tabs') === 'true')
+
+/** 切换标签栏方向：写设置 + 通知 Rust 重算内容区几何（top 与 left 都变） */
+async function onToggleVerticalTabs() {
+  const next = !verticalTabs.value
+  await settingsStore.set('vertical_tabs', next ? 'true' : 'false')
+  try {
+    await invoke('set_vertical_tabs', { active: next })
+  } catch (e) {
+    console.error('[app] 切换标签栏方向失败:', e)
+  }
+}
 const showPasswords = ref(false)
 const showGroups = ref(false)
 const showDownloads = ref(false)
@@ -254,6 +269,14 @@ async function initBrowser(skipStartupTab = false) {
   } catch (e) {
     console.error('[app] 书签栏初始化同步失败:', e)
   }
+  // 同步标签栏方向到 Rust 侧（垂直标签：内容区 top 与 left 都变）
+  try {
+    await invoke('set_vertical_tabs', {
+      active: settingsStore.get('vertical_tabs') === 'true',
+    })
+  } catch (e) {
+    console.error('[app] 标签栏方向初始化同步失败:', e)
+  }
   // 分组尽早加载（不等标签恢复，避免右键菜单/组头迟迟不显示）
   groupsStore.loadGroups().catch((e) => {
     console.error('[app] 加载分组失败:', e)
@@ -405,24 +428,30 @@ watch(
 </script>
 
 <template>
-  <div class="app" :class="{ 'theme-light': settingsStore.isLight }">
-    <TabBar />
-    <AddressBar
-      ref="addressBarRef"
-      @open-passwords="openPanel('passwords')"
-      @open-groups="openPanel('groups')"
-      @open-downloads="openPanel('downloads')"
-      @open-settings="openPanel('settings')"
-      @open-ai="openPanel('ai')"
-      @open-translate="openPanel('translate')"
-    />
-    <BookmarksBar v-if="settingsStore.showBookmarksBar" @open-manager="showBookmarks = true" />
-    <!-- 内容区：webview 由 Rust 以 (0, 112) 起盖住此区域 -->
-    <div class="content-area" id="contentArea"></div>
-    <StatusBar
-      @open-downloads="showDownloads = true"
-      @open-settings="showSettings = true"
-    />
+  <div class="app" :class="{ 'theme-light': settingsStore.isLight, 'vertical-tabs': verticalTabs }">
+    <!-- 主体：垂直标签时「左侧栏 + 主列」，横向时只有主列 -->
+    <div class="app-body">
+      <VerticalTabBar v-if="verticalTabs" @toggle="onToggleVerticalTabs" />
+      <div class="app-main">
+        <TabBar v-if="!verticalTabs" />
+        <AddressBar
+          ref="addressBarRef"
+          @open-passwords="openPanel('passwords')"
+          @open-groups="openPanel('groups')"
+          @open-downloads="openPanel('downloads')"
+          @open-settings="openPanel('settings')"
+          @open-ai="openPanel('ai')"
+          @open-translate="openPanel('translate')"
+        />
+        <BookmarksBar v-if="settingsStore.showBookmarksBar" @open-manager="showBookmarks = true" />
+        <!-- 内容区：webview 由 Rust 按内容区几何盖住此区域（top 随书签栏/垂直标签变化） -->
+        <div class="content-area" id="contentArea"></div>
+        <StatusBar
+          @open-downloads="showDownloads = true"
+          @open-settings="showSettings = true"
+        />
+      </div>
+    </div>
     <PasswordsDialog :show="showPasswords" @close="showPasswords = false" />
     <GroupsDialog :show="showGroups" @close="showGroups = false" />
     <DownloadsDialog :show="showDownloads" @close="showDownloads = false" />
@@ -450,6 +479,20 @@ watch(
   height: 100vh;
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
   overflow: hidden;
+}
+/* 主体：横向标签时仅一个主列；垂直标签时左侧栏 + 主列 */
+.app-body {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+}
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 .content-area {
   flex: 1;

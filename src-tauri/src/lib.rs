@@ -320,6 +320,7 @@ pub fn run() {
       tabs::close_window,
       tabs::start_drag_window,
       tabs::set_bookmarks_bar_visible,
+      tabs::set_vertical_tabs,
       tabs::get_nav_state,
       tabs::set_webview_ai_panel,
       tabs::open_devtools,

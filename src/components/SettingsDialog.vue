@@ -331,6 +331,15 @@ async function onSet(key: string, value: string) {
       useToastStore().error('书签栏切换失败')
     }
   }
+  // 垂直标签切换：通知 Rust 重算内容区几何（top 与 left 都变）
+  if (key === 'vertical_tabs') {
+    try {
+      await invoke('set_vertical_tabs', { active: value === 'true' })
+    } catch (e) {
+      console.error('[settings] 标签栏方向同步失败:', e)
+      useToastStore().error('标签栏方向切换失败')
+    }
+  }
   // 启动页相关设置：保存后重新生成新标签页 HTML
   if (key === 'show_bg' || key === 'font_size' || key === 'search_engine') {
     try {
@@ -959,6 +968,18 @@ async function onRemoveKeyword(k: string) {
                     type="checkbox"
                     :checked="settingsStore.get('show_bookmarks_bar') !== 'false'"
                     @change="onSet('show_bookmarks_bar', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>垂直标签栏</label>
+                <span class="field-desc">标签栏移到左侧竖排，适合多标签</span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('vertical_tabs') === 'true'"
+                    @change="onSet('vertical_tabs', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
                   />
                   <span class="slider"></span>
                 </label>

@@ -24,6 +24,8 @@ pub const BOOKMARKS_BAR_HEIGHT: f64 = 30.0;
 pub const STATUS_BAR_HEIGHT: f64 = 22.0;
 /// AI 侧边栏占用的右侧宽度：AI 面板打开时内容区让出该宽度
 pub const AI_PANEL_WIDTH: f64 = 380.0;
+/// 垂直标签栏占用的左侧宽度：垂直标签模式下内容区让出该宽度（阶段 3.1）
+pub const VERTICAL_TAB_BAR_WIDTH: f64 = 220.0;
 /// 内容区顶部偏移（含书签栏）
 pub const CONTENT_TOP_OFFSET: f64 = TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT + BOOKMARKS_BAR_HEIGHT;
 /// 内容区顶部偏移（不含书签栏）
@@ -36,7 +38,9 @@ pub const MIN_CONTENT_HEIGHT: f64 = 100.0;
 /// 内容区几何（逻辑像素，已换算缩放）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContentGeometry {
-    /// 内容区宽度（AI 分屏时已让出右侧）
+    /// 内容区左偏移（GtkFixed 的 margin_start；垂直标签时让出左侧栏，否则 0）
+    pub left: i32,
+    /// 内容区宽度（已让出左侧栏与 AI 分屏右侧）
     pub width: i32,
     /// 内容区高度（已扣除顶部偏移与状态栏）
     pub height: i32,
@@ -46,19 +50,34 @@ pub struct ContentGeometry {
 
 impl ContentGeometry {
     /// 依据窗口当前尺寸计算内容区几何。
-    /// `top`：内容区顶部偏移（随书签栏显隐变化，取 `TabManager::top_offset()`）
+    /// `top`：内容区顶部偏移（随书签栏显隐 / 垂直标签模式变化，取 `TabManager::top_offset()`）
     /// `ai_active`：AI 分屏是否开启（true 时右侧让出 `AI_PANEL_WIDTH`）
-    pub fn compute(window: &tauri::Window, top: f64, ai_active: bool) -> Self {
+    /// `vertical`：垂直标签模式（true 时左侧让出 `VERTICAL_TAB_BAR_WIDTH`）
+    pub fn compute(window: &tauri::Window, top: f64, ai_active: bool, vertical: bool) -> Self {
         let inner = window
             .inner_size()
             .unwrap_or(tauri::PhysicalSize::new(1280, 800));
         let scale = window.scale_factor().unwrap_or(1.0);
-        let mut w = inner.width as f64 / scale;
+        Self::from_size(inner.width as f64 / scale, inner.height as f64 / scale, top, ai_active, vertical)
+    }
+
+    /// 纯数学（与窗口解耦，便于单测）：给定内容区逻辑宽高算几何。
+    /// 顺序：先让出左侧（垂直标签）→ 再让出右侧（AI 分屏）→ 下限保底。
+    pub fn from_size(
+        logical_w: f64,
+        logical_h: f64,
+        top: f64,
+        ai_active: bool,
+        vertical: bool,
+    ) -> Self {
+        let left = if vertical { VERTICAL_TAB_BAR_WIDTH } else { 0.0 };
+        let mut w = logical_w - left;
         if ai_active {
             w = (w - AI_PANEL_WIDTH).max(MIN_CONTENT_WIDTH);
         }
-        let h = ((inner.height as f64 / scale) - top - STATUS_BAR_HEIGHT).max(MIN_CONTENT_HEIGHT);
+        let h = (logical_h - top - STATUS_BAR_HEIGHT).max(MIN_CONTENT_HEIGHT);
         Self {
+            left: left as i32,
             width: w as i32,
             height: h as i32,
             top: top as i32,
@@ -67,8 +86,8 @@ impl ContentGeometry {
 }
 
 /// 内容区尺寸（浮点，供建标签时直接使用）
-pub fn content_size(window: &tauri::Window, top: f64, ai_active: bool) -> (f64, f64) {
-    let geo = ContentGeometry::compute(window, top, ai_active);
+pub fn content_size(window: &tauri::Window, top: f64, ai_active: bool, vertical: bool) -> (f64, f64) {
+    let geo = ContentGeometry::compute(window, top, ai_active, vertical);
     (geo.width as f64, geo.height as f64)
 }
 
@@ -89,6 +108,7 @@ pub fn apply_to_webview(window: &tauri::Window, tab_id: &str, geo: ContentGeomet
             .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
         {
             fixed.set_margin_top(geo.top);
+            fixed.set_margin_start(geo.left);
             fixed.move_(&gtk_wv, 0, 0);
             fixed.set_size_request(geo.width, geo.height);
         }
@@ -170,5 +190,44 @@ mod tests {
             CONTENT_TOP_OFFSET - CONTENT_TOP_OFFSET_NO_BOOKMARKS,
             BOOKMARKS_BAR_HEIGHT
         );
+    }
+
+    #[test]
+    fn geometry_horizontal_defaults() {
+        let g = ContentGeometry::from_size(1280.0, 800.0, CONTENT_TOP_OFFSET, false, false);
+        assert_eq!(g.left, 0);
+        assert_eq!(g.width, 1280);
+        assert_eq!(g.height, (800.0 - CONTENT_TOP_OFFSET - STATUS_BAR_HEIGHT) as i32);
+        assert_eq!(g.top, CONTENT_TOP_OFFSET as i32);
+    }
+
+    #[test]
+    fn geometry_vertical_lets_out_left() {
+        let g = ContentGeometry::from_size(
+            1280.0,
+            800.0,
+            CONTENT_TOP_OFFSET_NO_BOOKMARKS,
+            false,
+            true,
+        );
+        assert_eq!(g.left, VERTICAL_TAB_BAR_WIDTH as i32);
+        assert_eq!(g.width, 1280 - VERTICAL_TAB_BAR_WIDTH as i32);
+    }
+
+    #[test]
+    fn geometry_vertical_and_ai_both_sides() {
+        let g = ContentGeometry::from_size(1280.0, 800.0, CONTENT_TOP_OFFSET, true, true);
+        assert_eq!(g.left, VERTICAL_TAB_BAR_WIDTH as i32);
+        assert_eq!(
+            g.width,
+            (1280.0 - VERTICAL_TAB_BAR_WIDTH - AI_PANEL_WIDTH) as i32
+        );
+    }
+
+    #[test]
+    fn geometry_clamps_to_minimums() {
+        let g = ContentGeometry::from_size(500.0, 80.0, CONTENT_TOP_OFFSET, true, true);
+        assert_eq!(g.width, MIN_CONTENT_WIDTH as i32);
+        assert_eq!(g.height, MIN_CONTENT_HEIGHT as i32);
     }
 }

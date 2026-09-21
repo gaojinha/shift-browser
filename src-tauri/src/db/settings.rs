@@ -17,6 +17,8 @@ const ALLOWED_KEYS: &[&str] = &[
     "search_engine",
     "theme",
     "show_bookmarks_bar",
+    // 垂直标签模式（阶段 3.1：标签栏移到左侧，内容区右移）
+    "vertical_tabs",
     "record_history",
     "ai_model",
     "ai_base_url",
