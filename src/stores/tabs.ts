@@ -132,6 +132,59 @@ export const useTabsStore = defineStore('tabs', {
       this.splitTabId = null
     },
 
+    /** 批量：关闭同域名标签（保留 keepId，缺省用活动标签）；返回关闭数 */
+    closeSameDomain(keepId?: string): number {
+      const keep = keepId ?? this.activeTabId
+      const target = this.tabs.find((t) => t.id === keep)
+      if (!target) return 0
+      let dom = ''
+      try {
+        dom = new URL(target.url).hostname
+      } catch {
+        return 0
+      }
+      if (!dom) return 0
+      let n = 0
+      for (const t of [...this.tabs]) {
+        if (t.id === keep) continue
+        try {
+          if (new URL(t.url).hostname === dom) {
+            this.closeTab(t.id)
+            n++
+          }
+        } catch {
+          /* 忽略非法 URL */
+        }
+      }
+      return n
+    },
+
+    /** 批量：关闭重复标签（同 URL 只留一个）；返回关闭数 */
+    closeDuplicates(): number {
+      const seen = new Set<string>()
+      let n = 0
+      for (const t of [...this.tabs]) {
+        if (!t.url) continue
+        if (seen.has(t.url)) {
+          this.closeTab(t.id)
+          n++
+        } else {
+          seen.add(t.url)
+        }
+      }
+      return n
+    },
+
+    /** 批量：全部静音/取消（按是否还有未静音决定方向）；返回是否执行了"静音" */
+    toggleMuteAll(): boolean {
+      const anyUnmuted = this.tabs.some((t) => !t.is_muted)
+      for (const t of [...this.tabs]) {
+        if (anyUnmuted && !t.is_muted) this.muteTab(t.id)
+        else if (!anyUnmuted && t.is_muted) this.muteTab(t.id)
+      }
+      return anyUnmuted
+    },
+
     /** 分配标签到分组（groupId = null 表示取消分组） */
     assignTabToGroup(tabId: string, groupId: number | null) {
       const tab = this.tabs.find((t) => t.id === tabId)

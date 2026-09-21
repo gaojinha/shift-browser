@@ -178,6 +178,27 @@ function onMenuCloseRight() {
   }
   closeMenu()
 }
+/** 关闭同域名标签（保留右键的这个） */
+function onMenuCloseSameDomain() {
+  if (!menu.value || menuClickGuard()) return
+  const n = tabsStore.closeSameDomain(menu.value.tabId)
+  useToastStore().success(`已关闭 ${n} 个同域名标签`)
+  closeMenu()
+}
+/** 关闭重复标签（同 URL 只留一个） */
+function onMenuCloseDuplicates() {
+  if (!menu.value || menuClickGuard()) return
+  const n = tabsStore.closeDuplicates()
+  useToastStore().success(n > 0 ? `已关闭 ${n} 个重复标签` : '没有重复标签')
+  closeMenu()
+}
+/** 全部静音 / 全部取消静音 */
+function onMenuMuteAll() {
+  if (!menu.value || menuClickGuard()) return
+  const muted = tabsStore.toggleMuteAll()
+  useToastStore().success(muted ? '已全部静音' : '已全部取消静音')
+  closeMenu()
+}
 function onMenuCopyUrl() {
   if (!menu.value || menuClickGuard()) return
   const tab = tabsStore.tabs.find((t) => t.id === menu.value!.tabId)
@@ -488,6 +509,9 @@ function onFaviconError(e: Event) {
       <div class="menu-item" @click="onMenuCloseTab">✕ 关闭标签</div>
       <div class="menu-item" @click="onMenuCloseOthers">关闭其他标签</div>
       <div class="menu-item" @click="onMenuCloseRight">关闭右侧标签</div>
+      <div class="menu-item" @click="onMenuCloseSameDomain">关闭同域名标签</div>
+      <div class="menu-item" @click="onMenuCloseDuplicates">关闭重复标签</div>
+      <div class="menu-item" @click="onMenuMuteAll">🔇 全部静音/取消</div>
       <div class="menu-divider"></div>
       <div class="menu-item" @click="onMenuCopyUrl">🔗 复制网址</div>
       <div class="menu-divider"></div>

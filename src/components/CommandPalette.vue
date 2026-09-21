@@ -49,6 +49,9 @@ const COMMANDS: Item[] = [
   { key: 'cmd:userscripts', kind: 'command', icon: '📜', title: '打开用户脚本', value: 'userscripts' },
   { key: 'cmd:translate', kind: 'command', icon: '🌐', title: '翻译当前页面', value: 'translate' },
   { key: 'cmd:settings', kind: 'command', icon: '⚙', title: '打开设置', value: 'settings' },
+  { key: 'cmd:close-same-domain', kind: 'command', icon: '🧹', title: '关闭同域名标签', value: 'close-same-domain' },
+  { key: 'cmd:close-duplicates', kind: 'command', icon: '🧹', title: '关闭重复标签', value: 'close-duplicates' },
+  { key: 'cmd:mute-all', kind: 'command', icon: '🔇', title: '全部静音/取消', value: 'mute-all' },
   { key: 'cmd:devtools', kind: 'command', icon: '🛠', title: '开发者工具', value: 'devtools' },
 ]
 

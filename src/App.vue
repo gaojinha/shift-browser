@@ -26,6 +26,7 @@ import { useGroupsStore } from './stores/groups'
 import { useSettingsStore } from './stores/settings'
 import { useWorkspacesStore } from './stores/workspaces'
 import { useAIStore } from './stores/ai'
+import { useToastStore } from './stores/toast'
 
 const tabsStore = useTabsStore()
 const groupsStore = useGroupsStore()
@@ -178,6 +179,21 @@ function onPaletteCommand(action: string) {
     case 'userscripts':
       openPanel(action)
       break
+    case 'close-same-domain': {
+      const n = tabsStore.closeSameDomain()
+      useToastStore().success(`已关闭 ${n} 个同域名标签`)
+      break
+    }
+    case 'close-duplicates': {
+      const n = tabsStore.closeDuplicates()
+      useToastStore().success(n > 0 ? `已关闭 ${n} 个重复标签` : '没有重复标签')
+      break
+    }
+    case 'mute-all': {
+      const muted = tabsStore.toggleMuteAll()
+      useToastStore().success(muted ? '已全部静音' : '已全部取消静音')
+      break
+    }
     default:
       handleGlobalAction(action)
   }
