@@ -197,7 +197,34 @@ fn spawn_http(app: AppHandle) {
                             })
                             .unwrap_or(false)
                 });
-                let resp = if path != "/api" && path != "/" {
+                // 状态面板（浏览器用）：GET /?token=<t>（浏览器不便发 Bearer 头，故支持查询串）
+                if !path.starts_with("/api") {
+                    let qtok = path
+                        .splitn(2, '?')
+                        .nth(1)
+                        .unwrap_or("")
+                        .split('&')
+                        .find_map(|kv| {
+                            let mut it = kv.splitn(2, '=');
+                            let k = it.next()?;
+                            let v = it.next().unwrap_or("");
+                            (k == "token").then(|| v.to_string())
+                        });
+                    let ok = qtok.as_deref() == Some(token.as_str()) || auth_ok;
+                    let html = if ok {
+                        dashboard_html(&app).await
+                    } else {
+                        "<!doctype html><meta charset=utf-8><h2>ShiftBrowser API</h2><p>需要 token：在地址后加 <code>?token=&lt;api-token 文件里的值&gt;</code></p>".to_string()
+                    };
+                    let out = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        html.len(),
+                        html
+                    );
+                    let _ = stream.write_all(out.as_bytes()).await;
+                    return;
+                }
+                let resp = if path != "/api" {
                     json!({"ok": false, "error": "请用 POST /api 发 JSON 命令"})
                 } else if !auth_ok {
                     json!({"ok": false, "error": "未授权：需要 Authorization: Bearer <token>"})
@@ -214,6 +241,53 @@ fn spawn_http(app: AppHandle) {
             });
         }
     });
+}
+
+/// 状态面板 HTML（自托管套件的"管理页"，浏览器打开 `/?token=<t>`）
+async fn dashboard_html(app: &AppHandle) -> String {
+    let (n, active) = match app.try_state::<crate::tabs::TabManager>() {
+        Some(s) => {
+            let all = s.all_tabs();
+            let a = all
+                .iter()
+                .find(|t| t.is_active)
+                .map(|t| (t.title.clone(), t.url.clone()));
+            (all.len(), a)
+        }
+        None => (0, None),
+    };
+    let esc = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    };
+    let active_html = match active {
+        Some((t, u)) => format!(
+            "<div><b>{}</b><br><span class=u>{}</span></div>",
+            esc(&t),
+            esc(&u)
+        ),
+        None => "<div>（无活动标签）</div>".to_string(),
+    };
+    let cmds = "status · list_tabs · active_tab · history · bookmarks · open_url · close_tab · \
+                switch_tab · reload_tab · navigate · search · new_tab · screenshot · \
+                eval（默认关）· tools · tool_call";
+    format!(
+        r#"<!doctype html><meta charset=utf-8><title>ShiftBrowser 状态</title>
+<style>body{{font:14px/1.6 system-ui,sans-serif;max-width:760px;margin:32px auto;padding:0 16px;color:#222}}
+h1{{font-size:20px}} .u{{color:#888;font-size:12px}} code{{background:#f2f2f2;padding:1px 5px;border-radius:4px}}
+.card{{border:1px solid #ddd;border-radius:10px;padding:14px 16px;margin:12px 0}}</style>
+<h1>ShiftBrowser 状态面板</h1>
+<div class=card><b>版本</b>：{ver}　<b>标签数</b>：{n}</div>
+<div class=card><b>当前活动标签</b>{active}</div>
+<div class=card><b>开放 API 命令</b><br><code>{cmds}</code></div>
+<div class=card><b>用法</b>：<code>POST /api</code> + <code>Authorization: Bearer &lt;token&gt;</code>；详见 <code>docs/local-api.md</code></div>
+"#,
+        ver = env!("CARGO_PKG_VERSION"),
+        n = n,
+        active = active_html,
+        cmds = cmds,
+    )
 }
 
 /// 处理一条请求
