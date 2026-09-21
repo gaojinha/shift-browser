@@ -25,6 +25,8 @@ const ALLOWED_KEYS: &[&str] = &[
     "ai_api_key",
     "adblock_enabled",
     "adblock_keywords",
+    // 网络层拦截规则（阶段3.2：写入 Web 进程扩展规则文件，每行一个 URL 子串）
+    "net_block_rules",
     "show_lunar",
     "show_quote",
     "show_weather",
@@ -224,6 +226,34 @@ async fn set_settings_bulk_inner(db: &Db, settings: Vec<Setting>) -> DbResult<()
     tx.commit().await?;
     Ok(())
 }
+
+/// 把「网络层拦截规则」设置写入 Web 进程扩展的规则文件（阶段 3.2）。
+/// 扩展在 Web 进程启动时读该文件（进程内只读一次）；改完需重启浏览器生效。
+/// 文件路径与应用数据目录一致（与扩展读取路径对齐）。
+#[tauri::command]
+pub async fn sync_ext_rules(db: tauri::State<'_, Db>) -> DbResult<()> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'net_block_rules'")
+            .fetch_optional(&db.pool)
+            .await?;
+    let rules = row.map(|(v,)| v).unwrap_or_default();
+    let path = db.vault_path.with_file_name("shift-ext-rules.txt");
+    let mut content = String::from(
+        "# ShiftBrowser 网络层拦截规则（由主程序写入，勿手改）\n# 每行一个 URL 子串，命中即取消该请求；# 开头为注释\n",
+    );
+    for line in rules.lines() {
+        let l = line.trim();
+        if !l.is_empty() {
+            content.push_str(l);
+            content.push('\n');
+        }
+    }
+    std::fs::write(&path, content)
+        .map_err(|e| crate::db::DbError::Other(format!("写扩展规则文件失败: {}", e)))?;
+    log::info!("[settings] 已写网络层拦截规则文件: {}", path.display());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

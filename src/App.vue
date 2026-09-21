@@ -288,6 +288,12 @@ async function initBrowser(skipStartupTab = false) {
   } catch (e) {
     console.error('[app] 标签栏方向初始化同步失败:', e)
   }
+  // 落盘网络层拦截规则到扩展规则文件（阶段3.2；Web 进程扩展启动时读取）
+  try {
+    await invoke('sync_ext_rules')
+  } catch (e) {
+    console.error('[app] 网络层规则落盘失败:', e)
+  }
   // 分组尽早加载（不等标签恢复，避免右键菜单/组头迟迟不显示）
   groupsStore.loadGroups().catch((e) => {
     console.error('[app] 加载分组失败:', e)

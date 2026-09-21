@@ -121,7 +121,11 @@ GIR（`WebKit2WebExtension-4.1.gir:48966`）：
 > `~/.local/share/com.shiftbrowser.app/shift-ext-rules.txt`（每行一个 URL 子串，`#` 注释），
 > 命中即取消该请求。运行实证：`[shift-ext] 已加载 1 条规则 …` +
 > `[shift-ext] 拦截（取消）: https://dup.baidustatic.com/js/ds.js`。
-> 后续：主程序写入该文件（同步广告拦截词库/用户规则）、请求头改写（需 SoupHeaders FFI）。
+> **主程序落盘已完成（2026-09-21）**：设置项 `net_block_rules`（隐私分区文本框，每行一个 URL 子串）
+> 经命令 `sync_ext_rules` 写入规则文件；启动时与保存时各同步一次。
+> 运行实证：DB 设 `baidustatic` → 日志 `已写网络层拦截规则文件` → 扩展 `已加载 1 条规则` →
+> `拦截（取消）: …/ds.js`。一条龙打通。
+> 后续：请求头改写（需 SoupHeaders FFI）、规则热更新（当前改规则需重启浏览器）。
 
 **阶段 C · 扩展模型（平台化）**
 在 A/B 之上做打包格式 + 清单 + 权限声明，用 `WebExtension` 消息通道连 UI 进程做"扩展管理面板"，

@@ -340,6 +340,15 @@ async function onSet(key: string, value: string) {
       useToastStore().error('标签栏方向切换失败')
     }
   }
+  // 网络层拦截规则：落盘到扩展规则文件（阶段3.2；重启浏览器生效）
+  if (key === 'net_block_rules') {
+    try {
+      await invoke('sync_ext_rules')
+    } catch (e) {
+      console.error('[settings] 写网络层规则文件失败:', e)
+      useToastStore().error('保存网络层规则失败')
+    }
+  }
   // 启动页相关设置：保存后重新生成新标签页 HTML
   if (key === 'show_bg' || key === 'font_size' || key === 'search_engine') {
     try {
@@ -1470,6 +1479,20 @@ async function onRemoveKeyword(k: string) {
                   <span class="slider"></span>
                 </label>
               </div>
+              <div class="kw-block">
+                <div class="kw-hint">
+                  <b>网络层拦截规则</b>（阶段3.2）：每行一个 URL 子串，命中即<strong>取消该请求</strong>
+                  （请求出网前拦，比内容层更彻底）。保存后<strong>重启浏览器生效</strong>。
+                </div>
+                <textarea
+                  class="net-rules"
+                  :value="settingsStore.get('net_block_rules')"
+                  placeholder="每行一个 URL 子串，例如：doubleclick.net"
+                  spellcheck="false"
+                  rows="4"
+                  @change="onSet('net_block_rules', ($event.target as HTMLTextAreaElement).value)"
+                ></textarea>
+              </div>
               <div class="field webmcp-field" :class="{ 'experiment-tag': webmcpPolyfill }">
                 <label>
                   WebMCP polyfill <span class="exp-badge" v-if="webmcpPolyfill">试验中</span>
@@ -2140,6 +2163,23 @@ async function onRemoveKeyword(k: string) {
   background: var(--bg-primary);
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
+}
+.net-rules {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 64px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: monospace;
+  resize: vertical;
+  outline: none;
+}
+.net-rules:focus {
+  border-color: var(--accent);
 }
 .kw-hint {
   font-size: 11px;

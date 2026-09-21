@@ -234,6 +234,8 @@ pub fn run() {
       settings::set_setting,
       settings::delete_setting,
       settings::set_settings_bulk,
+      // 网络层拦截规则落盘（阶段3.2：写 Web 进程扩展规则文件）
+      settings::sync_ext_rules,
       // 书签
       bookmarks::get_bookmarks,
       bookmarks::get_bookmark_folders,
