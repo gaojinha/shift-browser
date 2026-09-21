@@ -762,8 +762,14 @@ impl TabManager {
                     sanitize_filename(&name)
                   })
                   .unwrap_or_else(|| "download".to_string());
-                let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-                let dest_dir = format!("{}/Downloads", home);
+                // 用系统 XDG 下载目录（~/.config/user-dirs.dirs；中文系统常是 ~/下载），
+                // 避免硬编码 ~/Downloads 与实际落盘位置不一致（用户"找不到下载的文件"）。
+                let dest_dir = gtk::glib::user_special_dir(gtk::glib::UserDirectory::Downloads)
+                  .map(|p| p.to_string_lossy().to_string())
+                  .unwrap_or_else(|| {
+                    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+                    format!("{}/Downloads", home)
+                  });
                 let _ = std::fs::create_dir_all(&dest_dir);
                 // 同名文件已存在时加 (1)(2) 后缀，避免覆盖
                 let dest = unique_download_path(&dest_dir, &filename);
