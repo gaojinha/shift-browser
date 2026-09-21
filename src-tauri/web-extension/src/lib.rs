@@ -44,33 +44,71 @@ fn rules_path() -> Option<String> {
     ))
 }
 
-static RULES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{OnceLock, RwLock};
 
-/// 加载规则（进程内只读一次）
-fn rules() -> &'static [String] {
-    RULES.get_or_init(|| {
-        let mut out = Vec::new();
-        if let Some(p) = rules_path() {
-            match std::fs::read_to_string(&p) {
-                Ok(text) => {
-                    for line in text.lines() {
-                        let l = line.trim();
-                        if !l.is_empty() && !l.starts_with('#') {
-                            out.push(l.to_string());
-                        }
-                    }
-                    eprintln!("[shift-ext] 已加载 {} 条规则（{}）", out.len(), p);
+static RULES: OnceLock<RwLock<Vec<String>>> = OnceLock::new();
+/// 规则文件最近一次加载的 mtime（纳秒；0 = 未加载）
+static RULES_MTIME: AtomicU64 = AtomicU64::new(0);
+
+fn rules_cell() -> &'static RwLock<Vec<String>> {
+    RULES.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+fn file_mtime_ns(path: &str) -> u64 {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+}
+
+/// 从文件重载规则（mtime 未变则跳过；无文件则清空）
+fn reload_rules() {
+    let Some(p) = rules_path() else {
+        return;
+    };
+    let mtime = file_mtime_ns(&p);
+    if mtime == 0 || mtime == RULES_MTIME.load(Ordering::Relaxed) {
+        return;
+    }
+    let mut out = Vec::new();
+    match std::fs::read_to_string(&p) {
+        Ok(text) => {
+            for line in text.lines() {
+                let l = line.trim();
+                if !l.is_empty() && !l.starts_with('#') {
+                    out.push(l.to_string());
                 }
-                Err(_) => eprintln!("[shift-ext] 无规则文件（{}），仅内置标记", p),
             }
+            eprintln!("[shift-ext] 已加载 {} 条规则（{}）", out.len(), p);
         }
-        out
-    })
+        Err(_) => eprintln!("[shift-ext] 规则文件读取失败（{}），清空规则", p),
+    }
+    if let Ok(mut g) = rules_cell().write() {
+        *g = out;
+    }
+    RULES_MTIME.store(mtime, Ordering::Relaxed);
+}
+
+/// 后台每 2 秒检查规则文件是否更新（热更新：改规则免重启浏览器）
+fn spawn_rules_watcher() {
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        reload_rules();
+    });
 }
 
 /// 该 URL 是否应拦截：内置标记 或 命中任一规则
 fn should_block(uri: &str) -> bool {
-    uri.contains(BLOCK_MARK) || rules().iter().any(|r| uri.contains(r.as_str()))
+    if uri.contains(BLOCK_MARK) {
+        return true;
+    }
+    match rules_cell().read() {
+        Ok(g) => g.iter().any(|r| uri.contains(r.as_str())),
+        Err(_) => false,
+    }
 }
 
 /// `send-request` 回调：请求出网前触发；返回 1 (TRUE) = 取消该资源加载
@@ -124,6 +162,9 @@ unsafe extern "C" fn on_page_created(
 #[no_mangle]
 pub unsafe extern "C" fn webkit_web_extension_initialize(extension: *mut c_void) {
     eprintln!("[shift-ext] Web 进程扩展已加载（阶段A 原型）");
+    // 首载规则 + 起后台守护线程（每 2s 查 mtime，改规则免重启）
+    reload_rules();
+    spawn_rules_watcher();
     if extension.is_null() {
         eprintln!("[shift-ext] extension 指针为空，跳过");
         return;

@@ -228,7 +228,7 @@ async fn set_settings_bulk_inner(db: &Db, settings: Vec<Setting>) -> DbResult<()
 }
 
 /// 把「网络层拦截规则」设置写入 Web 进程扩展的规则文件（阶段 3.2）。
-/// 扩展在 Web 进程启动时读该文件（进程内只读一次）；改完需重启浏览器生效。
+/// 扩展有后台守护线程每 2 秒查文件 mtime，改完约 2 秒自动生效（热更新，免重启）。
 /// 文件路径与应用数据目录一致（与扩展读取路径对齐）。
 #[tauri::command]
 pub async fn sync_ext_rules(db: tauri::State<'_, Db>) -> DbResult<()> {

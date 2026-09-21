@@ -1482,7 +1482,7 @@ async function onRemoveKeyword(k: string) {
               <div class="kw-block">
                 <div class="kw-hint">
                   <b>网络层拦截规则</b>（阶段3.2）：每行一个 URL 子串，命中即<strong>取消该请求</strong>
-                  （请求出网前拦，比内容层更彻底）。保存后<strong>重启浏览器生效</strong>。
+                  （请求出网前拦，比内容层更彻底）。保存后约 <strong>2 秒自动生效</strong>（热更新）。
                 </div>
                 <textarea
                   class="net-rules"
