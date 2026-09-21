@@ -265,6 +265,8 @@ watch(
         loadWebmcpPolyfill()
         // 打开时清空 AI Key 输入框：不回显掩码，避免用户无意把掩码写回库
         aiKeyInput.value = ''
+        // 默认浏览器状态（通用分区）
+        loadDefaultBrowser()
         // MCP 工具配置（阶段 1.3）
         loadMcp()
       }
@@ -286,6 +288,36 @@ const HIBERNATE_OPTIONS = [
   { v: '30', label: '30 分钟' },
   { v: '60', label: '60 分钟' },
 ]
+
+// 默认浏览器（阶段 4：xdg-settings 集成）
+// 状态：is_default 是否已是默认；current 当前默认 desktop-id；desktop_ready 用户级声明是否就绪
+const defaultBrowser = ref<{
+  is_default: boolean
+  current: string
+  desktop_id: string
+  desktop_ready: boolean
+}>({ is_default: false, current: '', desktop_id: '', desktop_ready: false })
+const dbBusy = ref(false)
+async function loadDefaultBrowser() {
+  try {
+    defaultBrowser.value = await invoke('default_browser_status')
+  } catch (e) {
+    console.error('[settings] 读取默认浏览器状态失败:', e)
+  }
+}
+async function setAsDefaultBrowser() {
+  if (dbBusy.value) return
+  dbBusy.value = true
+  try {
+    defaultBrowser.value = await invoke('set_default_browser')
+    useToastStore().success('已设为默认浏览器')
+  } catch (e) {
+    console.error('[settings] 设置默认浏览器失败:', e)
+    useToastStore().error('设置失败：' + e)
+  } finally {
+    dbBusy.value = false
+  }
+}
 
 /** 翻译源（后端 translate.rs 按 settings.translate_engine 派发，失败自动回退另一方） */
 const TRANSLATE_ENGINES = [
@@ -854,6 +886,29 @@ async function onRemoveKeyword(k: string) {
           <div v-if="activeSection === 'general'" class="settings-scroll">
             <div class="card">
               <div class="card-title">🖥 通用</div>
+              <div class="field">
+                <label>默认浏览器</label>
+                <span class="field-desc">
+                  {{
+                    defaultBrowser.is_default
+                      ? '✅ 当前已是默认浏览器'
+                      : (defaultBrowser.current
+                          ? '当前默认：' + defaultBrowser.current
+                          : '未检测到默认浏览器设置')
+                  }}
+                </span>
+                <button
+                  class="mini-btn primary"
+                  :disabled="defaultBrowser.is_default || dbBusy"
+                  @click="setAsDefaultBrowser"
+                >
+                  {{ dbBusy ? '设置中…' : defaultBrowser.is_default ? '已是默认' : '设为默认浏览器' }}
+                </button>
+              </div>
+              <div class="kw-hint">
+                设为默认后，从邮件、聊天等外部应用点开的链接会直接用 Shift Browser 打开。
+                系统级 desktop 文件若缺浏览器声明，会自动写入用户级声明（无需 root）。
+              </div>
               <div class="field">
                 <label>主页 URL</label>
                 <input

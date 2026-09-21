@@ -3,6 +3,7 @@ mod ai;
 mod audit;
 mod content_cmd;
 mod db;
+mod default_browser;
 mod engine;
 mod extensions;
 mod feed;
@@ -21,6 +22,7 @@ mod tray;
 use db::{
     bookmarks, downloads, history, passwords, sessions, settings, tab_groups, users, workspaces, Db,
 };
+use tabs::TabManager;
 use tauri::Emitter;
 use tauri::Manager;
 
@@ -435,6 +437,9 @@ pub fn run() {
       settings::set_settings_bulk,
       // 网络层拦截规则落盘（阶段3.2：写 Web 进程扩展规则文件）
       settings::sync_ext_rules,
+      // 默认浏览器（阶段 4：xdg-settings 集成）
+      default_browser::default_browser_status,
+      default_browser::set_default_browser,
       // 用户脚本（阶段3.2 平台化：Tampermonkey 风格）
       db::userscripts::list_userscripts,
       db::userscripts::refresh_userscripts_cache,
@@ -1412,6 +1417,31 @@ pub fn run() {
           }
           gtk::glib::ControlFlow::Continue
         });
+      }
+
+      // 外部 URL 打开（默认浏览器入口）：命令行带 http/https 参数时（desktop 文件
+      // Exec=shift-browser %U），启动后延迟打开新标签——等前端初始化完（onMounted
+      // 会建初始标签），避免与初始标签竞争
+      #[cfg(target_os = "linux")]
+      {
+        let urls: Vec<String> = std::env::args()
+          .skip(1)
+          .filter(|a| a.starts_with("http://") || a.starts_with("https://"))
+          .collect();
+        if !urls.is_empty() {
+          log::info!("[default-browser] 外部链接参数: {:?}", urls);
+          let app_handle = app.handle().clone();
+          tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+            for url in urls {
+              let state = app_handle.state::<TabManager>();
+              match tabs::create_tab(app_handle.clone(), state, url.clone()).await {
+                Ok(tab) => log::info!("[default-browser] 外部链接已打开: {}", tab.id),
+                Err(e) => log::warn!("[default-browser] 外部链接打开失败: {} ({})", url, e),
+              }
+            }
+          });
+        }
       }
 
       Ok(())
