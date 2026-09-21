@@ -6,6 +6,7 @@ pub mod history;
 pub mod passwords;
 pub mod sessions;
 pub mod settings;
+pub mod sync;
 pub mod tab_groups;
 pub mod users;
 pub mod vault;

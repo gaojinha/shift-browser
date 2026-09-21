@@ -259,6 +259,8 @@ watch(
         loadPrivacyStats()
         // 密码库主密码状态（阶段 2）
         loadVaultStatus()
+        // 上云 E2E 加密同步状态（第 45 章）
+        loadSyncStatus()
         // WebMCP polyfill 试验开关（阶段 1.5）
         loadWebmcpPolyfill()
         // 打开时清空 AI Key 输入框：不回显掩码，避免用户无意把掩码写回库
@@ -639,6 +641,89 @@ async function removeVaultPassword() {
     useToastStore().error('移除失败：' + e)
   } finally {
     vaultBusy.value = false
+  }
+}
+
+/** 上云 E2E 加密同步（第 45 章 · 服务器零知识） */
+interface SyncStatus {
+  vault_protected: boolean
+  unlocked: boolean
+  configured: boolean
+  ready: boolean
+  host: string | null
+  last_push_at: string | null
+  last_pull_at: string | null
+}
+const syncStatus = ref<SyncStatus | null>(null)
+const syncUrl = ref('')
+const syncUser = ref('')
+const syncPass = ref('')
+const syncBusy = ref(false)
+async function loadSyncStatus() {
+  try {
+    syncStatus.value = await invoke<SyncStatus>('sync_status')
+    if (syncStatus.value.host && !syncUrl.value) {
+      syncUrl.value = 'https://' + syncStatus.value.host
+    }
+  } catch (e) {
+    console.error('[settings] 读取同步状态失败:', e)
+  }
+}
+async function saveSyncConfig() {
+  if (!syncUrl.value.trim() || !syncUser.value.trim()) {
+    useToastStore().error('请填写 WebDAV 地址与用户名')
+    return
+  }
+  syncBusy.value = true
+  try {
+    await invoke('sync_configure', {
+      url: syncUrl.value,
+      username: syncUser.value,
+      password: syncPass.value,
+    })
+    syncPass.value = ''
+    await loadSyncStatus()
+    useToastStore().success('WebDAV 已配置（凭据已用主密码加密落盘）')
+  } catch (e) {
+    console.error('[settings] 配置同步失败:', e)
+    useToastStore().error('配置失败：' + e)
+  } finally {
+    syncBusy.value = false
+  }
+}
+async function pushSync() {
+  syncBusy.value = true
+  try {
+    const msg = await invoke<string>('sync_push')
+    await loadSyncStatus()
+    useToastStore().success(msg)
+  } catch (e) {
+    console.error('[settings] 推送失败:', e)
+    useToastStore().error('推送失败：' + e)
+  } finally {
+    syncBusy.value = false
+  }
+}
+async function pullSync() {
+  syncBusy.value = true
+  try {
+    const msg = await invoke<string>('sync_pull')
+    await loadSyncStatus()
+    useToastStore().success(msg)
+  } catch (e) {
+    console.error('[settings] 拉取失败:', e)
+    useToastStore().error('拉取失败：' + e)
+  } finally {
+    syncBusy.value = false
+  }
+}
+async function clearSync() {
+  try {
+    await invoke('sync_clear')
+    await loadSyncStatus()
+    useToastStore().success('已清除本地同步配置（云端包保留）')
+  } catch (e) {
+    console.error('[settings] 清除同步配置失败:', e)
   }
 }
 
@@ -1275,6 +1360,82 @@ async function onRemoveKeyword(k: string) {
                       移除主密码
                     </button>
                   </template>
+                </div>
+              </div>
+              <div class="kw-block" style="margin-top: 10px">
+                <div class="kw-hint">
+                  <b>上云 E2E 加密同步（服务器零知识）</b>：把密码库加密推送到自建
+                  Nextcloud（WebDAV）。同步包用<strong>主密码</strong>整包加密，服务器只存密文，
+                  没主密码谁也解不开。须先设主密码并解锁。
+                  <span v-if="syncStatus">
+                    当前：<b>{{
+                      !syncStatus.vault_protected
+                        ? '未设主密码（禁止上云）'
+                        : !syncStatus.unlocked
+                          ? '已锁定（请先解锁）'
+                          : syncStatus.configured
+                            ? '就绪 · ' + (syncStatus.host || '')
+                            : '待配置 WebDAV'
+                    }}</b>
+                  </span>
+                </div>
+                <div class="kw-add" style="margin-top: 6px; flex-wrap: wrap; gap: 6px">
+                  <input
+                    v-model="syncUrl"
+                    placeholder="WebDAV 地址，如 https://host/remote.php/dav/files/user"
+                    spellcheck="false"
+                    style="min-width: 260px"
+                  />
+                  <input
+                    v-model="syncUser"
+                    placeholder="用户名"
+                    spellcheck="false"
+                    style="max-width: 150px"
+                  />
+                  <input
+                    v-model="syncPass"
+                    type="password"
+                    placeholder="密码"
+                    spellcheck="false"
+                    style="max-width: 150px"
+                  />
+                  <button
+                    class="mini-btn"
+                    :disabled="syncBusy || !syncStatus?.vault_protected || !syncStatus?.unlocked"
+                    @click="saveSyncConfig"
+                  >
+                    保存配置
+                  </button>
+                </div>
+                <div class="kw-add" style="margin-top: 6px">
+                  <button
+                    class="mini-btn primary"
+                    :disabled="syncBusy || !syncStatus?.ready"
+                    @click="pushSync"
+                  >
+                    ⬆ 推送到云
+                  </button>
+                  <button
+                    class="mini-btn"
+                    :disabled="syncBusy || !syncStatus?.ready"
+                    @click="pullSync"
+                  >
+                    ⬇ 从云合并
+                  </button>
+                  <button
+                    v-if="syncStatus?.configured"
+                    class="mini-btn danger"
+                    :disabled="syncBusy"
+                    @click="clearSync"
+                  >
+                    清除配置
+                  </button>
+                  <span v-if="syncStatus?.last_push_at" class="kw-hint" style="margin-left: 8px">
+                    上次推送：{{ syncStatus.last_push_at }}
+                  </span>
+                  <span v-if="syncStatus?.last_pull_at" class="kw-hint" style="margin-left: 8px">
+                    上次拉取：{{ syncStatus.last_pull_at }}
+                  </span>
                 </div>
               </div>
               <div class="field">

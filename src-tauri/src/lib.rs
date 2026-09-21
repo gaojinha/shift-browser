@@ -290,6 +290,12 @@ pub fn run() {
       db::vault::unlock_vault,
       db::vault::lock_vault,
       db::vault::remove_vault_password,
+      // 上云 E2E 加密同步（第 45 章 · 服务器零知识）
+      db::sync::sync_status,
+      db::sync::sync_configure,
+      db::sync::sync_push,
+      db::sync::sync_pull,
+      db::sync::sync_clear,
       // 标签页
       tabs::create_tab,
       tabs::close_tab,
