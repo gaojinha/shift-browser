@@ -1769,8 +1769,56 @@ dev 下兜底未误触发、扩展仍正常加载。
 
 ---
 
-## 下一步（截至第六十五章）
+## 第六十六章（阶段 4 开放生态）：本地开放 API — 7768d74
 
-- **阶段 4 起步**：开放 API / 多端协同 / 自托管服务端套件（长期项，按需推进）。
-- **工程**：HANDOFF 逐章记录机制（已补至 65 章，后续每章随提交更新）。
+**背景一句话**：让外部脚本/工具驱动浏览器（阶段 4 起步）。
+
+**交付**：`src-tauri/src/api.rs`（Unix 域套接字 + 行式 JSON；套接字权限 0600 只限本用户）；
+命令 `status` / `list_tabs` / `open_url`；`tabs.rs::all_tabs` 提为 pub；`docs/local-api.md`。
+
+**运行实证**：套接字 `srw-------`；三命令均 `ok:true`，`open_url` 真开 example.com。
+
+**验证**：cargo 0错0警告；114 测试；冒烟 12/12。
+
+---
+
+## 第六十七章（阶段 4 开放生态）：开放 API 扩命令 — 71e6cd6
+
+**交付**：新增 `active_tab` / `close_tab` / `switch_tab` / `reload_tab` / `navigate`；
+文档补命令表 + 用法（先 list_tabs/active_tab 拿 id 再传写命令）。
+
+**运行实证**：全流程真调——open_url → active_tab → switch_tab → reload_tab → navigate →
+list_tabs（3 标签）→ close_tab 均 `ok:true`；未知命令返回 `ok:false` + 错误。
+
+**验证**：cargo 0错0警告；114 测试；冒烟 12/12。
+
+---
+
+## 第六十八章（修复）：翻译在带 CSP 站点失效 — 081ce40 + f34d681
+
+**背景一句话**：用户报"翻译功能不能用了"（带 CSP 的站点上整页/划词翻译没反应）。
+
+**根因**：翻译脚本用 `img.src = 'shift://__translate__/…'` 调后端，**受站点 CSP 的 img-src 约束**；
+主流站点普遍带 CSP → 浏览器在页面层直接拒绝，请求没到后端（日志里连一次翻译 API 调用都没有）。
+
+**修复**：改用 **WebKit 原生脚本消息处理器**（CSP 免疫）：
+- `lib.rs` 新增 `native_translate_handle`（复用 translate::* + write_translate_result，
+  支持 /text /batch /whole-page /progress，保留限长/限频/callback 白名单）。
+- `extensions.rs` 在 child webview 注册处理器 + 连回调（按 label 去重）。
+- 两个翻译 JS 加 `__sbTrSend`：**原生桥优先、无桥回退 img**（双通道）。
+
+**二次坑**：换桥后仍"没反应"——**path 规范化**（旧通道前缀自带斜杠，JS 传的 path 不带，
+新 handler 按 `/whole-page` 匹配 → 全落"未知路径"静默丢弃）。f34d681 修：缺斜杠就补 + 加链路日志。
+
+**运行实证**：`原生桥已注册`（每 child webview）；端到端 `result={"text":"你好，世界"}`；
+整页链路 `整页翻译请求` → `批量翻译请求 bytes=482`；用户确认修复。
+
+**验证**：cargo 0错0警告；114 测试；冒烟 12/12。
+
+---
+
+## 下一步（截至第六十八章）
+
+- **阶段 4 继续**：多端协同 / 自托管服务端套件（长期项，按需推进）；开放 API 更多命令。
+- **工程**：HANDOFF 逐章记录机制（已补至 68 章，后续每章随提交更新）。
 
