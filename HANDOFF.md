@@ -2073,9 +2073,33 @@ IP 白名单设 `1.2.3.4` 时本机被拒（日志 `拒绝非白名单 IP: 127.0
 
 ---
 
-## 下一步（截至第八十三章）
+## 第八十四章（阶段交付）：deb 打包 + 升级安装（4.4.0 → 5.6.0）
+
+**背景一句话**：把 5.6.0 打成可分发 deb 安装包并装进系统，替换旧的 4.4.0 现场验证。
+
+**打包**：`node_modules/.bin/tauri build --bundles deb`（release 全量编译，产物带扩展库
+`libshift_web_extension.so`、desktop 入口、三档 hicolor 图标）。生成
+`src-tauri/target/release/bundle/deb/Shift Browser_5.6.0_amd64.deb`（≈8.1MB）。
+*工具链约束*：本机缺 `rpmbuild` / `linuxdeploy` / `appimagebtool`，`--bundles deb` 显式
+锁定 deb（绕开 `targets:"all"` 会因缺工具失败的问题）。
+
+**安装**：`sudo dpkg -i` 完成升级（4.4.0 → 5.6.0），desktop 入口 `Exec=shift-browser`，
+二进制 `/usr/bin/shift-browser`（22MB）。
+
+**运行实证（卸载旧进程 1216975 后起新版）**：
+- 进程存活、托盘 SNI/DBusMenu 交互正常（zbus 日志实时刷）；
+- 隐私防护（标准档 + 0 白名单）+ 右键翻译菜单注入成功；
+- 标签恢复 4 个；API 走 unix socket `~/.local/share/com.shiftbrowser.app/api.sock`
+  （fd 43 监听中，HTTP 19701 形态默认不监听，符合鉴权设计）。
+
+**验证**：cargo 0错0警告；115 测试；冒烟 12/12 + deb 真机升级验证通过。
+
+---
+
+## 下一步（截至第八十四章）
 
 - **阶段 4 继续**：多端形态（移动/平板协同）——路线图剩的最后一块大件。
-- **实战检验（进行中）**：下载目录、系统托盘已修并验收；开放 API 扩展（C2）已交付。
-- **工程**：HANDOFF 逐章记录机制（已补至 83 章，后续每章随提交更新）。
+- **实战检验（进行中）**：下载目录、系统托盘已修并验收；开放 API 扩展（C2）已交付；
+  deb 打包安装闭环（第八十四章）。
+- **工程**：HANDOFF 逐章记录机制（已补至 84 章，后续每章随提交更新）。
 
