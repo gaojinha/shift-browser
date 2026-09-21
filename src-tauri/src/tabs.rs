@@ -1746,13 +1746,18 @@ pub async fn set_webview_visible(
     // 恢复显示后重新应用几何：隐藏期间（弹窗打开时）可能改过书签栏显隐/AI 分屏/窗口尺寸，
     // 不重设会导致 webview 尺寸或位置滞后，WebKit 输入窗口不跟随 → 页面点不动
     if visible {
-        let top = state.top_offset();
-        let ai_active = *state
-            .ai_panel_active
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        for id in &ids_for_geometry {
-            apply_tab_geometry(&window, id, top, ai_active);
+        if state.split_tab().is_some() {
+            // 分屏中：按窗格显示（否则"恢复全部"会把分屏覆盖成全部重叠——右键菜单/弹窗关闭时触发）
+            apply_split_layout(&app, &state)?;
+        } else {
+            let top = state.top_offset();
+            let ai_active = *state
+                .ai_panel_active
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            for id in &ids_for_geometry {
+                apply_tab_geometry(&window, id, top, ai_active);
+            }
         }
     }
     log::info!(
