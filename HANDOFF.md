@@ -1886,9 +1886,24 @@ navigate/search/new_tab），**Unix 套接字 + HTTP（带 token）双形态**�
 
 ---
 
-## 下一步（截至第七十三章）
+## 第七十四章（阶段 4）：开放 API 再加 history / bookmarks 只读命令 — bfff839
+
+**交付**：`history {limit}`（默认 50、上限 500）、`bookmarks`（LEFT JOIN 出文件夹名）；
+文档命令表补两行。
+
+**运行实证**：`history {"limit":3}` → 3 条（含 cn.bing.com 搜索页）；`bookmarks` → 列表（含 folder 名）。
+
+**验证**：cargo 0错0警告；115 测试；冒烟 12/12。
+
+**开放 API 现状（12 命令）**：读 `status`/`list_tabs`/`active_tab`/`history`/`bookmarks`；
+写 `open_url`/`close_tab`/`switch_tab`/`reload_tab`/`navigate`/`search`/`new_tab`；
+Unix 套接字 + HTTP（带 token）双形态。
+
+---
+
+## 下一步（截至第七十四章）
 
 - **阶段 4 继续**：自托管服务端套件更完整版（长期项）；开放 API 更多命令（截图/执行 JS，需安全评估）；
   多端形态（移动/平板协同）。
-- **工程**：HANDOFF 逐章记录机制（已补至 73 章，后续每章随提交更新）。
+- **工程**：HANDOFF 逐章记录机制（已补至 74 章，后续每章随提交更新）。
 
