@@ -974,6 +974,7 @@ fn inject_extensions(
     // block_on 会 panic "Cannot start a runtime from within a runtime"）。
     // 缓存由用户脚本 CRUD 后 + 启动时刷新。
     let user_scripts: Vec<(String, Vec<String>)> = crate::db::userscripts::cached_scripts();
+    log::info!("[extensions] 用户脚本缓存 {} 个", user_scripts.len());
     let _ = app.run_on_main_thread(move || {
         // 引擎层内容过滤器：如有规则变更，在主线程编译（编译完成会回来触发一次重新注入）
         crate::engine::content_filter::compile_pending();
