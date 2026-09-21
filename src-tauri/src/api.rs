@@ -324,6 +324,46 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 Err(e) => json!({"ok": false, "error": e}),
             }
         }
+        "history" => {
+            let limit = req
+                .get("limit")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(50)
+                .clamp(1, 500);
+            let db = app.state::<crate::db::Db>();
+            let rows = sqlx::query_as::<_, (String, Option<String>, i64, String)>(
+                "SELECT url, title, visit_count, last_visit_at FROM history
+                 ORDER BY last_visit_at DESC LIMIT ?",
+            )
+            .bind(limit)
+            .fetch_all(&db.pool)
+            .await
+            .unwrap_or_default();
+            let items: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(|(url, title, vc, lv)| {
+                    json!({"url": url, "title": title, "visit_count": vc, "last_visit_at": lv})
+                })
+                .collect();
+            json!({"ok": true, "data": items})
+        }
+        "bookmarks" => {
+            let db = app.state::<crate::db::Db>();
+            let rows = sqlx::query_as::<_, (String, String, Option<String>, i64)>(
+                "SELECT b.title, b.url, f.name, b.sort_order FROM bookmarks b
+                 LEFT JOIN bookmark_folders f ON f.id = b.folder_id ORDER BY b.id",
+            )
+            .fetch_all(&db.pool)
+            .await
+            .unwrap_or_default();
+            let items: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(|(title, url, folder, so)| {
+                    json!({"title": title, "url": url, "folder": folder, "sort_order": so})
+                })
+                .collect();
+            json!({"ok": true, "data": items})
+        }
         "active_tab" => {
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});

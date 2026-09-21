@@ -44,6 +44,8 @@ curl -s -X POST http://127.0.0.1:19701/api -H "Authorization: Bearer $TOKEN" \
 | `{"cmd":"navigate","id":"…","url":"…"}` | `{"ok":true,"data":Tab\|null}` | 让指定标签导航到网址 |
 | `{"cmd":"search","query":"…"}` | `{"ok":true,"data":Tab}` | 用当前搜索引擎搜（新标签打开） |
 | `{"cmd":"new_tab"}` | `{"ok":true,"data":Tab}` | 打开内置新标签页 |
+| `{"cmd":"history","limit":50}` | `{"ok":true,"data":[{url,title,visit_count,last_visit_at}…]}` | 读最近历史（limit ≤500） |
+| `{"cmd":"bookmarks"}` | `{"ok":true,"data":[{title,url,folder,sort_order}…]}` | 读书签（含文件夹名） |
 
 出错时：`{"ok":false,"error":"…"}`。
 
