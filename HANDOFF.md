@@ -1853,8 +1853,42 @@ list_tabs（3 标签）→ close_tab 均 `ok:true`；未知命令返回 `ok:fals
 
 ---
 
-## 下一步（截至第七十一章）
+## 第七十二章（阶段 4 自托管服务端套件）：本地 HTTP API — 1e64d88
 
-- **阶段 4 继续**：自托管服务端套件（长期项，按需推进）；开放 API 更多命令；多端形态（移动/平板）。
-- **工程**：HANDOFF 逐章记录机制（已补至 71 章，后续每章随提交更新）。
+**背景一句话**：开放 API 除 Unix 套接字外，再提供 HTTP 形态（自托管套件最小版）。
+
+**交付**：`POST http://127.0.0.1:19701/api`，body 为同款 JSON 命令，**复用同一套 `handle()`**；
+**只绑 127.0.0.1**（不对外）；鉴权 `Authorization: Bearer <token>`（随机生成、落 `api-token` 0600）。
+文档补「两种形态」表 + curl 示例 + 局域网暴露提醒。
+
+**运行实证**：`HTTP API 已启动`；token 文件 `-rw-------`；不带 token → 未授权；
+带 token → `{"ok":true,"data":{"tabs":3,…}}`；`open_url` 成功。
+
+**验证**：cargo 0错0警告；115 测试；冒烟 12/12。
+
+---
+
+## 第七十三章（阶段 4）：开放 API 再加 search / new_tab — 69e8f63
+
+**交付**：`search {query}`（读 search_engine 设置拼 URL，与 newtab/AddressBar 同映射）、
+`new_tab`（打开内置新标签页）；附最小 percent-encode（不引额外依赖）。
+
+**踩坑**：Rust 侧 `create_tab` 需绝对 URL——传 `"newtab"` 报
+`URL 解析失败: relative URL without a base`，改用 `shift://newtab`。
+
+**运行实证**：`search "山西 永济 天气"` → `create_tab: url=https://www.bing.com/search?q=%E5%B1%B1…`；
+`new_tab` → `create_tab: url=shift://newtab`。
+
+**验证**：cargo 0错0警告；115 测试；冒烟 12/12。
+
+**开放 API 现状**：10 命令（status/list_tabs/active_tab/open_url/close_tab/switch_tab/reload_tab/
+navigate/search/new_tab），**Unix 套接字 + HTTP（带 token）双形态**。
+
+---
+
+## 下一步（截至第七十三章）
+
+- **阶段 4 继续**：自托管服务端套件更完整版（长期项）；开放 API 更多命令（截图/执行 JS，需安全评估）；
+  多端形态（移动/平板协同）。
+- **工程**：HANDOFF 逐章记录机制（已补至 73 章，后续每章随提交更新）。
 
