@@ -135,6 +135,7 @@ fn spawn_rules_watcher() {
     std::thread::spawn(|| loop {
         std::thread::sleep(std::time::Duration::from_secs(2));
         reload_rules();
+        reload_headers();
     });
 }
 
@@ -146,6 +147,83 @@ fn should_block(uri: &str) -> bool {
     match rules_cell().read() {
         Ok(g) => g.iter().any(|r| uri.contains(r.as_str())),
         Err(_) => false,
+    }
+}
+
+// ===== 可配置请求头注入（阶段3.2）=====
+
+/// 请求头文件（应用数据目录；每行 `Name: Value`，`#` 注释）
+fn headers_path() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    Some(format!(
+        "{}/.local/share/com.shiftbrowser.app/shift-ext-headers.txt",
+        home
+    ))
+}
+
+static HEADERS: OnceLock<RwLock<Vec<(String, String)>>> = OnceLock::new();
+static HEADERS_MTIME: AtomicU64 = AtomicU64::new(0);
+
+fn headers_cell() -> &'static RwLock<Vec<(String, String)>> {
+    HEADERS.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+/// 从文件重载请求头（mtime 未变则跳过）
+fn reload_headers() {
+    let Some(p) = headers_path() else {
+        return;
+    };
+    let mtime = file_mtime_ns(&p);
+    if mtime == 0 || mtime == HEADERS_MTIME.load(Ordering::Relaxed) {
+        return;
+    }
+    let mut out = Vec::new();
+    match std::fs::read_to_string(&p) {
+        Ok(text) => {
+            for line in text.lines() {
+                let l = line.trim();
+                if l.is_empty() || l.starts_with('#') {
+                    continue;
+                }
+                if let Some((n, v)) = l.split_once(':') {
+                    let (n, v) = (n.trim(), v.trim());
+                    if !n.is_empty() {
+                        out.push((n.to_string(), v.to_string()));
+                    }
+                }
+            }
+            eprintln!("[shift-ext] 已加载 {} 条自定义请求头（{}）", out.len(), p);
+        }
+        Err(_) => eprintln!("[shift-ext] 无自定义请求头文件（{}）", p),
+    }
+    if let Ok(mut g) = headers_cell().write() {
+        *g = out;
+    }
+    HEADERS_MTIME.store(mtime, Ordering::Relaxed);
+}
+
+/// 注入自定义请求头（GPC 之外的用户配置头）
+fn apply_custom_headers(request: *mut c_void) {
+    let Ok(g) = headers_cell().read() else {
+        return;
+    };
+    if g.is_empty() {
+        return;
+    }
+    unsafe {
+        let headers = webkit_uri_request_get_http_headers(request);
+        if headers.is_null() {
+            return;
+        }
+        for (n, v) in g.iter() {
+            let (Ok(nc), Ok(vc)) = (
+                std::ffi::CString::new(n.as_str()),
+                std::ffi::CString::new(v.as_str()),
+            ) else {
+                continue;
+            };
+            soup_message_headers_replace(headers, nc.as_ptr(), vc.as_ptr());
+        }
     }
 }
 
@@ -161,6 +239,8 @@ unsafe extern "C" fn on_send_request(
     }
     // 网络层 GPC：给每个出网请求加 Sec-GPC: 1
     apply_gpc_header(request);
+    // 自定义请求头（用户配置）
+    apply_custom_headers(request);
     let uri_ptr = webkit_uri_request_get_uri(request);
     if uri_ptr.is_null() {
         return 0;
@@ -202,8 +282,9 @@ unsafe extern "C" fn on_page_created(
 #[no_mangle]
 pub unsafe extern "C" fn webkit_web_extension_initialize(extension: *mut c_void) {
     eprintln!("[shift-ext] Web 进程扩展已加载（阶段A 原型）");
-    // 首载规则 + 起后台守护线程（每 2s 查 mtime，改规则免重启）
+    // 首载规则 + 请求头 + 起后台守护线程（每 2s 查 mtime，改了免重启）
     reload_rules();
+    reload_headers();
     spawn_rules_watcher();
     if extension.is_null() {
         eprintln!("[shift-ext] extension 指针为空，跳过");

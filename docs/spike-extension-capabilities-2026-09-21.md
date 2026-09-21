@@ -132,7 +132,11 @@ GIR（`WebKit2WebExtension-4.1.gir:48966`）：
 > `webkit_uri_request_get_http_headers` + `soup_message_headers_replace` 给每个出网请求注入
 > `Sec-GPC: 1`（网络层 GPC）——补上了原先只注入 JS 属性、**缺请求头**的缺口。
 > 运行实证：`[shift-ext] 已注入 Sec-GPC: 1（网络层 GPC）`（读回校验为 1）。
-> 后续：GPC 开关化（当前常开）、UA 策略等更多头改写。
+> **可配置请求头已完成（2026-09-21）**：设置项 `net_headers`（隐私分区文本框，每行
+> `Name: Value`）经 `sync_ext_rules` 写入 `shift-ext-headers.txt`；扩展读取并注入到每个出网请求
+> （与常开的 `Sec-GPC: 1` 叠加）。运行实证：DB 设 `DNT: 1` → 日志 `已写自定义请求头文件` →
+> 扩展 `已加载 1 条自定义请求头`。
+> 后续：GPC 开关化（当前常开）。
 
 **阶段 C · 扩展模型（平台化）**
 在 A/B 之上做打包格式 + 清单 + 权限声明，用 `WebExtension` 消息通道连 UI 进程做"扩展管理面板"，

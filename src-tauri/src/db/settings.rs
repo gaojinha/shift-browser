@@ -27,6 +27,8 @@ const ALLOWED_KEYS: &[&str] = &[
     "adblock_keywords",
     // 网络层拦截规则（阶段3.2：写入 Web 进程扩展规则文件，每行一个 URL 子串）
     "net_block_rules",
+    // 自定义请求头（阶段3.2：写入扩展请求头文件，每行 `Name: Value`）
+    "net_headers",
     "show_lunar",
     "show_quote",
     "show_weather",
@@ -251,6 +253,27 @@ pub async fn sync_ext_rules(db: tauri::State<'_, Db>) -> DbResult<()> {
     std::fs::write(&path, content)
         .map_err(|e| crate::db::DbError::Other(format!("写扩展规则文件失败: {}", e)))?;
     log::info!("[settings] 已写网络层拦截规则文件: {}", path.display());
+
+    // 自定义请求头文件（每行 `Name: Value`）
+    let hrow: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'net_headers'")
+            .fetch_optional(&db.pool)
+            .await?;
+    let hdrs = hrow.map(|(v,)| v).unwrap_or_default();
+    let hpath = db.vault_path.with_file_name("shift-ext-headers.txt");
+    let mut hcontent = String::from(
+        "# ShiftBrowser 自定义请求头（由主程序写入，勿手改）\n# 每行 `Name: Value`，注入到每个出网请求；# 开头为注释\n",
+    );
+    for line in hdrs.lines() {
+        let l = line.trim();
+        if !l.is_empty() {
+            hcontent.push_str(l);
+            hcontent.push('\n');
+        }
+    }
+    std::fs::write(&hpath, hcontent)
+        .map_err(|e| crate::db::DbError::Other(format!("写请求头文件失败: {}", e)))?;
+    log::info!("[settings] 已写自定义请求头文件: {}", hpath.display());
     Ok(())
 }
 

@@ -340,13 +340,13 @@ async function onSet(key: string, value: string) {
       useToastStore().error('标签栏方向切换失败')
     }
   }
-  // 网络层拦截规则：落盘到扩展规则文件（阶段3.2；重启浏览器生效）
-  if (key === 'net_block_rules') {
+  // 网络层拦截规则 / 自定义请求头：落盘到扩展文件（阶段3.2；热更新，约 2 秒生效）
+  if (key === 'net_block_rules' || key === 'net_headers') {
     try {
       await invoke('sync_ext_rules')
     } catch (e) {
-      console.error('[settings] 写网络层规则文件失败:', e)
-      useToastStore().error('保存网络层规则失败')
+      console.error('[settings] 写扩展规则/请求头文件失败:', e)
+      useToastStore().error('保存网络层配置失败')
     }
   }
   // 启动页相关设置：保存后重新生成新标签页 HTML
@@ -1491,6 +1491,21 @@ async function onRemoveKeyword(k: string) {
                   spellcheck="false"
                   rows="4"
                   @change="onSet('net_block_rules', ($event.target as HTMLTextAreaElement).value)"
+                ></textarea>
+              </div>
+              <div class="kw-block">
+                <div class="kw-hint">
+                  <b>自定义请求头</b>（阶段3.2）：每行 <code>Name: Value</code>，注入到每个出网请求
+                  （如 <code>DNT: 1</code>、自定义 UA）。保存后约 <strong>2 秒自动生效</strong>。
+                  <br />注：<code>Sec-GPC: 1</code> 已默认常开，无需在此重复。
+                </div>
+                <textarea
+                  class="net-rules"
+                  :value="settingsStore.get('net_headers')"
+                  placeholder="每行 Name: Value，例如：DNT: 1"
+                  spellcheck="false"
+                  rows="4"
+                  @change="onSet('net_headers', ($event.target as HTMLTextAreaElement).value)"
                 ></textarea>
               </div>
               <div class="field webmcp-field" :class="{ 'experiment-tag': webmcpPolyfill }">
