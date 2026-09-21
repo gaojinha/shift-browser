@@ -46,6 +46,7 @@ const COMMANDS: Item[] = [
   { key: 'cmd:downloads', kind: 'command', icon: '⤓', title: '打开下载管理', value: 'downloads' },
   { key: 'cmd:passwords', kind: 'command', icon: '🔑', title: '打开密码管理', value: 'passwords' },
   { key: 'cmd:sessions', kind: 'command', icon: '🗂', title: '打开会话管理', value: 'sessions' },
+  { key: 'cmd:userscripts', kind: 'command', icon: '📜', title: '打开用户脚本', value: 'userscripts' },
   { key: 'cmd:translate', kind: 'command', icon: '🌐', title: '翻译当前页面', value: 'translate' },
   { key: 'cmd:settings', kind: 'command', icon: '⚙', title: '打开设置', value: 'settings' },
   { key: 'cmd:devtools', kind: 'command', icon: '🛠', title: '开发者工具', value: 'devtools' },

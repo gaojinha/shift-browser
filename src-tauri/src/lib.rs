@@ -236,6 +236,12 @@ pub fn run() {
       settings::set_settings_bulk,
       // 网络层拦截规则落盘（阶段3.2：写 Web 进程扩展规则文件）
       settings::sync_ext_rules,
+      // 用户脚本（阶段3.2 平台化：Tampermonkey 风格）
+      db::userscripts::list_userscripts,
+      db::userscripts::refresh_userscripts_cache,
+      db::userscripts::add_userscript,
+      db::userscripts::update_userscript,
+      db::userscripts::delete_userscript,
       // 书签
       bookmarks::get_bookmarks,
       bookmarks::get_bookmark_folders,

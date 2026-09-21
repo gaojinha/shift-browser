@@ -970,6 +970,10 @@ fn inject_extensions(
     let webviews = window.webviews();
     log::info!("[extensions] 注入到 {} 个 webview", webviews.len());
     let items_owned = items.clone();
+    // 用户脚本（阶段3.2）：读注入缓存（同步，不碰 DB/runtime——inject 可能跑在 tokio 上下文里，
+    // block_on 会 panic "Cannot start a runtime from within a runtime"）。
+    // 缓存由用户脚本 CRUD 后 + 启动时刷新。
+    let user_scripts: Vec<(String, Vec<String>)> = crate::db::userscripts::cached_scripts();
     let _ = app.run_on_main_thread(move || {
         // 引擎层内容过滤器：如有规则变更，在主线程编译（编译完成会回来触发一次重新注入）
         crate::engine::content_filter::compile_pending();
@@ -985,6 +989,7 @@ fn inject_extensions(
                 continue;
             }
             let items_clone = items_owned.clone();
+            let user_scripts_clone = user_scripts.clone();
             let _ = wv.with_webview(move |pwv| {
                 let webview = pwv.inner();
                 let Some(manager) = webview.user_content_manager() else {
@@ -1008,6 +1013,24 @@ fn inject_extensions(
                     manager.add_script(&polyfill);
                     // 即时注入：已加载的标签立即生效（幂等，重复无害）
                     crate::engine::webview::eval_js(&webview, crate::engine::webmcp::WEBMCP_POLYFILL_JS);
+                }
+                // 用户脚本（阶段3.2）：按各自 matches 限定页面（空则全站）；与扩展脚本同一套机制
+                for (code, patterns) in &user_scripts_clone {
+                    let allow: Vec<&str> = if patterns.is_empty() {
+                        vec!["*"]
+                    } else {
+                        patterns.iter().map(|s| s.as_str()).collect()
+                    };
+                    let script = UserScript::new(
+                        code,
+                        UserContentInjectedFrames::AllFrames,
+                        UserScriptInjectionTime::End,
+                        &allow,
+                        &[],
+                    );
+                    manager.add_script(&script);
+                    // 即时注入：已加载的标签立即生效（脚本自带幂等保护）
+                    crate::engine::webview::eval_js(&webview, code);
                 }
                 for (js, css) in &items_clone {
                     if let Some(js) = js {

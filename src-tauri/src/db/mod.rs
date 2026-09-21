@@ -9,6 +9,7 @@ pub mod settings;
 pub mod sync;
 pub mod tab_groups;
 pub mod users;
+pub mod userscripts;
 pub mod vault;
 pub mod workspaces;
 
@@ -177,6 +178,11 @@ impl Db {
                 12,
                 "space_color",
                 include_str!("../../migrations/20260921000000_space_color.sql"),
+            ),
+            (
+                13,
+                "userscripts",
+                include_str!("../../migrations/20260921000001_userscripts.sql"),
             ),
         ];
 

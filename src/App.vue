@@ -18,6 +18,7 @@ import TranslatePanel from './components/TranslatePanel.vue'
 import HistoryDialog from './components/HistoryDialog.vue'
 import BookmarksDialog from './components/BookmarksDialog.vue'
 import SessionDialog from './components/SessionDialog.vue'
+import UserscriptsDialog from './components/UserscriptsDialog.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import AppToast from './components/AppToast.vue'
 import { useTabsStore, setLockedState } from './stores/tabs'
@@ -62,7 +63,7 @@ const showDownloads = ref(false)
 const showSettings = ref(false)
 const showAI = ref(false)
 
-function openPanel(name: 'translate' | 'sessions' | 'history' | 'passwords' | 'groups' | 'downloads' | 'settings' | 'ai' | 'bookmarks') {
+function openPanel(name: 'translate' | 'sessions' | 'history' | 'passwords' | 'groups' | 'downloads' | 'settings' | 'ai' | 'bookmarks' | 'userscripts') {
   showTranslate.value = name === 'translate'
   showSessions.value = name === 'sessions'
   showHistory.value = name === 'history'
@@ -72,6 +73,7 @@ function openPanel(name: 'translate' | 'sessions' | 'history' | 'passwords' | 'g
   showSettings.value = name === 'settings'
   showAI.value = name === 'ai'
   showBookmarks.value = name === 'bookmarks'
+  showUserscripts.value = name === 'userscripts'
 }
 
 const showTranslate = ref(false)
@@ -80,6 +82,8 @@ const showBookmarks = ref(false)
 const showSessions = ref(false)
 // 命令栏（Ctrl+K 万能入口，阶段 3.1）
 const showCommandPalette = ref(false)
+// 用户脚本管理（阶段 3.2）
+const showUserscripts = ref(false)
 const addressBarRef = ref<InstanceType<typeof AddressBar> | null>(null)
 let saveTimer: number | null = null
 
@@ -96,7 +100,8 @@ function anyDialogOpen() {
     showHistory.value ||
     showSessions.value ||
     showBookmarks.value ||
-    showCommandPalette.value
+    showCommandPalette.value ||
+    showUserscripts.value
   )
 }
 
@@ -170,6 +175,7 @@ function onPaletteCommand(action: string) {
     case 'sessions':
     case 'translate':
     case 'settings':
+    case 'userscripts':
       openPanel(action)
       break
     default:
@@ -265,6 +271,8 @@ function onGlobalKeydown(e: KeyboardEvent) {
     showHistory.value = false
   } else if (showSessions.value) {
     showSessions.value = false
+  } else if (showUserscripts.value) {
+    showUserscripts.value = false
   }
 }
 
@@ -293,6 +301,12 @@ async function initBrowser(skipStartupTab = false) {
     await invoke('sync_ext_rules')
   } catch (e) {
     console.error('[app] 网络层规则落盘失败:', e)
+  }
+  // 刷新用户脚本注入缓存（阶段3.2；inject 路径读缓存，不能 await）
+  try {
+    await invoke('refresh_userscripts_cache')
+  } catch (e) {
+    console.error('[app] 用户脚本缓存刷新失败:', e)
   }
   // 分组尽早加载（不等标签恢复，避免右键菜单/组头迟迟不显示）
   groupsStore.loadGroups().catch((e) => {
@@ -461,6 +475,7 @@ watch(
           @open-settings="openPanel('settings')"
           @open-ai="openPanel('ai')"
           @open-translate="openPanel('translate')"
+          @open-userscripts="openPanel('userscripts')"
         />
         <BookmarksBar v-if="settingsStore.showBookmarksBar" @open-manager="showBookmarks = true" />
         <!-- 内容区：webview 由 Rust 按内容区几何盖住此区域（top 随书签栏/垂直标签变化） -->
@@ -480,6 +495,7 @@ watch(
     <HistoryDialog :show="showHistory" @close="showHistory = false" />
     <BookmarksDialog :show="showBookmarks" @close="showBookmarks = false" />
     <SessionDialog :show="showSessions" @close="showSessions = false" />
+    <UserscriptsDialog :show="showUserscripts" @close="showUserscripts = false" />
     <CommandPalette
       :show="showCommandPalette"
       @close="showCommandPalette = false"

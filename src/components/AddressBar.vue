@@ -29,6 +29,7 @@ const emit = defineEmits<{
   (e: 'openTranslate'): void
   (e: 'openPasswords'): void
   (e: 'openGroups'): void
+  (e: 'openUserscripts'): void
   (e: 'openDownloads'): void
   (e: 'openSettings'): void
 }>()
@@ -290,6 +291,7 @@ async function onReader() {
     <button class="action-btn ai-btn" title="AI 助手" @click="emit('openAi')">AI</button>
     <button class="action-btn" title="密码管理" @click="emit('openPasswords')">🔑</button>
     <button class="action-btn" title="标签分组" @click="emit('openGroups')">🗂</button>
+    <button class="action-btn" title="用户脚本" @click="emit('openUserscripts')">📜</button>
     <button class="action-btn" title="下载管理" @click="emit('openDownloads')">⬇</button>
     <button class="action-btn" title="设置" @click="emit('openSettings')">⚙</button>
   </div>
