@@ -2080,8 +2080,13 @@ IP 白名单设 `1.2.3.4` 时本机被拒（日志 `拒绝非白名单 IP: 127.0
 **打包**：`node_modules/.bin/tauri build --bundles deb`（release 全量编译，产物带扩展库
 `libshift_web_extension.so`、desktop 入口、三档 hicolor 图标）。生成
 `src-tauri/target/release/bundle/deb/Shift Browser_5.6.0_amd64.deb`（≈8.1MB）。
-*工具链约束*：本机缺 `rpmbuild` / `linuxdeploy` / `appimagebtool`，`--bundles deb` 显式
+*工具链约束*：本机缺 `rpmbuild` / `linuxdeploy` / `appimagetool`，`--bundles deb` 显式
 锁定 deb（绕开 `targets:"all"` 会因缺工具失败的问题）。
+
+**一键固化**：新增 `scripts/package-deb.sh`，`bash scripts/package-deb.sh` 一条命令走完
+「校验工具链(缺了先提示装) → 构建扩展库(dev+prod 两拷) → 构建前端 → release 打 deb →
+报产物路径」，规避裸跑 `tauri build` 因 `targets:"all"` 缺 rpm/AppImage 工具翻车的坑。
+安装仍 `dpkg -i` 单独执行（打包/安装解耦，修护灵活）。提交 `b708ede`。
 
 **安装**：`sudo dpkg -i` 完成升级（4.4.0 → 5.6.0），desktop 入口 `Exec=shift-browser`，
 二进制 `/usr/bin/shift-browser`（22MB）。
