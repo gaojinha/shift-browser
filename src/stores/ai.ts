@@ -30,6 +30,8 @@ interface AIState {
   tools: Array<{ name: string; serverName: string; description: string }>
   /** 工具是否已加载 */
   toolsLoaded: boolean
+  /** 命令栏「问 AI」暂存的提问：AI 侧栏打开时消费（阶段 3.1） */
+  pendingPrompt: string | null
 }
 
 export const useAIStore = defineStore('ai', {
@@ -41,12 +43,25 @@ export const useAIStore = defineStore('ai', {
     streamingId: null,
     tools: [],
     toolsLoaded: false,
+    pendingPrompt: null,
   }),
 
   actions: {
     /** 设置当前页面上下文（调用方在打开侧边栏/切换标签时更新） */
     setPageContext(url: string, title: string) {
       this.pageContext = { url, title }
+    },
+
+    /** 命令栏「问 AI」：暂存提问，AI 侧栏打开时消费（阶段 3.1） */
+    queuePrompt(prompt: string) {
+      this.pendingPrompt = prompt.trim() || null
+    },
+
+    /** 取出并清空暂存提问（返回 null 表示无待发问） */
+    takePendingPrompt(): string | null {
+      const p = this.pendingPrompt
+      this.pendingPrompt = null
+      return p
     },
 
     /** 加载可用 MCP 工具（阶段 1.3） */

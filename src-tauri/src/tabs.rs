@@ -1029,7 +1029,7 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
             gtk_win.connect_key_press_event(move |_, event| {
                 // 直接用 GDK 键值常量比对（避免 gdk 版本间 keys 常量路径差异）
                 // F12=0xFFC9 I/i=0x49/0x69 T/t=0x54/0x74 W/w=0x57/0x77 R/r=0x52/0x72
-                // L/l=0x4C/0x6C H/h=0x48/0x68 S/s=0x53/0x73 Tab=0xFF09
+                // L/l=0x4C/0x6C H/h=0x48/0x68 S/s=0x53/0x73 K/k=0x4B/0x6B Tab=0xFF09
                 const KEY_F12: u32 = 0xFFC9;
                 const KEY_TAB: u32 = 0xFF09;
                 let key: u32 = *event.keyval();
@@ -1059,6 +1059,8 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
                         Some("focus-address")
                     } else if is(0x68, 0x48) {
                         Some("history")
+                    } else if is(0x6B, 0x4B) {
+                        Some("command-palette")
                     } else if is(0x73, 0x53) && shift {
                         Some("sessions")
                     } else if key == KEY_TAB && !shift {

@@ -35,8 +35,15 @@ watch(
       // 打开时同步当前页面上下文
       const tab = tabsStore.activeTab
       if (tab) aiStore.setPageContext(tab.url, tab.title)
-      // 自动聚焦输入框（配合后端把 GTK 焦点交给 HTML 层，可直接打字）
-      nextTick(() => inputRef.value?.focus())
+      // 命令栏「问 AI」：打开即发问；否则自动聚焦输入框（配合后端把 GTK 焦点交给 HTML 层）
+      nextTick(() => {
+        const pending = aiStore.takePendingPrompt()
+        if (pending) {
+          aiStore.sendMessage(pending)
+        } else {
+          inputRef.value?.focus()
+        }
+      })
     }
   },
 )

@@ -17,16 +17,19 @@ import TranslatePanel from './components/TranslatePanel.vue'
 import HistoryDialog from './components/HistoryDialog.vue'
 import BookmarksDialog from './components/BookmarksDialog.vue'
 import SessionDialog from './components/SessionDialog.vue'
+import CommandPalette from './components/CommandPalette.vue'
 import AppToast from './components/AppToast.vue'
 import { useTabsStore, setLockedState } from './stores/tabs'
 import { useGroupsStore } from './stores/groups'
 import { useSettingsStore } from './stores/settings'
 import { useWorkspacesStore } from './stores/workspaces'
+import { useAIStore } from './stores/ai'
 
 const tabsStore = useTabsStore()
 const groupsStore = useGroupsStore()
 const settingsStore = useSettingsStore()
 const workspacesStore = useWorkspacesStore()
+const aiStore = useAIStore()
 const showPasswords = ref(false)
 const showGroups = ref(false)
 const showDownloads = ref(false)
@@ -49,6 +52,8 @@ const showTranslate = ref(false)
 const showHistory = ref(false)
 const showBookmarks = ref(false)
 const showSessions = ref(false)
+// 命令栏（Ctrl+K 万能入口，阶段 3.1）
+const showCommandPalette = ref(false)
 const addressBarRef = ref<InstanceType<typeof AddressBar> | null>(null)
 let saveTimer: number | null = null
 
@@ -64,7 +69,8 @@ function anyDialogOpen() {
     showPasswords.value ||
     showHistory.value ||
     showSessions.value ||
-    showBookmarks.value
+    showBookmarks.value ||
+    showCommandPalette.value
   )
 }
 
@@ -105,9 +111,53 @@ function handleGlobalAction(action: string) {
       tabsStore.switchTab(tabs[(idx + step + tabs.length) % tabs.length].id)
       break
     }
+    case 'command-palette':
+      openCommandPalette()
+      break
     case 'devtools':
       invoke('open_devtools').catch(() => {})
       break
+  }
+}
+
+/** 打开命令栏（Ctrl+K）：先收起其它模态，避免叠层 */
+function openCommandPalette() {
+  showTranslate.value = false
+  showSessions.value = false
+  showHistory.value = false
+  showPasswords.value = false
+  showGroups.value = false
+  showDownloads.value = false
+  showSettings.value = false
+  showBookmarks.value = false
+  showCommandPalette.value = true
+}
+
+/** 命令栏选中「命令」类：面板类走 openPanel，其余交给统一动作入口 */
+function onPaletteCommand(action: string) {
+  switch (action) {
+    case 'ai':
+    case 'history':
+    case 'bookmarks':
+    case 'downloads':
+    case 'passwords':
+    case 'sessions':
+    case 'translate':
+    case 'settings':
+      openPanel(action)
+      break
+    default:
+      handleGlobalAction(action)
+  }
+}
+
+/** 命令栏选中「问 AI」：侧栏已开则直接发问，否则暂存待侧栏打开时消费 */
+function onPaletteAskAi(query: string) {
+  if (showAI.value) {
+    aiStore.sendMessage(query)
+  } else {
+    aiStore.queuePrompt(query)
+    openPanel('ai')
   }
 }
 
@@ -133,6 +183,12 @@ function onGlobalKeydown(e: KeyboardEvent) {
     if (k === 'l') {
       e.preventDefault()
       handleGlobalAction('focus-address')
+      return
+    }
+    // Ctrl+K 命令栏（切换：任何情况下都生效，含输入框内）
+    if (k === 'k') {
+      e.preventDefault()
+      showCommandPalette.value = !showCommandPalette.value
       return
     }
     // 弹窗打开时，其余标签快捷键不响应（避免误关标签/新建标签）
@@ -165,7 +221,9 @@ function onGlobalKeydown(e: KeyboardEvent) {
   }
 
   if (e.key !== 'Escape') return
-  if (showTranslate.value) {
+  if (showCommandPalette.value) {
+    showCommandPalette.value = false
+  } else if (showTranslate.value) {
     showTranslate.value = false
   } else if (showAI.value) {
     showAI.value = false
@@ -374,6 +432,12 @@ watch(
     <HistoryDialog :show="showHistory" @close="showHistory = false" />
     <BookmarksDialog :show="showBookmarks" @close="showBookmarks = false" />
     <SessionDialog :show="showSessions" @close="showSessions = false" />
+    <CommandPalette
+      :show="showCommandPalette"
+      @close="showCommandPalette = false"
+      @command="onPaletteCommand"
+      @ask-ai="onPaletteAskAi"
+    />
     <AppToast />
     <!-- 启动锁屏已迁移到 Rust/GTK 层（lib.rs），不在此处重复实现 -->
   </div>
