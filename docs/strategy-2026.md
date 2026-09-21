@@ -167,7 +167,7 @@
 | # | 验证项 | 用途 | 若不可行的退路 | 状态 |
 |---|---|---|---|---|
 | 1 | 引擎升级可行性 | 阶段 0 起点 | — | ✅ **实测：不可行**（系统源冻结 2.52.3）→ 改为版本跟踪 |
-| 2 | WebAuthn/Passkeys 在 WebKitGTK 的可用性 | 阶段 2 | 降级为"密码管理器增强" | ⚠️ 部分完成（引擎有实现，需运行时实测平台认证器） |
+| 2 | WebAuthn/Passkeys 在 WebKitGTK 的可用性 | 阶段 2 | 降级为"密码管理器增强" | ✅ **实测完成（2026-09-21）**：页面探针 `typeof PublicKeyCredential === "undefined"` → 引擎二进制含 WebAuthn 符号但**未在 JS 层暴露**，Passkeys 不可用 → 按预案**降级为密码管理器增强** |
 | 3 | `send-request` 信号可改请求头 | GPC 实现 | — | ✅ **实测：可行**（web process extension `send-request` + 可变 `SoupMessageHeaders`） |
 | 4 | WebKitWebProcessExtension 能力边界（能否网络层拦截） | 阶段 3 扩展体系 | 维持注入式 + 自研规则 | ✅ **spike 完成（2026-09-21）**：`WebKitWebPage::send-request` 支持改请求/取消 → 网络层拦截**可行**，走独立 Web 进程扩展 .so（裸 FFI，非 chrome.*）；详见 [spike-extension-capabilities-2026-09-21.md](spike-extension-capabilities-2026-09-21.md) |
 | 5 | WebGPU 在 2.54 的启用状态 | 平台能力 | 保持指纹防护定位 | ✅ **实测：引擎有、无公开开关** → 不作依赖 |

@@ -1644,10 +1644,52 @@ App.vue 监听空间色 → 全局 `--accent`。
 
 ---
 
-## 下一步（截至第五十七章）
+## 第五十八章（阶段 3.2）：用户脚本生态（Tampermonkey 风格）— c64b6bd
+
+**背景一句话**：用户可添加/编辑/启停/删除用户脚本，按 matches 匹配页面注入 JS。
+
+**交付**：迁移 v13 `userscripts`；`db/userscripts.rs`（CRUD + 注入缓存）；`inject_extensions`
+搭车注入（按 matches 作 allow_list）；前端 `UserscriptsDialog.vue` + 地址栏 📜 按钮 + 命令栏命令。
+
+**踩坑（重要）**：首版在注入路径里 `block_on` 查 DB → **panic**（inject 跑在 tokio 上下文，
+"cannot start a runtime from within a runtime"）。**改成同步注入缓存**（CRUD 后 + 启动时刷新）。
+
+**运行实证**：插入 `console.log('[userscript-test] …')` 后重启，日志出现 `CONSOLE LOG [userscript-test] …`。
+
+---
+
+## 第五十九章（渲染修复）：禁用 WebKitGTK DMA-BUF 渲染器 — b844b08
+
+**背景一句话**：看视频时画面闪烁（历史遗留，用户一直没说）。
+
+**根因**：WebKitGTK 2.42+ 默认走 **DMA-BUF 渲染路径**，在部分核显（本机 Intel HD 630 / i915）
+上与驱动配合不良 → 网页/视频闪烁（社区公认问题）。
+
+**修复**：`run()` 最前面（WebKit 初始化前）设 `WEBKIT_DISABLE_DMABUF_RENDERER=1`，回退共享内存渲染；
+可用环境变量覆盖（设 0 保留 DMA-BUF）。
+
+**验证**：WebKit 子进程环境确含该变量（注意父进程 `/proc/<pid>/environ` 是启动快照，要查子进程）；
+用户实测**不再闪烁**。
+
+**诊断方法论**：先隔离最近改动（临时停扩展/脚本）→ 确认历史遗留 → 查渲染路径/驱动（env 开关）。
+
+---
+
+## 第六十章（阶段 2 收尾）：Passkeys 运行时实测 — 结论：不可用
+
+**背景一句话**：阶段 2 最后一块——WebKitGTK 能否用 Passkeys？用用户脚本探针在真页面实测。
+
+**方法**：借第 58 章的用户脚本能力，注入探针查 `PublicKeyCredential` 与平台认证器。
+
+**结论**：`PublicKeyCredential=false`（JS 层**未暴露** WebAuthn）→ **Passkeys 不可用**，
+按战略预案**降级为「密码管理器增强」**（strategy 风险登记第 2 项已更新为 ✅ 实测完成）。
+
+---
+
+## 下一步（截至第六十章）
 
 - **扩展体系**：.so 生产打包（正式版带扩展）；GPC 开关化。
-- **阶段 3 剩余**：用户脚本生态（Tampermonkey 风格）、自动化/工作流。
-- **阶段 2 收尾**：Passkeys 运行时实测（引擎有 WebAuthn 实现，平台认证器待验）。
-- **工程**：HANDOFF 逐章记录机制（已补至 57 章，后续每章随提交更新）。
+- **阶段 3 剩余**：自动化/工作流（Agent 编排、定时任务、批量操作）。
+- **渲染**：若后续在别的机器上 DMA-BUF 正常，可用 env 覆盖保留性能。
+- **工程**：HANDOFF 逐章记录机制（已补至 60 章，后续每章随提交更新）。
 
