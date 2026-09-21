@@ -221,11 +221,14 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
             return;
         }
     };
-    let path = v
-        .get("path")
-        .and_then(|x| x.as_str())
-        .unwrap_or("")
-        .to_string();
+    // path 规范化：旧通道是 `shift://__translate__/` + path（前缀带斜杠），故 JS 传的 path
+    // 可能**不带**前导斜杠（如 "whole-page"）——统一补上，避免"未知路径"。
+    let path_raw = v.get("path").and_then(|x| x.as_str()).unwrap_or("");
+    let path = if path_raw.starts_with('/') {
+        path_raw.to_string()
+    } else {
+        format!("/{}", path_raw)
+    };
     let callback = v
         .get("callback")
         .and_then(|x| x.as_str())
@@ -278,6 +281,11 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
         }
         "/batch" => {
             let texts_json = params.get("texts").cloned().unwrap_or_default();
+            log::info!(
+                "[translate-native] 批量翻译请求: label={} bytes={}",
+                label,
+                texts_json.len()
+            );
             tauri::async_runtime::spawn(async move {
                 let texts: Vec<String> = match serde_json::from_str(&texts_json) {
                     Ok(v) => v,
@@ -328,6 +336,7 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
             });
         }
         "/whole-page" => {
+            log::info!("[translate-native] 整页翻译请求: label={}", label);
             let label2 = label.clone();
             tauri::async_runtime::spawn(async move {
                 if let Some(wv) = app_clone.get_webview(&label2) {
