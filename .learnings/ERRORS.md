@@ -186,4 +186,13 @@ webkit2gtk::WebInspectorExt::show(&inspector);
 **正确**: 在 WebKit 初始化**之前**设环境变量 `WEBKIT_DISABLE_DMABUF_RENDERER=1`，回退到共享内存渲染路径。本项目放在 `lib.rs::run()` 最前面（已有环境变量先例）。
 **验证**: `/proc/<WebKitWebProcess>/environ` 确含该变量（注意：**父进程 `/proc/<pid>/environ` 是启动时快照，`set_var` 之后不反映**，要查 WebKit 子进程才看得到）。
 **预防**: 遇到"画面闪烁/黑屏/撕裂"类**渲染层**问题，先怀疑 **DMA-BUF 渲染器**（WebKitGTK 2.42+ 的已知坑），而不是业务代码。诊断顺序：先隔离最近改动 → 若历史就存在 → 查渲染路径/驱动（env 开关、`glxinfo`、i915）。
+
+## 2026-09-21 — 翻译在带 CSP 的站点失效：页面内请求受站点 CSP 约束
+
+**类别**: correction
+**场景**: 翻译功能"不能用了"——带 CSP 的站点上整页/划词翻译没反应（地址栏进度条也不出现）。
+**根因**: 翻译脚本用 `img.src = 'shift://__translate__/…'`（图片加载）调后端，**受站点 CSP 的 img-src 约束**；主流站点普遍带 CSP → 浏览器在页面层直接拒绝（`Refused to load shift://… because it does not appear in the img-src directive`），请求根本没到后端（日志里连一次翻译 API 调用都没有）。**不是引擎/网络/翻译服务的问题**。
+**正确**: 改用 **WebKit 原生脚本消息处理器**（`window.webkit.messageHandlers.<name>.postMessage` + `UserContentManager::register_script_message_handler` / `connect_script_message_received`）——**原生消息不走页面 CSP**；保留 `img.src` 作降级。
+**二次坑（最值得记）**: 换桥后仍"没反应"——**path 规范化**问题：旧通道前缀自带斜杠（`shift://__translate__/` + path），JS 传的 path **不带**斜杠（`whole-page`），新 handler 按 `/whole-page` 匹配 → 全部落进"未知路径"**静默丢弃**。教训：**换传输层时，参数格式（前导斜杠/编码/命名）必须跟旧通道对齐**。
+**预防**: ①**页面内 JS 发起的任何请求都受站点 CSP 约束**（img-src/connect-src/script-src…）——需要"页面→宿主"通信时**优先原生桥**，别用 img/fetch；②新通道上线前**先加链路日志**（请求进来 / 分发 / 结果），否则"静默丢弃"最难查；③CSP 问题的诊断信号：日志里的 `Refused to load … because it does not appear in the … directive`。
 ---
