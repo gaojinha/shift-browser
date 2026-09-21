@@ -8,6 +8,7 @@ mod extensions;
 mod feed;
 mod gpc;
 mod auto_tasks;
+mod api;
 mod mcp_cmd;
 mod netmon;
 mod newtab;
@@ -1016,6 +1017,9 @@ pub fn run() {
 
       // 定时任务调度器（阶段3 自动化：设置驱动的后台任务）
       auto_tasks::spawn(app.handle().clone());
+
+      // 本地开放 API（阶段4 开放生态：Unix 域套接字 + 行式 JSON）
+      api::spawn(app.handle().clone());
 
       // Linux：手动设置 WebKit web extensions 目录（tauri://localhost 协议依赖 web extension）
       // Tauri 2 不会自动设置 extensions_path，必须手动指定，否则前端资源加载失败

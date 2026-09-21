@@ -272,7 +272,7 @@ impl TabManager {
         uuid::Uuid::new_v4().to_string()
     }
 
-    fn all_tabs(&self) -> Vec<Tab> {
+    pub fn all_tabs(&self) -> Vec<Tab> {
         let tabs = self.tabs.lock().unwrap_or_else(|e| e.into_inner());
         let order = self.order.lock().unwrap_or_else(|e| e.into_inner());
         order
