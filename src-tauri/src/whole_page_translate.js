@@ -8,6 +8,33 @@
 //   4. 右上角浮层显示进度
 // 注意：本脚本被 eval 到任意第三方页面，变量全部挂 window.__shift_wpt_* 避免污染，
 // 且用 IIFE 包裹；不依赖任何页面全局。
+// 翻译传输（CSP 免疫）：优先 WebKit 原生桥 window.webkit.messageHandlers.shiftTranslate
+// （原生消息不受站点 CSP 约束）；无桥则回退 shift:// Image（老站点/降级）。
+if (!window.__sbTrSend) {
+  window.__sbTrSend = function (path, params, callback) {
+    try {
+      if (
+        window.webkit &&
+        window.webkit.messageHandlers &&
+        window.webkit.messageHandlers.shiftTranslate
+      ) {
+        window.webkit.messageHandlers.shiftTranslate.postMessage(
+          JSON.stringify({ path: path, params: params || {}, callback: callback || '' })
+        );
+        return;
+      }
+    } catch (e) {}
+    var q = 'callback=' + encodeURIComponent(callback || '');
+    for (var k in params) {
+      if (Object.prototype.hasOwnProperty.call(params, k)) {
+        q += '&' + k + '=' + encodeURIComponent(params[k]);
+      }
+    }
+    var img = new Image();
+    img.src = 'shift://__translate__/' + path + '?' + q;
+  };
+}
+
 (function () {
   if (window.__shift_wpt_active) return;
   window.__shift_wpt_active = true;
@@ -53,14 +80,13 @@
   function reportProgress(state, pct, info, fails) {
     try {
       var el = Math.round((Date.now() - startedAt) / 1000);
-      var q = 'state=' + state + '&elapsed=' + el;
-      if (pct !== undefined && pct !== null) q += '&pct=' + pct;
-      if (info) q += '&info=' + encodeURIComponent(info);
-      if (fails) q += '&fails=' + fails;
+      var pp = { state: state, elapsed: el };
+      if (pct !== undefined && pct !== null) pp.pct = pct;
+      if (info) pp.info = info;
+      if (fails) pp.fails = fails;
       // 预计剩余秒数：按当前进度线性外推
-      if (pct > 0 && pct < 100) q += '&eta=' + Math.round(el * (100 - pct) / pct);
-      var im = new Image();
-      im.src = 'shift://__translate__/progress?' + q;
+      if (pct > 0 && pct < 100) pp.eta = Math.round((el * (100 - pct)) / pct);
+      window.__sbTrSend('/progress', pp, '');
     } catch (e) {}
   }
 
@@ -138,10 +164,8 @@
     var key = 'shift_cache_wpt_' + cb;
     try { window[key] = null; } catch (e) {}
 
-    // 通过 Image().src 触发（shift handler 同步返回 1x1 gif）
-    var payload = encodeURIComponent(JSON.stringify(slice));
-    var img = new Image();
-    img.src = 'shift://__translate__/batch?callback=' + cb + '&texts=' + payload;
+    // 通过原生桥（CSP 免疫）触发；无桥则回退 shift:// Image
+    window.__sbTrSend('/batch', { texts: JSON.stringify(slice) }, cb);
 
     var waited = 0;
     var timer = setInterval(function () {

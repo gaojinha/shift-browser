@@ -975,6 +975,8 @@ fn inject_extensions(
     // 缓存由用户脚本 CRUD 后 + 启动时刷新。
     let user_scripts: Vec<(String, Vec<String>)> = crate::db::userscripts::cached_scripts();
     log::info!("[extensions] 用户脚本缓存 {} 个", user_scripts.len());
+    // 翻译原生桥要 AppHandle（闭包需 'static，不能借用 app，故闭包外先克隆）
+    let app_for_bridge_all = app.clone();
     let _ = app.run_on_main_thread(move || {
         // 引擎层内容过滤器：如有规则变更，在主线程编译（编译完成会回来触发一次重新注入）
         crate::engine::content_filter::compile_pending();
@@ -991,14 +993,41 @@ fn inject_extensions(
             }
             let items_clone = items_owned.clone();
             let user_scripts_clone = user_scripts.clone();
+            let app_for_bridge = app_for_bridge_all.clone();
+            let label_for_bridge = wv.label().to_string();
             let _ = wv.with_webview(move |pwv| {
                 let webview = pwv.inner();
                 let Some(manager) = webview.user_content_manager() else {
                     return;
                 };
-                // 引擎级内容过滤器（网络层规则拦截）：开启时挂载，关闭时移除。
-                // 与脚本/样式注入相互独立——它拦的是"请求"，不是"渲染结果"。
                 crate::engine::content_filter::apply_to_manager(&manager);
+                // 翻译原生桥（CSP 免疫 · 2026-09-21）：注册脚本消息处理器。
+                // 站点 CSP 的 img-src 会拦 `img.src='shift://__translate__/…'`，故翻译脚本改走
+                // 原生消息（不受 CSP 约束）。按 webview label 去重，避免重复连接累积。
+                {
+                    use std::collections::HashSet;
+                    use std::sync::{Mutex, OnceLock};
+                    static BRIDGED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+                    let first = BRIDGED
+                        .get_or_init(|| Mutex::new(HashSet::new()))
+                        .lock()
+                        .map(|mut s| s.insert(label_for_bridge.clone()))
+                        .unwrap_or(false);
+                    if first && manager.register_script_message_handler("shiftTranslate") {
+                        let app_msg = app_for_bridge.clone();
+                        let label_msg = label_for_bridge.clone();
+                        manager.connect_script_message_received(
+                            Some("shiftTranslate"),
+                            move |_mgr, res| {
+                                if let Some(v) = res.js_value() {
+                                    let raw = v.to_string();
+                                    crate::native_translate_handle(&app_msg, &label_msg, &raw);
+                                }
+                            },
+                        );
+                        log::info!("[translate-native] 原生桥已注册: {}", label_for_bridge);
+                    }
+                }
                 manager.remove_all_scripts();
                 manager.remove_all_style_sheets();
                 // WebMCP polyfill 试验（阶段 1.5）：document_start 注入（网站脚本

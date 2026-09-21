@@ -12,6 +12,33 @@
 //   请求：shift://__translate__/{text|whole-page}?callback=NAME[&text=...]
 //   回写：后端 eval `window.NAME = {text} | {error}`，前端轮询取值
 //   触发：Image().src（shift handler 同步返回 1x1 gif，不阻塞页面）
+// 翻译传输（CSP 免疫）：优先 WebKit 原生桥 window.webkit.messageHandlers.shiftTranslate
+// （原生消息不受站点 CSP 约束）；无桥则回退 shift:// Image（老站点/降级）。
+if (!window.__sbTrSend) {
+  window.__sbTrSend = function (path, params, callback) {
+    try {
+      if (
+        window.webkit &&
+        window.webkit.messageHandlers &&
+        window.webkit.messageHandlers.shiftTranslate
+      ) {
+        window.webkit.messageHandlers.shiftTranslate.postMessage(
+          JSON.stringify({ path: path, params: params || {}, callback: callback || '' })
+        );
+        return;
+      }
+    } catch (e) {}
+    var q = 'callback=' + encodeURIComponent(callback || '');
+    for (var k in params) {
+      if (Object.prototype.hasOwnProperty.call(params, k)) {
+        q += '&' + k + '=' + encodeURIComponent(params[k]);
+      }
+    }
+    var img = new Image();
+    img.src = 'shift://__translate__/' + path + '?' + q;
+  };
+}
+
 (function () {
   if (window.__shiftTranslateMenu) return;
   window.__shiftTranslateMenu = true;
@@ -23,15 +50,9 @@
   function callTranslate(path, params, cb) {
     var name = '__sb_tr_' + Date.now() + '_' + (++seq);
     window[name] = null;
-    var q = 'callback=' + name;
-    for (var k in params) {
-      if (Object.prototype.hasOwnProperty.call(params, k)) {
-        q += '&' + k + '=' + encodeURIComponent(params[k]);
-      }
-    }
     try {
-      var img = new Image();
-      img.src = 'shift://__translate__/' + path + '?' + q;
+      // 原生桥（CSP 免疫）优先；无桥回退 shift:// Image
+      window.__sbTrSend(path, params, name);
     } catch (e) {
       cb({ error: '无法发起翻译请求: ' + e });
       return;

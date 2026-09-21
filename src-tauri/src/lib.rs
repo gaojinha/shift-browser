@@ -202,6 +202,180 @@ fn valid_callback(cb: &str) -> bool {
     !cb.is_empty() && cb.len() <= 64 && cb.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
+/// 原生桥翻译处理（CSP 免疫 · 2026-09-21）
+///
+/// 背景：翻译脚本原先用 `img.src = 'shift://__translate__/…'` 调后端，但**图片加载受站点
+/// CSP 的 img-src 约束**——主流站点普遍带 CSP，导致整页/划词翻译在页面层被浏览器直接拒绝
+/// （`Refused to load shift://… because it does not appear in the img-src directive`）。
+///
+/// 修复：改用 **WebKit 原生脚本消息处理器**（`window.webkit.messageHandlers.shiftTranslate`）——
+/// 原生消息不走页面 CSP。JS 发 JSON 字符串：`{"path":"/batch","params":{…},"callback":"__sb_tr_x"}`，
+/// 结果仍用 `write_translate_result` 写回页面全局变量（与旧通道一致）。
+///
+/// 与旧通道**并存**：老站点（无 CSP）继续走 `shift://`，双通道更稳。
+pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &str, raw: &str) {
+    let v: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("[translate-native] 消息 JSON 非法: {}", e);
+            return;
+        }
+    };
+    let path = v
+        .get("path")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let callback = v
+        .get("callback")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let params: std::collections::HashMap<String, String> = v
+        .get("params")
+        .and_then(|x| x.as_object())
+        .map(|o| {
+            o.iter()
+                .map(|(k, val)| (k.clone(), val.as_str().unwrap_or("").to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if path != "/progress" && !valid_callback(&callback) {
+        log::warn!("[translate-native] 非法 callback 拒绝: {:?}", callback);
+        return;
+    }
+    if path != "/progress" && translate_rate_limited(webview_label) {
+        let payload = serde_json::json!({ "error": "翻译请求过于频繁，请稍后再试" });
+        write_translate_result(app, webview_label, &callback, &payload);
+        return;
+    }
+    let app_clone = app.clone();
+    let label = webview_label.to_string();
+    match path.as_str() {
+        "/text" => {
+            let text = params.get("text").cloned().unwrap_or_default();
+            if text.len() > 5000 {
+                let payload = serde_json::json!({ "error": "待翻译文本过长（>5000 字符）" });
+                write_translate_result(&app_clone, &label, &callback, &payload);
+                return;
+            }
+            tauri::async_runtime::spawn(async move {
+                let (engine, timeout) = match app_clone.try_state::<Db>() {
+                    Some(db) => (
+                        translate::current_engine(db.inner()).await,
+                        translate::current_timeout(db.inner()).await,
+                    ),
+                    None => ("google".to_string(), 15),
+                };
+                let payload =
+                    match translate::translate_with(&text, "zh-CN", &engine, timeout).await {
+                        Ok(t) => serde_json::json!({ "text": t }),
+                        Err(e) => serde_json::json!({ "error": e }),
+                    };
+                write_translate_result(&app_clone, &label, &callback, &payload);
+            });
+        }
+        "/batch" => {
+            let texts_json = params.get("texts").cloned().unwrap_or_default();
+            tauri::async_runtime::spawn(async move {
+                let texts: Vec<String> = match serde_json::from_str(&texts_json) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let payload = serde_json::json!({ "error": format!("参数解析失败: {}", e) });
+                        write_translate_result(&app_clone, &label, &callback, &payload);
+                        return;
+                    }
+                };
+                if texts.len() > 20 || texts.iter().any(|t| t.len() > 2000) {
+                    let payload =
+                        serde_json::json!({ "error": "批量翻译参数超限（≤20 段、每段 ≤2000 字符）" });
+                    write_translate_result(&app_clone, &label, &callback, &payload);
+                    return;
+                }
+                let mut out: Vec<String> = vec![String::new(); texts.len()];
+                let (engine, target, timeout) = match app_clone.try_state::<Db>() {
+                    Some(db) => (
+                        translate::current_engine(db.inner()).await,
+                        translate::current_target(db.inner()).await,
+                        translate::current_timeout(db.inner()).await,
+                    ),
+                    None => ("google".to_string(), "zh-CN".to_string(), 15),
+                };
+                for chunk_start in (0..texts.len()).step_by(5) {
+                    let chunk_end = (chunk_start + 5).min(texts.len());
+                    let mut handles = Vec::new();
+                    for (offset, t) in texts[chunk_start..chunk_end].iter().enumerate() {
+                        let i = chunk_start + offset;
+                        let t = t.clone();
+                        let eng = engine.clone();
+                        let tgt = target.clone();
+                        handles.push((
+                            i,
+                            tauri::async_runtime::spawn(async move {
+                                translate::translate_with(&t, &tgt, &eng, timeout).await
+                            }),
+                        ));
+                    }
+                    for (i, h) in handles {
+                        if let Ok(Ok(t)) = h.await {
+                            out[i] = t;
+                        }
+                    }
+                }
+                let payload = serde_json::json!({ "texts": out });
+                write_translate_result(&app_clone, &label, &callback, &payload);
+            });
+        }
+        "/whole-page" => {
+            let label2 = label.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Some(wv) = app_clone.get_webview(&label2) {
+                    if let Err(e) = wv.eval(WHOLE_PAGE_TRANSLATE_JS) {
+                        let payload =
+                            serde_json::json!({ "error": format!("脚本注入失败: {}", e) });
+                        write_translate_result(&app_clone, &label2, &callback, &payload);
+                    }
+                }
+            });
+        }
+        "/progress" => {
+            {
+                let cell = PROGRESS_THROTTLE
+                    .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+                let mut map = cell.lock().unwrap_or_else(|e| e.into_inner());
+                let now = std::time::Instant::now();
+                if let Some(t0) = map.get(&label).copied() {
+                    if now.duration_since(t0).as_millis() < 300 {
+                        return;
+                    }
+                }
+                map.insert(label.clone(), now);
+            }
+            let p = params.clone();
+            let app_p = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let engine = match app_p.try_state::<Db>() {
+                    Some(db) => translate::current_engine(db.inner()).await,
+                    None => "google".to_string(),
+                };
+                let num = |k: &str| p.get(k).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+                let payload = serde_json::json!({
+                  "state": p.get("state").cloned().unwrap_or_else(|| "update".to_string()),
+                  "engine": if engine == "bing" { "Bing" } else { "Google" },
+                  "pct": num("pct"),
+                  "info": p.get("info").cloned().unwrap_or_default(),
+                  "elapsed": num("elapsed"),
+                  "eta": num("eta"),
+                  "fails": num("fails"),
+                });
+                let _ = app_p.emit("translate-progress", payload);
+            });
+        }
+        _ => log::warn!("[translate-native] 未知路径: {}", path),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // ===== 画面闪烁修复：禁用 WebKitGTK 的 DMA-BUF 渲染器 =====
