@@ -9,9 +9,14 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/src-tauri/web-extension"
-DEST="$ROOT/src-tauri/target/release"
+DEST="$ROOT/src-tauri/target/release"          # 开发/便携运行：web extensions 目录 = exe 目录
+RES="$ROOT/src-tauri/resources"                # 生产打包：进 Tauri bundle.resources
 
 cargo build --release --manifest-path "$SRC/Cargo.toml"
 cp "$SRC/target/release/libshift_web_extension.so" "$DEST/"
-echo "✅ 扩展已构建并拷到 $DEST/libshift_web_extension.so"
+mkdir -p "$RES"
+cp "$SRC/target/release/libshift_web_extension.so" "$RES/"
+echo "✅ 扩展已构建并拷到："
+echo "   · $DEST/libshift_web_extension.so（开发运行用，web extensions 目录）"
+echo "   · $RES/libshift_web_extension.so（生产打包用，Tauri bundle.resources）"
 echo "   重启浏览器后生效。"

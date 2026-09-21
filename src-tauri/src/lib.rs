@@ -1026,6 +1026,22 @@ pub fn run() {
         if let Some(context) = WebContext::default() {
           if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
+              // 打包兜底：web extensions 目录 = exe 目录；打包后扩展 .so 进的是资源目录，
+              // 若 exe 目录没有就复制过去（开发/便携运行下 .so 本就在 exe 目录，跳过）。
+              let target = dir.join("libshift_web_extension.so");
+              if !target.exists() {
+                if let Ok(res) = app.path().resource_dir() {
+                  let src = res.join("libshift_web_extension.so");
+                  if src.exists() {
+                    match std::fs::copy(&src, &target) {
+                      Ok(_) => {
+                        log::info!("[ShiftBrowser] 扩展 .so 已从资源目录复制到 exe 目录")
+                      }
+                      Err(e) => log::warn!("[ShiftBrowser] 扩展 .so 复制失败: {}", e),
+                    }
+                  }
+                }
+              }
               context.set_web_extensions_directory(&dir.display().to_string());
               log::info!("[ShiftBrowser] web extensions 目录: {}", dir.display());
             }

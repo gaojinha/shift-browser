@@ -6,6 +6,8 @@ dist/
 src-tauri/target/
 # Web 进程扩展（独立 cdylib crate）的构建产物
 src-tauri/web-extension/target/
+# 扩展 .so 的打包资源（构建时由 scripts/build-extension.sh 生成；只排除 .so，保留其它资源）
+src-tauri/resources/libshift_web_extension.so
 
 # 系统
 .DS_Store
