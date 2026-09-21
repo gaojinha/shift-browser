@@ -2211,6 +2211,9 @@ pub async fn minimize_window(app: AppHandle) -> Result<(), String> {
 /// 关闭主窗口（标题栏/标签栏合并后的窗口控制按钮）
 #[tauri::command]
 pub async fn close_window(app: AppHandle) -> Result<(), String> {
+    // 前端「退出」按钮是明确要退出，先置真退出标志，
+    // 否则会被「关窗=缩托盘」的 delete-event 拦截，变成只隐藏。
+    crate::tray::REAL_QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
     let window = app
         .get_window("main")
         .ok_or_else(|| "主窗口不存在".to_string())?;

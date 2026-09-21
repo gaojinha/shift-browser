@@ -451,6 +451,14 @@ onMounted(async () => {
     showSettings.value = true
   }).catch(() => {})
 
+  // 系统托盘菜单 → 打开面板（Rust 侧 emit，见 tray.rs）
+  listen('tray-open-downloads', () => {
+    openPanel('downloads')
+  }).catch(() => {})
+  listen('tray-open-passwords', () => {
+    openPanel('passwords')
+  }).catch(() => {})
+
   // GTK 窗口层转发的全局快捷键：页面（child webview）持焦时，前端 keydown 收不到按键，
   // 由 Rust 在 GTK 顶层窗口拦截后发事件过来（见 tabs.rs 的 UI_FOCUSED 焦点跟踪）。
   listen<string>('global-shortcut', (ev) => {

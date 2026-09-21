@@ -47,6 +47,7 @@ ammonia = "4"
 url = "2"
 # 系统文件对话框（XDG portal，走 DBus，不依赖 GTK 主线程）
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+ksni = "0.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", features = ["v3_24"] }
