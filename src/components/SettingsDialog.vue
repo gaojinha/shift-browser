@@ -1440,7 +1440,7 @@ async function onRemoveKeyword(k: string) {
               </div>
               <div class="kw-block" style="margin-top: 10px">
                 <div class="kw-hint">
-                  <b>上云 E2E 加密同步（服务器零知识）</b>：把<strong>密码库 + 书签</strong>加密推送到
+                  <b>上云 E2E 加密同步（服务器零知识）</b>：把<strong>密码库 + 书签 + 会话</strong>加密推送到
                   自建 Nextcloud（WebDAV）。同步包用<strong>主密码</strong>整包加密，服务器只存密文，
                   没主密码谁也解不开。须先设主密码并解锁。
                   <span v-if="syncStatus">

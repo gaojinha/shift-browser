@@ -236,12 +236,30 @@ async fn export_payload(db: &Db) -> DbResult<Vec<u8>> {
         })
         .collect();
 
+    // 会话（阶段4 多端协同）：标签集跨端；按 (name, created_at) 去重，最多带 50 条
+    let se_rows = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT name, data, created_at FROM sessions ORDER BY id DESC LIMIT 50",
+    )
+    .fetch_all(&db.pool)
+    .await?;
+    let sessions: Vec<serde_json::Value> = se_rows
+        .into_iter()
+        .map(|(name, data, created_at)| {
+            serde_json::json!({
+                "name": name,
+                "data": data,
+                "created_at": created_at,
+            })
+        })
+        .collect();
+
     let exported_at = now_str(db).await;
     let payload = serde_json::json!({
-        "version": 2,
+        "version": 3,
         "exported_at": exported_at,
         "entries": entries,
         "bookmarks": bookmarks,
+        "sessions": sessions,
     });
     serde_json::to_vec(&payload).map_err(|e| DbError::Other(format!("导出序列化失败: {}", e)))
 }
@@ -344,6 +362,37 @@ async fn import_payload(db: &Db, plain: &[u8]) -> DbResult<usize> {
             count += 1;
         }
     }
+
+    // 会话合并（阶段4 · 版本 3 起）：按 (name, created_at) 去重；workspace 不跨端（置空）。
+    if let Some(ss) = v.get("sessions").and_then(|s| s.as_array()) {
+        for s in ss {
+            let name = s.get("name").and_then(|x| x.as_str()).unwrap_or("");
+            let created_at = s.get("created_at").and_then(|x| x.as_str()).unwrap_or("");
+            let data = s.get("data").and_then(|x| x.as_str()).unwrap_or("");
+            if name.is_empty() || created_at.is_empty() || data.is_empty() {
+                continue;
+            }
+            let exists: Option<(i64,)> =
+                sqlx::query_as("SELECT id FROM sessions WHERE name = ? AND created_at = ? LIMIT 1")
+                    .bind(name)
+                    .bind(created_at)
+                    .fetch_optional(&db.pool)
+                    .await?;
+            if exists.is_some() {
+                continue;
+            }
+            sqlx::query(
+                "INSERT INTO sessions (name, workspace_id, data, created_at) VALUES (?, NULL, ?, ?)",
+            )
+            .bind(name)
+            .bind(data)
+            .bind(created_at)
+            .execute(&db.pool)
+            .await
+            .map_err(|e| DbError::Other(format!("会话合并失败: {}", e)))?;
+            count += 1;
+        }
+    }
     Ok(count)
 }
 
@@ -416,7 +465,7 @@ pub async fn sync_push(db: tauri::State<'_, Db>) -> DbResult<String> {
                     .map(|a| a.len())
                     .unwrap_or(0)
             };
-            n("entries") + n("bookmarks")
+            n("entries") + n("bookmarks") + n("sessions")
         })
         .unwrap_or(0);
     let sealed = seal(&key, &payload)?;
@@ -451,7 +500,7 @@ pub async fn sync_push(db: tauri::State<'_, Db>) -> DbResult<String> {
     store.last_push_at = Some(now_str(&db).await);
     save_store(&db, &store, &key)?;
     Ok(format!(
-        "已加密推送 {} 项（密码库 + 书签）到云端（服务器仅见密文）",
+        "已加密推送 {} 项（密码库 + 书签 + 会话）到云端（服务器仅见密文）",
         count
     ))
 }
@@ -492,7 +541,7 @@ pub async fn sync_pull(db: tauri::State<'_, Db>) -> DbResult<String> {
     store.last_pull_at = Some(now_str(&db).await);
     save_store(&db, &store, &key)?;
     Ok(format!(
-        "已从云端合并 {} 项（密码库 + 书签，本地独有记录未删除）",
+        "已从云端合并 {} 项（密码库 + 书签 + 会话，本地独有记录未删除）",
         count
     ))
 }
@@ -528,6 +577,7 @@ mod tests {
             "CREATE TABLE passwords (id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT NOT NULL, username TEXT, password TEXT NOT NULL, notes TEXT, created_at TEXT, updated_at TEXT, UNIQUE(domain, username))",
             "CREATE TABLE bookmark_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, parent_id INTEGER, sort_order INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))",
             "CREATE TABLE bookmarks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, url TEXT NOT NULL, folder_id INTEGER, sort_order INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))",
+            "CREATE TABLE sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, workspace_id INTEGER, data TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))",
         ] {
             sqlx::query(ddl).execute(&pool).await.unwrap();
         }
@@ -549,16 +599,20 @@ mod tests {
             .await
             .unwrap();
         let payload = serde_json::json!({
-            "version": 2,
+            "version": 3,
             "entries": [],
             "bookmarks": [
                 {"title": "远端A", "url": "https://a.com", "folder": null},
                 {"title": "远端B", "url": "https://b.com", "folder": "工作"}
+            ],
+            "sessions": [
+                {"name": "自动保存", "data": "[]", "created_at": "2026-09-21 10:00:00"},
+                {"name": "自动保存", "data": "[]", "created_at": "2026-09-21 11:00:00"}
             ]
         });
         let plain = serde_json::to_vec(&payload).unwrap();
         let n = import_payload(&db, &plain).await.unwrap();
-        assert_eq!(n, 1, "只应新增 b.com（a.com 已存在）");
+        assert_eq!(n, 3, "b.com + 两个会话");
         let cnt: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM bookmarks")
             .fetch_one(&db.pool)
             .await
@@ -570,6 +624,11 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(f.0, 1, "文件夹应按名字 find-or-create");
+        let sc: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(sc.0, 2, "两个会话应按 (name, created_at) 合并入库");
         // 重复导入幂等（a.com 仍在、b.com 已存在 → 0）
         let n2 = import_payload(&db, &plain).await.unwrap();
         assert_eq!(n2, 0);
