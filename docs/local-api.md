@@ -42,6 +42,8 @@ curl -s -X POST http://127.0.0.1:19701/api -H "Authorization: Bearer $TOKEN" \
 | `{"cmd":"switch_tab","id":"…"}` | `{"ok":true,"data":Tab\|null}` | 切换活动标签 |
 | `{"cmd":"reload_tab","id":"…"}` | `{"ok":true,"data":Tab\|null}` | 刷新标签 |
 | `{"cmd":"navigate","id":"…","url":"…"}` | `{"ok":true,"data":Tab\|null}` | 让指定标签导航到网址 |
+| `{"cmd":"search","query":"…"}` | `{"ok":true,"data":Tab}` | 用当前搜索引擎搜（新标签打开） |
+| `{"cmd":"new_tab"}` | `{"ok":true,"data":Tab}` | 打开内置新标签页 |
 
 出错时：`{"ok":false,"error":"…"}`。
 

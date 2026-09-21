@@ -26,6 +26,20 @@ pub fn socket_path(app: &AppHandle) -> Option<PathBuf> {
     Some(db.vault_path.with_file_name("api.sock"))
 }
 
+/// 最小 percent-encode（查询串用；不引额外依赖）
+fn url_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
 /// 起 API 服务（lib.rs setup 调用）
 pub fn spawn(app: AppHandle) {
     let Some(path) = socket_path(&app) else {
@@ -259,6 +273,53 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };
             match crate::tabs::navigate_tab(app.clone(), state, id, url).await {
+                Ok(t) => json!({"ok": true, "data": t}),
+                Err(e) => json!({"ok": false, "error": e}),
+            }
+        }
+        "search" => {
+            let q = req
+                .get("query")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if q.is_empty() {
+                return json!({"ok": false, "error": "缺少 query"});
+            }
+            // 读 search_engine 设置，拼搜索 URL（与 newtab/AddressBar 同映射）
+            let engine: String = {
+                let db = app.state::<crate::db::Db>();
+                sqlx::query_as::<_, (String,)>(
+                    "SELECT value FROM settings WHERE key = 'search_engine'",
+                )
+                .fetch_optional(&db.pool)
+                .await
+                .ok()
+                .flatten()
+                .map(|(v,)| v)
+                .unwrap_or_else(|| "bing".to_string())
+            };
+            let (base, param) = match engine.as_str() {
+                "baidu" => ("https://www.baidu.com/s", "wd"),
+                "google" => ("https://www.google.com/search", "q"),
+                _ => ("https://www.bing.com/search", "q"),
+            };
+            let url = format!("{}?{}={}", base, param, url_encode(&q));
+            let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+                return json!({"ok": false, "error": "标签管理器不可用"});
+            };
+            match crate::tabs::create_tab(app.clone(), state, url).await {
+                Ok(t) => json!({"ok": true, "data": t}),
+                Err(e) => json!({"ok": false, "error": e}),
+            }
+        }
+        "new_tab" => {
+            let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+                return json!({"ok": false, "error": "标签管理器不可用"});
+            };
+            // 注意：Rust 侧 create_tab 需要绝对 URL，"newtab" 会解析失败 → 用 shift://newtab
+            match crate::tabs::create_tab(app.clone(), state, "shift://newtab".to_string()).await {
                 Ok(t) => json!({"ok": true, "data": t}),
                 Err(e) => json!({"ok": false, "error": e}),
             }
