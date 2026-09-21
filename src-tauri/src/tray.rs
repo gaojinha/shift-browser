@@ -20,8 +20,9 @@ use std::sync::OnceLock;
 /// 前端退出按钮 / 托盘「退出」菜单都会先置位再关窗。
 pub static REAL_QUIT: AtomicBool = AtomicBool::new(false);
 
-/// 应用图标（编译期嵌入 128x128 源图，不依赖运行时路径）
-const ICON_PNG: &[u8] = include_bytes!("../icons/128x128.png");
+/// 应用图标（编译期嵌入 512x512 主源图 icon.png，不依赖运行时路径；
+/// 与程序图标同源，缩放出的托盘小尺寸更清晰）
+const ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
 
 /// 托盘图标缓存（多尺寸，宿主按需挑；缩放/解码只做一次）
 static TRAY_ICONS: OnceLock<Vec<ksni::Icon>> = OnceLock::new();
