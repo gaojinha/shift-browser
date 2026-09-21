@@ -34,6 +34,8 @@ pub fn spawn(app: AppHandle) {
     };
     // 清理上次残留
     let _ = std::fs::remove_file(&path);
+    // 同时起本地 HTTP API（阶段4 自托管服务端套件最小版）——必须在下面 move app 之前克隆
+    spawn_http(app.clone());
     tauri::async_runtime::spawn(async move {
         let listener = match UnixListener::bind(&path) {
             Ok(l) => l,
@@ -72,6 +74,105 @@ pub fn spawn(app: AppHandle) {
                 }
                 Err(e) => log::warn!("[api] accept 失败: {}", e),
             }
+        }
+    });
+
+}
+
+/// HTTP API 端口（**仅 127.0.0.1**；局域网暴露需自行改绑并保管好 token）
+const HTTP_PORT: u16 = 19701;
+
+/// 确保 API token 存在（0600 落盘，与 vault.key/sync.key 同级），返回 token
+fn ensure_token(app: &AppHandle) -> Option<String> {
+    let db = app.try_state::<crate::db::Db>()?;
+    let path = db.vault_path.with_file_name("api-token");
+    if let Ok(t) = std::fs::read_to_string(&path) {
+        let t = t.trim().to_string();
+        if !t.is_empty() {
+            return Some(t);
+        }
+    }
+    let t = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    let _ = std::fs::write(&path, &t);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Some(t)
+}
+
+/// 起 HTTP API：`POST http://127.0.0.1:19701/api`，body 为同款 JSON 命令；
+/// 鉴权：`Authorization: Bearer <token>`（token 见 api-token 文件）。复用 `handle()`。
+fn spawn_http(app: AppHandle) {
+    let Some(token) = ensure_token(&app) else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let addr = format!("127.0.0.1:{}", HTTP_PORT);
+        let listener = match tokio::net::TcpListener::bind(&addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                log::warn!("[api] HTTP 绑定 {} 失败: {}", addr, e);
+                return;
+            }
+        };
+        log::info!(
+            "[api] HTTP API 已启动: http://{}/api（Bearer token 见 api-token 文件）",
+            addr
+        );
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                continue;
+            };
+            let app = app.clone();
+            let token = token.clone();
+            tauri::async_runtime::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = vec![0u8; 1 << 16];
+                let n = match stream.read(&mut buf).await {
+                    Ok(n) => n,
+                    Err(_) => return,
+                };
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let (head, body) = match req.find("\r\n\r\n") {
+                    Some(i) => (&req[..i], &req[i + 4..]),
+                    None => (req.as_str(), ""),
+                };
+                let path = head
+                    .lines()
+                    .next()
+                    .and_then(|l| l.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                let auth_ok = head.lines().any(|l| {
+                    l.to_ascii_lowercase().starts_with("authorization:")
+                        && l.splitn(2, ':')
+                            .nth(1)
+                            .map(|v| {
+                                v.trim().trim_start_matches("Bearer ").trim() == token.as_str()
+                            })
+                            .unwrap_or(false)
+                });
+                let resp = if path != "/api" && path != "/" {
+                    json!({"ok": false, "error": "请用 POST /api 发 JSON 命令"})
+                } else if !auth_ok {
+                    json!({"ok": false, "error": "未授权：需要 Authorization: Bearer <token>"})
+                } else {
+                    handle(&app, body.trim()).await
+                };
+                let body_out = serde_json::to_string(&resp).unwrap_or_else(|_| "{}".into());
+                let out = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body_out.len(),
+                    body_out
+                );
+                let _ = stream.write_all(out.as_bytes()).await;
+            });
         }
     });
 }

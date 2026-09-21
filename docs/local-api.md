@@ -9,6 +9,27 @@
 - **协议**：**行式 JSON**——每行一个请求 → 每行一个响应。
 - **路径**：`~/.local/share/com.shiftbrowser.app/api.sock`
 
+## 两种形态
+
+| 形态 | 地址 | 鉴权 | 用途 |
+|---|---|---|---|
+| **Unix 套接字** | `~/.local/share/com.shiftbrowser.app/api.sock` | 文件权限 0600 | 本机脚本/工具 |
+| **HTTP**（阶段4 自托管） | `http://127.0.0.1:19701/api` | `Authorization: Bearer <token>` | 浏览器扩展/HTTP 客户端等 |
+
+HTTP 形态**只绑 127.0.0.1**（不对外），token 随机生成、落 `api-token`（权限 0600）。
+两形态**命令完全一致**（同一套处理逻辑）。
+
+```bash
+TOKEN=$(cat ~/.local/share/com.shiftbrowser.app/api-token)
+curl -s -X POST http://127.0.0.1:19701/api -H "Authorization: Bearer $TOKEN" \
+     -d '{"cmd":"status"}'
+# → {"ok":true,"data":{"version":"…","tabs":N}}
+```
+无/错 token 返回 `{"ok":false,"error":"未授权…"}`。
+
+> 若要局域网暴露（手机/其它设备驱动），需自行把绑定地址改为 `0.0.0.0` 并**务必保管好 token**
+> （默认不开，避免误暴露）。
+
 ## 命令
 
 | 请求 | 响应 | 说明 |
