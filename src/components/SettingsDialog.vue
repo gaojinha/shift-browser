@@ -888,6 +888,18 @@ async function onRemoveKeyword(k: string) {
                 240-500MB），点击该标签时按原网址重新加载。标签开得多、内存吃紧时特别有用。
               </div>
               <div class="field">
+                <label>垂直标签栏</label>
+                <span class="field-desc">标签栏移到左侧竖排，适合多标签</span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('vertical_tabs') === 'true'"
+                    @change="onSet('vertical_tabs', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
                 <label>翻译源</label>
                 <div class="seg-group">
                   <button
@@ -968,18 +980,6 @@ async function onRemoveKeyword(k: string) {
                     type="checkbox"
                     :checked="settingsStore.get('show_bookmarks_bar') !== 'false'"
                     @change="onSet('show_bookmarks_bar', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-                  />
-                  <span class="slider"></span>
-                </label>
-              </div>
-              <div class="field">
-                <label>垂直标签栏</label>
-                <span class="field-desc">标签栏移到左侧竖排，适合多标签</span>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('vertical_tabs') === 'true'"
-                    @change="onSet('vertical_tabs', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
                   />
                   <span class="slider"></span>
                 </label>
