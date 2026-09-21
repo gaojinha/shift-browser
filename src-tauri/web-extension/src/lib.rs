@@ -26,6 +26,44 @@ extern "C" {
     ) -> u64;
     /// webkit2gtk：取请求的 URI（返回引擎内部字符串，勿释放）
     fn webkit_uri_request_get_uri(request: *mut c_void) -> *const c_char;
+    /// webkit2gtk：取请求的 SoupMessageHeaders
+    fn webkit_uri_request_get_http_headers(request: *mut c_void) -> *mut c_void;
+    /// libsoup3：替换请求头
+    fn soup_message_headers_replace(
+        headers: *mut c_void,
+        name: *const c_char,
+        value: *const c_char,
+    );
+    /// libsoup3：读请求头（校验用）
+    fn soup_message_headers_get_one(headers: *mut c_void, name: *const c_char) -> *const c_char;
+}
+
+/// GPC 头只打一次日志（避免每请求刷屏）
+static GPC_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 网络层 GPC：给请求加 `Sec-GPC: 1`（W3C Global Privacy Control）。
+/// 原先只注入了 JS 属性 `navigator.globalPrivacyControl`，**缺请求头**——这里补上。
+fn apply_gpc_header(request: *mut c_void) {
+    unsafe {
+        let headers = webkit_uri_request_get_http_headers(request);
+        if headers.is_null() {
+            return;
+        }
+        soup_message_headers_replace(
+            headers,
+            b"Sec-GPC\0".as_ptr() as *const c_char,
+            b"1\0".as_ptr() as *const c_char,
+        );
+        if !GPC_LOGGED.swap(true, Ordering::Relaxed) {
+            let v = soup_message_headers_get_one(headers, b"Sec-GPC\0".as_ptr() as *const c_char);
+            let vs = if v.is_null() {
+                "(null)".to_string()
+            } else {
+                CStr::from_ptr(v).to_string_lossy().to_string()
+            };
+            eprintln!("[shift-ext] 已注入 Sec-GPC: {}（网络层 GPC）", vs);
+        }
+    }
 }
 
 const SIG_PAGE_CREATED: &[u8] = b"page-created\0";
@@ -121,6 +159,8 @@ unsafe extern "C" fn on_send_request(
     if request.is_null() {
         return 0;
     }
+    // 网络层 GPC：给每个出网请求加 Sec-GPC: 1
+    apply_gpc_header(request);
     let uri_ptr = webkit_uri_request_get_uri(request);
     if uri_ptr.is_null() {
         return 0;

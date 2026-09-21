@@ -128,7 +128,11 @@ GIR（`WebKit2WebExtension-4.1.gir:48966`）：
 > **规则热更新已完成（2026-09-21）**：扩展起后台守护线程每 2 秒查规则文件 mtime，
 > 变了就重载（`RwLock` 存规则）。运行实证：改文件后不重启，日志即从"已加载 1 条规则"
 > 变为"已加载 2 条规则"。
-> 后续：请求头改写（需 SoupHeaders FFI）。
+> **请求头改写已完成（2026-09-21）**：扩展在 `send-request` 里经
+> `webkit_uri_request_get_http_headers` + `soup_message_headers_replace` 给每个出网请求注入
+> `Sec-GPC: 1`（网络层 GPC）——补上了原先只注入 JS 属性、**缺请求头**的缺口。
+> 运行实证：`[shift-ext] 已注入 Sec-GPC: 1（网络层 GPC）`（读回校验为 1）。
+> 后续：GPC 开关化（当前常开）、UA 策略等更多头改写。
 
 **阶段 C · 扩展模型（平台化）**
 在 A/B 之上做打包格式 + 清单 + 权限声明，用 `WebExtension` 消息通道连 UI 进程做"扩展管理面板"，
