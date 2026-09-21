@@ -173,6 +173,11 @@ impl Db {
                 "mcp_tools",
                 include_str!("../../migrations/20260920000001_mcp_tools.sql"),
             ),
+            (
+                12,
+                "space_color",
+                include_str!("../../migrations/20260921000000_space_color.sql"),
+            ),
         ];
 
         for (version, name, sql) in migrations {

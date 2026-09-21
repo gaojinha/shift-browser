@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub struct Workspace {
     pub id: i64,
     pub name: String,
+    /// 空间主题色（阶段 3.2）；空字符串 = 跟随默认强调色
+    pub color: String,
     pub sort_order: i64,
     pub created_at: String,
 }
@@ -25,17 +27,18 @@ pub async fn create_workspace(db: tauri::State<'_, Db>, name: String) -> DbResul
 /// 获取所有工作区
 #[tauri::command]
 pub async fn get_workspaces(db: tauri::State<'_, Db>) -> DbResult<Vec<Workspace>> {
-    let rows = sqlx::query_as::<_, (i64, String, i64, String)>(
-        "SELECT id, name, sort_order, created_at FROM workspaces ORDER BY sort_order, id",
+    let rows = sqlx::query_as::<_, (i64, String, String, i64, String)>(
+        "SELECT id, name, color, sort_order, created_at FROM workspaces ORDER BY sort_order, id",
     )
     .fetch_all(&db.pool)
     .await?;
 
     Ok(rows
         .into_iter()
-        .map(|(id, name, sort_order, created_at)| Workspace {
+        .map(|(id, name, color, sort_order, created_at)| Workspace {
             id,
             name,
+            color,
             sort_order,
             created_at,
         })
@@ -49,8 +52,9 @@ pub async fn update_workspace(
     id: i64,
     name: Option<String>,
     sort_order: Option<i64>,
+    color: Option<String>,
 ) -> DbResult<()> {
-    update_workspace_inner(&db.pool, id, name, sort_order).await
+    update_workspace_inner(&db.pool, id, name, sort_order, color).await
 }
 
 /// 更新工作区核心逻辑（pool 级，便于测试）
@@ -59,6 +63,7 @@ pub async fn update_workspace_inner(
     id: i64,
     name: Option<String>,
     sort_order: Option<i64>,
+    color: Option<String>,
 ) -> DbResult<()> {
     // 多字段更新放同一事务，避免部分成功
     let mut tx = pool.begin().await?;
@@ -72,6 +77,13 @@ pub async fn update_workspace_inner(
     if let Some(sort_order) = sort_order {
         sqlx::query("UPDATE workspaces SET sort_order = ? WHERE id = ?")
             .bind(sort_order)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    if let Some(color) = color {
+        sqlx::query("UPDATE workspaces SET color = ? WHERE id = ?")
+            .bind(color)
             .bind(id)
             .execute(&mut *tx)
             .await?;
@@ -110,6 +122,7 @@ mod tests {
             "CREATE TABLE workspaces (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               name TEXT NOT NULL,
+              color TEXT NOT NULL DEFAULT '',
               sort_order INTEGER DEFAULT 0,
               created_at TEXT DEFAULT (datetime('now'))
             )",
@@ -129,7 +142,7 @@ mod tests {
             .unwrap()
             .last_insert_rowid();
         // 只更新名字，sort_order 不变
-        super::update_workspace_inner(&pool, id, Some("工作区A".into()), None)
+        super::update_workspace_inner(&pool, id, Some("工作区A".into()), None, None)
             .await
             .unwrap();
         let (name, sort_order): (String, i64) =

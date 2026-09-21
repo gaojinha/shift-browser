@@ -45,6 +45,17 @@ async function onToggleVerticalTabs() {
     console.error('[app] 切换标签栏方向失败:', e)
   }
 }
+
+// 空间主题色 → 全局强调色（阶段 3.2；空 = 跟随默认）
+watch(
+  () => workspacesStore.currentColor,
+  (c) => {
+    const el = document.documentElement
+    if (c) el.style.setProperty('--accent', c)
+    else el.style.removeProperty('--accent')
+  },
+  { immediate: true },
+)
 const showPasswords = ref(false)
 const showGroups = ref(false)
 const showDownloads = ref(false)

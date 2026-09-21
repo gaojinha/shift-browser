@@ -8,9 +8,23 @@ import { useToastStore } from './toast'
 export interface Workspace {
   id: number
   name: string
+  /** 空间主题色（阶段 3.2）；空字符串 = 跟随默认强调色 */
+  color: string
   sort_order: number
   created_at: string
 }
+
+/** 新建空间时按序分配的调色板 */
+export const SPACE_COLORS = [
+  '#4a9eff',
+  '#43a047',
+  '#e53935',
+  '#fb8c00',
+  '#8e24aa',
+  '#00acc1',
+  '#f06292',
+  '#5e35b1',
+]
 
 interface WorkspacesState {
   workspaces: Workspace[]
@@ -37,6 +51,10 @@ export const useWorkspacesStore = defineStore('workspaces', {
         ? '默认'
         : (state.workspaces.find((w) => w.id === state.currentId)?.name ?? '默认')
     },
+    /** 当前空间主题色（空字符串 = 跟随默认强调色） */
+    currentColor(state): string {
+      return state.workspaces.find((w) => w.id === state.currentId)?.color ?? ''
+    },
   },
 
   actions: {
@@ -49,28 +67,41 @@ export const useWorkspacesStore = defineStore('workspaces', {
       }
     },
 
-    /** 新建工作区（自动命名"工作区 N"） */
+    /** 新建空间（自动命名"空间 N" + 分配调色板主题色） */
     async createWorkspace(): Promise<number | null> {
       try {
         const n = this.workspaces.length + 1
-        const id = await invoke<number>('create_workspace', { name: `工作区 ${n}` })
+        const id = await invoke<number>('create_workspace', { name: `空间 ${n}` })
+        // 分配主题色（按序号取调色板）
+        const color = SPACE_COLORS[(n - 1) % SPACE_COLORS.length]
+        await invoke('update_workspace', { id, name: null, sort_order: null, color })
         await this.loadWorkspaces()
         return id
       } catch (e) {
-        console.error('[workspaces] 创建工作区失败:', e)
-        useToastStore().error('创建工作区失败')
+        console.error('[workspaces] 创建空间失败:', e)
+        useToastStore().error('创建空间失败')
         return null
       }
     },
 
-    /** 重命名工作区 */
+    /** 重命名空间 */
     async renameWorkspace(id: number, name: string) {
       try {
-        await invoke('update_workspace', { id, name })
+        await invoke('update_workspace', { id, name, sort_order: null, color: null })
         await this.loadWorkspaces()
       } catch (e) {
-        console.error('[workspaces] 重命名工作区失败:', e)
-        useToastStore().error('重命名工作区失败')
+        console.error('[workspaces] 重命名空间失败:', e)
+        useToastStore().error('重命名空间失败')
+      }
+    },
+
+    /** 设置空间主题色 */
+    async setColor(id: number, color: string) {
+      try {
+        await invoke('update_workspace', { id, name: null, sort_order: null, color })
+        await this.loadWorkspaces()
+      } catch (e) {
+        console.error('[workspaces] 设置空间色失败:', e)
       }
     },
 

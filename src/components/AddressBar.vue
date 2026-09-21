@@ -7,6 +7,7 @@ import { useSettingsStore } from '../stores/settings'
 import type { Bookmark } from '../types/bookmark'
 import type { HistoryEntry } from '../types/history'
 import TranslateProgress from './TranslateProgress.vue'
+import SpaceSwitcher from './SpaceSwitcher.vue'
 
 const tabsStore = useTabsStore()
 const settingsStore = useSettingsStore()
@@ -233,6 +234,7 @@ async function onReader() {
 
 <template>
   <div class="address-bar">
+    <SpaceSwitcher />
     <button class="nav-btn" title="后退" :disabled="!tabsStore.canGoBack" @click="onBack">←</button>
     <button class="nav-btn" title="前进" :disabled="!tabsStore.canGoForward" @click="onForward">
       →
