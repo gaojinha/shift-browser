@@ -2114,8 +2114,12 @@ IP 白名单设 `1.2.3.4` 时本机被拒（日志 `拒绝非白名单 IP: 127.0
   **无需 root**）→ `xdg-settings set default-web-browser` → 回读状态。
   *为什么用户级*：系统级文件由 deb 生成，旧版缺 MimeType 声明且改它要 root；用户级优先级更高。
 
-**交付 · 打包模板**：新增 `src-tauri/bundle/linux/Shift Browser.desktop`（tauri 打 deb 时
-用它替换默认模板），从此新包自带 MimeType 声明 + `%U`，装完即可被 xdg 认作网页浏览器。
+**交付 · 打包模板**：tauri 2 的自定义 desktop 文件必须走 `bundle.linux.deb.desktopTemplate`
+（handlebars 模板，变量 `name/comment/exec/icon`）——直接放 `bundle/linux/` 下的同名
+.desktop 文件**不生效**（实测 deb 包内仍是默认模板）。模板
+`src-tauri/bundle/linux/desktop-template.desktop` 带
+`MimeType=x-scheme-handler/http;x-scheme-handler/https;text/html;` + `Exec={{exec}} %U`，
+deb 包内 desktop 文件实测正确（提交 `d3811d9` 修正，首个包验证失败见下）。
 
 **交付 · 外部 URL 打开**：启动时解析命令行 `http/https` 参数（desktop `Exec=%U` 传入），
 setup 完成后延迟 2 秒（等前端初始化建初始标签）逐条 `create_tab` 打开新标签。
@@ -2123,11 +2127,18 @@ setup 完成后延迟 2 秒（等前端初始化建初始标签）逐条 `create
 **交付 · 前端**：设置弹窗「通用」分区新增「默认浏览器」区块——
 状态显示（当前默认 desktop-id / 已是默认）+「设为默认浏览器」按钮。
 
-**真机验证**：用户级 desktop 文件写入后 `xdg-settings set` 成功、`get` 返回
-`Shift Browser.desktop`（带空格 desktop-id 处理正常）；验证后恢复原默认
-`google-chrome.desktop`，把设置动作留给用户在设置页触发。
+**真机验证**：
+- 用户级 desktop 文件写入后 `xdg-settings set` 成功、`get` 返回
+  `Shift Browser.desktop`（带空格 desktop-id 处理正常）；验证后恢复原默认
+  `google-chrome.desktop`，把设置动作留给用户在设置页触发。
+- 重新打包安装（5.6.0 覆盖装）后：系统 desktop 文件带 MimeType + `%U`；
+  外部 URL 实测 `shift-browser https://example.com` → 日志
+  `外部链接参数: ["https://example.com"]` → 2 秒后 `外部链接已打开: <id>`，标签正常打开。
+- **踩坑**：双实例同时跑会竞争数据目录，首个实例 WebKit 崩溃
+  （internallyFailedLoadTimerFired）——正是 D3 单实例遗留要解决的，清理后单实例正常。
 
-**验证**：cargo 0错0警告；115 测试；前端构建通过。提交 `21c0f3f`。
+**验证**：cargo 0错0警告；115 测试；前端构建通过；deb 真机安装 + 外部 URL 实测通过。
+提交 `21c0f3f`（功能）+ `d3811d9`（desktopTemplate 修正）。
 
 **遗留**：单实例——应用已在运行时不处理二次启动（外部链接会起第二个进程），
 后续可加 tauri-plugin-single-instance 把 URL 转发给已有实例。
