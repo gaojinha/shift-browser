@@ -31,8 +31,47 @@ extern "C" {
 const SIG_PAGE_CREATED: &[u8] = b"page-created\0";
 const SIG_SEND_REQUEST: &[u8] = b"send-request\0";
 
-/// 原型拦截标记：URL 含此片段即取消（阶段 B 换成真规则引擎）
+/// 内置自检标记：URL 含此片段即取消（与规则文件无关，便于冒烟验证扩展活着）
 const BLOCK_MARK: &str = "shift-ext-block-test";
+
+/// 规则文件（应用数据目录；每行一个 URL 子串，`#` 开头为注释）。
+/// 阶段 B 最小版：网络层按静态规则拦截；后续由主程序写入该文件（如同步广告拦截词库）。
+fn rules_path() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    Some(format!(
+        "{}/.local/share/com.shiftbrowser.app/shift-ext-rules.txt",
+        home
+    ))
+}
+
+static RULES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// 加载规则（进程内只读一次）
+fn rules() -> &'static [String] {
+    RULES.get_or_init(|| {
+        let mut out = Vec::new();
+        if let Some(p) = rules_path() {
+            match std::fs::read_to_string(&p) {
+                Ok(text) => {
+                    for line in text.lines() {
+                        let l = line.trim();
+                        if !l.is_empty() && !l.starts_with('#') {
+                            out.push(l.to_string());
+                        }
+                    }
+                    eprintln!("[shift-ext] 已加载 {} 条规则（{}）", out.len(), p);
+                }
+                Err(_) => eprintln!("[shift-ext] 无规则文件（{}），仅内置标记", p),
+            }
+        }
+        out
+    })
+}
+
+/// 该 URL 是否应拦截：内置标记 或 命中任一规则
+fn should_block(uri: &str) -> bool {
+    uri.contains(BLOCK_MARK) || rules().iter().any(|r| uri.contains(r.as_str()))
+}
 
 /// `send-request` 回调：请求出网前触发；返回 1 (TRUE) = 取消该资源加载
 unsafe extern "C" fn on_send_request(
@@ -49,13 +88,17 @@ unsafe extern "C" fn on_send_request(
         return 0;
     }
     let uri = CStr::from_ptr(uri_ptr).to_string_lossy().to_string();
-    eprintln!("[shift-ext] send-request: {}", uri);
-    if uri.contains(BLOCK_MARK) {
+    if should_block(&uri) {
         eprintln!("[shift-ext] 拦截（取消）: {}", uri);
         return 1; // TRUE = 取消
     }
+    // 未命中：不打每条（避免刷屏），只统计
+    COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     0
 }
+
+/// 放行计数（用于"扩展在干活"的轻量可观测）
+static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// `page-created` 回调：新页面创建 → 连接它的 send-request
 unsafe extern "C" fn on_page_created(

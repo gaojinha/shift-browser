@@ -117,6 +117,12 @@ GIR（`WebKit2WebExtension-4.1.gir:48966`）：
 用阶段 A 的通道做**脚本化网络拦截**：动态 URL 黑名单、请求头改写（如强制 `Sec-GPC`、UA 策略）、
 按域注入请求级策略——补上现有"内容过滤器（声明式）+ UserScript（DOM 层）"缺的**脚本化网络层**。
 
+> **最小版已完成（2026-09-21）**：扩展按**规则文件**拦截——读
+> `~/.local/share/com.shiftbrowser.app/shift-ext-rules.txt`（每行一个 URL 子串，`#` 注释），
+> 命中即取消该请求。运行实证：`[shift-ext] 已加载 1 条规则 …` +
+> `[shift-ext] 拦截（取消）: https://dup.baidustatic.com/js/ds.js`。
+> 后续：主程序写入该文件（同步广告拦截词库/用户规则）、请求头改写（需 SoupHeaders FFI）。
+
 **阶段 C · 扩展模型（平台化）**
 在 A/B 之上做打包格式 + 清单 + 权限声明，用 `WebExtension` 消息通道连 UI 进程做"扩展管理面板"，
 逐步逼近 Tampermonkey/浏览器扩展的开发体验。
