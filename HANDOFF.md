@@ -2177,11 +2177,46 @@ setup 完成后延迟 2 秒（等前端初始化建初始标签）逐条 `create
 
 ---
 
-## 下一步（截至第八十六章）
+## 第八十七章（阶段 4 · 开放生态）：MCP Server——AI 标准协议驱动浏览器
+
+**背景一句话**：高哥问"AI 调用浏览器方便吗"——评估后发现本地开放 API 能用但协议是
+自定义的，AI 要自己写客户端封装；缺一个 **MCP server 形态**（任何 MCP 客户端配一行即用）。
+
+**交付 · `shift-browser-mcp` 二进制**（`src-tauri/src/bin/mcp_server.rs`）：
+- **协议**：MCP 2025-03-26，stdio 传输（newline-delimited JSON-RPC），实现
+  `initialize` / `notifications/initialized` / `ping` / `tools/list` / `tools/call`。
+- **转发**：直连浏览器 Unix socket（`api.sock`，0600 权限天然鉴权）——**零额外依赖**
+  （只用 std + serde_json，不引 HTTP 客户端、不碰 token 文件）。
+- **工具**：25 个 = 13 读 + 12 写，与 API 命令**同名同参**（AI 好理解）：
+  读：status / list_tabs / active_tab / history / bookmarks / search_history /
+  list_downloads / list_sessions / list_groups / list_spaces / list_userscripts /
+  get_setting / list_settings；
+  写：open_url / new_tab / close_tab / switch_tab / reload_tab / navigate / search /
+  pin_tab / mute_tab / minimize_window / maximize_window / screenshot。
+- **安全边界**：写类天然继承浏览器 `api_readonly` 只读闸门；**不暴露** `eval`
+  （执行任意 JS）与 `tool_call`（嵌套 MCP）——风险高，需要时走浏览器 API 直连（有显式闸门）。
+- **安装**：`cargo build --release --bin shift-browser-mcp` → 复制到
+  `~/.local/bin/shift-browser-mcp`（不进 deb，独立工具）。环境变量 `SHIFT_BROWSER_SOCK`
+  可覆盖 socket 路径。
+
+**真机验证**（全部通过）：
+- initialize 握手返回协议版本 + serverInfo；tools/list 返回 25 个工具定义；
+- tools/call `status` / `open_url`（新标签打开 example.com）/ `screenshot`（PNG 落盘）
+  / `search`（bing 搜索）/ `list_tabs`（返回启动页 + example.com 两标签）全部 ok:true；
+- 缺参正确报错（`缺少必填参数: query`）、未知工具正确报错（`未知工具: bogus`）；
+- method `ping` 返回空 result（健康检查）。
+
+**验证**：cargo 0 警告；二进制 487KB；手动 JSON-RPC 全链路通过。
+提交 `（待填）`。
+
+---
+
+## 下一步（截至第八十七章）
 
 - **阶段 4 继续**：多端形态（移动/平板协同）——路线图剩的最后一块大件。
 - **实战检验（进行中）**：下载目录、系统托盘已修并验收；开放 API 扩展（C2）已交付；
   deb 打包安装闭环（第八十四章）；默认浏览器设置（第八十五章）+ 登录持久化/单实例
-  （第八十六章）待高哥实测确认。
-- **工程**：HANDOFF 逐章记录机制（已补至 86 章，后续每章随提交更新）。
+  （第八十六章）待高哥实测确认；MCP Server（第八十七章）待高哥在 opencode/其它 MCP
+  客户端接入实测。
+- **工程**：HANDOFF 逐章记录机制（已补至 87 章，后续每章随提交更新）。
 

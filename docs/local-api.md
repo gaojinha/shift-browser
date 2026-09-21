@@ -19,6 +19,47 @@
 HTTP 形态**只绑 127.0.0.1**（不对外），token 随机生成、落 `api-token`（权限 0600）。
 两形态**命令完全一致**（同一套处理逻辑）。
 
+### MCP Server（AI 驱动浏览器 · 标准协议）
+
+把本地开放 API 暴露为**标准 MCP 工具**，任何 MCP 客户端（opencode / Claude Desktop /
+Cursor / 自研 agent）配一条 command 即可驱动浏览器——不用自己写 HTTP 客户端。
+
+- **二进制**：`~/.local/bin/shift-browser-mcp`（`cargo build --release --bin shift-browser-mcp` 编译）
+- **协议**：MCP 2025-03-26，stdio 传输（newline-delimited JSON-RPC）
+- **转发**：直连浏览器 Unix socket（api.sock，0600 权限鉴权）——**零额外依赖、不经网络**
+- **工具**：25 个 = 13 读 + 12 写（与 API 命令同名同参；写类受 `api_readonly` 只读闸门约束）
+- **不暴露**：`eval`（执行任意 JS）与 `tool_call`（嵌套 MCP）——风险高，需要时走浏览器 API 直连（有显式闸门）
+
+配置示例（opencode / Claude Desktop 的 `mcpServers`）：
+
+```json
+{
+  "mcpServers": {
+    "shift-browser": { "command": "/home/gao/.local/bin/shift-browser-mcp" }
+  }
+}
+```
+
+环境变量 `SHIFT_BROWSER_SOCK` 可覆盖 api.sock 路径（默认
+`~/.local/share/com.shiftbrowser.app/api.sock`）。
+
+**工具清单**：
+
+| 类别 | 工具 |
+|---|---|
+| 读 | `status` · `list_tabs` · `active_tab` · `history` · `bookmarks` · `search_history` · `list_downloads` · `list_sessions` · `list_groups` · `list_spaces` · `list_userscripts` · `get_setting` · `list_settings` |
+| 写 | `open_url` · `new_tab` · `close_tab` · `switch_tab` · `reload_tab` · `navigate` · `search` · `pin_tab` · `mute_tab` · `minimize_window` · `maximize_window` · `screenshot` |
+
+手动测试（三行握手 + 调工具）：
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"status","arguments":{}}}' \
+  | ~/.local/bin/shift-browser-mcp
+```
+
 ```bash
 TOKEN=$(cat ~/.local/share/com.shiftbrowser.app/api-token)
 curl -s -X POST http://127.0.0.1:19701/api -H "Authorization: Bearer $TOKEN" \
@@ -159,3 +200,5 @@ ls -la ~/.local/share/com.shiftbrowser.app/api.sock   # 应为 srw-------
 - 鉴权细化（已完成 · C2）：只读模式（`api_readonly`）+ IP 白名单（`api_allowed_ips`）；
   如仍需要，可再加速率限制 / 命令级权限表。
 - HTTP 形态已支持（`127.0.0.1:<port>` + token，端口可配、可绑局域网 + IP 白名单）。
+- MCP Server（已完成 · 第八十七章）：`shift-browser-mcp` 二进制，标准 MCP stdio 协议，
+  25 个工具（13 读 + 12 写），任何 MCP 客户端可驱动浏览器；eval/tool_call 不暴露。

@@ -12,6 +12,13 @@ rust-version = "1.77.2"
 name = "shift_browser_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# MCP Server（阶段 4 · 开放生态）：把本地开放 API 暴露为标准 MCP 工具，
+# 供任何 MCP 客户端（opencode / Claude Desktop 等）驱动浏览器。
+# 编译：cargo build --release --bin shift-browser-mcp；安装：cp 到 ~/.local/bin/（见 docs/local-api.md）
+[[bin]]
+name = "shift-browser-mcp"
+path = "src/bin/mcp_server.rs"
+
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
 

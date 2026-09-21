@@ -1,6 +1,6 @@
 # ShiftBrowser 待办清单
 
-> 更新于 2026-09-21 · 对应 HANDOFF 第八十六章（登录持久化 + 单实例）
+> 更新于 2026-09-21 · 对应 HANDOFF 第八十七章（MCP Server）
 > 优先级：🔴 高 / 🟡 中 / 🟢 低 / ⚪ 遗留
 
 ---
@@ -65,6 +65,11 @@
   新增 12 命令（8 只读 + 4 操作）+ 鉴权细化（只读模式 `api_readonly` / IP 白名单 `api_allowed_ips`）。
   命令总数 16 → 28。详见 HANDOFF 第八十三章。
 
+- [x] **C3 · MCP Server——AI 标准协议驱动浏览器（✅ 2026-09-21）**
+  `shift-browser-mcp` 二进制（MCP 2025-03-26 stdio），25 个工具（13 读 + 12 写）与 API
+  命令同名同参，直连 Unix socket 零依赖；eval/tool_call 不暴露。任何 MCP 客户端配一行即用。
+  详见 HANDOFF 第八十七章。**待高哥在 opencode/其它 MCP 客户端接入实测。**
+
 ---
 
 ## D. 遗留疑点
@@ -92,3 +97,4 @@
 - [x] 书签搜索 LIKE 通配符转义（与 search_history 对齐，`ESCAPE '\'`，修 `%`/`_` 误匹配）
 - [x] 默认浏览器设置（`21c0f3f`：xdg-settings 集成 + MimeType 声明 + 外部 URL 打开）
 - [x] 登录状态持久化 + 单实例（`9ce60c0`：Cookie 落盘 + single-instance 转发 URL）
+- [x] MCP Server（`（待填）`：`shift-browser-mcp` stdio 二进制，25 工具，AI 标准协议驱动浏览器）
