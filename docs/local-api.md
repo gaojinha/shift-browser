@@ -75,6 +75,18 @@ curl -s -X POST http://127.0.0.1:19701/v1/chat/completions \
 | `{"cmd":"eval","code":"…"}` | `{"ok":true,"data":{"result":"…"}}` | 在活动标签执行 JS（**默认关**，见下） |
 | `{"cmd":"tools"}` | `{"ok":true,"data":[{name,server_name,description,input_schema}…]}` | 列出可用 MCP 工具（工具网关） |
 | `{"cmd":"tool_call","name":"…","arguments":{…}}` | `{"ok":true,"data":{"result":"…"}}` | 调用一个 MCP 工具（受 server 白名单约束） |
+| `{"cmd":"search_history","query":"…","limit":50}` | `{"ok":true,"data":[HistoryEntry…]}` | 搜索历史（query 必填） |
+| `{"cmd":"list_downloads"}` | `{"ok":true,"data":[Download…]}` | 列下载记录（最近 100） |
+| `{"cmd":"list_sessions"}` | `{"ok":true,"data":[Session…]}` | 列会话快照（最近 50） |
+| `{"cmd":"list_groups"}` | `{"ok":true,"data":[TabGroup…]}` | 列标签分组 |
+| `{"cmd":"list_spaces"}` | `{"ok":true,"data":[Workspace…]}` | 列空间（工作区） |
+| `{"cmd":"list_userscripts"}` | `{"ok":true,"data":[Userscript…]}` | 列用户脚本 |
+| `{"cmd":"get_setting","key":"theme"}` | `{"ok":true,"data":"…"\|null}` | 读单个设置（敏感键返回 null） |
+| `{"cmd":"list_settings"}` | `{"ok":true,"data":[{key,value}…]}` | 列全部设置（敏感键已过滤） |
+| `{"cmd":"pin_tab","id":"…"}` | `{"ok":true,"data":Tab\|null}` | 固定 / 取消固定标签 |
+| `{"cmd":"mute_tab","id":"…"}` | `{"ok":true,"data":Tab\|null}` | 静音 / 取消静音标签 |
+| `{"cmd":"minimize_window"}` | `{"ok":true,"data":null}` | 最小化主窗口 |
+| `{"cmd":"maximize_window"}` | `{"ok":true,"data":bool}` | 最大化 / 还原主窗口（返回当前是否最大化） |
 
 出错时：`{"ok":false,"error":"…"}`。
 
@@ -110,8 +122,15 @@ print(s.recv(65536).decode())
 
 - **只监听本地**：Unix 套接字，不经网络，外部主机连不上。
 - **只限本用户**：文件权限 0600（同机其它用户无权限）。
-- **动作面**：目前只有"读状态 / 列标签 / 开网址"三个**低风险**命令；写操作（关标签、执行 JS 等）
-  若后续加入，需评估是否要再加一层 token 鉴权。
+- **动作面**：读命令（`status` / `list_*` / `history` / `bookmarks` / `search_history` /
+  `get_setting` / `list_settings`）为低风险；写命令（`open_url` / `close_tab` / `switch_tab` /
+  `navigate` / `search` / `new_tab` / `pin_tab` / `mute_tab` / `minimize_window` /
+  `maximize_window` / `eval` / `tool_call`）会改变浏览器状态。
+- **只读模式**（设置 `api_readonly=true`）：一键禁掉**所有写命令**（返回 `ok:false`），
+  只放读命令——给"只想让脚本读数据"的场景兜底。
+- **IP 白名单**（设置 `api_allowed_ips`）：HTTP 形态可绑 `0.0.0.0` 暴露到局域网，
+  此时用白名单限定来源 IP（逗号分隔、前缀匹配，如 `192.168.1.,127.0.0.1`）；空 = 不限制。
+  非白名单来源的连接直接被拒（日志留痕）。
 - **不绕过安全闸门**：本 API 不提供 agent 动作执行入口（多步动作仍只走 AI 面板的确认流程）。
 - **执行 JS（eval）默认关**：最强能力（可读页面/驱动交互），故加**显式闸门**——必须在
   设置 → 隐私 → 「允许 API 执行 JS（危险）」里开启，命令才生效；未开返回 `ok:false`。
@@ -127,7 +146,16 @@ ls -la ~/.local/share/com.shiftbrowser.app/api.sock   # 应为 srw-------
 运行实证（2026-09-21）：`status` / `list_tabs` / `open_url` 三命令均返回 `ok:true`，
 `open_url` 成功新建标签。
 
+运行实证（2026-09-21 · C2 扩展）：12 个新命令全部 `ok:true`——`list_downloads` /
+`list_sessions` / `list_spaces` / `list_settings` / `search_history` / `get_setting`
+均取到真实数据；`pin_tab` / `mute_tab` / `maximize_window` 生效。
+**只读模式**：`api_readonly=true` 时 `open_url` 被拒（`只读模式已开启…`）、`status` 正常。
+**IP 白名单**：`api_allowed_ips=1.2.3.4` 时本机请求被拒（日志 `拒绝非白名单 IP: 127.0.0.1`），
+改为 `127.0.0.1` 后恢复正常。
+
 ## 后续
 
-- 更多命令：`close_tab` / `switch_tab` / `search`（按需）。
-- HTTP 形态（`127.0.0.1:<port>` + token）若确有必要再加；当前 Unix 套接字已够本地脚本用。
+- 更多命令：按需继续扩（如书签增删、会话恢复、空间切换）。
+- 鉴权细化（已完成 · C2）：只读模式（`api_readonly`）+ IP 白名单（`api_allowed_ips`）；
+  如仍需要，可再加速率限制 / 命令级权限表。
+- HTTP 形态已支持（`127.0.0.1:<port>` + token，端口可配、可绑局域网 + IP 白名单）。

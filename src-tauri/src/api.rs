@@ -136,6 +136,20 @@ fn read_setting_blocking(app: &AppHandle, key: &str) -> Option<String> {
     })
 }
 
+/// IP 白名单校验：名单为空 = 不限制；否则逗号分隔，按前缀匹配
+/// （如 `192.168.1.` 匹配整个 192.168.1.x 网段；`127.0.0.1` 精确匹配）
+fn ip_allowed(ip: &str, allowlist: &str) -> bool {
+    let allow = allowlist.trim();
+    if allow.is_empty() {
+        return true;
+    }
+    allow
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .any(|pat| ip == pat || ip.starts_with(pat))
+}
+
 fn spawn_http(app: AppHandle) {
     let Some(token) = ensure_token(&app) else {
         return;
@@ -148,8 +162,16 @@ fn spawn_http(app: AppHandle) {
         .map(|v| v == "true")
         .unwrap_or(false);
     let host = if lan { "0.0.0.0" } else { "127.0.0.1" };
+    // IP 白名单（阶段4 C2）：空 = 不限制；LAN 暴露时建议设上
+    let allowed_ips = read_setting_blocking(&app, "api_allowed_ips").unwrap_or_default();
     if lan {
-        log::warn!("[api] HTTP 已绑 0.0.0.0（局域网可达）——请确保 token 不外泄");
+        if allowed_ips.trim().is_empty() {
+            log::warn!(
+                "[api] HTTP 已绑 0.0.0.0（局域网可达）——请确保 token 不外泄，建议设 api_allowed_ips"
+            );
+        } else {
+            log::info!("[api] HTTP 已绑 0.0.0.0，IP 白名单: {}", allowed_ips);
+        }
     }
     tauri::async_runtime::spawn(async move {
         let addr = format!("{}:{}", host, port);
@@ -165,9 +187,19 @@ fn spawn_http(app: AppHandle) {
             addr
         );
         loop {
-            let Ok((mut stream, _)) = listener.accept().await else {
+            let Ok((mut stream, peer)) = listener.accept().await else {
                 continue;
             };
+            // IP 白名单校验（空名单放行）
+            let peer_ip = peer.ip().to_string();
+            if !ip_allowed(&peer_ip, &allowed_ips) {
+                log::warn!(
+                    "[api] 拒绝非白名单 IP: {}（api_allowed_ips={}）",
+                    peer_ip,
+                    allowed_ips
+                );
+                continue;
+            }
             let app = app.clone();
             let token = token.clone();
             tauri::async_runtime::spawn(async move {
@@ -285,9 +317,11 @@ async fn dashboard_html(app: &AppHandle) -> String {
         ),
         None => "<div>（无活动标签）</div>".to_string(),
     };
-    let cmds = "status · list_tabs · active_tab · history · bookmarks · open_url · close_tab · \
-                switch_tab · reload_tab · navigate · search · new_tab · screenshot · \
-                eval（默认关）· tools · tool_call";
+    let cmds = "status · list_tabs · active_tab · history · bookmarks · search_history · \
+                list_downloads · list_sessions · list_groups · list_spaces · list_userscripts · \
+                get_setting · list_settings · open_url · close_tab · switch_tab · reload_tab · \
+                navigate · search · new_tab · screenshot · pin_tab · mute_tab · \
+                minimize_window · maximize_window · eval（默认关）· tools · tool_call";
     format!(
         r#"<!doctype html><meta charset=utf-8><title>ShiftBrowser 状态</title>
 <style>body{{font:14px/1.6 system-ui,sans-serif;max-width:760px;margin:32px auto;padding:0 16px;color:#222}}
@@ -365,6 +399,26 @@ async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Value {
     }
 }
 
+/// 写命令（改变浏览器状态）；只读模式（api_readonly=true）下统一拒绝
+fn is_write_cmd(cmd: &str) -> bool {
+    matches!(
+        cmd,
+        "open_url"
+            | "close_tab"
+            | "switch_tab"
+            | "reload_tab"
+            | "navigate"
+            | "search"
+            | "new_tab"
+            | "eval"
+            | "tool_call"
+            | "pin_tab"
+            | "mute_tab"
+            | "minimize_window"
+            | "maximize_window"
+    )
+}
+
 /// 处理一条请求
 async fn handle(app: &AppHandle, line: &str) -> Value {
     let req: Value = match serde_json::from_str(line) {
@@ -372,6 +426,22 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
         Err(e) => return json!({"ok": false, "error": format!("请求 JSON 非法: {}", e)}),
     };
     let cmd = req.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
+    // 只读模式（api_readonly=true）：拒绝一切写命令
+    if is_write_cmd(cmd) {
+        let db = app.state::<crate::db::Db>();
+        let ro = sqlx::query_scalar::<_, String>(
+            "SELECT value FROM settings WHERE key = 'api_readonly'",
+        )
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false);
+        if ro {
+            return json!({"ok": false, "error": format!("只读模式已开启，写命令 {} 被拒绝", cmd)});
+        }
+    }
     match cmd {
         "status" => {
             let tabs = app
@@ -690,6 +760,119 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 Err(e) => json!({"ok": false, "error": e}),
             }
         }
+        // ===== 只读扩展命令（阶段4 C2：更多只读命令）=====
+        "list_downloads" => {
+            let db = app.state::<crate::db::Db>();
+            match crate::db::downloads::get_downloads(db).await {
+                Ok(v) => json!({"ok": true, "data": v}),
+                Err(e) => json!({"ok": false, "error": e.to_string()}),
+            }
+        }
+        "list_sessions" => {
+            let db = app.state::<crate::db::Db>();
+            match crate::db::sessions::list_sessions(db).await {
+                Ok(v) => json!({"ok": true, "data": v}),
+                Err(e) => json!({"ok": false, "error": e.to_string()}),
+            }
+        }
+        "list_groups" => {
+            let db = app.state::<crate::db::Db>();
+            match crate::db::tab_groups::get_tab_groups(db).await {
+                Ok(v) => json!({"ok": true, "data": v}),
+                Err(e) => json!({"ok": false, "error": e.to_string()}),
+            }
+        }
+        "list_spaces" => {
+            let db = app.state::<crate::db::Db>();
+            match crate::db::workspaces::get_workspaces(db).await {
+                Ok(v) => json!({"ok": true, "data": v}),
+                Err(e) => json!({"ok": false, "error": e.to_string()}),
+            }
+        }
+        "list_userscripts" => {
+            let db = app.state::<crate::db::Db>();
+            match crate::db::userscripts::list_userscripts(db).await {
+                Ok(v) => json!({"ok": true, "data": v}),
+                Err(e) => json!({"ok": false, "error": e.to_string()}),
+            }
+        }
+        "search_history" => {
+            let query = req
+                .get("query")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if query.is_empty() {
+                return json!({"ok": false, "error": "缺少 query"});
+            }
+            let limit = req.get("limit").and_then(|v| v.as_i64());
+            let db = app.state::<crate::db::Db>();
+            match crate::db::history::search_history(db, query, limit).await {
+                Ok(v) => json!({"ok": true, "data": v}),
+                Err(e) => json!({"ok": false, "error": e.to_string()}),
+            }
+        }
+        "get_setting" => {
+            let key = req
+                .get("key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if key.is_empty() {
+                return json!({"ok": false, "error": "缺少 key"});
+            }
+            let db = app.state::<crate::db::Db>();
+            match crate::db::settings::get_setting(db, key).await {
+                Ok(v) => json!({"ok": true, "data": v}),
+                Err(e) => json!({"ok": false, "error": e.to_string()}),
+            }
+        }
+        "list_settings" => {
+            let db = app.state::<crate::db::Db>();
+            match crate::db::settings::get_all_settings(db).await {
+                Ok(v) => json!({"ok": true, "data": v}),
+                Err(e) => json!({"ok": false, "error": e.to_string()}),
+            }
+        }
+        // ===== 操作命令（写；只读模式下被拒）=====
+        "pin_tab" => {
+            let id = req
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+                return json!({"ok": false, "error": "标签管理器不可用"});
+            };
+            match crate::tabs::toggle_pin(state, id).await {
+                Ok(v) => json!({"ok": true, "data": v}),
+                Err(e) => json!({"ok": false, "error": e}),
+            }
+        }
+        "mute_tab" => {
+            let id = req
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+                return json!({"ok": false, "error": "标签管理器不可用"});
+            };
+            match crate::tabs::toggle_mute(app.clone(), state, id).await {
+                Ok(v) => json!({"ok": true, "data": v}),
+                Err(e) => json!({"ok": false, "error": e}),
+            }
+        }
+        "minimize_window" => match crate::tabs::minimize_window(app.clone()).await {
+            Ok(_) => json!({"ok": true, "data": null}),
+            Err(e) => json!({"ok": false, "error": e}),
+        },
+        "maximize_window" => match crate::tabs::toggle_maximize(app.clone()).await {
+            Ok(v) => json!({"ok": true, "data": v}),
+            Err(e) => json!({"ok": false, "error": e}),
+        },
         "active_tab" => {
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});

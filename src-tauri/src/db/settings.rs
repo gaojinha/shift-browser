@@ -44,6 +44,9 @@ const ALLOWED_KEYS: &[&str] = &[
     "api_bind_lan",
     // 模型网关（阶段4 自托管套件；默认关，显式设 'true' 才开）
     "api_model_gateway",
+    // 开放 API 鉴权细化（阶段4 C2）：只读模式（禁写命令）/ IP 白名单（逗号分隔前缀）
+    "api_readonly",
+    "api_allowed_ips",
     "show_lunar",
     "show_quote",
     "show_weather",
