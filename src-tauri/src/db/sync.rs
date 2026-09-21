@@ -215,11 +215,33 @@ async fn export_payload(db: &Db) -> DbResult<Vec<u8>> {
         })
         .collect();
 
+    // 书签（阶段4 多端协同）：跨端同步；文件夹按名字保留，导入时 find-or-create
+    let bm_rows = sqlx::query_as::<_, (String, String, Option<String>, i64, String)>(
+        "SELECT b.title, b.url, f.name, b.sort_order, b.created_at
+         FROM bookmarks b LEFT JOIN bookmark_folders f ON f.id = b.folder_id
+         ORDER BY b.id",
+    )
+    .fetch_all(&db.pool)
+    .await?;
+    let bookmarks: Vec<serde_json::Value> = bm_rows
+        .into_iter()
+        .map(|(title, url, folder, sort_order, created_at)| {
+            serde_json::json!({
+                "title": title,
+                "url": url,
+                "folder": folder,
+                "sort_order": sort_order,
+                "created_at": created_at,
+            })
+        })
+        .collect();
+
     let exported_at = now_str(db).await;
     let payload = serde_json::json!({
-        "version": 1,
+        "version": 2,
         "exported_at": exported_at,
         "entries": entries,
+        "bookmarks": bookmarks,
     });
     serde_json::to_vec(&payload).map_err(|e| DbError::Other(format!("导出序列化失败: {}", e)))
 }
@@ -264,6 +286,63 @@ async fn import_payload(db: &Db, plain: &[u8]) -> DbResult<usize> {
         .await
         .map_err(|e| DbError::Other(format!("合并写入失败: {}", e)))?;
         count += 1;
+    }
+
+    // 书签合并（阶段4 · 版本 2 起）：按 url 去重——本地已有同 url 则跳过（不覆盖本地）；
+    // 文件夹按名字 find-or-create。旧版同步包（无 bookmarks 字段）自然跳过。
+    if let Some(bms) = v.get("bookmarks").and_then(|b| b.as_array()) {
+        for b in bms {
+            let url = b.get("url").and_then(|x| x.as_str()).unwrap_or("");
+            if url.is_empty() {
+                continue;
+            }
+            let exists: Option<(i64,)> =
+                sqlx::query_as("SELECT id FROM bookmarks WHERE url = ? LIMIT 1")
+                    .bind(url)
+                    .fetch_optional(&db.pool)
+                    .await?;
+            if exists.is_some() {
+                continue;
+            }
+            let title = b.get("title").and_then(|x| x.as_str()).unwrap_or(url);
+            let sort_order = b.get("sort_order").and_then(|x| x.as_i64()).unwrap_or(0);
+            let created_at = b.get("created_at").and_then(|x| x.as_str()).unwrap_or("");
+            let folder_id: Option<i64> = match b.get("folder").and_then(|x| x.as_str()) {
+                Some(n) if !n.is_empty() => {
+                    let f: Option<(i64,)> =
+                        sqlx::query_as("SELECT id FROM bookmark_folders WHERE name = ? LIMIT 1")
+                            .bind(n)
+                            .fetch_optional(&db.pool)
+                            .await?;
+                    match f {
+                        Some((id,)) => Some(id),
+                        None => {
+                            let r = sqlx::query(
+                                "INSERT INTO bookmark_folders (name, sort_order) VALUES (?, 0)",
+                            )
+                            .bind(n)
+                            .execute(&db.pool)
+                            .await?;
+                            Some(r.last_insert_rowid())
+                        }
+                    }
+                }
+                _ => None,
+            };
+            sqlx::query(
+                "INSERT INTO bookmarks (title, url, folder_id, sort_order, created_at)
+                 VALUES (?, ?, ?, ?, COALESCE(NULLIF(?, ''), datetime('now')))",
+            )
+            .bind(title)
+            .bind(url)
+            .bind(folder_id)
+            .bind(sort_order)
+            .bind(created_at)
+            .execute(&db.pool)
+            .await
+            .map_err(|e| DbError::Other(format!("书签合并失败: {}", e)))?;
+            count += 1;
+        }
     }
     Ok(count)
 }
@@ -330,7 +409,15 @@ pub async fn sync_push(db: tauri::State<'_, Db>) -> DbResult<String> {
     let payload = export_payload(&db).await?;
     let count = serde_json::from_slice::<serde_json::Value>(&payload)
         .ok()
-        .and_then(|v| v.get("entries").and_then(|e| e.as_array()).map(|a| a.len()))
+        .map(|v| {
+            let n = |k: &str| {
+                v.get(k)
+                    .and_then(|e| e.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0)
+            };
+            n("entries") + n("bookmarks")
+        })
         .unwrap_or(0);
     let sealed = seal(&key, &payload)?;
 
@@ -363,7 +450,10 @@ pub async fn sync_push(db: tauri::State<'_, Db>) -> DbResult<String> {
 
     store.last_push_at = Some(now_str(&db).await);
     save_store(&db, &store, &key)?;
-    Ok(format!("已加密推送 {} 条密码到云端（服务器仅见密文）", count))
+    Ok(format!(
+        "已加密推送 {} 项（密码库 + 书签）到云端（服务器仅见密文）",
+        count
+    ))
 }
 
 /// 拉取：WebDAV GET → 主钥解包 → 合并导入（不删本地独有）
@@ -401,7 +491,10 @@ pub async fn sync_pull(db: tauri::State<'_, Db>) -> DbResult<String> {
 
     store.last_pull_at = Some(now_str(&db).await);
     save_store(&db, &store, &key)?;
-    Ok(format!("已从云端合并 {} 条密码（本地独有记录未删除）", count))
+    Ok(format!(
+        "已从云端合并 {} 项（密码库 + 书签，本地独有记录未删除）",
+        count
+    ))
 }
 
 /// 清除本地同步配置（云端同步包保留）
@@ -413,4 +506,75 @@ pub async fn sync_clear(db: tauri::State<'_, Db>) -> DbResult<()> {
             .map_err(|e| DbError::Other(format!("删除同步配置失败: {}", e)))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    async fn temp_db() -> (tempfile::TempDir, Db) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("t.db");
+        let opts = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .unwrap();
+        for ddl in [
+            "CREATE TABLE passwords (id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT NOT NULL, username TEXT, password TEXT NOT NULL, notes TEXT, created_at TEXT, updated_at TEXT, UNIQUE(domain, username))",
+            "CREATE TABLE bookmark_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, parent_id INTEGER, sort_order INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))",
+            "CREATE TABLE bookmarks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, url TEXT NOT NULL, folder_id INTEGER, sort_order INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))",
+        ] {
+            sqlx::query(ddl).execute(&pool).await.unwrap();
+        }
+        let db = Db {
+            pool,
+            key_path: dir.path().join("master.key"),
+            vault_path: dir.path().join("vault.key"),
+            master_key: tokio::sync::Mutex::new(None),
+        };
+        (dir, db)
+    }
+
+    #[tokio::test]
+    async fn import_merges_bookmarks_by_url_and_creates_folder() {
+        let (_d, db) = temp_db().await;
+        // 本地先有一条书签（同 url 的远端条目应被跳过、不覆盖本地）
+        sqlx::query("INSERT INTO bookmarks (title, url) VALUES ('本地', 'https://a.com')")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        let payload = serde_json::json!({
+            "version": 2,
+            "entries": [],
+            "bookmarks": [
+                {"title": "远端A", "url": "https://a.com", "folder": null},
+                {"title": "远端B", "url": "https://b.com", "folder": "工作"}
+            ]
+        });
+        let plain = serde_json::to_vec(&payload).unwrap();
+        let n = import_payload(&db, &plain).await.unwrap();
+        assert_eq!(n, 1, "只应新增 b.com（a.com 已存在）");
+        let cnt: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM bookmarks")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(cnt.0, 2);
+        let f: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM bookmark_folders WHERE name='工作'")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(f.0, 1, "文件夹应按名字 find-or-create");
+        // 重复导入幂等（a.com 仍在、b.com 已存在 → 0）
+        let n2 = import_payload(&db, &plain).await.unwrap();
+        assert_eq!(n2, 0);
+        // 旧版包（无 bookmarks 字段）不应报错
+        let v1 = serde_json::to_vec(&serde_json::json!({"version": 1, "entries": []})).unwrap();
+        assert_eq!(import_payload(&db, &v1).await.unwrap(), 0);
+    }
 }
