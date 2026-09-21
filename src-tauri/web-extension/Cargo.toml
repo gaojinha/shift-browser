@@ -1,0 +1,14 @@
+[package]
+name = "shift-web-extension"
+version = "0.1.0"
+edition = "2021"
+description = "ShiftBrowser Web 进程扩展（阶段3.2 真扩展体系 · 阶段A 原型）"
+license = ""
+
+[lib]
+name = "shift_web_extension"
+# WebKit 从 extensions 目录加载 .so，入口是导出的 webkit_web_extension_initialize
+crate-type = ["cdylib"]
+
+[dependencies]
+# 纯裸 FFI（extern "C"），符号由宿主 WebKit Web 进程在加载时解析，无需链接 webkit2gtk

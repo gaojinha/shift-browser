@@ -91,10 +91,27 @@ GIR（`WebKit2WebExtension-4.1.gir:48966`）：
 
 ## 五、推荐路线（分阶段）
 
-**阶段 A · 最小原型（下一个 spike 级任务）**
-构建一个最小 Web 进程扩展 `.so`（Rust `cdylib` + 裸 FFI），导出 `webkit_web_extension_initialize`，
-在 `page-created` 里连接 `send-request`，**打印/取消**一个指定 URL 的请求 → 证明端到端可用。
-风险点：.so 构建/打包、跨进程调试、ABI。
+**阶段 A · 最小原型 — ✅ 已完成（2026-09-21）**
+
+产物：`src-tauri/web-extension/`（Rust `cdylib` + 裸 FFI，无第三方依赖），
+入口 `webkit_web_extension_initialize`，在 `page-created` 里连接 `send-request`，
+打印每个请求 URL，并对含标记的 URL 返回 TRUE 取消。构建：`scripts/build-extension.sh`
+（构建 .so 并拷到 exe 所在目录 = 已注册的 web extensions 目录）。
+
+**运行实证**（真机日志，`/tmp/opencode/shift-browser.log`）：
+```
+[shift-ext] Web 进程扩展已加载（阶段A 原型）
+[shift-ext] page-created
+[shift-ext] send-request: shift://newtab
+[shift-ext] send-request: https://www.xiachufang.com/
+[shift-ext] send-request: https://dup.baidustatic.com/js/ds.js
+[shift-ext] send-request: https://sv2.chuimg.com/dist/d2ece0585770c0bb7990.css
+[shift-ext] 拦截（取消）: https://dup.baidustatic.com/js/ds.js   ← 返回 TRUE 的取消分支生效
+```
+即：**加载 → page-created → 每个请求出网前可见 → 返回 TRUE 取消**，全链路打通。
+
+遗留（进阶段 B 前要收）：① .so 的**生产打包**（`tauri.conf.json` resources/bundle，
+当前只在 dev 目录手动拷贝）；② 拦截规则的**性能与真规则引擎**（当前是硬编码标记）。
 
 **阶段 B · 能力落地（把网络层用起来）**
 用阶段 A 的通道做**脚本化网络拦截**：动态 URL 黑名单、请求头改写（如强制 `Sec-GPC`、UA 策略）、

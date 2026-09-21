@@ -4,6 +4,8 @@ dist/
 
 # Rust
 src-tauri/target/
+# Web 进程扩展（独立 cdylib crate）的构建产物
+src-tauri/web-extension/target/
 
 # 系统
 .DS_Store
