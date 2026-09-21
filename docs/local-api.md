@@ -11,13 +11,20 @@
 
 ## 命令
 
-| 请求 | 响应 |
-|---|---|
-| `{"cmd":"status"}` | `{"ok":true,"data":{"version":"…","tabs":N}}` |
-| `{"cmd":"list_tabs"}` | `{"ok":true,"data":[Tab…]}` |
-| `{"cmd":"open_url","url":"https://…"}` | `{"ok":true,"data":Tab}` |
+| 请求 | 响应 | 说明 |
+|---|---|---|
+| `{"cmd":"status"}` | `{"ok":true,"data":{"version":"…","tabs":N}}` | 版本 + 标签数 |
+| `{"cmd":"list_tabs"}` | `{"ok":true,"data":[Tab…]}` | 列全部标签 |
+| `{"cmd":"active_tab"}` | `{"ok":true,"data":Tab\|null}` | 取当前活动标签 |
+| `{"cmd":"open_url","url":"https://…"}` | `{"ok":true,"data":Tab}` | 新标签打开网址 |
+| `{"cmd":"close_tab","id":"…"}` | `{"ok":true,"data":Tab\|null}` | 关标签（返回接管的活动标签） |
+| `{"cmd":"switch_tab","id":"…"}` | `{"ok":true,"data":Tab\|null}` | 切换活动标签 |
+| `{"cmd":"reload_tab","id":"…"}` | `{"ok":true,"data":Tab\|null}` | 刷新标签 |
+| `{"cmd":"navigate","id":"…","url":"…"}` | `{"ok":true,"data":Tab\|null}` | 让指定标签导航到网址 |
 
 出错时：`{"ok":false,"error":"…"}`。
+
+**取 id**：先 `list_tabs` / `active_tab` 拿 `id`，再传给写命令。
 
 ## 用法示例
 

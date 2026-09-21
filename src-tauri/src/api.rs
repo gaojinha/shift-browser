@@ -115,6 +115,60 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 Err(e) => json!({"ok": false, "error": e}),
             }
         }
+        "close_tab" | "switch_tab" | "reload_tab" => {
+            let id = req
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if id.is_empty() {
+                return json!({"ok": false, "error": "缺少 id"});
+            }
+            let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+                return json!({"ok": false, "error": "标签管理器不可用"});
+            };
+            let r = match cmd {
+                "close_tab" => crate::tabs::close_tab(app.clone(), state, id).await,
+                "switch_tab" => crate::tabs::switch_tab(app.clone(), state, id).await,
+                _ => crate::tabs::reload_tab(app.clone(), state, id).await,
+            };
+            match r {
+                Ok(t) => json!({"ok": true, "data": t}),
+                Err(e) => json!({"ok": false, "error": e}),
+            }
+        }
+        "navigate" => {
+            let id = req
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let url = req
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if id.is_empty() || url.is_empty() {
+                return json!({"ok": false, "error": "缺少 id 或 url"});
+            }
+            let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+                return json!({"ok": false, "error": "标签管理器不可用"});
+            };
+            match crate::tabs::navigate_tab(app.clone(), state, id, url).await {
+                Ok(t) => json!({"ok": true, "data": t}),
+                Err(e) => json!({"ok": false, "error": e}),
+            }
+        }
+        "active_tab" => {
+            let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+                return json!({"ok": false, "error": "标签管理器不可用"});
+            };
+            let active = state.all_tabs().into_iter().find(|t| t.is_active);
+            json!({"ok": true, "data": active})
+        }
         _ => json!({"ok": false, "error": format!("未知命令: {}", cmd)}),
     }
 }
