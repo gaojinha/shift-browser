@@ -253,13 +253,33 @@ async fn export_payload(db: &Db) -> DbResult<Vec<u8>> {
         })
         .collect();
 
+    // 历史（阶段4 多端协同）：最近 300 条跨端；按 url 合并（取最大 visit_count / 最新时间）
+    let hi_rows = sqlx::query_as::<_, (String, Option<String>, i64, String)>(
+        "SELECT url, title, visit_count, last_visit_at FROM history
+         ORDER BY last_visit_at DESC LIMIT 300",
+    )
+    .fetch_all(&db.pool)
+    .await?;
+    let history: Vec<serde_json::Value> = hi_rows
+        .into_iter()
+        .map(|(url, title, visit_count, last_visit_at)| {
+            serde_json::json!({
+                "url": url,
+                "title": title,
+                "visit_count": visit_count,
+                "last_visit_at": last_visit_at,
+            })
+        })
+        .collect();
+
     let exported_at = now_str(db).await;
     let payload = serde_json::json!({
-        "version": 3,
+        "version": 4,
         "exported_at": exported_at,
         "entries": entries,
         "bookmarks": bookmarks,
         "sessions": sessions,
+        "history": history,
     });
     serde_json::to_vec(&payload).map_err(|e| DbError::Other(format!("导出序列化失败: {}", e)))
 }
@@ -393,6 +413,36 @@ async fn import_payload(db: &Db, plain: &[u8]) -> DbResult<usize> {
             count += 1;
         }
     }
+
+    // 历史合并（阶段4 · 版本 4 起）：按 url UPSERT——取最大 visit_count + 最新 last_visit_at，
+    // 标题仅在本地为空时补（不覆盖本地）。旧版包（无 history 字段）自然跳过。
+    if let Some(hs) = v.get("history").and_then(|h| h.as_array()) {
+        for h in hs {
+            let url = h.get("url").and_then(|x| x.as_str()).unwrap_or("");
+            if url.is_empty() {
+                continue;
+            }
+            let title = h.get("title").and_then(|x| x.as_str());
+            let visit_count = h.get("visit_count").and_then(|x| x.as_i64()).unwrap_or(1);
+            let last_visit_at = h.get("last_visit_at").and_then(|x| x.as_str()).unwrap_or("");
+            sqlx::query(
+                "INSERT INTO history (url, title, visit_count, last_visit_at)
+                 VALUES (?, ?, ?, COALESCE(NULLIF(?, ''), datetime('now')))
+                 ON CONFLICT(url) DO UPDATE SET
+                   title = COALESCE(history.title, excluded.title),
+                   visit_count = MAX(history.visit_count, excluded.visit_count),
+                   last_visit_at = MAX(history.last_visit_at, excluded.last_visit_at)",
+            )
+            .bind(url)
+            .bind(title)
+            .bind(visit_count)
+            .bind(last_visit_at)
+            .execute(&db.pool)
+            .await
+            .map_err(|e| DbError::Other(format!("历史合并失败: {}", e)))?;
+            count += 1;
+        }
+    }
     Ok(count)
 }
 
@@ -465,7 +515,7 @@ pub async fn sync_push(db: tauri::State<'_, Db>) -> DbResult<String> {
                     .map(|a| a.len())
                     .unwrap_or(0)
             };
-            n("entries") + n("bookmarks") + n("sessions")
+            n("entries") + n("bookmarks") + n("sessions") + n("history")
         })
         .unwrap_or(0);
     let sealed = seal(&key, &payload)?;
@@ -500,7 +550,7 @@ pub async fn sync_push(db: tauri::State<'_, Db>) -> DbResult<String> {
     store.last_push_at = Some(now_str(&db).await);
     save_store(&db, &store, &key)?;
     Ok(format!(
-        "已加密推送 {} 项（密码库 + 书签 + 会话）到云端（服务器仅见密文）",
+        "已加密推送 {} 项（密码库 + 书签 + 会话 + 历史）到云端（服务器仅见密文）",
         count
     ))
 }
@@ -541,7 +591,7 @@ pub async fn sync_pull(db: tauri::State<'_, Db>) -> DbResult<String> {
     store.last_pull_at = Some(now_str(&db).await);
     save_store(&db, &store, &key)?;
     Ok(format!(
-        "已从云端合并 {} 项（密码库 + 书签 + 会话，本地独有记录未删除）",
+        "已从云端合并 {} 项（密码库 + 书签 + 会话 + 历史，本地独有记录未删除）",
         count
     ))
 }
@@ -578,6 +628,8 @@ mod tests {
             "CREATE TABLE bookmark_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, parent_id INTEGER, sort_order INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))",
             "CREATE TABLE bookmarks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, url TEXT NOT NULL, folder_id INTEGER, sort_order INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))",
             "CREATE TABLE sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, workspace_id INTEGER, data TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))",
+            "CREATE TABLE history (id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL, title TEXT, visit_count INTEGER DEFAULT 1, last_visit_at TEXT DEFAULT (datetime('now')), created_at TEXT DEFAULT (datetime('now')))",
+            "CREATE UNIQUE INDEX idx_history_url_uniq ON history(url)",
         ] {
             sqlx::query(ddl).execute(&pool).await.unwrap();
         }
@@ -598,6 +650,14 @@ mod tests {
             .execute(&db.pool)
             .await
             .unwrap();
+        // 本地历史（visit_count=2）——导入的 visit_count=5 应取最大、标题不覆盖本地
+        sqlx::query(
+            "INSERT INTO history (url, title, visit_count, last_visit_at)
+             VALUES ('https://a.com', '本地标题', 2, '2026-09-21 09:00:00')",
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
         let payload = serde_json::json!({
             "version": 3,
             "entries": [],
@@ -608,11 +668,24 @@ mod tests {
             "sessions": [
                 {"name": "自动保存", "data": "[]", "created_at": "2026-09-21 10:00:00"},
                 {"name": "自动保存", "data": "[]", "created_at": "2026-09-21 11:00:00"}
+            ],
+            "history": [
+                {"url": "https://a.com", "title": "远端标题", "visit_count": 5, "last_visit_at": "2026-09-21 12:00:00"}
             ]
         });
         let plain = serde_json::to_vec(&payload).unwrap();
         let n = import_payload(&db, &plain).await.unwrap();
-        assert_eq!(n, 3, "b.com + 两个会话");
+        assert_eq!(n, 4, "b.com + 两个会话 + 一条历史");
+        // 历史按 url 合并：visit_count 取最大、last_visit_at 取最新、标题不覆盖本地
+        let (vc, lv, t): (i64, String, String) = sqlx::query_as(
+            "SELECT visit_count, last_visit_at, title FROM history WHERE url='https://a.com'",
+        )
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+        assert_eq!(vc, 5);
+        assert_eq!(lv, "2026-09-21 12:00:00");
+        assert_eq!(t, "本地标题");
         let cnt: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM bookmarks")
             .fetch_one(&db.pool)
             .await
@@ -629,9 +702,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(sc.0, 2, "两个会话应按 (name, created_at) 合并入库");
-        // 重复导入幂等（a.com 仍在、b.com 已存在 → 0）
+        // 重复导入：书签/会话幂等跳过；历史是 UPSERT（数据不变，但计一次"处理"）
         let n2 = import_payload(&db, &plain).await.unwrap();
-        assert_eq!(n2, 0);
+        assert_eq!(n2, 1, "仅历史被重新 UPSERT");
+        let hc: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM history")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(hc.0, 1, "历史仍只有一行（UPSERT 不重复插入）");
         // 旧版包（无 bookmarks 字段）不应报错
         let v1 = serde_json::to_vec(&serde_json::json!({"version": 1, "entries": []})).unwrap();
         assert_eq!(import_payload(&db, &v1).await.unwrap(), 0);
