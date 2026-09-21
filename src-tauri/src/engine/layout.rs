@@ -61,6 +61,25 @@ impl ContentGeometry {
         Self::from_size(inner.width as f64 / scale, inner.height as f64 / scale, top, ai_active, vertical)
     }
 
+    /// 分屏：把当前内容区左右对半，返回 (左半, 右半)。
+    /// 左半承载活动标签，右半承载分屏标签（阶段 3.1 分屏浏览）。
+    pub fn split(self) -> (ContentGeometry, ContentGeometry) {
+        let half = self.width / 2;
+        let left = ContentGeometry {
+            left: self.left,
+            width: half,
+            height: self.height,
+            top: self.top,
+        };
+        let right = ContentGeometry {
+            left: self.left + half,
+            width: self.width - half,
+            height: self.height,
+            top: self.top,
+        };
+        (left, right)
+    }
+
     /// 纯数学（与窗口解耦，便于单测）：给定内容区逻辑宽高算几何。
     /// 顺序：先让出左侧（垂直标签）→ 再让出右侧（AI 分屏）→ 下限保底。
     pub fn from_size(
@@ -232,5 +251,29 @@ mod tests {
         let g = ContentGeometry::from_size(500.0, 80.0, CONTENT_TOP_OFFSET, true, true);
         assert_eq!(g.width, MIN_CONTENT_WIDTH as i32);
         assert_eq!(g.height, MIN_CONTENT_HEIGHT as i32);
+    }
+
+    #[test]
+    fn geometry_split_halves_side_by_side() {
+        let g = ContentGeometry::from_size(1280.0, 800.0, CONTENT_TOP_OFFSET, false, false);
+        let (l, r) = g.split();
+        assert_eq!(l.left, 0);
+        assert_eq!(l.width, 640);
+        assert_eq!(r.left, 640);
+        assert_eq!(r.width, 640);
+        assert_eq!(l.top, r.top);
+        assert_eq!(l.height, r.height);
+        // 两块拼起来等于原内容区（无缝隙、无重叠）
+        assert_eq!(l.width + r.width, g.width);
+        assert_eq!(r.left, l.left + l.width);
+    }
+
+    #[test]
+    fn geometry_split_keeps_vertical_offset() {
+        let g = ContentGeometry::from_size(1280.0, 800.0, 72.0, false, true);
+        let (l, r) = g.split();
+        assert_eq!(l.left, VERTICAL_TAB_BAR_WIDTH as i32); // 垂直标签：左半从 220 起
+        assert_eq!(r.left, VERTICAL_TAB_BAR_WIDTH as i32 + l.width);
+        assert_eq!(l.width + r.width, g.width);
     }
 }

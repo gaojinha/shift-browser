@@ -145,6 +145,8 @@ pub struct TabManager {
     ai_panel_active: Mutex<bool>,
     /// 垂直标签模式（true 时左侧让出 VERTICAL_TAB_BAR_WIDTH，顶部不再含标签栏）
     vertical_tabs: Mutex<bool>,
+    /// 分屏：右侧窗格承载的标签 id（None = 未分屏；左侧窗格始终是活动标签）
+    split_tab: Mutex<Option<String>>,
     /// 每个标签最后一次激活时间（Unix 秒），用于"空闲休眠"判定
     last_active: Mutex<HashMap<String, i64>>,
 }
@@ -167,6 +169,7 @@ impl TabManager {
             webview_visible_seq: Mutex::new(0),
             ai_panel_active: Mutex::new(false),
             vertical_tabs: Mutex::new(false),
+            split_tab: Mutex::new(None),
             last_active: Mutex::new(HashMap::new()),
         }
     }
@@ -228,6 +231,22 @@ impl TabManager {
             .vertical_tabs
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = on;
+    }
+
+    /// 分屏：右侧窗格承载的标签 id（None = 未分屏）
+    pub fn split_tab(&self) -> Option<String> {
+        self.split_tab
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// 设置/清除分屏标签
+    pub fn set_split_tab(&self, id: Option<String>) {
+        *self
+            .split_tab
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = id;
     }
 
     /// 当前内容区顶部偏移（随书签栏显隐 + 垂直标签模式变化）
@@ -1063,15 +1082,20 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
                     ai_active
                 );
                 if let Some(state) = app_handle.try_state::<TabManager>() {
-                    let ids: Vec<String> = state
-                        .tabs
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .keys()
-                        .cloned()
-                        .collect();
-                    for id in ids {
-                        crate::engine::layout::apply_to_webview(&win_for_geo, &id, geo);
+                    if state.split_tab().is_some() {
+                        // 分屏中：两个窗格各自几何，统一走 apply_split_layout
+                        let _ = apply_split_layout(&app_handle, &state);
+                    } else {
+                        let ids: Vec<String> = state
+                            .tabs
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .keys()
+                            .cloned()
+                            .collect();
+                        for id in ids {
+                            crate::engine::layout::apply_to_webview(&win_for_geo, &id, geo);
+                        }
                     }
                 }
             }
@@ -1178,6 +1202,56 @@ fn apply_tab_geometry(window: &tauri::Window, id: &str, top: f64, ai_active: boo
         .unwrap_or(false);
     let geo = crate::engine::layout::ContentGeometry::compute(window, top, ai_active, vertical);
     crate::engine::layout::apply_to_webview(window, id, geo);
+}
+
+/// 应用分屏布局：左窗格=活动标签，右窗格=分屏标签（如有）；隐藏其余标签。
+/// 未分屏时等价于"只显示活动标签"（但用统一的隐藏-再显示路径，避免 z-order 残留）。
+fn apply_split_layout(app: &AppHandle, state: &TabManager) -> Result<(), String> {
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "主窗口不存在".to_string())?;
+    let top = state.top_offset();
+    let vertical = state.vertical_tabs();
+    let ai_active = *state
+        .ai_panel_active
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let active = state
+        .active_id
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let split = state.split_tab();
+
+    let full = crate::engine::layout::ContentGeometry::compute(&window, top, ai_active, vertical);
+    let ids: Vec<String> = state
+        .tabs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .keys()
+        .cloned()
+        .collect();
+
+    // 先全部隐藏（避免 z-order/尺寸错位），再按窗格定位并显示
+    for id in &ids {
+        let _ = TabManager::set_webview_visible(app, id, false);
+    }
+    match (active, split) {
+        (Some(a), Some(s)) if s != a => {
+            let (lg, rg) = full.split();
+            crate::engine::layout::apply_to_webview(&window, &a, lg);
+            crate::engine::layout::apply_to_webview(&window, &s, rg);
+            // 先显示右窗格，再显示左窗格（活动标签获得焦点、置于上层）
+            let _ = TabManager::set_webview_visible(app, &s, true);
+            let _ = TabManager::set_webview_visible(app, &a, true);
+        }
+        (Some(a), _) => {
+            crate::engine::layout::apply_to_webview(&window, &a, full);
+            let _ = TabManager::set_webview_visible(app, &a, true);
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// 创建新标签页
@@ -1387,7 +1461,10 @@ pub async fn switch_tab(
 
     // 切换可见性：一次主线程投递里"先显示新标签、再隐藏旧标签"
     // （原实现 hide→show 两次投递且顺序相反，中间白屏空窗 + 双跨线程往返导致切换迟钝）
-    if old_active.as_deref() == Some(id.as_str()) {
+    if state.split_tab().is_some() {
+        // 分屏中：重排两个窗格（活动标签变了，右窗格保持），避免把分屏标签误隐藏
+        let _ = apply_split_layout(&app, &state);
+    } else if old_active.as_deref() == Some(id.as_str()) {
         // 点的就是当前标签：仅确保可见
         let _ = TabManager::set_webview_visible(&app, &id, true);
     } else {
@@ -1898,6 +1975,43 @@ pub async fn set_vertical_tabs(
     }
 
     Ok(new_top)
+}
+
+/// 开启分屏：右侧窗格显示指定标签（阶段 3.1 分屏浏览）
+#[tauri::command]
+pub async fn set_split_tab(
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+    id: String,
+) -> Result<(), String> {
+    if !state
+        .tabs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(&id)
+    {
+        return Err("标签不存在".to_string());
+    }
+    state.set_split_tab(Some(id.clone()));
+    log::info!("[tabs] set_split_tab: {}", id);
+    apply_split_layout(&app, &state)
+}
+
+/// 关闭分屏
+#[tauri::command]
+pub async fn clear_split(
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+) -> Result<(), String> {
+    state.set_split_tab(None);
+    log::info!("[tabs] clear_split");
+    apply_split_layout(&app, &state)
+}
+
+/// 查询当前分屏标签（None = 未分屏）
+#[tauri::command]
+pub async fn get_split_tab(state: tauri::State<'_, TabManager>) -> Result<Option<String>, String> {
+    Ok(state.split_tab())
 }
 
 /// 获取当前活动标签的导航状态（可后退/可前进）

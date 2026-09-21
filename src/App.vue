@@ -344,6 +344,8 @@ onMounted(async () => {
       })
     }
     tabsStore.startPolling()
+    // 分屏状态同步（阶段 3.1；进程内状态，重启后为未分屏）
+    tabsStore.loadSplit()
     frontLog('onReady 完成 标签数=' + tabsStore.tabs.length)
     // 启动自检：把版本/存储/运行时/能力状态写进 Rust 日志（只读，便于事后排查）
     invoke<{ healthy: boolean }>('selfcheck_cmd')

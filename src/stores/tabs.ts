@@ -73,6 +73,8 @@ interface TabsState {
   /** 当前活动标签是否可后退/前进（前端乐观追踪，webview 内链跳也会在轮询里补 back） */
   canGoBack: boolean
   canGoForward: boolean
+  /** 分屏：右侧窗格承载的标签 id（null = 未分屏，阶段 3.1） */
+  splitTabId: string | null
 }
 
 export const useTabsStore = defineStore('tabs', {
@@ -86,6 +88,7 @@ export const useTabsStore = defineStore('tabs', {
     loadingTabId: null,
     canGoBack: false,
     canGoForward: false,
+    splitTabId: null,
   }),
 
   getters: {
@@ -108,6 +111,25 @@ export const useTabsStore = defineStore('tabs', {
         // 锁屏期间命令必然失败，静默等待解锁（否则反复弹 toast）
         if (!(await isLockedNow())) useToastStore().error('加载标签页失败')
       }
+    },
+
+    /** 分屏：加载当前分屏标签（启动时同步，阶段 3.1） */
+    async loadSplit() {
+      try {
+        this.splitTabId = await invoke<string | null>('get_split_tab')
+      } catch {
+        this.splitTabId = null
+      }
+    },
+    /** 分屏：在右侧窗格显示指定标签 */
+    async setSplit(id: string) {
+      await invoke('set_split_tab', { id })
+      this.splitTabId = id
+    },
+    /** 分屏：关闭分屏 */
+    async clearSplit() {
+      await invoke('clear_split')
+      this.splitTabId = null
     },
 
     /** 分配标签到分组（groupId = null 表示取消分组） */

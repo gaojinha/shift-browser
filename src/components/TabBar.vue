@@ -140,6 +140,20 @@ function onMenuMute() {
   tabsStore.muteTab(menu.value.tabId)
   closeMenu()
 }
+/** 在右侧分屏 / 关闭分屏（阶段 3.1） */
+function onMenuSplit() {
+  if (!menu.value || menuClickGuard()) return
+  const id = menu.value.tabId
+  closeMenu()
+  if (tabsStore.splitTabId === id) {
+    tabsStore.clearSplit().catch(() => {})
+  } else {
+    tabsStore.setSplit(id).catch((e) => {
+      console.error('[tabs] 分屏失败:', e)
+      useToastStore().error('分屏失败')
+    })
+  }
+}
 function onMenuCloseTab() {
   if (!menu.value || menuClickGuard()) return
   tabsStore.closeTab(menu.value.tabId)
@@ -467,6 +481,9 @@ function onFaviconError(e: Event) {
     >
       <div class="menu-item" @click="onMenuPin">📌 固定/取消固定</div>
       <div class="menu-item" @click="onMenuMute">🔇 静音/取消静音</div>
+      <div class="menu-item" @click="onMenuSplit">
+        {{ tabsStore.splitTabId === menu?.tabId ? '◫ 关闭分屏' : '◫ 在右侧分屏' }}
+      </div>
       <div class="menu-divider"></div>
       <div class="menu-item" @click="onMenuCloseTab">✕ 关闭标签</div>
       <div class="menu-item" @click="onMenuCloseOthers">关闭其他标签</div>
