@@ -168,4 +168,13 @@ webkit2gtk::WebInspectorExt::show(&inspector);
 **错误 3（长文件 write 截断）**: 一次性 write 超长 Rust 文件，JSON 被截断成 `Unterminated string`，落盘成半截残稿（因未在 `db/mod.rs` 注册而未参与编译，但污染工作区）。
 **正确**: ①**写跨模块调用前，先 grep 被调符号的真身签名贴进对话，再从输出抄**，绝不从记忆造；②项目根只认 `git -C <dir> log` 能对上历史提交的那个；③长文件用 `write` 分块（≤250 行）+ `edit` 拼接，每块后 `cargo build` 验证；④残稿立即 `rm` + `git checkout --` 回绿线，不留尸。
 **预防**: 编译错误成堆时，**先怀疑"我引用的 API 是不是真的存在"**，grep 一遍再说。这与 2026-09-20「llms.txt 幽灵符号」是**同一类病**——"凭记忆写 API"是本模型高频失误，必须靠"先 grep 后写"的流程硬约束，不能靠记性。本次最终以"先 grep 真身 → 分块写 → build 全绿 → 108 测试过 → 冒烟 12/12 → 真 Nextcloud WebDAV 验证"收口。
+
+## 2026-09-21 — 垂直标签：GTK 布局"看着合理"的写法把 webview 压成 1×1
+
+**类别**: correction
+**场景**: 第47章垂直标签（阶段3.1），内容区需从 x=0 右移到 x=220。
+**错误 1（漏调用）**: 新建标签后从未调用 `apply_to_webview`（负责设 GtkFixed 的 margin 定位）——初始化同步 `set_vertical_tabs` 跑时还是 0 个标签、循环空转；新标签只设尺寸没设位置。结果 Fixed 停在 setup 的初始 margin（0,116），垂直模式下 webview 实际落在 (0,116) 而非 (220,72)，**盖住左侧标签栏**（用户："左边标签栏没内容"）。
+**错误 2（margin_start 压崩布局）**: 首版修复用 `fixed.set_margin_start(220)` 让 Fixed 右移——GtkOverlay 的叠加子件（`add_overlay`）上 margin_start 会把 Fixed 的分配**压成 1×1**（实测 `wv_alloc=(0,700,1,1)`），webview 直接消失。
+**正确**: ①新建标签后立即 `compute + apply` 当前几何；②GTK 里改容器定位**优先用 GtkFixed 内部 `move_(x, y)`**（绝对定位，最可靠），别用叠加子件的 margin；顶部偏移沿用已验证有效的 `margin_top`。最终 `move_(geo.left, 0)` + Fixed 宽度 `left+width` → 实测 `wv_toplevel_pos=(220,72)` 与 HTML content-area 完全对齐。
+**预防**: **GTK 布局改动必须实测真实像素**——用 `gtk_widget_translate_coordinates(wv, toplevel, 0,0)` + `allocation()` 打日志验证，**绝不能靠"应该对"**（本次靠它抓到 allocation (0,0) vs 期望 (220,72) 的偏差）。这与"凭记忆写 API"同源：**GTK 的布局语义（margin vs move_、Overlay 子件行为）不能靠直觉**，必须实测。
 ---
