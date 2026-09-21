@@ -340,8 +340,8 @@ async function onSet(key: string, value: string) {
       useToastStore().error('标签栏方向切换失败')
     }
   }
-  // 网络层拦截规则 / 自定义请求头：落盘到扩展文件（阶段3.2；热更新，约 2 秒生效）
-  if (key === 'net_block_rules' || key === 'net_headers') {
+  // 网络层拦截规则 / 自定义请求头 / GPC 开关：落盘到扩展文件（阶段3.2；热更新，约 2 秒生效）
+  if (key === 'net_block_rules' || key === 'net_headers' || key === 'gpc_header') {
     try {
       await invoke('sync_ext_rules')
     } catch (e) {
@@ -1521,6 +1521,18 @@ async function onRemoveKeyword(k: string) {
                     type="checkbox"
                     :checked="settingsStore.get('adblock_enabled') !== 'false'"
                     @change="onToggleAdblock"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>GPC 请求头（Sec-GPC: 1）</label>
+                <span class="field-desc">W3C Global Privacy Control：网络层告诉站点"别卖我的数据"</span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('gpc_header') !== 'false'"
+                    @change="onSet('gpc_header', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
                   />
                   <span class="slider"></span>
                 </label>

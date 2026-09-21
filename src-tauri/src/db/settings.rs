@@ -35,6 +35,8 @@ const ALLOWED_KEYS: &[&str] = &[
     // 定时 Agent 提示词（阶段3 Agent 编排；0 = 关闭）
     "auto_agent_minutes",
     "auto_agent_prompt",
+    // 网络层 GPC 请求头开关（阶段2/3：Sec-GPC: 1；'false' = 关）
+    "gpc_header",
     "show_lunar",
     "show_quote",
     "show_weather",
@@ -270,6 +272,16 @@ pub async fn sync_ext_rules(db: tauri::State<'_, Db>) -> DbResult<()> {
     let mut hcontent = String::from(
         "# ShiftBrowser 自定义请求头（由主程序写入，勿手改）\n# 每行 `Name: Value`，注入到每个出网请求；# 开头为注释\n",
     );
+    // 网络层 GPC（开关化）：gpc_header != 'false' 时注入 Sec-GPC: 1
+    let gpc_on = sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'gpc_header'")
+        .fetch_optional(&db.pool)
+        .await?
+        .map(|(v,)| v)
+        .unwrap_or_else(|| "true".to_string())
+        != "false";
+    if gpc_on {
+        hcontent.push_str("Sec-GPC: 1\n");
+    }
     for line in hdrs.lines() {
         let l = line.trim();
         if !l.is_empty() {
