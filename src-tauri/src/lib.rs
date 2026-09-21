@@ -403,6 +403,41 @@ pub fn run() {
         std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER")
     );
 
+    // ===== Cookie 持久化（修复"登录状态不保存"）=====
+    // WebKitGTK 的 CookieManager 默认是内存模式，重启即丢——必须显式
+    // set_persistent_storage 落盘。且该调用必须在任何 web process 创建之前
+    // （tauri 的 setup 回调执行时主 webview 已创建，已太晚），故放在 run() 开头。
+    // 存储路径与 app_data_dir 一致：$XDG_DATA_HOME/com.shiftbrowser.app/cookies.sqlite
+    #[cfg(target_os = "linux")]
+    {
+        // WebContext::default() 要求 GTK 已初始化；gtk::init() 幂等（已初始化直接 Ok），
+        // 之后 tauri 再初始化不会冲突
+        let _ = gtk::init();
+        use webkit2gtk::{CookieManagerExt, CookiePersistentStorage, WebContext, WebContextExt};
+        if let Some(context) = WebContext::default() {
+            if let Some(cm) = context.cookie_manager() {
+                let data_home = std::env::var("XDG_DATA_HOME")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|_| {
+                        std::env::var("HOME")
+                            .map(|h| std::path::PathBuf::from(h).join(".local/share"))
+                            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                    });
+                let cookie_path = data_home.join("com.shiftbrowser.app").join("cookies.sqlite");
+                if let Some(dir) = cookie_path.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                cm.set_persistent_storage(
+                    cookie_path.to_str().unwrap_or("cookies.sqlite"),
+                    CookiePersistentStorage::Sqlite,
+                );
+                // 注意：此处 logger 插件尚未初始化（Builder 之前），log::info! 会被丢弃，
+            // 用 println! 保证启动日志可见
+            println!("[ShiftBrowser] Cookie 持久化已启用: {}", cookie_path.display());
+            }
+        }
+    }
+
     // ===== 隐私防护 P3：TLS 指纹规范化（已回退，2026-09-18）=====
     // 回退原因：设置 G_TLS_GNUTLS_PRIORITY 后邮箱正文渲染为空 —— 该环境变量
     // 作用于进程内全部 TLS 连接，若站点部分资源依赖被裁掉的协议/套件组合，
@@ -414,6 +449,39 @@ pub fn run() {
     //     "NORMAL:-VERS-ALL:+VERS-TLS1.3:+VERS-TLS1.2:-VERS-TLS1.0:-VERS-TLS1.1",
     // );
     tauri::Builder::default()
+    // 单实例（阶段 4 D3）：已有实例运行时，新实例退出并把命令行参数转发给已有实例。
+    // 必须注册为第一个插件（官方要求）。回调在已有实例进程里执行，
+    // argv 是新实例的完整命令行参数——过滤 http/https 后让已有实例开新标签。
+    .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+      let urls: Vec<String> = argv
+        .iter()
+        .filter(|a| a.starts_with("http://") || a.starts_with("https://"))
+        .cloned()
+        .collect();
+      log::info!("[single-instance] 已有实例收到新实例参数: {:?}", argv);
+      if !urls.is_empty() {
+        log::info!("[single-instance] 转发外部链接: {:?}", urls);
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+          // 稍等现有实例就绪（标签管理器已 manage）
+          tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+          for url in urls {
+            if let Some(state) = app_handle.try_state::<TabManager>() {
+              match tabs::create_tab(app_handle.clone(), state, url.clone()).await {
+                Ok(tab) => log::info!("[single-instance] 外部链接已打开: {}", tab.id),
+                Err(e) => log::warn!("[single-instance] 外部链接打开失败: {} ({})", url, e),
+              }
+            }
+          }
+          // 窗口前置（可能最小化/缩托盘）
+          if let Some(w) = app_handle.get_window("main") {
+            let _ = w.show();
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+          }
+        });
+      }
+    }))
     .plugin(tauri_plugin_opener::init())
     // 注意：不再注册 shell/dialog/fs 插件——前端只用到 opener，
     // 多余插件只增加攻击面与二进制体积（安全最小化原则）

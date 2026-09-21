@@ -23,6 +23,8 @@ log = "0.4"
 tauri = { version = "2.11.3", features = ["unstable", "custom-protocol"] }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
+# 单实例（阶段 4 D3）：已有实例运行时，新实例退出并把命令行参数转发给已有实例
+tauri-plugin-single-instance = "2"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 aes-gcm = "0.10"
 rand = "0.8"
