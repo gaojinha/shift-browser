@@ -427,6 +427,56 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 Err(_) => json!({"ok": false, "error": "截图结果丢失"}),
             }
         }
+        "eval" => {
+            // 执行 JS（安全闸门：设置 api_allow_eval 必须为 'true'，默认关）
+            let db = app.state::<crate::db::Db>();
+            let allowed: String =
+                sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'api_allow_eval'")
+                    .fetch_optional(&db.pool)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|(v,)| v)
+                    .unwrap_or_default();
+            if allowed != "true" {
+                return json!({"ok": false, "error": "执行 JS 已禁用：需在设置里显式开启「允许 API 执行 JS」"});
+            }
+            let code = req
+                .get("code")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if code.is_empty() {
+                return json!({"ok": false, "error": "缺少 code"});
+            }
+            if code.len() > 100_000 {
+                return json!({"ok": false, "error": "代码过长（>100KB）"});
+            }
+            let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+                return json!({"ok": false, "error": "标签管理器不可用"});
+            };
+            let Some(active) = state.all_tabs().into_iter().find(|t| t.is_active) else {
+                return json!({"ok": false, "error": "没有活动标签"});
+            };
+            let label = format!("tab-{}", active.id);
+            let Some(wv) = app.get_webview(&label) else {
+                return json!({"ok": false, "error": "找不到活动标签 webview"});
+            };
+            let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
+            let dispatched = wv.with_webview(move |pwv| {
+                crate::engine::webview::eval_js_with(&pwv.inner(), &code, move |res| {
+                    let _ = tx.send(res);
+                });
+            });
+            if dispatched.is_err() {
+                return json!({"ok": false, "error": "执行调度失败"});
+            }
+            match rx.await {
+                Ok(Ok(v)) => json!({"ok": true, "data": {"result": v}}),
+                Ok(Err(e)) => json!({"ok": false, "error": e}),
+                Err(_) => json!({"ok": false, "error": "执行结果丢失"}),
+            }
+        }
         "active_tab" => {
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});

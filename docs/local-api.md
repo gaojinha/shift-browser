@@ -47,6 +47,7 @@ curl -s -X POST http://127.0.0.1:19701/api -H "Authorization: Bearer $TOKEN" \
 | `{"cmd":"history","limit":50}` | `{"ok":true,"data":[{url,title,visit_count,last_visit_at}…]}` | 读最近历史（limit ≤500） |
 | `{"cmd":"bookmarks"}` | `{"ok":true,"data":[{title,url,folder,sort_order}…]}` | 读书签（含文件夹名） |
 | `{"cmd":"screenshot"}` | `{"ok":true,"data":{"path":"…/screenshots/shot-*.png"}}` | 截当前活动标签可见区 → PNG 落盘 |
+| `{"cmd":"eval","code":"…"}` | `{"ok":true,"data":{"result":"…"}}` | 在活动标签执行 JS（**默认关**，见下） |
 
 出错时：`{"ok":false,"error":"…"}`。
 
@@ -85,6 +86,9 @@ print(s.recv(65536).decode())
 - **动作面**：目前只有"读状态 / 列标签 / 开网址"三个**低风险**命令；写操作（关标签、执行 JS 等）
   若后续加入，需评估是否要再加一层 token 鉴权。
 - **不绕过安全闸门**：本 API 不提供 agent 动作执行入口（多步动作仍只走 AI 面板的确认流程）。
+- **执行 JS（eval）默认关**：最强能力（可读页面/驱动交互），故加**显式闸门**——必须在
+  设置 → 隐私 → 「允许 API 执行 JS（危险）」里开启，命令才生效；未开返回 `ok:false`。
+  另有限长（≤100KB）。开启前请确认：只有可信的本机脚本 / 持有 token 者能连进来。
 
 ## 验证
 

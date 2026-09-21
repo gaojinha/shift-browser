@@ -1537,6 +1537,20 @@ async function onRemoveKeyword(k: string) {
                   <span class="slider"></span>
                 </label>
               </div>
+              <div class="field">
+                <label>允许 API 执行 JS（危险）</label>
+                <span class="field-desc">
+                  开放 API 的 eval 命令；默认关。开启后本机脚本/持 token 者可执行任意 JS
+                </span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('api_allow_eval') === 'true'"
+                    @change="onSet('api_allow_eval', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
               <div class="kw-block">
                 <div class="kw-hint">
                   <b>网络层拦截规则</b>（阶段3.2）：每行一个 URL 子串，命中即<strong>取消该请求</strong>

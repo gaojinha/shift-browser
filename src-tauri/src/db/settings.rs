@@ -37,6 +37,8 @@ const ALLOWED_KEYS: &[&str] = &[
     "auto_agent_prompt",
     // 网络层 GPC 请求头开关（阶段2/3：Sec-GPC: 1；'false' = 关）
     "gpc_header",
+    // 开放 API 是否允许「执行 JS」（阶段4；默认关，显式设 'true' 才开）
+    "api_allow_eval",
     "show_lunar",
     "show_quote",
     "show_weather",
