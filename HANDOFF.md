@@ -1920,9 +1920,31 @@ Cargo.toml 加 `cairo-rs`（features=["png"]）；GTK 对象非 Send → GTK 主
 
 ---
 
-## 下一步（截至第七十五章）
+## 第七十六章（阶段 4）：开放 API 加「执行 JS」（带安全闸门）— 9a0e454
 
-- **阶段 4 继续**：开放 API 加「执行 JS」（需安全评估）；自托管服务端套件更完整版（长期项）；
-  多端形态（移动/平板协同）。
-- **工程**：HANDOFF 逐章记录机制（已补至 75 章，后续每章随提交更新）。
+**背景一句话**：开放 API 的最强能力——在活动标签执行任意 JS（读页面/驱动交互）。
+
+**安全闸门**（关键）：设置项 `api_allow_eval`（**默认关**）未开时命令直接拒绝；
+设置 → 隐私 → 「允许 API 执行 JS（危险）」显式开启；另有限长（≤100KB）；
+双形态鉴权兜底（Unix 0600 / HTTP Bearer token）。
+
+**实现**：api.rs `eval {code}` → 取活动标签 webview → `engine::webview::eval_js_with`
+（带结果回调）→ tokio oneshot 回传。
+
+**运行实证**：禁用态 → `{"ok":false,"error":"执行 JS 已禁用…"}`；
+开闸 → `{"ok":true,"data":{"result":"Example Domain | example.com"}}`。
+
+**验证**：cargo 0错0警告；115 测试；前端构建过；vitest 2/2；eslint 干净；冒烟 12/12。
+
+**开放 API 现状（14 命令）**：读 status/list_tabs/active_tab/history/bookmarks；
+写 open_url/close_tab/switch_tab/reload_tab/navigate/search/new_tab；
+媒体 screenshot；执行 eval（默认关）。
+
+---
+
+## 下一步（截至第七十六章）
+
+- **阶段 4 继续**：自托管服务端套件更完整版（长期项）；多端形态（移动/平板协同）；
+  开放 API 鉴权增强（如 HTTP 端口可配 / 局域网白名单）。
+- **工程**：HANDOFF 逐章记录机制（已补至 76 章，后续每章随提交更新）。
 
