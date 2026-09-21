@@ -216,10 +216,16 @@ pub async fn delete_bookmark_folder(db: tauri::State<'_, Db>, id: i64) -> DbResu
 /// 搜索书签
 #[tauri::command]
 pub async fn search_bookmarks(db: tauri::State<'_, Db>, query: String) -> DbResult<Vec<Bookmark>> {
-    let like = format!("%{}%", query);
+    // LIKE 通配符转义：% 和 _ 是 SQL LIKE 的通配符，用户输入含这些字符时按字面量匹配
+    // （先转义反斜杠本身，再转义 % 和 _，配合 ESCAPE '\' 使用，与 search_history 保持一致）
+    let escaped = query
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let like = format!("%{}%", escaped);
     let rows = sqlx::query_as::<_, (i64, String, String, Option<i64>, i64, String)>(
         "SELECT id, title, url, folder_id, sort_order, created_at FROM bookmarks
-     WHERE title LIKE ? OR url LIKE ? ORDER BY title LIMIT 50",
+     WHERE title LIKE ? ESCAPE '\\' OR url LIKE ? ESCAPE '\\' ORDER BY title LIMIT 50",
     )
     .bind(&like)
     .bind(&like)
