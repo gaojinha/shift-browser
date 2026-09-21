@@ -29,6 +29,9 @@ const ALLOWED_KEYS: &[&str] = &[
     "net_block_rules",
     // 自定义请求头（阶段3.2：写入扩展请求头文件，每行 `Name: Value`）
     "net_headers",
+    // 定时任务（阶段3 自动化；0 = 关闭）
+    "auto_clear_history_days",
+    "auto_refresh_feeds_minutes",
     "show_lunar",
     "show_quote",
     "show_weather",

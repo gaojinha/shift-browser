@@ -909,6 +909,28 @@ async function onRemoveKeyword(k: string) {
                 </label>
               </div>
               <div class="field">
+                <label>定时清理历史</label>
+                <input
+                  class="task-num"
+                  type="number"
+                  min="0"
+                  :value="settingsStore.get('auto_clear_history_days') || '0'"
+                  @change="onSet('auto_clear_history_days', ($event.target as HTMLInputElement).value)"
+                />
+                <span class="field-desc">天（0=关闭；每天自动删更早的历史）</span>
+              </div>
+              <div class="field">
+                <label>定时刷新订阅</label>
+                <input
+                  class="task-num"
+                  type="number"
+                  min="0"
+                  :value="settingsStore.get('auto_refresh_feeds_minutes') || '0'"
+                  @change="onSet('auto_refresh_feeds_minutes', ($event.target as HTMLInputElement).value)"
+                />
+                <span class="field-desc">分钟（0=关闭）</span>
+              </div>
+              <div class="field">
                 <label>翻译源</label>
                 <div class="seg-group">
                   <button
@@ -2194,6 +2216,20 @@ async function onRemoveKeyword(k: string) {
   outline: none;
 }
 .net-rules:focus {
+  border-color: var(--accent);
+}
+.task-num {
+  width: 72px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+}
+.task-num:focus {
   border-color: var(--accent);
 }
 .kw-hint {
