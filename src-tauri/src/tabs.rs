@@ -521,6 +521,14 @@ impl TabManager {
         {
             let db = app.state::<Db>();
             Self::fix_gtk_layout(&child, w, h, db.pool.clone(), app.clone())?;
+            // 新建标签后立即应用内容区几何（Fixed 的 margin 定位）：
+            // 否则新标签会停在 setup 时的初始 margin —— 垂直标签下会盖住左侧标签栏。
+            if let Some(win) = app.get_window("main") {
+                let geo = crate::engine::layout::ContentGeometry::compute(
+                    &win, top, ai_active, vertical,
+                );
+                crate::engine::layout::apply_to_webview(&win, id, geo);
+            }
         }
 
         // 监听 WebKit title 变化 → 实时同步标签标题（on_page_load 的 host 只是初始占位）

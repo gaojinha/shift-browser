@@ -2,6 +2,7 @@
 // 垂直标签栏（阶段 3.1）：标签栏移到左侧竖排，适配多标签重度使用。
 // 开启后 Rust 侧让出左侧 VERTICAL_TAB_BAR_WIDTH，webview 右移（见 engine/layout.rs）。
 import { computed } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useTabsStore } from '../stores/tabs'
 import type { Tab } from '../types/tab'
 
@@ -37,6 +38,16 @@ function onAux(e: MouseEvent, id: string) {
 function onNew() {
   tabsStore.createTab()
 }
+// 窗口按钮（垂直模式下 TabBar 被隐藏，窗口控制移到这里）
+function minimize() {
+  invoke('minimize_window').catch(() => {})
+}
+function maximize() {
+  invoke('toggle_maximize').catch(() => {})
+}
+function closeWin() {
+  invoke('close_window').catch(() => {})
+}
 </script>
 
 <template>
@@ -44,6 +55,11 @@ function onNew() {
     <div class="vtab-head">
       <button class="vtab-btn" title="新建标签页" @click="onNew">＋</button>
       <button class="vtab-btn" title="切换回横向标签栏" @click="emit('toggle')">⇤ 横向</button>
+    </div>
+    <div class="vtab-winrow">
+      <button class="vtab-win" title="最小化" @click="minimize">—</button>
+      <button class="vtab-win" title="最大化/还原" @click="maximize">▢</button>
+      <button class="vtab-win danger" title="关闭窗口" @click="closeWin">✕</button>
     </div>
     <div class="vtab-list">
       <div
@@ -83,7 +99,30 @@ function onNew() {
   display: flex;
   gap: 6px;
   padding: 8px;
+}
+.vtab-winrow {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px 8px;
   border-bottom: 1px solid var(--border-subtle);
+}
+.vtab-win {
+  flex: 1;
+  height: 24px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+}
+.vtab-win:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.vtab-win.danger:hover {
+  background: var(--danger);
+  color: #fff;
 }
 .vtab-btn {
   flex: 1;

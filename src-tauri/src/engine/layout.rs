@@ -107,10 +107,13 @@ pub fn apply_to_webview(window: &tauri::Window, tab_id: &str, geo: ContentGeomet
             .parent()
             .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
         {
+            // 顶部偏移用 Fixed 的 margin_top（水平模式已验证有效）；
+            // 左侧偏移用 GtkFixed 内部 move_（绝对定位）——不用 margin_start：
+            // GtkOverlay 的叠加子件上 margin_start 会把 Fixed 的分配压成 1×1（实测）。
             fixed.set_margin_top(geo.top);
-            fixed.set_margin_start(geo.left);
-            fixed.move_(&gtk_wv, 0, 0);
-            fixed.set_size_request(geo.width, geo.height);
+            fixed.set_margin_start(0);
+            fixed.move_(&gtk_wv, geo.left, 0);
+            fixed.set_size_request(geo.left + geo.width, geo.height);
         }
         gtk_wv.set_size_request(geo.width, geo.height);
         gtk_wv.queue_resize();
