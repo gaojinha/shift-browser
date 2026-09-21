@@ -97,4 +97,4 @@
 - [x] 书签搜索 LIKE 通配符转义（与 search_history 对齐，`ESCAPE '\'`，修 `%`/`_` 误匹配）
 - [x] 默认浏览器设置（`21c0f3f`：xdg-settings 集成 + MimeType 声明 + 外部 URL 打开）
 - [x] 登录状态持久化 + 单实例（`9ce60c0`：Cookie 落盘 + single-instance 转发 URL）
-- [x] MCP Server（`（待填）`：`shift-browser-mcp` stdio 二进制，25 工具，AI 标准协议驱动浏览器）
+- [x] MCP Server（`cdfdc97`：`shift-browser-mcp` stdio 二进制，25 工具，AI 标准协议驱动浏览器）

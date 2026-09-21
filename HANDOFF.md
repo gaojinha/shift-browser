@@ -2207,7 +2207,7 @@ setup 完成后延迟 2 秒（等前端初始化建初始标签）逐条 `create
 - method `ping` 返回空 result（健康检查）。
 
 **验证**：cargo 0 警告；二进制 487KB；手动 JSON-RPC 全链路通过。
-提交 `（待填）`。
+提交 `cdfdc97`。
 
 ---
 
