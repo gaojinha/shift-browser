@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Shift Browser
-Comment=Shift Browser - AI 增强型浏览器（Tauri 重构版）
-Exec=shift-browser %U
-Icon=shift-browser
+Name={{name}}
+Comment={{comment}}
+Exec={{exec}} %U
+Icon={{icon}}
 Terminal=false
 Categories=Network;WebBrowser;
 MimeType=x-scheme-handler/http;x-scheme-handler/https;text/html;
