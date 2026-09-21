@@ -1901,9 +1901,28 @@ Unix 套接字 + HTTP（带 token）双形态。
 
 ---
 
-## 下一步（截至第七十四章）
+## 第七十五章（阶段 4）：开放 API 加 screenshot 截图命令 — b369697
 
-- **阶段 4 继续**：自托管服务端套件更完整版（长期项）；开放 API 更多命令（截图/执行 JS，需安全评估）；
+**交付**：`screenshot` —— 截当前活动标签可见区 → PNG 落 `<app_data>/screenshots/`，返回路径。
+Cargo.toml 加 `cairo-rs`（features=["png"]）；GTK 对象非 Send → GTK 主上下文 `spawn_local`
+跑快照、结果经 tokio oneshot 回传。
+
+**踩坑**：`write_to_png` 在 `impl Surface` 但**受 cairo-rs 的 png feature 门控**（不开报 "no method"）；
+且它收 **Write 流**（不是路径）。
+
+**运行实证**：`screenshot` → `{"ok":true,"data":{"path":"…/shot-….png"}}`；
+`file` 确认 `PNG image data, 1280 x 662, 8-bit/color RGB`（18.6KB）。
+
+**验证**：cargo 0错0警告；115 测试；冒烟 12/12。
+
+**开放 API 现状（13 命令）**：读 status/list_tabs/active_tab/history/bookmarks；
+写 open_url/close_tab/switch_tab/reload_tab/navigate/search/new_tab；媒体 screenshot。
+
+---
+
+## 下一步（截至第七十五章）
+
+- **阶段 4 继续**：开放 API 加「执行 JS」（需安全评估）；自托管服务端套件更完整版（长期项）；
   多端形态（移动/平板协同）。
-- **工程**：HANDOFF 逐章记录机制（已补至 74 章，后续每章随提交更新）。
+- **工程**：HANDOFF 逐章记录机制（已补至 75 章，后续每章随提交更新）。
 
