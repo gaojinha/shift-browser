@@ -3,13 +3,14 @@
 // 调度：启动时起一个后台 tokio 任务，每 60 秒检查一次是否到期（到期才执行）。
 // 到期判定用进程内 last_run（重启后重新计时；"天/分钟"级任务，重启重置可接受）。
 use crate::db::Db;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// 起调度器（lib.rs setup 调用）
 pub fn spawn(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut last_history: i64 = 0;
         let mut last_feeds: i64 = 0;
+        let mut last_agent: i64 = 0;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             let now = std::time::SystemTime::now()
@@ -42,6 +43,23 @@ pub fn spawn(app: AppHandle) {
                         let n = crate::feed::refresh_all(&db).await;
                         log::info!("[auto] 定时刷新订阅：{} 个源", n);
                         last_feeds = now;
+                    }
+                }
+            }
+
+            // 定时跑 Agent 提示词（阶段3 Agent 编排：调度器 ↔ AI 打通）
+            // 到点发事件，由前端打开 AI 侧栏并发送该提示词（AI 的多步动作仍走原有确认流程）
+            if let Ok(Some(v)) = read_setting(&db.pool, "auto_agent_minutes").await {
+                if let Ok(mins) = v.trim().parse::<i64>() {
+                    if mins > 0 && now - last_agent >= mins * 60 {
+                        if let Ok(Some(prompt)) = read_setting(&db.pool, "auto_agent_prompt").await {
+                            let p = prompt.trim().to_string();
+                            if !p.is_empty() {
+                                let _ = app.emit("auto-agent", p);
+                                log::info!("[auto] 触发 Agent 提示词（每 {} 分钟）", mins);
+                            }
+                        }
+                        last_agent = now;
                     }
                 }
             }

@@ -931,6 +931,30 @@ async function onRemoveKeyword(k: string) {
                 <span class="field-desc">分钟（0=关闭）</span>
               </div>
               <div class="field">
+                <label>定时跑 Agent</label>
+                <input
+                  class="task-num"
+                  type="number"
+                  min="0"
+                  :value="settingsStore.get('auto_agent_minutes') || '0'"
+                  @change="onSet('auto_agent_minutes', ($event.target as HTMLInputElement).value)"
+                />
+                <span class="field-desc">分钟（0=关闭；到点打开 AI 侧栏并发送下面的提示词）</span>
+              </div>
+              <div class="kw-block">
+                <div class="kw-hint">
+                  <b>Agent 定时提示词</b>（阶段3 编排）：到点自动发给 AI；AI 的多步动作仍走原有确认流程。
+                </div>
+                <textarea
+                  class="net-rules"
+                  :value="settingsStore.get('auto_agent_prompt')"
+                  placeholder="例如：看看当前页面讲了啥，总结三条要点"
+                  spellcheck="false"
+                  rows="3"
+                  @change="onSet('auto_agent_prompt', ($event.target as HTMLTextAreaElement).value)"
+                ></textarea>
+              </div>
+              <div class="field">
                 <label>翻译源</label>
                 <div class="seg-group">
                   <button

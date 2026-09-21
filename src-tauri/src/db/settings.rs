@@ -32,6 +32,9 @@ const ALLOWED_KEYS: &[&str] = &[
     // 定时任务（阶段3 自动化；0 = 关闭）
     "auto_clear_history_days",
     "auto_refresh_feeds_minutes",
+    // 定时 Agent 提示词（阶段3 Agent 编排；0 = 关闭）
+    "auto_agent_minutes",
+    "auto_agent_prompt",
     "show_lunar",
     "show_quote",
     "show_weather",

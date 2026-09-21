@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 浏览器主窗口布局
 // 结构：TabBar(40) + AddressBar(42) + BookmarksBar(30) + 内容区(webview) + StatusBar(22)
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import TabBar from './components/TabBar.vue'
@@ -455,6 +455,14 @@ onMounted(async () => {
   // 由 Rust 在 GTK 顶层窗口拦截后发事件过来（见 tabs.rs 的 UI_FOCUSED 焦点跟踪）。
   listen<string>('global-shortcut', (ev) => {
     handleGlobalAction(ev.payload)
+  }).catch(() => {})
+
+  // 定时 Agent 提示词（阶段3 Agent 编排）：调度器到点发事件 → 打开 AI 侧栏并发送
+  listen<string>('auto-agent', (ev) => {
+    const prompt = ev.payload
+    if (!prompt) return
+    openPanel('ai')
+    nextTick(() => aiStore.sendMessage(prompt))
   }).catch(() => {})
 })
 
