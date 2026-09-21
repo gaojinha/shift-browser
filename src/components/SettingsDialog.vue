@@ -1551,6 +1551,32 @@ async function onRemoveKeyword(k: string) {
                   <span class="slider"></span>
                 </label>
               </div>
+              <div class="field">
+                <label>开放 API 端口</label>
+                <input
+                  class="task-num"
+                  type="number"
+                  min="1024"
+                  max="65535"
+                  :value="settingsStore.get('api_http_port') || '19701'"
+                  @change="onSet('api_http_port', ($event.target as HTMLInputElement).value)"
+                />
+                <span class="field-desc">默认 19701；改完重启生效</span>
+              </div>
+              <div class="field">
+                <label>开放 API 绑局域网（危险）</label>
+                <span class="field-desc">
+                  默认只绑 127.0.0.1；开启后局域网可达（务必保管 token）；改完重启生效
+                </span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('api_bind_lan') === 'true'"
+                    @change="onSet('api_bind_lan', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
               <div class="kw-block">
                 <div class="kw-hint">
                   <b>网络层拦截规则</b>（阶段3.2）：每行一个 URL 子串，命中即<strong>取消该请求</strong>

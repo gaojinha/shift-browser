@@ -122,12 +122,37 @@ fn ensure_token(app: &AppHandle) -> Option<String> {
 
 /// 起 HTTP API：`POST http://127.0.0.1:19701/api`，body 为同款 JSON 命令；
 /// 鉴权：`Authorization: Bearer <token>`（token 见 api-token 文件）。复用 `handle()`。
+/// 同步读一个设置（setup 阶段调用；setup 不在 tokio worker 上，block_on 安全）
+fn read_setting_blocking(app: &AppHandle, key: &str) -> Option<String> {
+    let db = app.try_state::<crate::db::Db>()?;
+    tauri::async_runtime::block_on(async {
+        sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(v,)| v)
+    })
+}
+
 fn spawn_http(app: AppHandle) {
     let Some(token) = ensure_token(&app) else {
         return;
     };
+    // 端口/绑定可配（默认 127.0.0.1:19701）；改完需重启生效
+    let port: u16 = read_setting_blocking(&app, "api_http_port")
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        .unwrap_or(HTTP_PORT);
+    let lan = read_setting_blocking(&app, "api_bind_lan")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+    let host = if lan { "0.0.0.0" } else { "127.0.0.1" };
+    if lan {
+        log::warn!("[api] HTTP 已绑 0.0.0.0（局域网可达）——请确保 token 不外泄");
+    }
     tauri::async_runtime::spawn(async move {
-        let addr = format!("127.0.0.1:{}", HTTP_PORT);
+        let addr = format!("{}:{}", host, port);
         let listener = match tokio::net::TcpListener::bind(&addr).await {
             Ok(l) => l,
             Err(e) => {

@@ -39,6 +39,9 @@ const ALLOWED_KEYS: &[&str] = &[
     "gpc_header",
     // 开放 API 是否允许「执行 JS」（阶段4；默认关，显式设 'true' 才开）
     "api_allow_eval",
+    // 开放 API HTTP 端口（默认 19701）与是否绑局域网（默认关；'true' 才绑 0.0.0.0）
+    "api_http_port",
+    "api_bind_lan",
     "show_lunar",
     "show_quote",
     "show_weather",
