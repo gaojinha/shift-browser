@@ -2101,10 +2101,43 @@ IP 白名单设 `1.2.3.4` 时本机被拒（日志 `拒绝非白名单 IP: 127.0
 
 ---
 
-## 下一步（截至第八十四章）
+## 第八十五章（阶段 4）：默认浏览器设置 + 外部 URL 打开
+
+**背景一句话**：浏览器常用设置里缺「设为默认浏览器」——desktop 文件没声明 MimeType（xdg
+不认它能开网页），设置页也没有入口。
+
+**交付 · 后端（`default_browser.rs` 新模块）**：
+- `default_browser_status`：`xdg-settings get default-web-browser` 查当前默认，
+  返回 `{ is_default, current, desktop_id, desktop_ready }`（只读）。
+- `set_default_browser`：写用户级 desktop 文件（`~/.local/share/applications/Shift Browser.desktop`，
+  带 `MimeType=x-scheme-handler/http;x-scheme-handler/https;text/html;` + `Exec=shift-browser %U`，
+  **无需 root**）→ `xdg-settings set default-web-browser` → 回读状态。
+  *为什么用户级*：系统级文件由 deb 生成，旧版缺 MimeType 声明且改它要 root；用户级优先级更高。
+
+**交付 · 打包模板**：新增 `src-tauri/bundle/linux/Shift Browser.desktop`（tauri 打 deb 时
+用它替换默认模板），从此新包自带 MimeType 声明 + `%U`，装完即可被 xdg 认作网页浏览器。
+
+**交付 · 外部 URL 打开**：启动时解析命令行 `http/https` 参数（desktop `Exec=%U` 传入），
+setup 完成后延迟 2 秒（等前端初始化建初始标签）逐条 `create_tab` 打开新标签。
+
+**交付 · 前端**：设置弹窗「通用」分区新增「默认浏览器」区块——
+状态显示（当前默认 desktop-id / 已是默认）+「设为默认浏览器」按钮。
+
+**真机验证**：用户级 desktop 文件写入后 `xdg-settings set` 成功、`get` 返回
+`Shift Browser.desktop`（带空格 desktop-id 处理正常）；验证后恢复原默认
+`google-chrome.desktop`，把设置动作留给用户在设置页触发。
+
+**验证**：cargo 0错0警告；115 测试；前端构建通过。提交 `21c0f3f`。
+
+**遗留**：单实例——应用已在运行时不处理二次启动（外部链接会起第二个进程），
+后续可加 tauri-plugin-single-instance 把 URL 转发给已有实例。
+
+---
+
+## 下一步（截至第八十五章）
 
 - **阶段 4 继续**：多端形态（移动/平板协同）——路线图剩的最后一块大件。
 - **实战检验（进行中）**：下载目录、系统托盘已修并验收；开放 API 扩展（C2）已交付；
-  deb 打包安装闭环（第八十四章）。
-- **工程**：HANDOFF 逐章记录机制（已补至 84 章，后续每章随提交更新）。
+  deb 打包安装闭环（第八十四章）；默认浏览器设置（第八十五章）待打包安装后由高哥实测。
+- **工程**：HANDOFF 逐章记录机制（已补至 85 章，后续每章随提交更新）。
 
