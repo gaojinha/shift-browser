@@ -197,6 +197,22 @@ fn spawn_http(app: AppHandle) {
                             })
                             .unwrap_or(false)
                 });
+                // 模型网关（阶段4）：POST /v1/chat/completions → 转发到配置的 provider
+                if path.starts_with("/v1/chat/completions") {
+                    let out_json = if !auth_ok {
+                        json!({"error": {"message": "未授权：需要 Authorization: Bearer <token>"}})
+                    } else {
+                        model_gateway(&app, body).await
+                    };
+                    let s = serde_json::to_string(&out_json).unwrap_or_else(|_| "{}".into());
+                    let out = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        s.len(),
+                        s
+                    );
+                    let _ = stream.write_all(out.as_bytes()).await;
+                    return;
+                }
                 // 状态面板（浏览器用）：GET /?token=<t>（浏览器不便发 Bearer 头，故支持查询串）
                 if !path.starts_with("/api") {
                     let qtok = path
@@ -288,6 +304,65 @@ h1{{font-size:20px}} .u{{color:#888;font-size:12px}} code{{background:#f2f2f2;pa
         active = active_html,
         cmds = cmds,
     )
+}
+
+/// 模型网关：把 OpenAI 兼容的 chat/completions 请求转发到设置里的 provider。
+/// 默认关（设置 `api_model_gateway` 需为 'true'）；复用设置里的 base_url / key / model。
+async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Value {
+    let db = app.state::<crate::db::Db>();
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT key, value FROM settings WHERE key IN \
+         ('api_model_gateway','ai_base_url','ai_api_key','ai_model')",
+    )
+    .fetch_all(&db.pool)
+    .await
+    .unwrap_or_default();
+    let m: std::collections::HashMap<String, String> = rows.into_iter().collect();
+    if m.get("api_model_gateway").map(|v| v.as_str()) != Some("true") {
+        return json!({"error": {"message": "模型网关已禁用：需在设置里显式开启「允许模型网关」"}});
+    }
+    let base = m
+        .get("ai_base_url")
+        .cloned()
+        .unwrap_or_else(|| "https://apihub.agnes-ai.com/v1".to_string());
+    let key = m
+        .get("ai_api_key")
+        .cloned()
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var("AGNES_API_KEY").ok())
+        .unwrap_or_default();
+    if key.is_empty() {
+        return json!({"error": {"message": "未配置 AI API Key（设置里填或设 AGNES_API_KEY）"}});
+    }
+    let model = m
+        .get("ai_model")
+        .cloned()
+        .unwrap_or_else(|| "agnes-2.0-flash".to_string());
+
+    let mut payload: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return json!({"error": {"message": format!("请求 JSON 非法: {}", e)}}),
+    };
+    if payload.get("model").is_none() {
+        if let Some(o) = payload.as_object_mut() {
+            o.insert("model".to_string(), json!(model));
+        }
+    }
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return json!({"error": {"message": format!("创建 HTTP 客户端失败: {}", e)}}),
+    };
+    let url = format!("{}/chat/completions", base.trim_end_matches('/'));
+    match client.post(&url).bearer_auth(&key).json(&payload).send().await {
+        Ok(resp) => match resp.json::<serde_json::Value>().await {
+            Ok(v) => v,
+            Err(e) => json!({"error": {"message": format!("解析上游响应失败: {}", e)}}),
+        },
+        Err(e) => json!({"error": {"message": format!("上游请求失败: {}", e)}}),
+    }
 }
 
 /// 处理一条请求

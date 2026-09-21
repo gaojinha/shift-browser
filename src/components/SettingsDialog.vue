@@ -1577,6 +1577,20 @@ async function onRemoveKeyword(k: string) {
                   <span class="slider"></span>
                 </label>
               </div>
+              <div class="field">
+                <label>允许模型网关（消耗额度）</label>
+                <span class="field-desc">
+                  POST /v1/chat/completions → 转发到 AI provider，其它程序可用同一模型（耗你的额度）
+                </span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('api_model_gateway') === 'true'"
+                    @change="onSet('api_model_gateway', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
               <div class="kw-block">
                 <div class="kw-hint">
                   <b>网络层拦截规则</b>（阶段3.2）：每行一个 URL 子串，命中即<strong>取消该请求</strong>

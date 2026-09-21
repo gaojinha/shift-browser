@@ -33,6 +33,22 @@ curl -s -X POST http://127.0.0.1:19701/api -H "Authorization: Bearer $TOKEN" \
 >   局域网可达（手机/其它设备可驱动浏览器）——**务必保管好 token**。
 > 两者改完**需重启生效**。
 
+### 模型网关（OpenAI 兼容）
+
+`POST http://127.0.0.1:19701/v1/chat/completions`（`Authorization: Bearer <token>`）→
+转发到设置里的 AI provider（`ai_base_url` / `ai_api_key` / `ai_model`），**其它程序可用同一模型**。
+
+- **默认关**：需在 设置 → 隐私 → 「允许模型网关（消耗额度）」显式开启。
+- 未指定 `model` 时用设置里的 `ai_model`；`ai_api_key` 空则回退环境变量 `AGNES_API_KEY`。
+- **注意**：会消耗你的模型额度，故默认关。
+
+```bash
+curl -s -X POST http://127.0.0.1:19701/v1/chat/completions \
+  -H "Authorization: Bearer $(cat ~/.local/share/com.shiftbrowser.app/api-token)" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"你好"}]}'
+```
+
 ### 状态面板（浏览器用）
 
 浏览器打开 `http://127.0.0.1:19701/?token=<api-token 里的值>` → 一个**状态面板**：
