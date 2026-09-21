@@ -202,6 +202,19 @@ fn valid_callback(cb: &str) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // ===== 画面闪烁修复：禁用 WebKitGTK 的 DMA-BUF 渲染器 =====
+    // WebKitGTK 2.42+ 默认走 DMA-BUF 渲染路径，在部分核显（本机 Intel HD 630 / i915）
+    // 上与驱动配合不良，表现为**网页/视频画面闪烁**（社区公认问题）。禁用后回退到
+    // 共享内存渲染路径。必须在 WebKit 初始化（建 webview）之前设置。
+    // 用户可用环境变量覆盖（若某机器上 DMA-BUF 正常，可设 0 保留更优性能）。
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+    log::info!(
+        "[ShiftBrowser] WEBKIT_DISABLE_DMABUF_RENDERER={:?}（视频闪烁修复）",
+        std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER")
+    );
+
     // ===== 隐私防护 P3：TLS 指纹规范化（已回退，2026-09-18）=====
     // 回退原因：设置 G_TLS_GNUTLS_PRIORITY 后邮箱正文渲染为空 —— 该环境变量
     // 作用于进程内全部 TLS 连接，若站点部分资源依赖被裁掉的协议/套件组合，
@@ -992,6 +1005,13 @@ pub fn run() {
       // 初始化标签管理器
       app.manage(tabs::TabManager::new());
       log::info!("[ShiftBrowser] 标签管理器初始化成功");
+
+      // 用户脚本注入缓存（启动时刷新，确保首个页面注入前就绪——inject 路径只读缓存，不能 await）
+      {
+        let db = app.state::<crate::db::Db>();
+        tauri::async_runtime::block_on(crate::db::userscripts::refresh_cache(&db.pool));
+        log::info!("[ShiftBrowser] 用户脚本注入缓存已刷新");
+      }
 
       // Linux：手动设置 WebKit web extensions 目录（tauri://localhost 协议依赖 web extension）
       // Tauri 2 不会自动设置 extensions_path，必须手动指定，否则前端资源加载失败
