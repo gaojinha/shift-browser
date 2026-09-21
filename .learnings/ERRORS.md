@@ -177,4 +177,13 @@ webkit2gtk::WebInspectorExt::show(&inspector);
 **错误 2（margin_start 压崩布局）**: 首版修复用 `fixed.set_margin_start(220)` 让 Fixed 右移——GtkOverlay 的叠加子件（`add_overlay`）上 margin_start 会把 Fixed 的分配**压成 1×1**（实测 `wv_alloc=(0,700,1,1)`），webview 直接消失。
 **正确**: ①新建标签后立即 `compute + apply` 当前几何；②GTK 里改容器定位**优先用 GtkFixed 内部 `move_(x, y)`**（绝对定位，最可靠），别用叠加子件的 margin；顶部偏移沿用已验证有效的 `margin_top`。最终 `move_(geo.left, 0)` + Fixed 宽度 `left+width` → 实测 `wv_toplevel_pos=(220,72)` 与 HTML content-area 完全对齐。
 **预防**: **GTK 布局改动必须实测真实像素**——用 `gtk_widget_translate_coordinates(wv, toplevel, 0,0)` + `allocation()` 打日志验证，**绝不能靠"应该对"**（本次靠它抓到 allocation (0,0) vs 期望 (220,72) 的偏差）。这与"凭记忆写 API"同源：**GTK 的布局语义（margin vs move_、Overlay 子件行为）不能靠直觉**，必须实测。
+
+## 2026-09-21 — 视频/网页画面闪烁：WebKitGTK DMA-BUF 渲染器 + Intel 核显
+
+**类别**: correction
+**场景**: ShiftBrowser 看视频时画面闪烁（历史遗留，用户一直没说，2026-09-21 才提）。
+**根因**: WebKitGTK 2.42+ 默认走 **DMA-BUF 渲染路径**，在部分核显（本机 **Intel HD 630 / i915**）上与驱动配合不良 → 网页/视频画面闪烁（社区公认问题，Intel/NVIDIA 驱动组合均有报告）。
+**正确**: 在 WebKit 初始化**之前**设环境变量 `WEBKIT_DISABLE_DMABUF_RENDERER=1`，回退到共享内存渲染路径。本项目放在 `lib.rs::run()` 最前面（已有环境变量先例）。
+**验证**: `/proc/<WebKitWebProcess>/environ` 确含该变量（注意：**父进程 `/proc/<pid>/environ` 是启动时快照，`set_var` 之后不反映**，要查 WebKit 子进程才看得到）。
+**预防**: 遇到"画面闪烁/黑屏/撕裂"类**渲染层**问题，先怀疑 **DMA-BUF 渲染器**（WebKitGTK 2.42+ 的已知坑），而不是业务代码。诊断顺序：先隔离最近改动 → 若历史就存在 → 查渲染路径/驱动（env 开关、`glxinfo`、i915）。
 ---
