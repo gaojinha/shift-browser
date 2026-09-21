@@ -364,6 +364,69 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 .collect();
             json!({"ok": true, "data": items})
         }
+        "screenshot" => {
+            // 截图当前活动标签（webkit snapshot → PNG），返回落盘路径
+            let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+                return json!({"ok": false, "error": "标签管理器不可用"});
+            };
+            let Some(active) = state.all_tabs().into_iter().find(|t| t.is_active) else {
+                return json!({"ok": false, "error": "没有活动标签"});
+            };
+            let label = format!("tab-{}", active.id);
+            let Some(wv) = app.get_webview(&label) else {
+                return json!({"ok": false, "error": "找不到活动标签 webview"});
+            };
+            let out_path = {
+                let db = app.state::<crate::db::Db>();
+                let dir = db
+                    .vault_path
+                    .parent()
+                    .map(|p| p.join("screenshots"))
+                    .unwrap_or_default();
+                let _ = std::fs::create_dir_all(&dir);
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                dir.join(format!("shot-{}.png", ts))
+            };
+            let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
+            let out2 = out_path.clone();
+            let dispatched = wv.with_webview(move |pwv| {
+                use webkit2gtk::WebViewExt;
+                let gtk_wv = pwv.inner().clone();
+                // GTK 对象非 Send → 在 GTK 主上下文里跑（spawn_local），结果经 oneshot 回传
+                gtk::glib::MainContext::default().spawn_local(async move {
+                    let res = match gtk_wv
+                        .snapshot_future(
+                            webkit2gtk::SnapshotRegion::Visible,
+                            webkit2gtk::SnapshotOptions::NONE,
+                        )
+                        .await
+                    {
+                        Ok(surface) => std::fs::File::create(&out2)
+                            .map_err(|e| format!("创建 PNG 失败: {}", e))
+                            .and_then(|mut f| {
+                                // write_to_png 收的是 Write 流（不是路径）
+                                surface
+                                    .write_to_png(&mut f)
+                                    .map_err(|e| format!("写 PNG 失败: {}", e))
+                            })
+                            .map(|_| out2.display().to_string()),
+                        Err(e) => Err(format!("截图失败: {}", e)),
+                    };
+                    let _ = tx.send(res);
+                });
+            });
+            if dispatched.is_err() {
+                return json!({"ok": false, "error": "截图调度失败"});
+            }
+            match rx.await {
+                Ok(Ok(path)) => json!({"ok": true, "data": {"path": path}}),
+                Ok(Err(e)) => json!({"ok": false, "error": e}),
+                Err(_) => json!({"ok": false, "error": "截图结果丢失"}),
+            }
+        }
         "active_tab" => {
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});

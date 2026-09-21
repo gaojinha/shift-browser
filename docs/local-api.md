@@ -46,6 +46,7 @@ curl -s -X POST http://127.0.0.1:19701/api -H "Authorization: Bearer $TOKEN" \
 | `{"cmd":"new_tab"}` | `{"ok":true,"data":Tab}` | 打开内置新标签页 |
 | `{"cmd":"history","limit":50}` | `{"ok":true,"data":[{url,title,visit_count,last_visit_at}…]}` | 读最近历史（limit ≤500） |
 | `{"cmd":"bookmarks"}` | `{"ok":true,"data":[{title,url,folder,sort_order}…]}` | 读书签（含文件夹名） |
+| `{"cmd":"screenshot"}` | `{"ok":true,"data":{"path":"…/screenshots/shot-*.png"}}` | 截当前活动标签可见区 → PNG 落盘 |
 
 出错时：`{"ok":false,"error":"…"}`。
 

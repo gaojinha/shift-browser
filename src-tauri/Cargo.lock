@@ -4542,6 +4542,7 @@ dependencies = [
  "ammonia",
  "async-trait",
  "base64 0.22.1",
+ "cairo-rs",
  "encoding_rs",
  "futures-util",
  "gtk",
