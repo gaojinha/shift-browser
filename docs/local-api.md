@@ -51,6 +51,8 @@ curl -s -X POST http://127.0.0.1:19701/api -H "Authorization: Bearer $TOKEN" \
 | `{"cmd":"bookmarks"}` | `{"ok":true,"data":[{title,url,folder,sort_order}…]}` | 读书签（含文件夹名） |
 | `{"cmd":"screenshot"}` | `{"ok":true,"data":{"path":"…/screenshots/shot-*.png"}}` | 截当前活动标签可见区 → PNG 落盘 |
 | `{"cmd":"eval","code":"…"}` | `{"ok":true,"data":{"result":"…"}}` | 在活动标签执行 JS（**默认关**，见下） |
+| `{"cmd":"tools"}` | `{"ok":true,"data":[{name,server_name,description,input_schema}…]}` | 列出可用 MCP 工具（工具网关） |
+| `{"cmd":"tool_call","name":"…","arguments":{…}}` | `{"ok":true,"data":{"result":"…"}}` | 调用一个 MCP 工具（受 server 白名单约束） |
 
 出错时：`{"ok":false,"error":"…"}`。
 

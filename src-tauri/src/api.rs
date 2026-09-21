@@ -502,6 +502,45 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 Err(_) => json!({"ok": false, "error": "执行结果丢失"}),
             }
         }
+        "tools" => {
+            // 工具网关（阶段4 自托管套件）：列出可用 MCP 工具
+            let db = app.state::<crate::db::Db>();
+            match crate::engine::mcp::list_tools(&db.pool).await {
+                Ok(tools) => {
+                    let items: Vec<serde_json::Value> = tools
+                        .into_iter()
+                        .map(|t| {
+                            json!({
+                                "name": t.name,
+                                "server_name": t.server_name,
+                                "description": t.description,
+                                "input_schema": t.input_schema,
+                            })
+                        })
+                        .collect();
+                    json!({"ok": true, "data": items})
+                }
+                Err(e) => json!({"ok": false, "error": e}),
+            }
+        }
+        "tool_call" => {
+            // 工具网关：调用一个 MCP 工具（受 MCP server 的 allowed_tools 白名单约束）
+            let name = req
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if name.is_empty() {
+                return json!({"ok": false, "error": "缺少 name"});
+            }
+            let args = req.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let db = app.state::<crate::db::Db>();
+            match crate::engine::mcp::call_tool(&db.pool, &name, args).await {
+                Ok(r) => json!({"ok": true, "data": {"result": r}}),
+                Err(e) => json!({"ok": false, "error": e}),
+            }
+        }
         "active_tab" => {
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});
