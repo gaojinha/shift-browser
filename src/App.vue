@@ -69,8 +69,14 @@ const showAI = ref(false)
 // 证书中心（P1/P3）+ 证书错误拦截页（P2）
 const showCerts = ref(false)
 // 权限请求提示（安全 #2）
-const permReq = ref<{ id: number; tabId: string; host: string; kind: string; kindZh: string } | null>(null)
-const tlsError = ref<{
+interface PermissionRequest {
+  id: number
+  tabId: string
+  host: string
+  kind: string
+  kindZh: string
+}
+interface TlsErrorInfo {
   tabId: string
   host: string
   port: number
@@ -80,7 +86,13 @@ const tlsError = ref<{
   subject: string
   issuer: string
   notAfter: string | null
-} | null>(null)
+}
+interface WebProcessCrash {
+  reason?: string
+  autoReload?: boolean
+}
+const permReq = ref<PermissionRequest | null>(null)
+const tlsError = ref<TlsErrorInfo | null>(null)
 
 function openPanel(name: 'translate' | 'sessions' | 'history' | 'passwords' | 'groups' | 'downloads' | 'settings' | 'ai' | 'bookmarks' | 'userscripts') {
   showTranslate.value = name === 'translate'
@@ -478,18 +490,18 @@ onMounted(async () => {
   }).catch(() => {})
 
   // 证书错误（P2 · Rust 侧 on_tls_error emit）→ 弹"危险站点"拦截页
-  listen<any>('tls-error', (ev) => {
+  listen<TlsErrorInfo>('tls-error', (ev) => {
     tlsError.value = ev.payload
   }).catch(() => {})
 
   // 权限请求（安全 #2 · Rust 侧 perms::attach emit）→ 弹权限提示
-  listen<any>('permission-request', (ev) => {
+  listen<PermissionRequest>('permission-request', (ev) => {
     permReq.value = ev.payload
   }).catch(() => {})
 
   // Web 进程崩溃（视频崩溃修复 · Rust 侧 connect_web_process_terminated emit）→ 提示
-  listen<any>('web-process-crashed', (ev) => {
-    const p = ev.payload || {}
+  listen<WebProcessCrash>('web-process-crashed', (ev) => {
+    const p = ev.payload ?? {}
     const reason = p.reason === 'ExceededMemoryLimit' ? '内存超限' : '进程崩溃'
     useToastStore().show(
       p.autoReload ? `网页${reason}，已自动重新加载` : `网页${reason}，请手动刷新`,
