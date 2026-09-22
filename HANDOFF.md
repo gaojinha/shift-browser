@@ -2647,7 +2647,39 @@ src-tauri/src/extensions/adblock.rs  # 广告拦截（301 行）
 
 ---
 
-## 下一步（截至第一百零五章）
+## 第一百零六章（架构完成）：extensions 全拆分 + 引擎 trait 真抽象
+
+**背景**：复测报告剩余两条，本轮完成。
+
+### 3. extensions.rs 全领域拆分（944 → 443 行）
+```
+src/extensions/
+├── adblock.rs      广告拦截（CSS/JS 外置）
+├── privacy.rs      隐私统计/自检/白名单判定
+├── privacy_cmd.rs  隐私/广告设置命令（14 个）
+└── manager.rs      扩展管理（目录解析 + 4 命令）
+```
+主文件仅保留 `inject_extensions`/`inject_on_startup`（跨领域注入引擎）。
+- 拆分中**契约守卫再次立功**：新文件未入源码清单 → 测试立即报错 → 补齐后通过。
+
+### 2. WebViewBackend trait 真抽象（去 `&WebView`）
+- **关键设计**：trait 方法**不出现任何 WebKitGTK 类型**，改为 `impl WebViewBackend for WebView`
+  （唯一出现 WebKitGTK 类型的地方）。业务侧持有 `impl WebViewBackend` 即可调用。
+- trait 方法扩充：`reload/go_back/go_forward/nav_state/uri/host/set_muted/open_inspector/
+  apply_default_settings/eval_js/enable_console_output/attach_download_policy`
+- `tabs.rs` 的 WebView 操作全部改走 trait（`child_gtk.host()`、`child_gtk.apply_default_settings()`、
+  `WebViewBackend::reload(...)` 等），**不再直接调用 WebViewExt 的对应 API**
+- 移植时：为 WebView2/系统 WebView 各提供一份 `impl WebViewBackend`，业务代码零改动
+
+**说明**：`tabs.rs` 仍 `use webkit2gtk`（下载信号 `connect_download_started` 与
+`connect_load_failed` 等 GTK 信号连接需要），但**WebView 能力调用已全部经 trait**，
+WebKit 类型依赖收敛到"信号连接"这一必要边界内。
+
+**验证**：Rust **116 passed**；`clippy --lib` 护栏通过；真机运行正常，0 崩溃。
+
+---
+
+## 下一步（截至第一百零六章）
 
 - **阶段 4 继续**：多端形态（移动/平板协同）——路线图剩的最后一块大件。
 - **实战检验（进行中）**：下载目录、系统托盘已修并验收；开放 API 扩展（C2）已交付；

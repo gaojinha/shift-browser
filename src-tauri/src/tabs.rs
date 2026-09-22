@@ -23,7 +23,11 @@ use util::{clean_tracking_params, sanitize_filename};
 use gtk::glib::translate::ToGlibPtr;
 use gtk::prelude::*;
 #[cfg(target_os = "linux")]
+// P0-2 补完：WebView 操作已走 WebViewBackend trait；此处仅保留下载信号所需的 WebKit 类型
+// P0-2 补完：WebView 操作走 WebViewBackend trait；WebViewExt 仍用于信号连接（load_failed/title 等）
 use webkit2gtk::{DownloadExt, URIRequestExt, URIResponseExt, WebContextExt, WebViewExt};
+// P0-2 补完：业务侧面向 WebViewBackend trait（不直接依赖 WebKitGTK 具体 API）
+use crate::engine::webview::WebViewBackend;
 
 // UI 布局常量：统一由引擎层提供（唯一事实来源，见 engine/layout.rs）
 pub use crate::engine::layout::CONTENT_TOP_OFFSET;
@@ -594,7 +598,7 @@ impl TabManager {
                         // 内部启动页（shift://newtab/worldnav）标题固定"启动页"：
                         // 页面自身的 <title>（"新标签页"）不覆盖，否则启动页标签
                         // 刚出来一下又变成"新标签页"
-                        if let Some(uri) = webview.uri() {
+                        if let Some(uri) = WebViewBackend::uri(webview) {
                             if is_internal_newtab_url(&uri) {
                                 return;
                             }
@@ -671,13 +675,13 @@ impl TabManager {
           // 只能修改现有 Settings 的属性
           // 页面默认设置（UA / 开发者工具 / JS 弹窗）统一由引擎层施加
           // host 用于站点级 UA 覆盖（方案 B · 2026-09-22）
-          let ua_host = crate::engine::webview::uri_host(&child_gtk);
-          crate::engine::webview::apply_default_settings(&child_gtk, &ua_host);
+          let ua_host = child_gtk.host();
+          child_gtk.apply_default_settings(&ua_host);
           // 下载策略（关键 · 2026-09-21）：主框架导航到"不可显示的 MIME"（apk/zip/exe/…）时，
           // WebKit 默认不当下载 → 表现为"帧加载已中断"（用户报"下载不能开始"）。
           // 这里接 decide-policy：对不支持的 MIME 调 decision.download()，
           // 触发 WebContext 的 download-started（已注册，落 ~/Downloads + 记录 downloads 表）。
-          crate::engine::webview::attach_download_policy(&child_gtk);
+          child_gtk.attach_download_policy();
           // 监听 child webview 的鼠标点击事件
           child_gtk.connect_button_press_event(|wv, event| {
               let (x, y) = (event.position().0, event.position().1);

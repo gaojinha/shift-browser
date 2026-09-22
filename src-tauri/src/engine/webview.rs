@@ -125,18 +125,17 @@ mod tests {
 }
 
 // ============================================================
-// P0-2 补完（2026-09-22）：WebView 后端抽象 trait
+// P0-2 补完（2026-09-22）：WebView 后端抽象 trait（真抽象版）
 // ============================================================
 //
-// 目的：业务模块（tabs.rs 等）不再直接依赖 `webkit2gtk::WebView` 具体类型，
-// 而是面向本 trait。Windows(WebView2)/Android(系统 WebView) 移植时，
-// 只需提供另一份实现，业务代码不动。
+// 目的：业务模块（tabs.rs 等）不再直接依赖 `webkit2gtk::WebView` 具体类型。
+// 关键设计：trait 方法**不出现任何 WebKitGTK 类型**——业务侧只需持有
+// `impl WebViewBackend`（当前即 `webkit2gtk::WebView`，由 `pwv.inner()` 取得），
+// 调用 trait 方法即可，**无需 `use webkit2gtk`**。
 //
-// 说明：当前 trait 方法仍接收 `&WebView`（WebKitGTK 类型）——这是**过渡态**：
-// 先把"调用点"收敛到本模块（业务代码不再直接 use webkit2gtk），
-// 待真正移植时再把 `&WebView` 换成 trait 关联类型/泛型。
+// 移植时：为 WebView2/系统 WebView 各提供一份 `impl WebViewBackend`，业务代码零改动。
 
-/// WebView 后端能力抽象（当前为 WebKitGTK 实现）
+/// WebView 后端能力抽象
 pub trait WebViewBackend {
     /// 重新加载
     fn reload(&self);
@@ -148,13 +147,23 @@ pub trait WebViewBackend {
     fn nav_state(&self) -> (bool, bool);
     /// 当前 URI
     fn uri(&self) -> Option<String>;
+    /// 当前 host（UA 覆盖等用）
+    fn host(&self) -> String;
     /// 设置静音
     fn set_muted(&self, muted: bool);
     /// 打开开发者工具
     fn open_inspector(&self);
+    /// 应用页面默认设置（UA/DevTools/JS 弹窗）
+    fn apply_default_settings(&self, host: &str);
+    /// 执行 JS（忽略返回值）
+    fn eval_js(&self, script: &str);
+    /// 开启 console 输出到 stdout
+    fn enable_console_output(&self);
+    /// 挂载下载策略（不可显示 MIME → 下载）
+    fn attach_download_policy(&self);
 }
 
-/// WebKitGTK 后端的 trait 实现
+/// WebKitGTK 后端的 trait 实现（唯一出现 WebKitGTK 类型的地方）
 impl WebViewBackend for WebView {
     fn reload(&self) {
         webkit2gtk::WebViewExt::reload(self);
@@ -174,21 +183,32 @@ impl WebViewBackend for WebView {
     fn uri(&self) -> Option<String> {
         webkit2gtk::WebViewExt::uri(self).map(|s| s.to_string())
     }
+    fn host(&self) -> String {
+        webkit2gtk::WebViewExt::uri(self)
+            .and_then(|u| url::Url::parse(u.as_str()).ok())
+            .and_then(|u| u.host_str().map(|h| h.to_string()))
+            .unwrap_or_default()
+    }
     fn set_muted(&self, muted: bool) {
         webkit2gtk::WebViewExt::set_is_muted(self, muted);
     }
     fn open_inspector(&self) {
         open_inspector(self);
     }
+    fn apply_default_settings(&self, host: &str) {
+        apply_default_settings(self, host);
+    }
+    fn eval_js(&self, script: &str) {
+        eval_js(self, script);
+    }
+    fn enable_console_output(&self) {
+        enable_console_output(self);
+    }
+    fn attach_download_policy(&self) {
+        attach_download_policy(self);
+    }
 }
 
-/// 便捷函数：从 URI 解析 host（业务侧 UA 覆盖等用）
-pub fn uri_host(wv: &WebView) -> String {
-    webkit2gtk::WebViewExt::uri(wv)
-        .and_then(|u| url::Url::parse(u.as_str()).ok())
-        .and_then(|u| u.host_str().map(|h| h.to_string()))
-        .unwrap_or_default()
-}
 
 /// 下载策略：主框架导航到"不可显示的 MIME"（apk/zip/exe…）时转为下载。
 /// 从 tabs.rs 下沉（P0-2 补完）：业务模块不再直接 use webkit2gtk 的 PolicyDecision 类型。

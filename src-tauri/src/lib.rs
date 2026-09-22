@@ -738,21 +738,21 @@ pub fn run() {
       extensions::set_extension_enabled,
       extensions::delete_extension,
       // 广告拦截
-      extensions::set_adblock_enabled,
-      extensions::get_adblock_enabled,
+      extensions::privacy_cmd::set_adblock_enabled,
+      extensions::privacy_cmd::get_adblock_enabled,
       // 隐私防护（GPC + 反指纹 + WebRTC 防泄露）
-      extensions::set_privacy_shield_enabled,
-      extensions::get_privacy_shield_enabled,
-      extensions::set_privacy_shield_level,
-      extensions::get_privacy_shield_level,
-      extensions::set_privacy_whitelist,
-      extensions::get_privacy_whitelist,
+      extensions::privacy_cmd::set_privacy_shield_enabled,
+      extensions::privacy_cmd::get_privacy_shield_enabled,
+      extensions::privacy_cmd::set_privacy_shield_level,
+      extensions::privacy_cmd::get_privacy_shield_level,
+      extensions::privacy_cmd::set_privacy_whitelist,
+      extensions::privacy_cmd::get_privacy_whitelist,
       // 反指纹 2.0 双模式（阶段 2：加噪 / 统一化）
-      extensions::set_privacy_fp_mode,
-      extensions::get_privacy_fp_mode,
+      extensions::privacy_cmd::set_privacy_fp_mode,
+      extensions::privacy_cmd::get_privacy_fp_mode,
       // WebMCP polyfill 试验（阶段 1.5）
-      extensions::set_webmcp_polyfill,
-      extensions::get_webmcp_polyfill,
+      extensions::privacy_cmd::set_webmcp_polyfill,
+      extensions::privacy_cmd::get_webmcp_polyfill,
       // 隐私防护统计（防护看得见）
       extensions::get_privacy_stats,
       extensions::reset_privacy_stats,
@@ -783,8 +783,8 @@ pub fn run() {
       // 阅读模式
       reader::enter_reader_mode,
       reader::fetch_article,
-      extensions::get_adblock_keywords,
-      extensions::set_adblock_keywords,
+      extensions::privacy_cmd::get_adblock_keywords,
+      extensions::privacy_cmd::set_adblock_keywords,
     ])
     .register_uri_scheme_protocol("shift", |ctx, request| {
       // shift://newtab → newtab/index.html; shift://worldnav → world-nav.html
@@ -1641,6 +1641,8 @@ mod tests {
             include_str!("extensions.rs"),
             include_str!("extensions/adblock.rs"),
             include_str!("extensions/privacy.rs"),
+            include_str!("extensions/privacy_cmd.rs"),
+            include_str!("extensions/manager.rs"),
             include_str!("newtab.rs"),
             include_str!("ai.rs"),
             include_str!("api.rs"),
