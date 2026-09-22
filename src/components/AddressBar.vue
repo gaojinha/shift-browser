@@ -181,8 +181,10 @@ function onAddressEnter() {
 }
 
 function onRefresh() {
+  // 修复（2026-09-22）：原用 navigateTab（重新导航）代替刷新——会丢 POST 数据/滚动位置，
+  // 且内部页（shift://）可能失败导致"刷新没反应"。改用真正的 reload_tab。
   const active = tabsStore.activeTab
-  if (active) tabsStore.navigateTab(active.id, active.url)
+  if (active) tabsStore.reloadTab(active.id)
 }
 
 function onHome() {

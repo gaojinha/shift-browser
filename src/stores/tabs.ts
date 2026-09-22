@@ -351,9 +351,8 @@ export const useTabsStore = defineStore('tabs', {
           t.is_active = t.id === id
         }
         this.activeTabId = id
-        // 切标签时历史栈未知：乐观允许后退（用户刚从别的页切回来多半能退），前进关掉
-        this.canGoBack = true
-        this.canGoForward = false
+        // 修复（2026-09-22）：切标签后从 WebKit 同步真实导航状态（原为乐观猜测）
+        this.syncNavState()
       } catch (e) {
         console.error('[tabs] 切换标签失败:', e)
         useToastStore().error('切换标签页失败')
@@ -457,13 +456,34 @@ export const useTabsStore = defineStore('tabs', {
       }
     },
 
+    /** 同步真实导航状态（修复 2026-09-22）：从 WebKit 查 canGoBack/canGoForward，
+     *  切标签/页面加载后调用，避免按钮 disabled 卡住 */
+    async syncNavState() {
+      if (!this.activeTabId) {
+        this.canGoBack = false
+        this.canGoForward = false
+        return
+      }
+      try {
+        const nav = await invoke<{ canGoBack: boolean; canGoForward: boolean }>(
+          'get_nav_state',
+          { id: this.activeTabId }
+        )
+        this.canGoBack = !!nav.canGoBack
+        this.canGoForward = !!nav.canGoForward
+      } catch {
+        /* 查询失败保持现状 */
+      }
+    },
+
     /** 后退（当前活动标签） */
     async goBack() {
       if (!this.activeTabId || !this.canGoBack) return
       this._markLoading(this.activeTabId)
-      this.canGoForward = true
       try {
         await invoke<Tab | null>('go_back')
+        // 修复：导航后同步真实状态（原为"后退后一定能前进"的猜测）
+        setTimeout(() => this.syncNavState(), 150)
       } catch (e) {
         // 无历史可退属正常交互，静默忽略；其余错误记录
         console.error('[tabs] 后退失败:', e)
@@ -475,9 +495,9 @@ export const useTabsStore = defineStore('tabs', {
     async goForward() {
       if (!this.activeTabId || !this.canGoForward) return
       this._markLoading(this.activeTabId)
-      this.canGoBack = true
       try {
         await invoke<Tab | null>('go_forward')
+        setTimeout(() => this.syncNavState(), 150)
       } catch (e) {
         console.error('[tabs] 前进失败:', e)
         if (this.loadingTabId === this.activeTabId) this.loadingTabId = null
@@ -636,6 +656,8 @@ export const useTabsStore = defineStore('tabs', {
       let hibernateTick = 0
       listen('tabs-updated', () => {
         this.syncTabs()
+        // 页面加载完成/标题变化时同步真实导航状态（修复前进/后退按钮卡住 · 2026-09-22）
+        this.syncNavState()
       })
         .then((un) => {
           this._unlisten = un
@@ -647,6 +669,8 @@ export const useTabsStore = defineStore('tabs', {
         // 窗口不可见时跳过（省 CPU/GTK 主线程调用；恢复可见后事件或下轮会补上）
         if (document.hidden) return
         this.syncTabs()
+        // 兜底：SPA 内路由（pushState）不发 tabs-updated 事件，靠轮询补同步导航状态
+        this.syncNavState()
         // 每 8 轮（≈64s）触发一次"空闲标签休眠"检查：销毁久未激活标签的 webview
         // 回收渲染进程内存（WebKitGTK 默认不主动回收，多标签内存线性增长）。
         // 阈值由 settings.tab_hibernate_minutes 控制（默认 30 分钟，0=关闭）

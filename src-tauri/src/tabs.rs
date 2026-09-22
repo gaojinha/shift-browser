@@ -1978,14 +1978,18 @@ pub async fn go_back(
     let webview = window
         .get_webview(&label)
         .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
+    // 修复（2026-09-22）：改用 WebKit 原生导航，不再 eval("history.back()")——
+    // 后者受页面 CSP / 页面脚本重写 history 影响，会"点了没反应"
     webview
-        .eval("history.back()")
+        .with_webview(|pwv| {
+            webkit2gtk::WebViewExt::go_back(&pwv.inner());
+        })
         .map_err(|e| format!("后退失败: {}", e))?;
     let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
     Ok(tabs.get(&id).cloned())
 }
 
-/// 前进（对当前活动标签执行 history.forward()）
+/// 前进（对当前活动标签执行原生 go_forward()）
 #[tauri::command]
 pub async fn go_forward(
     app: AppHandle,
@@ -2007,8 +2011,11 @@ pub async fn go_forward(
     let webview = window
         .get_webview(&label)
         .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
+    // 修复（2026-09-22）：同 go_back，改用 WebKit 原生导航
     webview
-        .eval("history.forward()")
+        .with_webview(|pwv| {
+            webkit2gtk::WebViewExt::go_forward(&pwv.inner());
+        })
         .map_err(|e| format!("前进失败: {}", e))?;
     let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
     Ok(tabs.get(&id).cloned())
@@ -2150,42 +2157,6 @@ pub async fn get_split_tab(state: tauri::State<'_, TabManager>) -> Result<Option
 }
 
 /// 获取当前活动标签的导航状态（可后退/可前进）
-#[tauri::command]
-pub async fn get_nav_state(
-    app: AppHandle,
-    state: tauri::State<'_, TabManager>,
-) -> Result<serde_json::Value, String> {
-    let id = state
-        .active_id
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
-    let Some(id) = id else {
-        return Ok(json!({ "canGoBack": false, "canGoForward": false }));
-    };
-    let window = app
-        .get_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?;
-    let label = format!("tab-{}", id);
-    let webview = window
-        .get_webview(&label)
-        .ok_or_else(|| format!("标签 {} 的 webview 不存在", id))?;
-
-    // with_webview 闭包要求 'static + Send，用 Arc<Mutex> 捕获结果
-    let nav = Arc::new(Mutex::new((false, false)));
-    let nav_clone = nav.clone();
-    webview
-        .with_webview(move |pwv| {
-            let (back, forward) = crate::engine::webview::navigation_state(&pwv.inner());
-            let mut guard = nav_clone.lock().unwrap_or_else(|e| e.into_inner());
-            guard.0 = back;
-            guard.1 = forward;
-        })
-        .map_err(|e| format!("获取导航状态失败: {}", e))?;
-
-    let (can_go_back, can_go_forward) = *nav.lock().unwrap_or_else(|e| e.into_inner());
-    Ok(json!({ "canGoBack": can_go_back, "canGoForward": can_go_forward }))
-}
 
 /// 打开活动标签的开发者工具（命令与 GTK 全局快捷键共用）。
 /// 走异步任务派发：从 GTK 信号处理器里直接调 `with_webview` 有主线程重入风险，
@@ -2501,4 +2472,45 @@ pub async fn clear_browsing_data(
 
     log::info!("[privacy] 清除浏览数据完成: {:?}", done);
     Ok(done)
+}
+
+/// 查询活动标签的真实导航状态（修复 2026-09-22：前端 canGoBack/canGoForward
+/// 原为本地猜测，切标签后不更新 → 前进/后退按钮 disabled 卡住、点了没反应）
+#[derive(serde::Serialize)]
+pub struct NavState {
+    #[serde(rename = "canGoBack")]
+    pub can_go_back: bool,
+    #[serde(rename = "canGoForward")]
+    pub can_go_forward: bool,
+}
+
+#[tauri::command]
+pub async fn get_nav_state(
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+    id: Option<String>,
+) -> Result<NavState, String> {
+    let id = match id {
+        Some(i) => i,
+        None => state
+            .active_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .ok_or("无活动标签")?,
+    };
+    let window = app.get_window("main").ok_or("主窗口不存在")?;
+    let label = format!("tab-{}", id);
+    let webview = window.get_webview(&label).ok_or("webview 不存在")?;
+    let (tx, rx) = tokio::sync::oneshot::channel::<(bool, bool)>();
+    webview
+        .with_webview(move |pwv| {
+            let _ = tx.send(crate::engine::webview::navigation_state(&pwv.inner()));
+        })
+        .map_err(|e| e.to_string())?;
+    let (b, f) = match tokio::time::timeout(std::time::Duration::from_secs(2), rx).await {
+        Ok(Ok(v)) => v,
+        _ => (false, false),
+    };
+    Ok(NavState { can_go_back: b, can_go_forward: f })
 }
