@@ -2583,7 +2583,45 @@ src-tauri/src/extensions/adblock.rs  # 广告拦截（301 行）
 
 ---
 
-## 下一步（截至第一百零三章）
+## 第一百零四章（架构补完）：P0-2 引擎 trait + 剩余拆分
+
+**背景**：对 P0-P2 成果做复查，发现几处"渐进策略留下的半成品"，本轮补完。
+
+### A. 引擎抽象补完（P0-2 真正落地）
+- **新增 `WebViewBackend` trait**（`engine/webview.rs`）：reload/go_back/go_forward/nav_state/
+  uri/set_muted/open_inspector，为 WebKitGTK 提供 impl → 跨平台边界确立
+- **下沉 `tabs.rs` 残留 WebKit 调用**：`reload`、`uri_host`、`attach_download_policy`
+  （下载策略）→ tabs.rs 的 `webkit2gtk::` 直接调用 **6 处 → 1 处**（仅剩顶部 use）
+
+### B. lib.rs 内联平台代码下沉
+- `setup_web_extensions_dir`（web extensions 目录 + .so 打包兜底）
+- `apply_cookie_policy`（第三方 Cookie 严格档阻断）
+  → 均移入 `engine/platform/linux.rs`，lib.rs 只调 `platform::xxx`
+
+### C. engine → ai 反向依赖解耦
+- **类型下沉**：`ChatMessage` → `engine/types.rs`（`ai.rs` re-export 保持路径）
+- **实现解耦**：`AgnesProvider` 不再直接调 `crate::ai::agnes_chat_impl`，改为
+  **回调注入**（`register_chat_impl`，由 `ai::register_provider_impls()` 在启动时注册）
+- 结果：engine 层已无 `crate::ai::` 实际引用（仅剩说明注释）
+
+### E. extensions.rs 继续拆分
+- 拆出 `extensions/privacy.rs`（隐私统计/自检/白名单判定，263 行）
+- `extensions.rs` **1195 → 944 行**
+
+### F. adblock 的 CSS/JS 外置
+- `ADBLOCK_CSS` → `resources/js/adblock.css`
+- `ADBLOCK_JS_TEMPLATE` → `resources/js/adblock.js`
+
+### 契约守卫的价值体现
+本轮拆分 `privacy.rs` 时，**P1-2 的 `all_registered_commands_are_defined` 测试立即报错**
+（漏把 `extensions/privacy.rs` 加入源码清单）→ 修复后通过。证明该守卫有效。
+
+**验证**：Rust **116 passed**；前端 **3 passed**；`clippy --lib -D unwrap_used` 通过；
+真机运行正常（Cookie/内存治理/隐私注入/第三方 Cookie 策略均经新平台层执行），0 崩溃。
+
+---
+
+## 下一步（截至第一百零四章）
 
 - **阶段 4 继续**：多端形态（移动/平板协同）——路线图剩的最后一块大件。
 - **实战检验（进行中）**：下载目录、系统托盘已修并验收；开放 API 扩展（C2）已交付；

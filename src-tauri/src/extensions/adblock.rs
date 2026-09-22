@@ -6,79 +6,7 @@ use super::*;
 
 /// 内置广告拦截 CSS 规则（精简版，常见广告选择器）
 /// 设置 adblock_enabled=true 时自动注入，优先级低于用户扩展（扩展后注入）
-const ADBLOCK_CSS: &str = r#"
-/* ShiftBrowser 内置广告拦截（收紧版 2026-09-18）
-   事故：宽泛选择器（[class*="banner"]、[id*="banner"]、iframe[src*="ad"]、
-   img[src*="ad."]、[src*="advert"] 等）导致邮箱正文的 iframe 与图片被隐藏，
-   表现为"邮件正文空白"。教训：src/class 的子串匹配会命中正常资源。
-   原则：只保留高置信度广告标识，严禁 [src*="ad"] 这类会误伤正文的匹配。 */
-ins.adsbygoogle, .adsbygoogle,
-[id^="google_ads"], [id^="aswift"], [id^="div-gpt-ad"], [class^="div-gpt-ad"],
-.google-ads, .ggads, #sinaads, .sinaads,
-iframe[src*="doubleclick.net"], iframe[src*="googlesyndication.com"],
-iframe[src*="amazon-adsystem.com"], iframe[src*="cpro.baidu.com"],
-img[src*="doubleclick.net"],
-.ad-banner, #ad-banner, .ad-container, .ad-slot,
-[class*="popup-ad"], [id*="popup-ad"], .ad-modal, .ad-overlay,
-[class*="popup-ad"], [id*="popup-ad"], .ad-modal, .ad-overlay,
-/* 门户/新浪类广告 */
-#ad_right, .ad-left, .ad-top, .ad-bottom, .adbox, .ad-box, .ad_box,
-.adsbox, .ads_global, .ad_global,
-[class*="sinaads"], [id*="sinaads"],
-/* 对联/悬浮广告（页面左右两侧） */
-#leftCouplet, #rightCouplet, .leftCouplet, .rightCouplet, .couplet, #couplet,
-.floatAd, .float-ad, .floatAdLeft, .floatAdRight, .leftFloat, .rightFloat,
-#floatAd, .sideAd, .side-ad, .sidebar-ad, .leftAd, .rightAd, .left-ad, .right-ad,
-.left_float, .right_float, .float_left, .float_right, .floatL, .floatR,
-[class*="couplet"], [id*="couplet"], [class*="floatAd"], [class*="float-ad"],
-[class*="float_"], [id*="float_"], [class*="sideAd"], [class*="side-ad"],
-/* 常见广告尺寸规格 */
-.ad-300x250, .ad-728x90, .ad-160x600, .ad-970x90, .ad-970x250,
-.ad-336x280, .ad-300x600, .ad-320x50, .ad-250x250, .ad-468x60,
-/* 广告容器/单元 */
-.adsense, .ad-sense, .advert-slot, .ad-slot-1, .ad-slot-2, .ad-slot,
-.ad-unit, .ad-unit-1, .ad-unit-2, .ad-inner, .ad-outer, .ad-wrap,
-.ad-content, .ad-item, .ad-list, .ad-grid, .ad-banner-container,
-/* 内容推荐广告 */
-.taboola, .outbrain, .revcontent, .content-ad, .recommend-ad,
-/* 电商联盟/点击追踪（不拦 tmall.com 本体链接，避免购物页全灭） */
-a[href*="uland.taobao"], a[href*="click.tb"], a[href*="s.click.taobao"],
-a[href*="section=ad"], a[href*="ad_id="],
-.tb-ads, .tm-ads, .shop-recommend-ad, .trade-ad, .tb-shop-ad, .shop-ad,
-.jd-ad, .jd-ads, .deal-ad, .pinduoduo-ad, .pdd-ad, .pdd-ads, .vip-ad,
-/* 内容平台广告（知乎/哔哩/豆瓣/小红书/微博） */
-.Pc-word-ad, .Pc-mission-ad, .QuestionAd, .AnswerAd, .Topstory-ad,
-.bili-rich-ad, .video-card-ad, .bili-video-card__info--ad, .feed-ad,
-.douban-ad, .douban-advert, .xiaohongshu-ad, .xhs-ad,
-.weibo-ad, .weibo-ads, .topic-ad, .card-ad, .recommend-card-ad,
-/* 视频平台广告（优酷/爱奇艺/腾讯视频/芒果TV） */
-.yk-player-ad, .yk-vip-ad, .yk-poster-ad, .youku-ad, .youku-ads,
-.iqiyi-player-ad, .iqiyi-vip-ad, .iqiyi-poster-ad, .iqiyi-ad, .iqiyi-ads,
-.tenvideo-player-ad, .qq-video-ad, .video-vip-ad,
-.mgtv-player-ad, .mgtv-ad, .mgtv-vip-ad, .player-vip-ad, .preroll-ad, .postroll-ad,
-/* 弹窗二跳/下载引导 */
-.download-guide, .app-guide, .install-guide, .guide-modal, .guide-overlay,
-.wx-follow, .wechat-guide, .qr-modal, .qr-overlay,
-/* 工具栏/浏览器伴侣 */
-.toolbar-ad, .companion-ad, .assistant-ad, .helper-ad,
-/* 超高 z-index 遮罩（广告弹层常用 2147483647，不拦普通 fixed） */
-div[style*="z-index:2147483647"], div[style*="z-index: 2147483647"],
-/* 通用电商品类页推广 */
-.quick-bar-ad, .flash-ad, .flashbuy-ad, .countdown-ad,
-/* 音频/音乐 */
-.kg-ad, .kugou-ad, .qqmusic-ad, .wangyiyun-ad, .music-ad,
-/* 弹窗/遮罩 */
-.modal-ad, .pop-ad, .layer-ad, .mask-ad, .dialog-ad, .overlay-ad,
-/* 底部浮条 */
-.bottom-ad, .footer-ad, .float-bottom, .bottom-banner, .footer-banner,
-.bottom-bar-ad, .floating-ad, .sticky-ad,
-/* 移动端/应用推广 */
-.mobile-ad, .app-ad, .app-download, .download-ad, .app-promo,
-/* 各门户广告 */
-.qq_ad, .tx_ad, .netease_ad, .sohu_ad, .sogou_ad, .youku_ad, .tudou_ad,
-#content_right, .ec_ads, .result-op.c-container, .c-container[data-click*="ad"]
-{ display: none !important; }
-"#;
+const ADBLOCK_CSS: &str = include_str!("../../resources/js/adblock.css");
 
 /// 内置关键词（用户自定义关键词会追加在后面）
 const BUILTIN_KEYWORDS: &[&str] = &[
@@ -102,49 +30,7 @@ const BUILTIN_KEYWORDS: &[&str] = &[
 ];
 
 /// 广告拦截 JS 模板。`__SB_KEYWORDS__` 在注入前替换成完整数组（内置 + 用户自定义）
-const ADBLOCK_JS_TEMPLATE: &str = r#"
-// ShiftBrowser 广告拦截：文本特征规则 + 动态监听
-(function () {
-  if (window.__shiftAdblockInstalled) return;
-  window.__shiftAdblockInstalled = true;
-  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
-  var keywords = __SB_KEYWORDS__;
-  var HIDDEN = 'data-sb-hidden';
-  function hideByText() {
-    var nodes = document.querySelectorAll('div, section, aside');
-    // 性能保护：超大 DOM（几十万节点的重型 SPA）全扫会卡主线程，超过 3000 节点直接放弃文本扫描
-    // （CSS [class*=ad]/[id*=ad] 规则仍会生效，只是文本特征词兜底失效，可接受）
-    if (nodes.length > 3000) return;
-    for (var i = 0; i < nodes.length; i++) {
-      var el = nodes[i];
-      if (el.getAttribute(HIDDEN)) continue;
-      if (el.offsetWidth === 0 && el.offsetHeight === 0) continue;
-      if (el.offsetHeight > 520) continue; // 跳过大块页面区域，避免误杀正文
-      var text = el.textContent || '';
-      if (text.length < 4 || text.length > 400) continue;
-      for (var k = 0; k < keywords.length; k++) {
-        if (keywords[k] && text.indexOf(keywords[k]) !== -1) {
-          el.style.display = 'none';
-          el.setAttribute(HIDDEN, '1');
-          break;
-        }
-      }
-    }
-  }
-  hideByText();
-  var timer = null;
-  var observer = new MutationObserver(function () {
-    if (timer) return;
-    timer = setTimeout(function () {
-      timer = null;
-      hideByText();
-    }, 500);
-  });
-  if (document.body) {
-    observer.observe(document.body, { childList: true, subtree: true });
-  }
-})();
-"#;
+const ADBLOCK_JS_TEMPLATE: &str = include_str!("../../resources/js/adblock.js");
 
 fn js_escape(s: &str) -> String {
     s.replace('\\', "\\\\")

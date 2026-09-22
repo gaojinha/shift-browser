@@ -123,3 +123,90 @@ mod tests {
         assert!(major >= 131, "Chrome 主版本过低: {}", major);
     }
 }
+
+// ============================================================
+// P0-2 补完（2026-09-22）：WebView 后端抽象 trait
+// ============================================================
+//
+// 目的：业务模块（tabs.rs 等）不再直接依赖 `webkit2gtk::WebView` 具体类型，
+// 而是面向本 trait。Windows(WebView2)/Android(系统 WebView) 移植时，
+// 只需提供另一份实现，业务代码不动。
+//
+// 说明：当前 trait 方法仍接收 `&WebView`（WebKitGTK 类型）——这是**过渡态**：
+// 先把"调用点"收敛到本模块（业务代码不再直接 use webkit2gtk），
+// 待真正移植时再把 `&WebView` 换成 trait 关联类型/泛型。
+
+/// WebView 后端能力抽象（当前为 WebKitGTK 实现）
+pub trait WebViewBackend {
+    /// 重新加载
+    fn reload(&self);
+    /// 后退
+    fn go_back(&self);
+    /// 前进
+    fn go_forward(&self);
+    /// 导航状态 (can_back, can_forward)
+    fn nav_state(&self) -> (bool, bool);
+    /// 当前 URI
+    fn uri(&self) -> Option<String>;
+    /// 设置静音
+    fn set_muted(&self, muted: bool);
+    /// 打开开发者工具
+    fn open_inspector(&self);
+}
+
+/// WebKitGTK 后端的 trait 实现
+impl WebViewBackend for WebView {
+    fn reload(&self) {
+        webkit2gtk::WebViewExt::reload(self);
+    }
+    fn go_back(&self) {
+        webkit2gtk::WebViewExt::go_back(self);
+    }
+    fn go_forward(&self) {
+        webkit2gtk::WebViewExt::go_forward(self);
+    }
+    fn nav_state(&self) -> (bool, bool) {
+        (
+            webkit2gtk::WebViewExt::can_go_back(self),
+            webkit2gtk::WebViewExt::can_go_forward(self),
+        )
+    }
+    fn uri(&self) -> Option<String> {
+        webkit2gtk::WebViewExt::uri(self).map(|s| s.to_string())
+    }
+    fn set_muted(&self, muted: bool) {
+        webkit2gtk::WebViewExt::set_is_muted(self, muted);
+    }
+    fn open_inspector(&self) {
+        open_inspector(self);
+    }
+}
+
+/// 便捷函数：从 URI 解析 host（业务侧 UA 覆盖等用）
+pub fn uri_host(wv: &WebView) -> String {
+    webkit2gtk::WebViewExt::uri(wv)
+        .and_then(|u| url::Url::parse(u.as_str()).ok())
+        .and_then(|u| u.host_str().map(|h| h.to_string()))
+        .unwrap_or_default()
+}
+
+/// 下载策略：主框架导航到"不可显示的 MIME"（apk/zip/exe…）时转为下载。
+/// 从 tabs.rs 下沉（P0-2 补完）：业务模块不再直接 use webkit2gtk 的 PolicyDecision 类型。
+pub fn attach_download_policy(wv: &WebView) {
+    use gtk::glib::prelude::Cast;
+    use webkit2gtk::{
+        PolicyDecisionExt, PolicyDecisionType, ResponsePolicyDecision, ResponsePolicyDecisionExt,
+    };
+    wv.connect_decide_policy(|_wv, decision, decision_type| {
+        if decision_type == PolicyDecisionType::Response {
+            if let Some(resp) = decision.downcast_ref::<ResponsePolicyDecision>() {
+                if !resp.is_mime_type_supported() {
+                    log::info!("[downloads] 不可显示 MIME → 转下载流程");
+                    decision.download();
+                    return true;
+                }
+            }
+        }
+        false
+    });
+}

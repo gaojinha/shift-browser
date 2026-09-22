@@ -9,17 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{ipc::Channel, Manager};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ChatMessage {
-    pub role: String,
-    pub content: String,
-    /// 工具结果回传时填（role=tool 时必填，对应 assistant 的 tool_call.id）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
-    /// assistant 消息请求工具调用时填
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ToolCall>>,
-}
+// P0-2 补完（2026-09-22）：ChatMessage 下沉到 engine::types 以打破
+// ai ↔ ai_provider 循环依赖。此处 re-export 保持既有引用路径不变。
+pub use crate::engine::types::ChatMessage;
 
 impl ChatMessage {
     /// 便捷构造（工具执行循环/测试用）
@@ -661,6 +653,25 @@ where
 #[tauri::command]
 pub fn ai_list_providers() -> Vec<crate::engine::ai_provider::ProviderInfo> {
     crate::engine::ai_provider::list_providers()
+}
+
+/// P0-2 补完（2026-09-22）：向 engine 层注册聊天实现，打破反向依赖。
+/// 由 lib.rs 启动时调用一次。
+pub fn register_provider_impls() {
+    crate::engine::ai_provider::register_chat_impl(
+        |base_url, api_key, req| {
+            Box::pin(async move {
+                let r = crate::engine::ai_provider::ProviderRequest { ..req };
+                agnes_chat_impl(&base_url, &api_key, &r).await
+            })
+        },
+        |base_url, api_key, req, cancel, on_delta| {
+            Box::pin(async move {
+                let r = crate::engine::ai_provider::ProviderRequest { ..req };
+                agnes_chat_stream_impl(&base_url, &api_key, &r, cancel, on_delta).await
+            })
+        },
+    );
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@
 //! 安全：所有 provider 的 base_url 都走 SSRF 校验（https-only + 非内网），
 //! 校验函数从 ai.rs 迁来，保持行为一致。
 
-use crate::ai::ChatMessage;
+use crate::engine::types::ChatMessage;
 use async_trait::async_trait;
 
 /// 推理请求（统一结构，与 OpenAI 兼容格式对齐）
@@ -60,6 +60,40 @@ impl AgnesProvider {
     }
 }
 
+
+// ============================================================
+// P0-2 补完（2026-09-22）：打破 engine → ai 的反向依赖
+// ============================================================
+//
+// 原状：`AgnesProvider::chat` 直接调 `crate::ai::agnes_chat_impl`（引擎层依赖业务实现）。
+// 现改为**回调注入**：`ai.rs` 在启动时注册实现，engine 只持函数指针调用。
+// 这样 engine 层不再 `use crate::ai::*`（除已下沉的 ChatMessage 类型）。
+
+/// 聊天实现签名（由 ai.rs 注册）
+pub type ChatFn = fn(
+    base_url: String,
+    api_key: String,
+    req: ProviderRequest,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<ChatMessage, String>> + Send>>;
+
+/// 流式聊天实现签名（由 ai.rs 注册）
+pub type ChatStreamFn = fn(
+    base_url: String,
+    api_key: String,
+    req: ProviderRequest,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    on_delta: Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send>>;
+
+static CHAT_IMPL: std::sync::OnceLock<ChatFn> = std::sync::OnceLock::new();
+static CHAT_STREAM_IMPL: std::sync::OnceLock<ChatStreamFn> = std::sync::OnceLock::new();
+
+/// 由 ai.rs 启动时注册实现（打破反向依赖）
+pub fn register_chat_impl(f: ChatFn, fs: ChatStreamFn) {
+    let _ = CHAT_IMPL.set(f);
+    let _ = CHAT_STREAM_IMPL.set(fs);
+}
+
 #[async_trait]
 impl AiProvider for AgnesProvider {
     fn id(&self) -> &str {
@@ -72,7 +106,8 @@ impl AiProvider for AgnesProvider {
         !self.api_key.is_empty()
     }
     async fn chat(&self, req: &ProviderRequest) -> Result<ChatMessage, String> {
-        crate::ai::agnes_chat_impl(&self.base_url, &self.api_key, req).await
+        let f = CHAT_IMPL.get().ok_or("聊天实现未注册（ai::register）")?;
+        f(self.base_url.clone(), self.api_key.clone(), req.clone()).await
     }
     async fn chat_stream(
         &self,
@@ -80,8 +115,17 @@ impl AiProvider for AgnesProvider {
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         on_delta: Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>,
     ) -> Result<String, String> {
-        crate::ai::agnes_chat_stream_impl(&self.base_url, &self.api_key, req, cancel, on_delta)
-            .await
+        let f = CHAT_STREAM_IMPL
+            .get()
+            .ok_or("流式聊天实现未注册（ai::register）")?;
+        f(
+            self.base_url.clone(),
+            self.api_key.clone(),
+            req.clone(),
+            cancel,
+            on_delta,
+        )
+        .await
     }
 }
 

@@ -1395,72 +1395,31 @@ pub fn run() {
       // 定时任务调度器（阶段3 自动化：设置驱动的后台任务）
       auto_tasks::spawn(app.handle().clone());
 
+      // P0-2 补完：注册 AI Provider 实现（打破 engine→ai 反向依赖）
+      ai::register_provider_impls();
+
       // 本地开放 API（阶段4 开放生态：Unix 域套接字 + 行式 JSON）
       api::spawn(app.handle().clone());
 
-      // Linux：手动设置 WebKit web extensions 目录（tauri://localhost 协议依赖 web extension）
-      // Tauri 2 不会自动设置 extensions_path，必须手动指定，否则前端资源加载失败
+      // Linux：WebKit web extensions 目录 + 第三方 Cookie 策略
+      // （P0-2 补完 · 2026-09-22：平台代码下沉到 engine::platform）
       #[cfg(target_os = "linux")]
       {
-        use webkit2gtk::WebContextExt;
-        use webkit2gtk::WebContext;
-        if let Some(context) = WebContext::default() {
-          if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-              // 打包兜底：web extensions 目录 = exe 目录；打包后扩展 .so 进的是资源目录，
-              // 若 exe 目录没有就复制过去（开发/便携运行下 .so 本就在 exe 目录，跳过）。
-              let target = dir.join("libshift_web_extension.so");
-              if !target.exists() {
-                if let Ok(res) = app.path().resource_dir() {
-                  let src = res.join("libshift_web_extension.so");
-                  if src.exists() {
-                    match std::fs::copy(&src, &target) {
-                      Ok(_) => {
-                        log::info!("[ShiftBrowser] 扩展 .so 已从资源目录复制到 exe 目录")
-                      }
-                      Err(e) => log::warn!("[ShiftBrowser] 扩展 .so 复制失败: {}", e),
-                    }
-                  }
-                }
-              }
-              context.set_web_extensions_directory(&dir.display().to_string());
-              log::info!("[ShiftBrowser] web extensions 目录: {}", dir.display());
-            }
-          }
-          // 注意：不要尝试 set_process_model(SharedSecondaryProcess)——
-          // 1) 主 webview 在 setup 前已创建，进程池已固化，设置被 g_return_if_fail 静默忽略；
-          // 2) 实测强行切换会触发 WebKit bug（WebLoaderStrategy internallyFailedLoad），整个应用崩。
-          // 多标签开销靠"切标签前 hide 旧 + 前端连点合并"缓解，进程模型保持默认。
-
-          // 隐私防护：第三方 Cookie 阻断 —— 仅"严格档"启用（2026-09-18 修订）
-          // 背景：全量阻断曾导致邮箱/网盘等内容空白（站点靠第三方域加载正文/附件），
-          // 故不再默认开启；改为绑定隐私防护档位：用户主动选"严格"才阻断，
-          // 属知情选择。Cookie 策略是 WebContext 级、须在建 webview 前设置，
-          // 因此切换档位后需重启浏览器生效。
-          #[cfg(target_os = "linux")]
-          {
-            use webkit2gtk::CookieManagerExt;
-            let level: String = tauri::async_runtime::block_on(async {
-              let db = app.state::<Db>();
-              let row: Option<(String,)> = sqlx::query_as(
-                "SELECT value FROM settings WHERE key = 'privacy_shield_level'",
-              )
-              .fetch_optional(&db.pool)
-              .await
-              .ok()
-              .flatten();
-              row.map(|r| r.0).unwrap_or_else(|| "standard".to_string())
-            });
-            if level == "strict" {
-              if let Some(cm) = context.cookie_manager() {
-                cm.set_accept_policy(webkit2gtk::CookieAcceptPolicy::NoThirdParty);
-                log::info!("[privacy] 严格档：第三方 Cookie 已阻断（重启后按档位生效）");
-              }
-            } else {
-              log::info!("[privacy] 标准档：第三方 Cookie 保持浏览器默认（不阻断）");
-            }
-          }
-        }
+        let res_dir = app.path().resource_dir().ok();
+        crate::engine::platform::setup_web_extensions_dir(res_dir);
+        // 第三方 Cookie 阻断：仅"严格档"启用（绑定隐私防护档位，切换后需重启生效）
+        let strict: bool = tauri::async_runtime::block_on(async {
+          let db = app.state::<Db>();
+          let row: Option<(String,)> = sqlx::query_as(
+            "SELECT value FROM settings WHERE key = 'privacy_shield_level'",
+          )
+          .fetch_optional(&db.pool)
+          .await
+          .ok()
+          .flatten();
+          row.map(|r| r.0 == "strict").unwrap_or(false)
+        });
+        crate::engine::platform::apply_cookie_policy(strict);
       }
 
       // Linux/GTK：初始化嵌入式 webview 的绝对定位布局（Fixed 容器 + 主 webview reparent）
@@ -1680,6 +1639,8 @@ mod tests {
             include_str!("perms.rs"),
             include_str!("useragent.rs"),
             include_str!("extensions.rs"),
+            include_str!("extensions/adblock.rs"),
+            include_str!("extensions/privacy.rs"),
             include_str!("newtab.rs"),
             include_str!("ai.rs"),
             include_str!("api.rs"),

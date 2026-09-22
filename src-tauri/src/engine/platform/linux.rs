@@ -79,3 +79,42 @@ pub fn clear_web_data(cookies: bool, cache: bool, storage: bool) {
 pub fn download_dir() -> Option<std::path::PathBuf> {
     gtk::glib::user_special_dir(gtk::glib::UserDirectory::Downloads)
 }
+
+/// 设置 WebKit web extensions 目录（tauri://localhost 协议依赖 web extension）
+/// 含打包兜底：扩展 .so 不在 exe 目录时从资源目录复制过去。
+/// 从 lib.rs 下沉（P0-2 补完 · 2026-09-22）。
+pub fn setup_web_extensions_dir(resource_dir: Option<std::path::PathBuf>) {
+    use webkit2gtk::{WebContext, WebContextExt};
+    let Some(context) = WebContext::default() else { return };
+    let Ok(exe) = std::env::current_exe() else { return };
+    let Some(dir) = exe.parent() else { return };
+    let target = dir.join("libshift_web_extension.so");
+    if !target.exists() {
+        if let Some(res) = resource_dir {
+            let src = res.join("libshift_web_extension.so");
+            if src.exists() {
+                match std::fs::copy(&src, &target) {
+                    Ok(_) => log::info!("[ShiftBrowser] 扩展 .so 已从资源目录复制到 exe 目录"),
+                    Err(e) => log::warn!("[ShiftBrowser] 扩展 .so 复制失败: {}", e),
+                }
+            }
+        }
+    }
+    context.set_web_extensions_directory(&dir.display().to_string());
+    log::info!("[ShiftBrowser] web extensions 目录: {}", dir.display());
+}
+
+/// 第三方 Cookie 阻断策略（仅"严格档"启用）
+/// 从 lib.rs 下沉（P0-2 补完 · 2026-09-22）。
+pub fn apply_cookie_policy(strict: bool) {
+    use webkit2gtk::{CookieManagerExt, WebContext, WebContextExt};
+    let Some(context) = WebContext::default() else { return };
+    if strict {
+        if let Some(cm) = context.cookie_manager() {
+            cm.set_accept_policy(webkit2gtk::CookieAcceptPolicy::NoThirdParty);
+            log::info!("[privacy] 严格档：第三方 Cookie 已阻断（重启后按档位生效）");
+        }
+    } else {
+        log::info!("[privacy] 标准档：第三方 Cookie 保持浏览器默认（不阻断）");
+    }
+}

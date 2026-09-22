@@ -580,7 +580,7 @@ impl TabManager {
                     );
                     if allow_reload {
                         log::info!("[tabs] 自动重载崩溃标签: {}", tab_id_crash);
-                        webkit2gtk::WebViewExt::reload(webview);
+                        crate::engine::webview::WebViewBackend::reload(webview);
                     }
                 });
                 // 监听 WebKit title 变化 → 实时同步标签标题
@@ -670,31 +670,13 @@ impl TabManager {
           // 只能修改现有 Settings 的属性
           // 页面默认设置（UA / 开发者工具 / JS 弹窗）统一由引擎层施加
           // host 用于站点级 UA 覆盖（方案 B · 2026-09-22）
-          let ua_host = webkit2gtk::WebViewExt::uri(&child_gtk)
-            .and_then(|u| url::Url::parse(&u).ok())
-            .and_then(|u| u.host_str().map(|h| h.to_string()))
-            .unwrap_or_default();
+          let ua_host = crate::engine::webview::uri_host(&child_gtk);
           crate::engine::webview::apply_default_settings(&child_gtk, &ua_host);
           // 下载策略（关键 · 2026-09-21）：主框架导航到"不可显示的 MIME"（apk/zip/exe/…）时，
           // WebKit 默认不当下载 → 表现为"帧加载已中断"（用户报"下载不能开始"）。
           // 这里接 decide-policy：对不支持的 MIME 调 decision.download()，
           // 触发 WebContext 的 download-started（已注册，落 ~/Downloads + 记录 downloads 表）。
-          child_gtk.connect_decide_policy(|_wv, decision, decision_type| {
-            use webkit2gtk::{
-              PolicyDecisionExt, PolicyDecisionType, ResponsePolicyDecision,
-              ResponsePolicyDecisionExt,
-            };
-            if decision_type == PolicyDecisionType::Response {
-              if let Some(resp) = decision.downcast_ref::<ResponsePolicyDecision>() {
-                if !resp.is_mime_type_supported() {
-                  log::info!("[downloads] 不可显示 MIME → 转下载流程");
-                  decision.download();
-                  return true;
-                }
-              }
-            }
-            false
-          });
+          crate::engine::webview::attach_download_policy(&child_gtk);
           // 监听 child webview 的鼠标点击事件
           child_gtk.connect_button_press_event(|wv, event| {
               let (x, y) = (event.position().0, event.position().1);

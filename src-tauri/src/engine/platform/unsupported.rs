@@ -13,3 +13,7 @@ pub fn clear_web_data(_cookies: bool, _cache: bool, _storage: bool) {}
 pub fn download_dir() -> Option<std::path::PathBuf> {
     None
 }
+
+pub fn setup_web_extensions_dir(_resource_dir: Option<std::path::PathBuf>) {}
+
+pub fn apply_cookie_policy(_strict: bool) {}
