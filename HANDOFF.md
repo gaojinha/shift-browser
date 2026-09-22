@@ -2431,7 +2431,37 @@ toast，避免标签直接变白。
 
 ---
 
-## 下一步（截至第九十七章）
+## 第九十八章（架构 P0-2）：引擎抽象层补全（平台代码下沉）
+
+**问题**：`engine/webview.rs` 仅 117 行；`tabs.rs`/`lib.rs` 直接 `use webkit2gtk/gtk` 并散落
+平台调用（Cookie/内存治理/下载目录/数据清理），跨平台（Windows/Android）无从下手。
+
+**方案**：新建 `engine/platform/` 平台适配层，业务模块不再直接依赖 WebKitGTK：
+```
+src-tauri/src/engine/platform/
+├── mod.rs          # 统一转发（业务模块只认 platform::xxx）
+├── linux.rs        # WebKitGTK/GTK 实现
+└── unsupported.rs  # Windows/Android 占位（移植时填充）
+```
+
+**已下沉**：
+| 能力 | 原位置 | 现位置 |
+|---|---|---|
+| Cookie 持久化初始化 | `lib.rs` | `platform::init_cookie_persistence` |
+| WebKit 内存压力治理 | `lib.rs` | `platform::setup_memory_pressure` |
+| 清除浏览数据（Cookie/缓存/存储） | `tabs.rs` | `platform::clear_web_data` |
+| 系统下载目录解析 | `tabs.rs` | `platform::download_dir` |
+
+**验证**：编译通过；真机启动日志确认 Cookie 持久化与内存压力治理均经新平台层执行
+（`[perf] WebKit 内存压力治理已启用：上限 9357 MB`），标签加载正常，无真实 ERROR。
+
+**剩余（渐进）**：`tabs.rs` 23 处 / `lib.rs` 22 处 GTK 调用，多为**深度布局/窗口控制**
+（GtkFixed 定位、窗口圆角、快捷键拦截），需重构布局逻辑，风险较高——**留待真正做
+Windows 移植时再动**（届时目标明确）。P0-2 核心边界已建立。
+
+---
+
+## 下一步（截至第九十八章）
 
 - **阶段 4 继续**：多端形态（移动/平板协同）——路线图剩的最后一块大件。
 - **实战检验（进行中）**：下载目录、系统托盘已修并验收；开放 API 扩展（C2）已交付；
@@ -2451,7 +2481,7 @@ toast，避免标签直接变白。
 - **延期待做**：设置分区重构（隐私/安全/本地服务三拆）、加密 DNS（DoH）、本机固定 IP。
 - **修复（2026-09-22）**：前进/后退/刷新失灵（96 章）高哥实测通过。
 - **延期待做**：设置分区重构（隐私/安全/本地服务三拆）、加密 DNS（DoH）、本机固定 IP。
-- **架构改造（2026-09-22 起）**：P0-1 newtab 模板外置已完成（97 章）；P0-2 引擎抽象补全进行中。
+- **架构改造（2026-09-22 起）**：P0-1 newtab 模板外置（97 章）、P0-2 引擎抽象补全（98 章）已完成；下一步 P1 系列。
 - **待做**：P1-1 tabs.rs 拆分 / P1-2 命令注册+契约 / P1-3 extensions 拆分 / P2-1 错误治理 / P2-2 JS 资源化。
 - **工程**：HANDOFF 逐章记录机制（已补至 97 章，后续每章随提交更新）。
 

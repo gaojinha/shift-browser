@@ -486,36 +486,26 @@ pub fn run() {
     // 存储路径与 app_data_dir 一致：$XDG_DATA_HOME/com.shiftbrowser.app/cookies.sqlite
     #[cfg(target_os = "linux")]
     {
-        // WebContext::default() 要求 GTK 已初始化；gtk::init() 幂等（已初始化直接 Ok），
-        // 之后 tauri 再初始化不会冲突
-        let _ = gtk::init();
-        use webkit2gtk::{CookieManagerExt, CookiePersistentStorage, WebContext, WebContextExt};
-        if let Some(context) = WebContext::default() {
-            if let Some(cm) = context.cookie_manager() {
-                let data_home = std::env::var("XDG_DATA_HOME")
-                    .map(std::path::PathBuf::from)
-                    .unwrap_or_else(|_| {
-                        std::env::var("HOME")
-                            .map(|h| std::path::PathBuf::from(h).join(".local/share"))
-                            .unwrap_or_else(|_| std::path::PathBuf::from("."))
-                    });
-                let cookie_path = data_home.join("com.shiftbrowser.app").join("cookies.sqlite");
-                if let Some(dir) = cookie_path.parent() {
-                    let _ = std::fs::create_dir_all(dir);
-                }
-                cm.set_persistent_storage(
-                    cookie_path.to_str().unwrap_or("cookies.sqlite"),
-                    CookiePersistentStorage::Sqlite,
-                );
-                // 安全：Cookie 库按 umask 落盘（常见 664，组/其他可读），立即收紧到 600。
-                // 运行时 WebKit 仍可能新建/重建这些文件，故另有周期重扫（见 setup）。
-                if let Some(dir) = cookie_path.parent() {
-                    crate::harden_sensitive_files(dir);
-                }
-                // 注意：此处 logger 插件尚未初始化（Builder 之前），log::info! 会被丢弃，
-            // 用 println! 保证启动日志可见
-            println!("[ShiftBrowser] Cookie 持久化已启用: {}", cookie_path.display());
+        // P0-2：平台代码下沉到 engine::platform（GTK 初始化 + Cookie 持久化）
+        let data_home = std::env::var("XDG_DATA_HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::var("HOME")
+                    .map(|h| std::path::PathBuf::from(h).join(".local/share"))
+                    .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
+        if let Some(cookie_path) =
+            crate::engine::platform::init_cookie_persistence(&data_home)
+        {
+            // 安全：Cookie 库按 umask 落盘（常见 664），立即收紧到 600（另有周期重扫）
+            if let Some(dir) = cookie_path.parent() {
+                crate::harden_sensitive_files(dir);
             }
+            // 此处 logger 插件尚未初始化，用 println! 保证启动日志可见
+            println!(
+                "[ShiftBrowser] Cookie 持久化已启用: {}",
+                cookie_path.display()
+            );
         }
     }
 
@@ -1152,8 +1142,7 @@ pub fn run() {
       // 必须在使用任何 WebContext 之前设置（WebsiteDataManager 的静态全局设置）。
       #[cfg(target_os = "linux")]
       {
-        use webkit2gtk::{MemoryPressureSettings, WebsiteDataManager};
-        // 读系统总内存（MemTotal，kB）
+        // P0-2：平台代码下沉到 engine::platform::linux
         let total_mb: u32 = std::fs::read_to_string("/proc/meminfo")
           .ok()
           .and_then(|s| {
@@ -1164,20 +1153,7 @@ pub fn run() {
           })
           .map(|kb| (kb / 1024) as u32)
           .unwrap_or(8192);
-        // 上限取系统内存 40%：留足余量给系统与其他应用，避免过早回收伤性能
-        let limit = ((total_mb as f64) * 0.4) as u32;
-        let mut mps = MemoryPressureSettings::new();
-        mps.set_memory_limit(limit);
-        mps.set_conservative_threshold(0.33); // 温和回收（清缓存）
-        mps.set_strict_threshold(0.5); // 严格回收（释放渲染树）
-        mps.set_kill_threshold(0.9); // 接近极限才杀进程，避免误杀导致标签崩溃
-        mps.set_poll_interval(1.0);
-        WebsiteDataManager::set_memory_pressure_settings(&mut mps);
-        log::info!(
-          "[perf] WebKit 内存压力治理已启用：上限 {} MB（系统总内存 {} MB 的 40%）",
-          limit,
-          total_mb
-        );
+        crate::engine::platform::linux::setup_memory_pressure(total_mb);
       }
 
       // 锁屏是否启用过（解锁后通知前端重试初始化——锁屏期间 Db/TabManager 未就绪，

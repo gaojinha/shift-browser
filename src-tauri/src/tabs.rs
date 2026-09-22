@@ -853,7 +853,8 @@ impl TabManager {
                   .unwrap_or_else(|| "download".to_string());
                 // 用系统 XDG 下载目录（~/.config/user-dirs.dirs；中文系统常是 ~/下载），
                 // 避免硬编码 ~/Downloads 与实际落盘位置不一致（用户"找不到下载的文件"）。
-                let dest_dir = gtk::glib::user_special_dir(gtk::glib::UserDirectory::Downloads)
+                // P0-2：平台目录解析下沉到 engine::platform
+                let dest_dir = crate::engine::platform::download_dir()
                   .map(|p| p.to_string_lossy().to_string())
                   .unwrap_or_else(|| {
                     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
@@ -2423,40 +2424,12 @@ pub async fn clear_browsing_data(
     let need_storage = has("storage");
     if need_cookies || need_cache || need_storage {
         app.run_on_main_thread(move || {
-            #[cfg(target_os = "linux")]
-            {
-                use gtk::glib;
-                use webkit2gtk::{
-                    CookieManagerExt, WebContext, WebContextExt, WebsiteDataManagerExtManual,
-                    WebsiteDataTypes,
-                };
-                if let Some(ctx) = WebContext::default() {
-                    if need_cookies {
-                        if let Some(cm) = ctx.cookie_manager() {
-                            cm.delete_all_cookies();
-                            log::info!("[privacy] 已清除全部 Cookie");
-                        }
-                    }
-                    if need_cache {
-                        ctx.clear_cache();
-                        log::info!("[privacy] 已清除缓存");
-                    }
-                    if need_storage {
-                        if let Some(dm) = ctx.website_data_manager() {
-                            dm.clear(
-                                WebsiteDataTypes::LOCAL_STORAGE
-                                    | WebsiteDataTypes::SESSION_STORAGE
-                                    | WebsiteDataTypes::INDEXEDDB_DATABASES
-                                    | WebsiteDataTypes::DOM_CACHE,
-                                glib::TimeSpan::from_seconds(0),
-                                None::<&gtk::gio::Cancellable>,
-                                |_| {},
-                            );
-                            log::info!("[privacy] 已清除本地存储");
-                        }
-                    }
-                }
-            }
+            // P0-2：WebKit 数据清理下沉到 engine::platform
+            crate::engine::platform::clear_web_data(need_cookies, need_cache, need_storage);
+            log::info!(
+                "[privacy] 清除浏览数据: cookies={} cache={} storage={}",
+                need_cookies, need_cache, need_storage
+            );
         })
         .map_err(|e| e.to_string())?;
         if need_cookies {
