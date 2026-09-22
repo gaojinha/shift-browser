@@ -121,6 +121,20 @@ fn ensure_token(app: &AppHandle) -> Option<String> {
 }
 
 /// 起 HTTP API：`POST http://127.0.0.1:19701/api`，body 为同款 JSON 命令；
+/// 常量时间字符串比较（安全 · 2026-09-22）：防 token 鉴权被时序侧信道逐字节推断。
+/// 长度不等直接返回（token 长度固定，泄露长度无意义）。
+fn ct_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for i in 0..a.len() {
+        diff |= a[i] ^ b[i];
+    }
+    diff == 0
+}
+
 /// 鉴权：`Authorization: Bearer <token>`（token 见 api-token 文件）。复用 `handle()`。
 /// 同步读一个设置（setup 阶段调用；setup 不在 tokio worker 上，block_on 安全）
 fn read_setting_blocking(app: &AppHandle, key: &str) -> Option<String> {
@@ -158,20 +172,24 @@ fn spawn_http(app: AppHandle) {
     let port: u16 = read_setting_blocking(&app, "api_http_port")
         .and_then(|v| v.trim().parse::<u16>().ok())
         .unwrap_or(HTTP_PORT);
-    let lan = read_setting_blocking(&app, "api_bind_lan")
+    let lan_want = read_setting_blocking(&app, "api_bind_lan")
         .map(|v| v == "true")
         .unwrap_or(false);
-    let host = if lan { "0.0.0.0" } else { "127.0.0.1" };
-    // IP 白名单（阶段4 C2）：空 = 不限制；LAN 暴露时建议设上
+    // IP 白名单（阶段4 C2；#4 加固 2026-09-22）：LAN 暴露必须配非空白名单
     let allowed_ips = read_setting_blocking(&app, "api_allowed_ips").unwrap_or_default();
+    // 安全（#4）：绑定 0.0.0.0（局域网可达）时，必须配非空 IP 白名单，否则整个局域网
+    // 都能打到 API（仅靠 token 保护）。空名单则拒绝 LAN 绑定，退回仅本机。
+    let lan = if lan_want && allowed_ips.trim().is_empty() {
+        log::error!(
+            "[api] 拒绝绑定 LAN：api_allowed_ips 为空（安全策略要求非空白名单），已退回仅本机 127.0.0.1"
+        );
+        false
+    } else {
+        lan_want
+    };
+    let host = if lan { "0.0.0.0" } else { "127.0.0.1" };
     if lan {
-        if allowed_ips.trim().is_empty() {
-            log::warn!(
-                "[api] HTTP 已绑 0.0.0.0（局域网可达）——请确保 token 不外泄，建议设 api_allowed_ips"
-            );
-        } else {
-            log::info!("[api] HTTP 已绑 0.0.0.0，IP 白名单: {}", allowed_ips);
-        }
+        log::info!("[api] HTTP 已绑 0.0.0.0，IP 白名单: {}", allowed_ips);
     }
     tauri::async_runtime::spawn(async move {
         let addr = format!("{}:{}", host, port);
@@ -225,7 +243,7 @@ fn spawn_http(app: AppHandle) {
                         && l.splitn(2, ':')
                             .nth(1)
                             .map(|v| {
-                                v.trim().trim_start_matches("Bearer ").trim() == token.as_str()
+                                ct_eq(v.trim().trim_start_matches("Bearer ").trim(), token.as_str())
                             })
                             .unwrap_or(false)
                 });
@@ -258,7 +276,7 @@ fn spawn_http(app: AppHandle) {
                             let v = it.next().unwrap_or("");
                             (k == "token").then(|| v.to_string())
                         });
-                    let ok = qtok.as_deref() == Some(token.as_str()) || auth_ok;
+                    let ok = qtok.as_deref().map(|t| ct_eq(t, token.as_str())).unwrap_or(false) || auth_ok;
                     let html = if ok {
                         dashboard_html(&app).await
                     } else {

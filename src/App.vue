@@ -20,6 +20,9 @@ import BookmarksDialog from './components/BookmarksDialog.vue'
 import SessionDialog from './components/SessionDialog.vue'
 import UserscriptsDialog from './components/UserscriptsDialog.vue'
 import CommandPalette from './components/CommandPalette.vue'
+import CertificatesDialog from './components/CertificatesDialog.vue'
+import CertWarning from './components/CertWarning.vue'
+import PermissionPrompt from './components/PermissionPrompt.vue'
 import AppToast from './components/AppToast.vue'
 import { useTabsStore, setLockedState } from './stores/tabs'
 import { useGroupsStore } from './stores/groups'
@@ -63,6 +66,21 @@ const showGroups = ref(false)
 const showDownloads = ref(false)
 const showSettings = ref(false)
 const showAI = ref(false)
+// 证书中心（P1/P3）+ 证书错误拦截页（P2）
+const showCerts = ref(false)
+// 权限请求提示（安全 #2）
+const permReq = ref<{ id: number; tabId: string; host: string; kind: string; kindZh: string } | null>(null)
+const tlsError = ref<{
+  tabId: string
+  host: string
+  port: number
+  flags: number
+  reasons: string[]
+  fingerprint: string
+  subject: string
+  issuer: string
+  notAfter: string | null
+} | null>(null)
 
 function openPanel(name: 'translate' | 'sessions' | 'history' | 'passwords' | 'groups' | 'downloads' | 'settings' | 'ai' | 'bookmarks' | 'userscripts') {
   showTranslate.value = name === 'translate'
@@ -459,6 +477,27 @@ onMounted(async () => {
     openPanel('passwords')
   }).catch(() => {})
 
+  // 证书错误（P2 · Rust 侧 on_tls_error emit）→ 弹"危险站点"拦截页
+  listen<any>('tls-error', (ev) => {
+    tlsError.value = ev.payload
+  }).catch(() => {})
+
+  // 权限请求（安全 #2 · Rust 侧 perms::attach emit）→ 弹权限提示
+  listen<any>('permission-request', (ev) => {
+    permReq.value = ev.payload
+  }).catch(() => {})
+
+  // Web 进程崩溃（视频崩溃修复 · Rust 侧 connect_web_process_terminated emit）→ 提示
+  listen<any>('web-process-crashed', (ev) => {
+    const p = ev.payload || {}
+    const reason = p.reason === 'ExceededMemoryLimit' ? '内存超限' : '进程崩溃'
+    useToastStore().show(
+      p.autoReload ? `网页${reason}，已自动重新加载` : `网页${reason}，请手动刷新`,
+      'error',
+      4500,
+    )
+  }).catch(() => {})
+
   // GTK 窗口层转发的全局快捷键：页面（child webview）持焦时，前端 keydown 收不到按键，
   // 由 Rust 在 GTK 顶层窗口拦截后发事件过来（见 tabs.rs 的 UI_FOCUSED 焦点跟踪）。
   listen<string>('global-shortcut', (ev) => {
@@ -509,6 +548,7 @@ watch(
           @open-translate="openPanel('translate')"
           @open-userscripts="openPanel('userscripts')"
           @open-history="openPanel('history')"
+          @open-certs="showCerts = true"
         />
         <BookmarksBar v-if="settingsStore.showBookmarksBar" @open-manager="showBookmarks = true" />
         <!-- 内容区：webview 由 Rust 按内容区几何盖住此区域（top 随书签栏/垂直标签变化） -->
@@ -529,6 +569,9 @@ watch(
     <BookmarksDialog :show="showBookmarks" @close="showBookmarks = false" />
     <SessionDialog :show="showSessions" @close="showSessions = false" />
     <UserscriptsDialog :show="showUserscripts" @close="showUserscripts = false" />
+    <CertificatesDialog :show="showCerts" @close="showCerts = false" />
+    <CertWarning :info="tlsError" @close="tlsError = null" />
+    <PermissionPrompt :info="permReq" @close="permReq = null" />
     <CommandPalette
       :show="showCommandPalette"
       @close="showCommandPalette = false"

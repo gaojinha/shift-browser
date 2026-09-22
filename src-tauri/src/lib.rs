@@ -13,9 +13,11 @@ mod api;
 mod mcp_cmd;
 mod netmon;
 mod newtab;
+mod perms;
 mod reader;
 mod selfcheck;
 mod tabs;
+mod tls;
 mod translate;
 mod tray;
 
@@ -31,11 +33,62 @@ use tauri::Manager;
 /// 自定义协议（shift://）不走注入，必须在这里手动加响应头。
 /// script-src 允许 'unsafe-inline'：newtab/world-nav 是本地生成的可信内联脚本；
 /// object-src 'none' + base-uri 'self' + connect-src 收紧 防注入面。
-const SHIFT_CSP: &str = "default-src 'self' shift: data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' ipc: http://ipc.localhost https://wttr.in https://ipinfo.io; font-src 'self' data:; media-src 'self' https: http:; frame-src 'self' https: http:; object-src 'none'; base-uri 'self'";
+const SHIFT_CSP: &str = "default-src 'self' shift: data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' ipc: http://ipc.localhost https://wttr.in https://api.open-meteo.com https://ipinfo.io; font-src 'self' data:; media-src 'self' https: http:; frame-src 'self' https: http:; object-src 'none'; base-uri 'self'";
+
+
+
+
 
 /// 整页翻译注入脚本（编译期嵌入，运行时 eval 到 child webview）
 /// （命令实现见 tabs.rs 的 translate_current_page —— 那里可访问 TabManager 内部字段）
 pub(crate) const WHOLE_PAGE_TRANSLATE_JS: &str = include_str!("whole_page_translate.js");
+
+/// 隐私脱敏（2026-09-22）：日志里的 URL 只保留 scheme://host，
+/// 去掉路径/查询/片段——URL 路径常含搜索词、文档名、token 等敏感信息。
+pub fn redact_url(u: &str) -> String {
+    match url::Url::parse(u) {
+        Ok(p) => match p.host_str() {
+            Some(h) => format!("{}://{}", p.scheme(), h),
+            None => format!("{}://[内部]", p.scheme()),
+        },
+        Err(_) => "<非URL>".to_string(),
+    }
+}
+
+/// 敏感文件权限加固（安全 · 2026-09-22）：Cookie 库/侧车 WAL 按 umask 落盘时
+/// 常见 664（组/其他用户可读），会话 Cookie 泄露风险。应用数据目录虽为 0700 兜底，
+/// 但纵深防御要求文件自身也为 0600。运行时 WebKit 可能重建这些文件，故需周期重扫。
+#[cfg(unix)]
+pub fn harden_sensitive_files(dir: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    const SENSITIVE: &[&str] = &[
+        "cookies",
+        "cookies.sqlite",
+        "cookies.bak",
+        "cookies-wal",
+        "cookies-shm",
+        "cookies.sqlite-wal",
+        "cookies.sqlite-shm",
+        "shift-browser.db-wal",
+        "shift-browser.db-shm",
+    ];
+    for name in SENSITIVE {
+        let p = dir.join(name);
+        if p.exists() {
+            let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    // 日志目录同样收紧（隐私：日志虽已脱敏，仍不应组/其他可读）
+    let logs = dir.join("logs");
+    if logs.exists() {
+        let _ = std::fs::set_permissions(&logs, std::fs::Permissions::from_mode(0o700));
+        if let Ok(rd) = std::fs::read_dir(&logs) {
+            for e in rd.flatten() {
+                let _ = std::fs::set_permissions(e.path(), std::fs::Permissions::from_mode(0o600));
+            }
+        }
+    }
+}
 
 /// 启动锁屏中标志：setup 弹出 GTK 密码对话框期间为 true。
 /// 前端 onMounted 在锁屏期间调用 Db/TabManager 命令会全部失败并弹"创建/加载标签页失败"
@@ -403,6 +456,28 @@ pub fn run() {
         std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER")
     );
 
+    // ===== 视频进程崩溃修复（2026-09-22）：降级硬件视频解码器 =====
+    // 症状：播放某些 H.264 视频时 WebKitWebProcess 直接 abort：
+    //   ** (WebKitWebProcess:PID): ERROR **: video meta uses 368x480 instead of 360x480
+    // 成因：硬件解码器（V4L2 stateless / VA-API）输出帧宽按 16 字节对齐（360→368），
+    // 而 WebKit 的 video meta 校验期望未对齐宽度，断言失败 → g_error() → 进程终止。
+    // 规避：用 GStreamer 标准的 GST_PLUGIN_FEATURE_RANK 把硬件解码器 rank 压到 0，
+    // 使其回退到软件解码（libav），彻底绕开对齐 padding 路径。
+    // 用户可覆盖（机器上硬解正常、且想要 4K 硬解性能时，自行设置该变量）。
+    if std::env::var_os("GST_PLUGIN_FEATURE_RANK").is_none() {
+        std::env::set_var(
+            "GST_PLUGIN_FEATURE_RANK",
+            // rank 0 = 不参与自动选择；软件解码 avdec_* 保持默认 rank
+            "v4l2slh264dec:0,v4l2slh265dec:0,v4l2slvp8dec:0,v4l2slvp9dec:0,v4l2slav1dec:0,\
+             v4l2h264dec:0,v4l2h265dec:0,v4l2vp8dec:0,v4l2vp9dec:0,\
+             vah264dec:0,vah265dec:0,vavp8dec:0,vavp9dec:0,vaav1dec:0,vajpegdec:0",
+        );
+    }
+    log::info!(
+        "[ShiftBrowser] GST_PLUGIN_FEATURE_RANK={:?}（视频进程崩溃修复）",
+        std::env::var("GST_PLUGIN_FEATURE_RANK")
+    );
+
     // ===== Cookie 持久化（修复"登录状态不保存"）=====
     // WebKitGTK 的 CookieManager 默认是内存模式，重启即丢——必须显式
     // set_persistent_storage 落盘。且该调用必须在任何 web process 创建之前
@@ -431,6 +506,11 @@ pub fn run() {
                     cookie_path.to_str().unwrap_or("cookies.sqlite"),
                     CookiePersistentStorage::Sqlite,
                 );
+                // 安全：Cookie 库按 umask 落盘（常见 664，组/其他可读），立即收紧到 600。
+                // 运行时 WebKit 仍可能新建/重建这些文件，故另有周期重扫（见 setup）。
+                if let Some(dir) = cookie_path.parent() {
+                    crate::harden_sensitive_files(dir);
+                }
                 // 注意：此处 logger 插件尚未初始化（Builder 之前），log::info! 会被丢弃，
             // 用 println! 保证启动日志可见
             println!("[ShiftBrowser] Cookie 持久化已启用: {}", cookie_path.display());
@@ -460,7 +540,7 @@ pub fn run() {
         .collect();
       log::info!("[single-instance] 已有实例收到新实例参数: {:?}", argv);
       if !urls.is_empty() {
-        log::info!("[single-instance] 转发外部链接: {:?}", urls);
+        log::info!("[single-instance] 转发外部链接 {} 个", urls.len());
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
           // 稍等现有实例就绪（标签管理器已 manage）
@@ -469,7 +549,7 @@ pub fn run() {
             if let Some(state) = app_handle.try_state::<TabManager>() {
               match tabs::create_tab(app_handle.clone(), state, url.clone()).await {
                 Ok(tab) => log::info!("[single-instance] 外部链接已打开: {}", tab.id),
-                Err(e) => log::warn!("[single-instance] 外部链接打开失败: {} ({})", url, e),
+                Err(e) => log::warn!("[single-instance] 外部链接打开失败: {} ({})", redact_url(&url), e),
               }
             }
           }
@@ -514,6 +594,21 @@ pub fn run() {
       db::userscripts::add_userscript,
       db::userscripts::update_userscript,
       db::userscripts::delete_userscript,
+      // 证书管理 / 监测 / 验证（P1-P3 · 2026-09-22）
+      tls::get_tls_info,
+      tls::list_certificates,
+      tls::get_certificate,
+      tls::delete_certificate,
+      tls::list_cert_exceptions,
+      tls::delete_cert_exception,
+      tls::list_cert_events,
+      tls::clear_cert_events,
+      tls::scan_cert_expiry,
+      tls::accept_cert_exception,
+      // 权限请求（安全 #2 · 2026-09-22）
+      perms::respond_permission,
+      perms::list_permission_rules,
+      perms::remove_permission_rule,
       // 书签
       bookmarks::get_bookmarks,
       bookmarks::get_bookmark_folders,
@@ -1027,6 +1122,22 @@ pub fn run() {
       }
     })
     .setup(|app| {
+      // 安全（#1 · 2026-09-22）：敏感文件（cookie 库/WAL）启动即加固到 0600，
+      // 并每 120s 重扫一次——WebKit 运行时会按 umask 重建这些文件。
+      #[cfg(unix)]
+      {
+        use tauri::Manager;
+        if let Ok(dir) = app.path().app_data_dir() {
+          crate::harden_sensitive_files(&dir);
+          let dir2 = dir.clone();
+          tauri::async_runtime::spawn(async move {
+            loop {
+              tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+              crate::harden_sensitive_files(&dir2);
+            }
+          });
+        }
+      }
       // ===== 性能：WebKitGTK 内存压力治理 =====
       // 实测痛点：9 个标签时全部 WebKit 进程合计 3.75 GB（每标签一个渲染进程、
       // 单个 240-500MB，WebKitGTK 默认不主动回收）。
@@ -1272,6 +1383,24 @@ pub fn run() {
         log::info!("[ShiftBrowser] 用户脚本注入缓存已刷新");
       }
 
+      // 权限白名单载入内存（安全 #2 · 2026-09-22）
+      {
+        let db = app.state::<crate::db::Db>();
+        tauri::async_runtime::block_on(crate::perms::load_allowlist(&db.pool));
+      }
+      // 开发者工具开关载入（安全 #6 · 2026-09-22，默认关）
+      {
+        let db = app.state::<crate::db::Db>();
+        if let Ok(Some((v,))) = tauri::async_runtime::block_on(async {
+          sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'enable_devtools'")
+            .fetch_optional(&db.pool)
+            .await
+        }) {
+          crate::engine::webview::DEVTOOLS_ENABLED
+            .store(v == "true", std::sync::atomic::Ordering::Relaxed);
+        }
+      }
+
       // 定时任务调度器（阶段3 自动化：设置驱动的后台任务）
       auto_tasks::spawn(app.handle().clone());
 
@@ -1497,7 +1626,7 @@ pub fn run() {
           .filter(|a| a.starts_with("http://") || a.starts_with("https://"))
           .collect();
         if !urls.is_empty() {
-          log::info!("[default-browser] 外部链接参数: {:?}", urls);
+          log::info!("[default-browser] 外部链接参数 {} 个", urls.len());
           let app_handle = app.handle().clone();
           tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
@@ -1505,7 +1634,7 @@ pub fn run() {
               let state = app_handle.state::<TabManager>();
               match tabs::create_tab(app_handle.clone(), state, url.clone()).await {
                 Ok(tab) => log::info!("[default-browser] 外部链接已打开: {}", tab.id),
-                Err(e) => log::warn!("[default-browser] 外部链接打开失败: {} ({})", url, e),
+                Err(e) => log::warn!("[default-browser] 外部链接打开失败: {} ({})", redact_url(&url), e),
               }
             }
           });

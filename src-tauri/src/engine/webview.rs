@@ -12,6 +12,11 @@ use webkit2gtk::{SettingsExt, WebView, WebViewExt};
 /// 返回简化版单屏页面（无法滚动）。
 /// 版本号保守取 Chrome 120（2026-09-18 决策）：UA 是唯一直接影响服务端响应的指纹项，
 /// 个别站点对高版本 UA 有兼容分支，宁保守勿激进。
+/// 开发者工具开关（安全 #6 · 2026-09-22）：默认关，由设置 enable_devtools 决定。
+/// 开启后 F12/Ctrl+Shift+I 可用（本地风险低，但共享/kiosk 场景应关闭）。
+pub static DEVTOOLS_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 /// 新建 child webview 时应用页面默认设置。
@@ -25,7 +30,10 @@ pub fn apply_default_settings(wv: &WebView) {
     // 允许 JS 自动开窗（target=_blank / window.open → 触发 on_new_window 建新标签）
     settings.set_javascript_can_open_windows_automatically(true);
     // 开发者工具：F12 / Ctrl+Shift+I（快捷键在 GTK 窗口层兜底拦截）
-    settings.set_enable_developer_extras(true);
+    // 安全 #6：开发者工具按开关（默认关）
+    settings.set_enable_developer_extras(
+        DEVTOOLS_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
+    );
     settings.set_user_agent(Some(DEFAULT_USER_AGENT));
 }
 

@@ -1,5 +1,6 @@
 // 数据库连接与迁移管理
 pub mod bookmarks;
+pub mod certificates;
 pub mod downloads;
 pub mod extensions;
 pub mod history;
@@ -183,6 +184,11 @@ impl Db {
                 13,
                 "userscripts",
                 include_str!("../../migrations/20260921000001_userscripts.sql"),
+            ),
+            (
+                14,
+                "certificates",
+                include_str!("../../migrations/20260922000000_certificates.sql"),
             ),
         ];
 

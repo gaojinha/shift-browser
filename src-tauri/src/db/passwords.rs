@@ -272,8 +272,20 @@ pub async fn save_password(
 #[tauri::command]
 pub async fn get_password(
     db: tauri::State<'_, Db>,
+    tabs: tauri::State<'_, crate::tabs::TabManager>,
     domain: String,
 ) -> DbResult<Option<PasswordEntry>> {
+    // 安全（#7 · 2026-09-22）：domain 必须匹配"当前活动标签"的 host，
+    // 否则拒绝——防止被诱导取到其他站点的密码（不信任前端入参）。
+    let host = tabs
+        .active_url()
+        .and_then(|u| url::Url::parse(&u).ok())
+        .and_then(|u| u.host_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+    if host.is_empty() || !domain.eq_ignore_ascii_case(&host) {
+        log::warn!("[passwords] get_password 拒绝：domain={} 与活动标签 host={} 不符", domain, host);
+        return Ok(None);
+    }
     let row = sqlx::query_as::<_, (i64, String, Option<String>, String, Option<String>, String, String)>(
         "SELECT id, domain, username, password, notes, created_at, updated_at FROM passwords WHERE domain = ? LIMIT 1",
     )

@@ -33,6 +33,7 @@ const emit = defineEmits<{
   (e: 'openHistory'): void
   (e: 'openDownloads'): void
   (e: 'openSettings'): void
+  (e: 'openCerts'): void
 }>()
 
 // 搜索引擎 URL 模板（与设置弹窗 SEARCH_ENGINES 一致）
@@ -252,7 +253,7 @@ async function onReader() {
     </button>
     <button class="nav-btn" title="主页" @click="onHome">⌂</button>
     <div class="address-container">
-      <span v-if="isHttps" class="lock-icon" title="HTTPS 安全连接">🔒</span>
+      <span v-if="isHttps" class="lock-icon" title="查看证书（点击打开证书中心）" @click="emit('openCerts')">🔒</span>
       <input
         ref="inputEl"
         v-model="addressInput"
@@ -390,6 +391,10 @@ async function onReader() {
   margin-right: 6px;
   flex-shrink: 0;
   opacity: 0.7;
+  cursor: pointer;
+}
+.lock-icon:hover {
+  opacity: 1;
 }
 .load-bar {
   position: absolute;

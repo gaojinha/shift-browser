@@ -16,7 +16,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   theme: 'dark', // dark | light
   show_bookmarks_bar: 'true',
   vertical_tabs: 'false', // 垂直标签栏（阶段 3.1）：标签栏移到左侧
-  record_history: 'true',
+  record_history: 'false', // 隐私优先：默认不记录浏览历史（2026-09-22）
   ai_model: 'agnes-2.0-flash', // AI 模型（agnes-2.0-flash 稳定 / agnes-2.5-pro / agnes-2.5-flash 可能超时）
   ai_base_url: 'https://apihub.agnes-ai.com/v1', // AI API 地址
   ai_api_key: '', // AI API Key（留空使用环境变量 AGNES_API_KEY）
