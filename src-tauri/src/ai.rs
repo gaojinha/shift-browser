@@ -1,3 +1,6 @@
+// P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 // AI 侧边栏：对接 AGNES AI（OpenAI 兼容 API）
 // baseURL: https://apihub.agnes-ai.com/v1（从环境变量 AGNES_API_KEY 读 key）
 use serde::{Deserialize, Serialize};

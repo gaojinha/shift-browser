@@ -3,6 +3,9 @@
 //! `content_snapshot`：从活动标签的实时 DOM 提取语义快照（本地执行，不出网）
 //! `content_extract`：正文提取（复用 reader.rs 的 curl+readability 管线）
 
+// P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use tauri::{AppHandle, Manager};
 
 /// 提取活动标签的语义快照（供 AI 理解页面）。

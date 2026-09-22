@@ -1,6 +1,9 @@
 //! 标签模块工具函数（P1-1 拆分 · 2026-09-22）
 //! 纯函数，无平台依赖，可独立单测。
 
+// P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 /// 清洗 URL 中的跨站追踪参数（隐私防护 P0）
 /// 覆盖 utm_* 系列 + 主流平台点击 ID（fbclid/gclid/msclkid/spm 等）
 pub fn clean_tracking_params(url: &str) -> String {

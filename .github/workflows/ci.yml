@@ -46,6 +46,11 @@ jobs:
       - name: cargo clippy（全目标 + 警告即失败）
         working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings
+      # P2-1（2026-09-22）：生产代码 unwrap/expect 护栏（测试代码豁免）
+      # 现有用法已在各模块 #![allow] 就地标注；此步防止**新增**未标注的 unwrap
+      - name: cargo clippy（生产代码 unwrap 护栏）
+        working-directory: src-tauri
+        run: cargo clippy --lib -- -D clippy::unwrap_used -D clippy::expect_used
       - name: cargo test
         working-directory: src-tauri
         run: cargo test

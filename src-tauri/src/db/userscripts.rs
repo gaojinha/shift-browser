@@ -1,3 +1,6 @@
+// P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 // 用户脚本（Tampermonkey 风格 · 阶段3.2 平台化）
 // 每个脚本：name 名称、matches 匹配模式（换行分隔，WebKit allow_list 格式）、code JS 源码、enabled 开关。
 // 注入：由 extensions.rs 的 inject_extensions 统一搭车（与扩展脚本同一套 UserScript 机制）。

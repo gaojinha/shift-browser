@@ -13,6 +13,9 @@
 //! - allowed_tools 白名单（空 = 允许全部）
 //! - 每次调用写 tool_audit_log（审计）
 
+// P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::sqlite::SqlitePool;

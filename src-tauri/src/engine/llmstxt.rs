@@ -11,6 +11,9 @@
 //! - HTTPS 优先，HTTP 仅作回退
 //! - 只读前 1200 字符摘要喂 Agent 上下文，不整篇灌
 
+// P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;

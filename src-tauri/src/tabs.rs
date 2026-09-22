@@ -1,3 +1,6 @@
+// P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 // 标签页管理器
 // 管理标签元数据 + 嵌入式 webview 生命周期
 // 与 Electron 版 electron/tabManager.ts 对应（v4.5.0）

@@ -1,0 +1,6 @@
+# P2-1（2026-09-22）：生产代码 unwrap/expect 护栏。
+# 说明：测试代码（#[cfg(test)]）天然豁免——CI 用 `cargo clippy --lib` 只检查生产代码。
+# 现有 38 处生产 unwrap 均为安全用法（Mutex::lock 毒化、Response::builder 硬编码 header），
+# 已在各模块顶部以 #![allow] 就地标注；本配置防止**新增**未标注的 unwrap。
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

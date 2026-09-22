@@ -1,0 +1,361 @@
+
+(function () {
+  if (window.__shiftPrivacyInstalled) return;
+  window.__shiftPrivacyInstalled = true;
+
+  // ---- 1) GPC：全球隐私控制（W3C 规范信号，2027 起加州强制）----
+  try {
+    Object.defineProperty(navigator, 'globalPrivacyControl', {
+      get: function () { return true; },
+      configurable: true
+    });
+  } catch (e) {}
+
+  // ---- 2) per-origin 确定性种子（FNV-1a 哈希 origin）----
+  function originSeed() {
+    var o = String(location.origin || location.href || '');
+    var h = 2166136261;
+    for (var i = 0; i < o.length; i++) {
+      h ^= o.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+  var SEED = originSeed();
+  // xorshift32 确定性伪随机：同源同会话稳定，换站点即变
+  function rnd(i) {
+    var x = (SEED + Math.imul(i, 2654435761)) >>> 0;
+    x ^= x << 13; x >>>= 0;
+    x ^= x >> 17;
+    x ^= x << 5; x >>>= 0;
+    return (x % 1000) / 1000;
+  }
+
+  // ---- 1.5) 加噪白名单：命中则跳过"加噪类"防护（保留 GPC/WebRTC/归一化等不破坏功能的项）----
+  // 注入时由 Rust 侧在脚本前拼 window.__SHIFT_PRIVACY_WHITELIST__ = [...]
+  var WL = window.__SHIFT_PRIVACY_WHITELIST__ || [];
+  var NOISE_ON = (function () {
+    var h = String(location.hostname || '').toLowerCase();
+    for (var i = 0; i < WL.length; i++) {
+      var d = String(WL[i] || '').toLowerCase().replace(/^\*\./, '').replace(/^https?:\/\//, '').replace(/\/.*$/, '').trim();
+      if (!d) continue;
+      if (h === d || (h.length > d.length && h.slice(-(d.length + 1)) === '.' + d)) return false;
+    }
+    return true;
+  })();
+  try { window.__shiftNoiseOn = NOISE_ON; } catch (e) {}
+
+  // ---- 1.6) 反指纹模式（阶段 2 · 反指纹 2.0）----
+  // noise   = 加噪（默认）：同源稳定、跨源不同的确定性噪声
+  // uniform = 统一化（Tor/Mullvad 派）：Canvas/WebGL/Audio 返回**固定值**，
+  //           让该模式下所有使用者呈现一致指纹，而非各自"独一无二的噪声"
+  // 注入时由 Rust 侧在脚本前拼 window.__SHIFT_FP_MODE__
+  var FP_MODE = (window.__SHIFT_FP_MODE__ === 'uniform') ? 'uniform' : 'noise';
+  var UNIFORM = (FP_MODE === 'uniform');
+  try { window.__shiftFpMode = FP_MODE; } catch (e) {}
+
+  // ---- 3) Canvas 加噪 / 统一化（读回路径 toDataURL / getImageData）----
+  try {
+    var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = function () {
+      if (!NOISE_ON) return origToDataURL.apply(this, arguments);
+      // 统一化：返回一张固定白图（所有人一致），不暴露真实画布内容
+      if (UNIFORM) {
+        try {
+          var fc = document.createElement('canvas');
+          fc.width = this.width || 1;
+          fc.height = this.height || 1;
+          var fx = fc.getContext && fc.getContext('2d');
+          if (fx) { fx.fillStyle = '#ffffff'; fx.fillRect(0, 0, fc.width, fc.height); }
+          return origToDataURL.apply(fc, arguments);
+        } catch (e) {}
+        return origToDataURL.apply(this, arguments);
+      }
+      try {
+        var ctx = this.getContext && this.getContext('2d');
+        if (ctx && this.width > 0 && this.height > 0) {
+          var w = Math.min(this.width, 12), h = Math.min(this.height, 12);
+          var d = ctx.getImageData(0, 0, w, h);
+          for (var i = 0; i < d.data.length; i += 4) {
+            d.data[i] = (d.data[i] + (rnd(i) < 0.5 ? 0 : 1)) & 255;
+            d.data[i + 1] = (d.data[i + 1] + (rnd(i + 1) < 0.5 ? 0 : 1)) & 255;
+          }
+          ctx.putImageData(d, 0, 0);
+        }
+      } catch (e) {}
+      return origToDataURL.apply(this, arguments);
+    };
+    var origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+    CanvasRenderingContext2D.prototype.getImageData = function () {
+      var d = origGetImageData.apply(this, arguments);
+      if (!NOISE_ON) return d;
+      try {
+        if (UNIFORM) {
+          // 统一化：固定为不透明白色（所有人一致）
+          for (var j = 0; j < d.data.length; j += 4) {
+            d.data[j] = 255; d.data[j + 1] = 255; d.data[j + 2] = 255; d.data[j + 3] = 255;
+          }
+        } else {
+          for (var i = 0; i < d.data.length; i += 4) {
+            d.data[i] = (d.data[i] + (rnd(i) < 0.5 ? 0 : 1)) & 255;
+          }
+        }
+      } catch (e) {}
+      return d;
+    };
+  } catch (e) {}
+
+  // ---- 4) WebGL 参数归一化（抹掉 GPU 型号/驱动指纹）----
+  try {
+    var gp = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function (p) {
+      // 白名单站点：不加噪、不归一化 GPU 信息（保留站点自己的渲染判断）
+      if (!NOISE_ON) return gp.apply(this, arguments);
+      // 37445 = UNMASKED_VENDOR_WEBGL, 37446 = UNMASKED_RENDERER_WEBGL
+      if (p === 37445) return 'Google Inc.';
+      if (p === 37446) return 'ANGLE (Generic Renderer)';
+      return gp.apply(this, arguments);
+    };
+    if (window.WebGL2RenderingContext) {
+      var gp2 = WebGL2RenderingContext.prototype.getParameter;
+      WebGL2RenderingContext.prototype.getParameter = function (p) {
+        if (!NOISE_ON) return gp2.apply(this, arguments);
+        if (p === 37445) return 'Google Inc.';
+        if (p === 37446) return 'ANGLE (Generic Renderer)';
+        return gp2.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+
+  // ---- 5) AudioContext 加噪 / 统一化 ----
+  try {
+    if (window.AnalyserNode && AnalyserNode.prototype.getFloatFrequencyData) {
+      var ofd = AnalyserNode.prototype.getFloatFrequencyData;
+      AnalyserNode.prototype.getFloatFrequencyData = function (arr) {
+        ofd.apply(this, arguments);
+        if (!NOISE_ON) return;
+        try {
+          if (UNIFORM) {
+            for (var u = 0; u < arr.length; u++) arr[u] = -100;
+          } else {
+            for (var i = 0; i < arr.length; i += 31) {
+              arr[i] = arr[i] + (rnd(i) - 0.5) * 0.001;
+            }
+          }
+        } catch (e) {}
+      };
+    }
+    if (window.AudioBuffer && AudioBuffer.prototype.getChannelData) {
+      var ocd = AudioBuffer.prototype.getChannelData;
+      AudioBuffer.prototype.getChannelData = function (ch) {
+        var d = ocd.apply(this, arguments);
+        if (!NOISE_ON) return d;
+        try {
+          if (UNIFORM) {
+            for (var u = 0; u < d.length; u++) d[u] = 0;
+          } else {
+            for (var i = 0; i < d.length; i += 997) {
+              d[i] = d[i] + (rnd(i) - 0.5) * 1e-6;
+            }
+          }
+        } catch (e) {}
+        return d;
+      };
+    }
+  } catch (e) {}
+
+  // ---- 6) 硬件信息归一化（收敛到常见配置，避免成为稀有指纹）----
+  try {
+    Object.defineProperty(navigator, 'hardwareConcurrency', {
+      get: function () { return 8; },
+      configurable: true
+    });
+  } catch (e) {}
+  try {
+    if ('deviceMemory' in navigator) {
+      Object.defineProperty(navigator, 'deviceMemory', {
+        get: function () { return 8; },
+        configurable: true
+      });
+    }
+  } catch (e) {}
+
+  // ---- 7) WebRTC 防泄露：丢弃 host 候选（内网 IP），保留公网候选 ----
+  try {
+    var OrigRTC = window.RTCPeerConnection || window.webkitRTCPeerConnection;
+    if (OrigRTC && !OrigRTC.__shiftPatched) {
+      var filterCandidate = function (ev) {
+        var c = ev && ev.candidate && ev.candidate.candidate;
+        // "typ host" = 本机/内网地址；丢弃即可阻止内网 IP 泄露
+        return !(c && / typ host/.test(c));
+      };
+      var Patched = function (cfg, cons) {
+        var pc = new OrigRTC(cfg, cons);
+        var origAdd = pc.addEventListener.bind(pc);
+        pc.addEventListener = function (type, fn, opts) {
+          if (type === 'icecandidate' && typeof fn === 'function') {
+            var wrapped = function (ev) {
+              if (!filterCandidate(ev)) return; // 内网候选不交给页面
+              return fn.apply(this, arguments);
+            };
+            return origAdd(type, wrapped, opts);
+          }
+          return origAdd(type, fn, opts);
+        };
+        try {
+          Object.defineProperty(pc, 'onicecandidate', {
+            configurable: true,
+            get: function () { return this.__shiftOnIce || null; },
+            set: function (fn) {
+              var self = this;
+              this.__shiftOnIce = fn;
+              origAdd('icecandidate', function (ev) {
+                if (!filterCandidate(ev)) return;
+                if (typeof self.__shiftOnIce === 'function') self.__shiftOnIce(ev);
+              });
+            }
+          });
+        } catch (e) {}
+        return pc;
+      };
+      Patched.prototype = OrigRTC.prototype;
+      Patched.__shiftPatched = true;
+      window.RTCPeerConnection = Patched;
+    }
+  } catch (e) {}
+
+  // ---- 8) 字体探针防护：已移至严格档 ----
+  // 事故记录（2026-09-18）：本项在标准档曾导致邮箱正文空白 —— 部分站点用
+  // document.fonts.check 判断"字体是否就绪"来决定是否渲染内容，强制返回 false
+  // 会被误判为字体未加载而卡住渲染。字体探针改为仅在严格档启用。
+  // （实现见 STRICT_PRIVACY_JS 的字体探针段）
+
+  // ---- 9) WebGPU 指纹防护（2026 新兴高熵信号）----
+  try {
+    if (navigator.gpu && navigator.gpu.requestAdapter) {
+      var oreq = navigator.gpu.requestAdapter.bind(navigator.gpu);
+      navigator.gpu.requestAdapter = function () {
+        return oreq.apply(null, arguments).then(function (adapter) {
+          try {
+            if (adapter && adapter.info) {
+              return new Proxy(adapter, {
+                get: function (t, k) {
+                  if (k === 'info') {
+                    return { vendor: 'google', architecture: 'generic',
+                             device: 'generic', description: 'Generic GPU' };
+                  }
+                  var v = t[k];
+                  return typeof v === 'function' ? v.bind(t) : v;
+                }
+              });
+            }
+            if (adapter && adapter.requestAdapterInfo) {
+              var oinfo = adapter.requestAdapterInfo.bind(adapter);
+              adapter.requestAdapterInfo = function () {
+                return Promise.resolve({ vendor: 'google', architecture: 'generic',
+                                         device: 'generic', description: 'Generic GPU' });
+              };
+            }
+          } catch (e) {}
+          return adapter;
+        });
+      };
+    }
+  } catch (e) {}
+
+  // ---- 10) navigator 杂项归一化（plugins/mimeTypes/Client Hints/平台）----
+  try {
+    // 现代网站不再依赖 plugins/mimeTypes，但指纹脚本仍会读取
+    Object.defineProperty(navigator, 'plugins', {
+      get: function () { return { length: 0, item: function () { return null; },
+                                  namedItem: function () { return null; },
+                                  refresh: function () {} }; },
+      configurable: true
+    });
+    Object.defineProperty(navigator, 'mimeTypes', {
+      get: function () { return { length: 0, item: function () { return null; },
+                                  namedItem: function () { return null; } }; },
+      configurable: true
+    });
+  } catch (e) {}
+  try {
+    // Client Hints JS API：抹掉精确的平台版本/架构
+    if (navigator.userAgentData) {
+      var uad = navigator.userAgentData;
+      try {
+        Object.defineProperty(navigator, 'userAgentData', {
+          get: function () {
+            return {
+              brands: window.__SHIFT_UA_BRANDS__ || uad.brands,
+              mobile: false,
+              platform: 'Linux',
+              getHighEntropyValues: function () {
+                return Promise.resolve({ platform: 'Linux', platformVersion: '',
+                                         architecture: '', model: '', uaFullVersion: '' });
+              },
+              toJSON: function () { return { brands: window.__SHIFT_UA_BRANDS__ || uad.brands, mobile: false, platform: 'Linux' }; }
+            };
+          },
+          configurable: true
+        });
+      } catch (e) {}
+    }
+  } catch (e) {}
+
+  // ---- 11) 屏幕色深归一化（不碰 width/height，避免影响响应式布局）----
+  try {
+    Object.defineProperty(screen, 'colorDepth', { get: function () { return 24; }, configurable: true });
+    Object.defineProperty(screen, 'pixelDepth', { get: function () { return 24; }, configurable: true });
+  } catch (e) {}
+
+  // ---- 12) 电池 / 网络信息 / 设备枚举 归一化 ----
+  try {
+    if (navigator.getBattery) {
+      navigator.getBattery = function () {
+        return Promise.resolve({
+          charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1,
+          onchargingchange: null, onchargingtimechange: null,
+          ondischargingtimechange: null, onlevelchange: null,
+          addEventListener: function () {}, removeEventListener: function () {}
+        });
+      };
+    }
+  } catch (e) {}
+  try {
+    if (navigator.connection) {
+      Object.defineProperty(navigator.connection, 'type', { get: function () { return 'wifi'; }, configurable: true });
+      Object.defineProperty(navigator.connection, 'effectiveType', { get: function () { return '4g'; }, configurable: true });
+      Object.defineProperty(navigator.connection, 'downlink', { get: function () { return 10; }, configurable: true });
+      Object.defineProperty(navigator.connection, 'rtt', { get: function () { return 50; }, configurable: true });
+    }
+  } catch (e) {}
+  try {
+    // 设备枚举：抹掉 label（真实设备名是强指纹），只保留 kind
+    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+      var oenum = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
+      navigator.mediaDevices.enumerateDevices = function () {
+        return oenum.apply(null, arguments).then(function (list) {
+          return list.map(function (d) {
+            return { deviceId: '', groupId: '', kind: d.kind, label: '' };
+          });
+        });
+      };
+    }
+  } catch (e) {}
+
+  // ---- 13) 自测特性标记（供"隐私防护自测"核对实际生效项）----
+  // 说明：canvas/webgl/audio 受白名单（NOISE_ON）控制；其余为常开归一化项。
+  try {
+    window.__shiftPrivacyFeatures = {
+      gpc: true,
+      canvas: NOISE_ON,
+      webgl: NOISE_ON,
+      audio: NOISE_ON,
+      hardware: true,
+      webrtc: true,
+      webgpu: !!(navigator.gpu && navigator.gpu.requestAdapter),
+      misc: true,
+      fp_mode: FP_MODE
+    };
+  } catch (e) {}
+})();

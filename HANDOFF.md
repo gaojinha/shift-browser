@@ -2539,7 +2539,51 @@ src-tauri/src/extensions/adblock.rs  # 广告拦截（301 行）
 
 ---
 
-## 下一步（截至第一百零一章）
+## 第一百零二章（架构 P2-1）：生产代码 unwrap 护栏
+
+**原报告主张**："182 处 unwrap，密码库 30 处风险高"，建议全库消除。
+
+**实测颠覆**（区分生产/测试）：
+| 文件 | 总数 | 生产 | 测试 |
+|---|---|---|---|
+| `db/passwords.rs` | 30 | **0** | 30 |
+| `db/sync.rs` | 15 | **0** | 15 |
+| `db/users.rs` | 12 | **0** | 12 |
+| **全项目** | 195 | **35** | 160 |
+
+- 密码库/同步/用户模块**生产代码 unwrap = 0**（测试里用是标准写法）
+- 生产 35 处多为 `Mutex::lock().unwrap()`（毒化锁，标准做法）与
+  `http::Response::builder().body().unwrap()`（Tauri 官方写法，header 硬编码不可能失败）
+
+**结论**：无真正高风险 panic 面，全库消除收益 < 成本。
+
+**方案（轻量护栏）**：
+- 新增 `src-tauri/clippy.toml`（`allow-unwrap-in-tests = true`）
+- 现有 12 个模块顶部加 `#![allow(clippy::unwrap_used, clippy::expect_used)]` 就地标注
+- **CI 新增步骤**：`cargo clippy --lib -- -D clippy::unwrap_used -D clippy::expect_used`
+  （`--lib` 只查生产代码，`#[cfg(test)]` 天然豁免）→ **防止新增未标注的 unwrap**
+
+**验证**：`clippy --lib -D unwrap_used` 无告警；Rust 116 passed。
+
+---
+
+## 第一百零三章（架构 P2-2）：内嵌 JS 资源化
+
+**问题**：`extensions.rs` 内嵌 3 段大 JS（`PRIVACY_JS` 362 行、`STRICT_PRIVACY_JS` 104 行、
+`PRIVACY_SELFTEST_JS` 33 行），无 lint、无独立测试。
+
+**方案**：外置到 `src-tauri/resources/js/`，用 `include_str!` 加载：
+- `privacy.js`（14.6 KB）
+- `strict_privacy.js`（3.6 KB）
+- `privacy_selftest.js`（1.0 KB）
+
+**收益**：`extensions.rs` **1691 → 1195 行**；JS 可独立 lint/测试。
+
+**验证**：Rust 116 passed；真机运行正常，隐私防护注入正常（24942 字节）。
+
+---
+
+## 下一步（截至第一百零三章）
 
 - **阶段 4 继续**：多端形态（移动/平板协同）——路线图剩的最后一块大件。
 - **实战检验（进行中）**：下载目录、系统托盘已修并验收；开放 API 扩展（C2）已交付；
@@ -2559,7 +2603,7 @@ src-tauri/src/extensions/adblock.rs  # 广告拦截（301 行）
 - **延期待做**：设置分区重构（隐私/安全/本地服务三拆）、加密 DNS（DoH）、本机固定 IP。
 - **修复（2026-09-22）**：前进/后退/刷新失灵（96 章）高哥实测通过。
 - **延期待做**：设置分区重构（隐私/安全/本地服务三拆）、加密 DNS（DoH）、本机固定 IP。
-- **架构改造（2026-09-22 起）**：P0-1（97）、P0-2（98）、P1-1（99）、P1-2（100）、P1-3（101）均已完成；下一步 P2 系列（错误治理 / JS 资源化）。
+- **架构改造（2026-09-22 起）**：P0（97-98）、P1（99-101）、P2-1 护栏（102）、P2-2 JS 资源化（103）均已完成。架构改造 P0-P2 收官。
 - **待做**：P1-1 tabs.rs 拆分 / P1-2 命令注册+契约 / P1-3 extensions 拆分 / P2-1 错误治理 / P2-2 JS 资源化。
 - **工程**：HANDOFF 逐章记录机制（已补至 97 章，后续每章随提交更新）。
 

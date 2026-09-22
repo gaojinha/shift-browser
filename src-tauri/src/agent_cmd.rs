@@ -6,6 +6,9 @@
 //! 2. 前端弹确认卡片 → 用户点"允许/拒绝" → 调 `agent_confirm_action(request_id, approved)`
 //! 3. 确认后执行动作（仅当前活动标签），返回结果给工具循环
 
+// P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
