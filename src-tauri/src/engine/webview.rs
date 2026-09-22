@@ -111,7 +111,15 @@ mod tests {
     fn default_ua_looks_like_chrome() {
         // UA 必须同时含 Safari 标记与 Chrome 版本号，否则部分站点返回简化页
         assert!(DEFAULT_USER_AGENT.contains("Safari/537.36"));
-        assert!(DEFAULT_USER_AGENT.contains("Chrome/120"));
         assert!(DEFAULT_USER_AGENT.starts_with("Mozilla/5.0"));
+        // 版本号需 ≥ 131（2026-09-22：原断言写死 120，UA 升级后过时；
+        // 改为"主版本号 >= 131"的区间断言，避免每次升版本都要改测试）
+        let major: u32 = DEFAULT_USER_AGENT
+            .split("Chrome/")
+            .nth(1)
+            .and_then(|s| s.split('.').next())
+            .and_then(|s| s.parse().ok())
+            .expect("UA 应含 Chrome/<主版本>");
+        assert!(major >= 131, "Chrome 主版本过低: {}", major);
     }
 }
