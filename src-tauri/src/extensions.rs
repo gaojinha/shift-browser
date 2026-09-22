@@ -727,14 +727,14 @@ const PRIVACY_JS: &str = r#"
         Object.defineProperty(navigator, 'userAgentData', {
           get: function () {
             return {
-              brands: uad.brands,
+              brands: window.__SHIFT_UA_BRANDS__ || uad.brands,
               mobile: false,
               platform: 'Linux',
               getHighEntropyValues: function () {
                 return Promise.resolve({ platform: 'Linux', platformVersion: '',
                                          architecture: '', model: '', uaFullVersion: '' });
               },
-              toJSON: function () { return { brands: uad.brands, mobile: false, platform: 'Linux' }; }
+              toJSON: function () { return { brands: window.__SHIFT_UA_BRANDS__ || uad.brands, mobile: false, platform: 'Linux' }; }
             };
           },
           configurable: true
@@ -1348,10 +1348,12 @@ async fn collect_enabled_items(
     // 反指纹模式（阶段 2）：noise（加噪，默认）/ uniform（统一化）
     let fp_mode = normalize_fp_mode(take("privacy_fp_mode").as_deref());
     let wl_prefix = format!(
-        "window.__SHIFT_PRIVACY_WHITELIST__ = {};\nwindow.__SHIFT_TRANSLATE_TIMEOUT = {};\nwindow.__SHIFT_FP_MODE__ = {};\n",
+        "window.__SHIFT_PRIVACY_WHITELIST__ = {};\nwindow.__SHIFT_TRANSLATE_TIMEOUT = {};\nwindow.__SHIFT_FP_MODE__ = {};\nwindow.__SHIFT_UA_BRANDS__ = {};\n",
         serde_json::to_string(&whitelist).unwrap_or_else(|_| "[]".to_string()),
         timeout,
-        serde_json::to_string(fp_mode).unwrap_or_else(|_| "\"noise\"".to_string())
+        serde_json::to_string(fp_mode).unwrap_or_else(|_| "\"noise\"".to_string()),
+        // Client Hints brands 与 UA 版本对齐（方案 B）：否则"UA 说 Chrome、brands 无 Chrome"被识破
+        crate::useragent::brands_json(&crate::useragent::ua_for(""))
     );
     match level.as_str() {
         "off" => log::info!("[extensions] 隐私防护已关闭（off）"),

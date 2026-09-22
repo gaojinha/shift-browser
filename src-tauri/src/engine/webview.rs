@@ -17,12 +17,12 @@ use webkit2gtk::{SettingsExt, WebView, WebViewExt};
 pub static DEVTOOLS_ENABLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+pub const DEFAULT_USER_AGENT: &str = crate::useragent::DEFAULT_UA;
 
 /// 新建 child webview 时应用页面默认设置。
 /// 注意：**不能新建 Settings 替换**（会丢失 Tauri 默认设置导致链接点击失效），
 /// 只能在现有 Settings 上改属性。
-pub fn apply_default_settings(wv: &WebView) {
+pub fn apply_default_settings(wv: &WebView, host: &str) {
     let Some(settings) = webkit2gtk::WebViewExt::settings(wv) else {
         log::warn!("[engine] 获取 WebView Settings 失败，跳过默认设置");
         return;
@@ -34,7 +34,8 @@ pub fn apply_default_settings(wv: &WebView) {
     settings.set_enable_developer_extras(
         DEVTOOLS_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
     );
-    settings.set_user_agent(Some(DEFAULT_USER_AGENT));
+    // UA 动态取（站点覆盖 > 全局 > 默认）
+    settings.set_user_agent(Some(&crate::useragent::ua_for(host)));
 }
 
 /// 执行 JS，忽略返回值。

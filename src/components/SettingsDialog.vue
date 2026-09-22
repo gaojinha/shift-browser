@@ -346,6 +346,57 @@ const SEARCH_ENGINES = [  { id: 'bing', label: '必应', url: 'https://www.bing.
 ]
 
 const clearedMsg = ref('')
+// User-Agent 管理（方案 B · 2026-09-22）
+const uaConfig = ref<{ global: string; default: string; overrides: Record<string, string> }>({ global: '', default: '', overrides: {} })
+const uaInput = ref('')
+const uaSiteHost = ref('')
+const uaSiteValue = ref('')
+const uaMsg = ref('')
+async function loadUa() {
+  try {
+    uaConfig.value = await invoke('get_user_agent_config')
+    uaInput.value = uaConfig.value.global
+  } catch (e) {
+    console.warn('[ua] 读取失败:', e)
+  }
+}
+async function saveUa() {
+  try {
+    await invoke('set_user_agent', { ua: uaInput.value })
+    await loadUa()
+    uaMsg.value = '已保存（新标签生效）'
+    useToastStore().show('User-Agent 已更新', 'success')
+  } catch (e) {
+    uaMsg.value = '保存失败：' + String(e)
+  }
+}
+async function resetUa() {
+  uaInput.value = uaConfig.value.default
+  await saveUa()
+}
+async function saveUaOverride() {
+  if (!uaSiteHost.value.trim()) {
+    uaMsg.value = '请填站点域名'
+    return
+  }
+  try {
+    await invoke('set_user_agent_override', { host: uaSiteHost.value, ua: uaSiteValue.value })
+    uaSiteHost.value = ''
+    uaSiteValue.value = ''
+    await loadUa()
+    uaMsg.value = '站点覆盖已保存'
+  } catch (e) {
+    uaMsg.value = '保存失败：' + String(e)
+  }
+}
+async function delUaOverride(h: string) {
+  try {
+    await invoke('set_user_agent_override', { host: h, ua: '' })
+    await loadUa()
+  } catch (e) {
+    uaMsg.value = '删除失败：' + String(e)
+  }
+}
 // 一键清除浏览数据（隐私 · 2026-09-22）
 const clearScopes = ref({ history: true, cookies: true, cache: true, storage: true, downloads: false, sessions: false })
 const clearMsg = ref('')
@@ -1788,6 +1839,30 @@ async function onRemoveKeyword(k: string) {
                   <span class="field-desc">查看/管理证书、例外与监测事件</span>
                 </div>
               </div>
+              <div class="field" style="margin-top: 14px">
+                <label>User-Agent</label>
+                <div class="field-desc" style="margin-bottom: 6px">
+                  部分网站按 UA 版本判定"浏览器不受支持"，可在此升级/自定义
+                </div>
+                <input class="ua-input" v-model="uaInput" placeholder="留空 = 使用默认 UA" />
+                <div class="history-actions" style="margin-top: 6px">
+                  <button class="mini-btn" @click="saveUa">保存</button>
+                  <button class="mini-btn" @click="resetUa">恢复默认</button>
+                  <span v-if="uaMsg" class="cleared-msg">{{ uaMsg }}</span>
+                </div>
+                <div class="field-desc" style="margin-top: 10px">站点级覆盖（某些站需特定 UA）</div>
+                <div class="ua-override-row">
+                  <input class="ua-input sm" v-model="uaSiteHost" placeholder="域名，如 example.com" />
+                  <input class="ua-input sm" v-model="uaSiteValue" placeholder="该站 UA" />
+                  <button class="mini-btn" @click="saveUaOverride">添加</button>
+                </div>
+                <div v-if="Object.keys(uaConfig.overrides).length" class="ua-overrides">
+                  <div v-for="(_, h) in uaConfig.overrides" :key="h" class="ua-ov-item">
+                    <span class="mono">{{ h }}</span>
+                    <button class="btn-x" @click="delUaOverride(h)">删除</button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           <!-- 自检 -->
@@ -2135,6 +2210,11 @@ async function onRemoveKeyword(k: string) {
 }
 
 /* 危险操作 */
+.ua-input { width: 100%; box-sizing: border-box; padding: 7px 10px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 8px; color: #ddd; font-size: 12px; font-family: ui-monospace, monospace; }
+.ua-input.sm { width: auto; flex: 1; }
+.ua-override-row { display: flex; gap: 6px; align-items: center; }
+.ua-overrides { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.ua-ov-item { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; background: rgba(255,255,255,0.04); border-radius: 6px; font-size: 12px; }
 .clear-scopes { display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 6px 0 8px; font-size: 12px; color: #bbb; }
 .clear-scopes label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
 .history-actions {

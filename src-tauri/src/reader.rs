@@ -47,7 +47,7 @@ async fn scrape_article(url: &str) -> Result<readability::extractor::Product, St
 /// 识别为爬虫（understandingwar.org 等返回 403），curl/OpenSSL 指纹被主流站信任。
 /// 手动跟随重定向（最多 5 跳），每跳做 SSRF 校验，防重定向绕过。
 fn fetch_and_extract(url: &str) -> Result<readability::extractor::Product, String> {
-    const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+    const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
     // UA 双保险：浏览器 UA 优先（多数站正常）；若被反爬拦（非 2xx），
     // 回退默认 UA（个别站反着来，如 understandingwar.org 拦浏览器 UA 放行默认 UA）
     let html = match curl_fetch_with_redirects(url, Some(BROWSER_UA)) {

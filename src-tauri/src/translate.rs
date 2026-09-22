@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 
 /// Chrome UA（Google translate 端点需要 Chrome 标识）
 const CHROME_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
-  (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+  (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
 
 /// reqwest 客户端（共享连接池，全局单例）
 /// 全局超时只做兜底（120s），实际超时由每个请求的 RequestBuilder::timeout() 控制，

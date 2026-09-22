@@ -18,6 +18,7 @@ mod reader;
 mod selfcheck;
 mod tabs;
 mod tls;
+mod useragent;
 mod translate;
 mod tray;
 
@@ -605,6 +606,10 @@ pub fn run() {
       tls::clear_cert_events,
       tls::scan_cert_expiry,
       tls::accept_cert_exception,
+      // User-Agent 管理（方案 B · 2026-09-22）
+      useragent::get_user_agent_config,
+      useragent::set_user_agent,
+      useragent::set_user_agent_override,
       // 一键清除浏览数据（隐私 · 2026-09-22）
       tabs::clear_browsing_data,
       // 权限请求（安全 #2 · 2026-09-22）
@@ -1389,6 +1394,11 @@ pub fn run() {
       {
         let db = app.state::<crate::db::Db>();
         tauri::async_runtime::block_on(crate::perms::load_allowlist(&db.pool));
+      }
+      // User-Agent 配置载入（方案 B · 2026-09-22）
+      {
+        let db = app.state::<crate::db::Db>();
+        tauri::async_runtime::block_on(crate::useragent::load(&db.pool));
       }
       // 开发者工具开关载入（安全 #6 · 2026-09-22，默认关）
       {
