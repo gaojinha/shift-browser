@@ -138,6 +138,10 @@ pub struct Tab {
     /// 是否已休眠（webview 已销毁以释放内存；点击标签时按 url 重建）
     #[serde(default)]
     pub hibernated: bool,
+    /// 无痕标签（2026-09-22）：incognito → ephemeral WebContext，
+    /// Cookie/缓存/存储不落盘、与常规标签隔离；不计历史
+    #[serde(default)]
+    pub private: bool,
 }
 
 /// 标签管理器（Tauri State）
@@ -301,7 +305,7 @@ impl TabManager {
     }
 
     /// 创建嵌入式 webview
-    fn create_webview(app: &AppHandle, id: &str, url: &str) -> Result<(), String> {
+    fn create_webview(app: &AppHandle, id: &str, url: &str, private: bool) -> Result<(), String> {
         let window = app
             .get_window("main")
             .ok_or_else(|| "主窗口不存在".to_string())?;
@@ -383,6 +387,8 @@ impl TabManager {
         let child = window
       .add_child(
         WebviewBuilder::new(label.clone(), webview_url)
+          // 无痕标签：走 ephemeral WebContext（Cookie/缓存/存储不落盘、与常规标签隔离）
+          .incognito(private)
           // Linux：显式指定 web extensions 目录（exe 同目录），否则 Tauri 的 IPC 桥
           // 依赖的 WebKit web extension 不会加载，__TAURI_INTERNALS__ 注入失败
           .extensions_path(
@@ -418,7 +424,7 @@ impl TabManager {
             let app = app_handle.clone();
             tauri::async_runtime::spawn(async move {
               let state = app.state::<TabManager>();
-              if let Ok(tab) = create_tab(app.clone(), state, url_str).await {
+              if let Ok(tab) = create_tab(app.clone(), state, url_str, None).await {
                 log::info!("[tabs] on_new_window: 新标签创建成功 id={}", tab.id);
                 // 页面内 window.open 建的新标签，前端不知情 → 通知同步
                 let _ = app.emit("tabs-updated", ());
@@ -516,6 +522,10 @@ impl TabManager {
                   if tab.title.is_empty() || tab.title == tab.url {
                     tab.title = title;
                   }
+                }
+                // 无痕标签一律不记历史
+                if tabs.get(&tab_id).map(|t| t.private).unwrap_or(false) {
+                  return;
                 }
               }
               // 页面加载完成（URL/标题变化）→ 通知前端同步（替代 2s 轮询）
@@ -1369,7 +1379,9 @@ pub async fn create_tab(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
     url: String,
+    private: Option<bool>,
 ) -> Result<Tab, String> {
+    let is_private = private.unwrap_or(false);
     // 隐私防护：新建标签前清洗跨站追踪参数（只影响 http/https，内部页面不受影响）
     let url = clean_tracking_params(&url);
     log::info!("[tabs] create_tab: url={}", crate::redact_url(&url));
@@ -1403,8 +1415,8 @@ pub async fn create_tab(
         url.clone()
     };
 
-    TabManager::create_webview(&app, &id, &url)?;
-    log::info!("[tabs] create_tab: webview 创建成功 id={}", id);
+    TabManager::create_webview(&app, &id, &url, is_private)?;
+    log::info!("[tabs] create_tab: webview 创建成功 id={} private={}", id, is_private);
 
     let tab = Tab {
         id: id.clone(),
@@ -1415,6 +1427,7 @@ pub async fn create_tab(
         is_pinned: false,
         is_muted: false,
         hibernated: false,
+        private: is_private,
     };
     state.touch_active(&id);
 
@@ -1531,9 +1544,9 @@ pub async fn switch_tab(
     // 导致 go_back/go_forward 报"标签不存在"、UI 显示与实际不符）
     let hibernated_info = {
         let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        tabs.get(&id).map(|t| (t.hibernated, t.url.clone()))
+        tabs.get(&id).map(|t| (t.hibernated, t.url.clone(), t.private))
     };
-    let Some((is_hibernated, hibernated_url)) = hibernated_info else {
+    let Some((is_hibernated, hibernated_url, hibernated_private)) = hibernated_info else {
         return Ok(None);
     };
 
@@ -1541,7 +1554,7 @@ pub async fn switch_tab(
     // 重建后需重新注入扩展/隐私防护脚本，并重新计算布局（create_webview 内部处理）。
     if is_hibernated {
         log::info!("[perf] 唤醒休眠标签: id={} url={}", id, hibernated_url);
-        TabManager::create_webview(&app, &id, &hibernated_url)?;
+        TabManager::create_webview(&app, &id, &hibernated_url, hibernated_private)?;
         if let Some(t) = state
             .tabs
             .lock()
@@ -2401,4 +2414,86 @@ mod tests {
         let long = "x".repeat(500);
         assert_eq!(sanitize_filename(&long).len(), 200);
     }
+}
+
+/// 一键清除浏览数据（隐私 · 2026-09-22）
+/// scopes: history / cookies / cache / storage / downloads / sessions / all
+#[tauri::command]
+pub async fn clear_browsing_data(
+    app: AppHandle,
+    db: tauri::State<'_, crate::db::Db>,
+    scopes: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let has = |k: &str| scopes.iter().any(|s| s == k || s == "all");
+    let mut done: Vec<String> = Vec::new();
+
+    // ---- 数据库侧 ----
+    if has("history") {
+        let _ = sqlx::query("DELETE FROM history").execute(&db.pool).await;
+        done.push("history".into());
+    }
+    if has("downloads") {
+        let _ = sqlx::query("DELETE FROM downloads").execute(&db.pool).await;
+        done.push("downloads".into());
+    }
+    if has("sessions") {
+        let _ = sqlx::query("DELETE FROM sessions").execute(&db.pool).await;
+        done.push("sessions".into());
+    }
+
+    // ---- WebKit 侧（GTK 对象只能在主线程操作）----
+    let need_cookies = has("cookies");
+    let need_cache = has("cache");
+    let need_storage = has("storage");
+    if need_cookies || need_cache || need_storage {
+        app.run_on_main_thread(move || {
+            #[cfg(target_os = "linux")]
+            {
+                use gtk::glib;
+                use webkit2gtk::{
+                    CookieManagerExt, WebContext, WebContextExt, WebsiteDataManagerExtManual,
+                    WebsiteDataTypes,
+                };
+                if let Some(ctx) = WebContext::default() {
+                    if need_cookies {
+                        if let Some(cm) = ctx.cookie_manager() {
+                            cm.delete_all_cookies();
+                            log::info!("[privacy] 已清除全部 Cookie");
+                        }
+                    }
+                    if need_cache {
+                        ctx.clear_cache();
+                        log::info!("[privacy] 已清除缓存");
+                    }
+                    if need_storage {
+                        if let Some(dm) = ctx.website_data_manager() {
+                            dm.clear(
+                                WebsiteDataTypes::LOCAL_STORAGE
+                                    | WebsiteDataTypes::SESSION_STORAGE
+                                    | WebsiteDataTypes::INDEXEDDB_DATABASES
+                                    | WebsiteDataTypes::DOM_CACHE,
+                                glib::TimeSpan::from_seconds(0),
+                                None::<&gtk::gio::Cancellable>,
+                                |_| {},
+                            );
+                            log::info!("[privacy] 已清除本地存储");
+                        }
+                    }
+                }
+            }
+        })
+        .map_err(|e| e.to_string())?;
+        if need_cookies {
+            done.push("cookies".into());
+        }
+        if need_cache {
+            done.push("cache".into());
+        }
+        if need_storage {
+            done.push("storage".into());
+        }
+    }
+
+    log::info!("[privacy] 清除浏览数据完成: {:?}", done);
+    Ok(done)
 }

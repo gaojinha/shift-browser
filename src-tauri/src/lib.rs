@@ -547,7 +547,7 @@ pub fn run() {
           tokio::time::sleep(std::time::Duration::from_millis(300)).await;
           for url in urls {
             if let Some(state) = app_handle.try_state::<TabManager>() {
-              match tabs::create_tab(app_handle.clone(), state, url.clone()).await {
+              match tabs::create_tab(app_handle.clone(), state, url.clone(), None).await {
                 Ok(tab) => log::info!("[single-instance] 外部链接已打开: {}", tab.id),
                 Err(e) => log::warn!("[single-instance] 外部链接打开失败: {} ({})", redact_url(&url), e),
               }
@@ -605,6 +605,8 @@ pub fn run() {
       tls::clear_cert_events,
       tls::scan_cert_expiry,
       tls::accept_cert_exception,
+      // 一键清除浏览数据（隐私 · 2026-09-22）
+      tabs::clear_browsing_data,
       // 权限请求（安全 #2 · 2026-09-22）
       perms::respond_permission,
       perms::list_permission_rules,
@@ -1632,7 +1634,7 @@ pub fn run() {
             tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
             for url in urls {
               let state = app_handle.state::<TabManager>();
-              match tabs::create_tab(app_handle.clone(), state, url.clone()).await {
+              match tabs::create_tab(app_handle.clone(), state, url.clone(), None).await {
                 Ok(tab) => log::info!("[default-browser] 外部链接已打开: {}", tab.id),
                 Err(e) => log::warn!("[default-browser] 外部链接打开失败: {} ({})", redact_url(&url), e),
               }

@@ -7,6 +7,9 @@ export interface Tab {
   is_active: boolean
   is_pinned: boolean
   is_muted: boolean
+  /** 无痕标签（ephemeral 上下文，不计历史） */
+  private?: boolean
+  hibernated?: boolean
   /** 运行时标签分组 id（前端内存字段，不持久化；null = 未分组） */
   groupId: number | null
 }

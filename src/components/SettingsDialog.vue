@@ -10,7 +10,7 @@ import { useToastStore } from '../stores/toast'
 import type { Extension } from '../types/extension'
 
 const props = defineProps<{ show: boolean }>()
-const emit = defineEmits<{ (e: 'close'): void }>()
+const emit = defineEmits<{ (e: 'close'): void; (e: 'openCerts'): void }>()
 
 const settingsStore = useSettingsStore()
 const extensionsStore = useExtensionsStore()
@@ -346,6 +346,27 @@ const SEARCH_ENGINES = [  { id: 'bing', label: '必应', url: 'https://www.bing.
 ]
 
 const clearedMsg = ref('')
+// 一键清除浏览数据（隐私 · 2026-09-22）
+const clearScopes = ref({ history: true, cookies: true, cache: true, storage: true, downloads: false, sessions: false })
+const clearMsg = ref('')
+async function onClearBrowsingData() {
+  const scopes = Object.entries(clearScopes.value)
+    .filter(([, v]) => v)
+    .map(([k]) => k)
+  if (scopes.length === 0) {
+    clearMsg.value = '请至少选择一项'
+    return
+  }
+  const zh: Record<string, string> = { history: '历史', cookies: 'Cookie', cache: '缓存', storage: '本地存储', downloads: '下载记录', sessions: '会话' }
+  clearMsg.value = '清除中…'
+  try {
+    const done = await invoke<string[]>('clear_browsing_data', { scopes })
+    clearMsg.value = '已清除：' + done.map((d) => zh[d] || d).join('、')
+    useToastStore().show('已清除浏览数据', 'success')
+  } catch (e) {
+    clearMsg.value = '清除失败：' + String(e)
+  }
+}
 
 // 扩展管理：加载路径输入
 const extPath = ref('')
@@ -1745,6 +1766,28 @@ async function onRemoveKeyword(k: string) {
                   <span v-if="clearedMsg" class="cleared-msg">{{ clearedMsg }}</span>
                 </div>
               </div>
+              <div class="field danger-field" style="margin-top: 14px">
+                <label>清除浏览数据</label>
+                <div class="clear-scopes">
+                  <label><input type="checkbox" v-model="clearScopes.history" /> 浏览历史</label>
+                  <label><input type="checkbox" v-model="clearScopes.cookies" /> Cookie</label>
+                  <label><input type="checkbox" v-model="clearScopes.cache" /> 缓存</label>
+                  <label><input type="checkbox" v-model="clearScopes.storage" /> 本地存储</label>
+                  <label><input type="checkbox" v-model="clearScopes.downloads" /> 下载记录</label>
+                  <label><input type="checkbox" v-model="clearScopes.sessions" /> 会话</label>
+                </div>
+                <div class="history-actions">
+                  <button class="danger-btn" @click="onClearBrowsingData">立即清除</button>
+                  <span v-if="clearMsg" class="cleared-msg">{{ clearMsg }}</span>
+                </div>
+              </div>
+              <div class="field">
+                <label>证书管理</label>
+                <div class="history-actions">
+                  <button class="mini-btn" @click="emit('openCerts')">打开证书中心</button>
+                  <span class="field-desc">查看/管理证书、例外与监测事件</span>
+                </div>
+              </div>
             </div>
           </div>
           <!-- 自检 -->
@@ -2092,6 +2135,8 @@ async function onRemoveKeyword(k: string) {
 }
 
 /* 危险操作 */
+.clear-scopes { display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 6px 0 8px; font-size: 12px; color: #bbb; }
+.clear-scopes label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
 .history-actions {
   display: flex;
   align-items: center;

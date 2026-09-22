@@ -562,7 +562,7 @@ watch(
     <PasswordsDialog :show="showPasswords" @close="showPasswords = false" />
     <GroupsDialog :show="showGroups" @close="showGroups = false" />
     <DownloadsDialog :show="showDownloads" @close="showDownloads = false" />
-    <SettingsDialog :show="showSettings" @close="showSettings = false" />
+    <SettingsDialog :show="showSettings" @close="showSettings = false" @open-certs="showCerts = true" />
     <AISidebar :show="showAI" @close="showAI = false" />
     <TranslatePanel :show="showTranslate" @close="showTranslate = false" />
     <HistoryDialog :show="showHistory" @close="showHistory = false" />

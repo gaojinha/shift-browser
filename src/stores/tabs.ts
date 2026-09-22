@@ -253,6 +253,7 @@ export const useTabsStore = defineStore('tabs', {
       url?: string,
       groupId?: number | null,
       skipAutoGroup = false,
+      isPrivate = false,
     ): Promise<Tab | null> {
       // 参与 _opSeq：防止 create_tab 在途时 syncTabs（轮询）用旧快照整体覆盖，把刚建的标签顶掉
       const my = ++this._opSeq
@@ -269,7 +270,7 @@ export const useTabsStore = defineStore('tabs', {
         }
       }
       try {
-        const tab = await invoke<Tab>('create_tab', { url: target })
+        const tab = await invoke<Tab>('create_tab', { url: target, private: isPrivate })
         // push 前去重：syncTabs 轮询可能已把该 id 带进列表（并发窗口），直接 push 会重复
         const dup = this.tabs.findIndex((t) => t.id === tab.id)
         if (dup !== -1) this.tabs[dup] = tab

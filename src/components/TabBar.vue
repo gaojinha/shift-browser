@@ -332,6 +332,10 @@ function onNewTab() {
   tabsStore.createTab()
 }
 
+function onNewPrivateTab() {
+  tabsStore.createTab(undefined, undefined, false, true)
+}
+
 // ---- 全局鼠标监听（拖拽排序 + 菜单拖动需要）+ 双击标签栏空白最大化 ----
 onMounted(() => {
   window.addEventListener('mousemove', onWindowMouseMove)
@@ -424,7 +428,8 @@ function onFaviconError(e: Event) {
           alt=""
         />
         <span v-else class="pin-icon" title="已固定">📌</span>
-        <span class="title">{{ tab.title || '启动页' }}</span>
+        <span v-if="tab.private" class="priv-mark" title="无痕标签">🕶</span>
+            <span class="title">{{ tab.title || '启动页' }}</span>
         <button class="close-btn" title="关闭标签" @click="onTabClose($event, tab.id)">×</button>
       </div>
 
@@ -482,6 +487,7 @@ function onFaviconError(e: Event) {
       </template>
     </div>
     <button class="new-tab-btn" title="新建标签" @click="onNewTab">+</button>
+    <button class="new-tab-btn priv-tab-btn" title="新建无痕标签（不计历史、Cookie 不落盘）" @click="onNewPrivateTab">🕶</button>
 
     <!-- 窗口控制（标签栏 = 标题栏，无边框窗口） -->
     <div class="window-controls">
@@ -715,6 +721,8 @@ function onFaviconError(e: Event) {
     background 0.15s,
     color 0.15s;
 }
+.priv-tab-btn { font-size: 13px; }
+.priv-mark { font-size: 11px; margin-right: 3px; opacity: 0.75; }
 .new-tab-btn:hover {
   background: var(--bg-active);
   color: var(--text-primary);
