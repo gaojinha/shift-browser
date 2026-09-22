@@ -525,6 +525,14 @@ fn render_html(
   .second-hand {{ width:1.5px; height:28px; margin:-28px 0 0 -0.75px; background:var(--accent); box-shadow:0 0 6px rgba(74,158,255,0.9); }}
   .second-hand::after {{ content:''; position:absolute; bottom:-5px; left:50%; width:3px; height:5px; margin-left:-1.5px; background:var(--accent); border-radius:0 0 2px 2px; }}
   .clock-center {{ position:absolute; left:50%; top:50%; width:5px; height:5px; margin:-2.5px; background:#fff; border-radius:50%; box-shadow:0 0 4px rgba(74,158,255,0.8); }}
+  /* ---- 天气卡 Bing 三层格式（2026-09-22 美化）：大字温度 / 状况高低温 / 底部 5 天预报 ---- */
+  .wc-temp {{ font-size:40px; font-weight:300; color:#fff; line-height:1.1; letter-spacing:-1px; }}
+  .wc-cond {{ font-size:13px; color:rgba(255,255,255,0.82); margin-top:2px; }}
+  #weatherCard > div {{ width:100%; box-sizing:border-box; }}
+  .wc-days {{ display:grid; grid-template-columns:repeat(5, 1fr); gap:4px; margin-top:8px; }}
+  .wc-days .wd {{ background:rgba(255,255,255,0.08); border-radius:8px; padding:5px 1px; text-align:center; font-size:10px; color:rgba(255,255,255,0.72); line-height:1.4; }}
+  .wc-days .wd b {{ display:block; font-size:11px; color:#fff; white-space:nowrap; }}
+  .wc-days .wd span {{ display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
   .forecast {{ display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin-top:8px; }}
   .forecast .f-day {{ background:rgba(255,255,255,0.08); border-radius:8px; padding:6px 4px; text-align:center; font-size:11px; color:rgba(255,255,255,0.7); line-height:1.5; }}
   .forecast .f-day b {{ display:block; font-size:14px; color:#fff; }}
@@ -641,9 +649,11 @@ fn render_html(
         <div class="info-card" id="weatherCard">
           <span class="ic">🌤️</span>
           <div>
-            <div class="iv" id="weatherMain">天气加载中…</div>
-            <div class="id" id="weatherCity">运城</div>
+            <div class="wc-temp" id="weatherMain">--°C</div>
+            <div class="wc-cond" id="weatherCond">天气加载中…</div>
+            <div class="id" id="weatherCity">永济</div>
             <div class="is" id="weatherDetail"></div>
+            <div class="wc-days" id="weatherDays"></div>
           </div>
         </div>
         <div class="info-card" id="locationCard">
@@ -879,11 +889,14 @@ fn render_html(
   }}
 
   // ---- 天气（wttr.in 免费 API，无需 key；英文描述映射中文）----
-  var WEATHER_ZH = {{ 'Clear':'晴','Sunny':'晴','Partly cloudy':'多云','Cloudy':'阴','Overcast':'阴天','Mist':'薄雾','Fog':'雾','Light drizzle':'毛毛雨','Drizzle':'毛毛雨','Light rain':'小雨','Moderate rain':'中雨','Heavy rain':'大雨','Torrential rain shower':'暴雨','Light rain shower':'阵雨','Moderate or heavy rain shower':'中到大雨','Patchy rain possible':'局部有雨','Thundery outbreaks possible':'雷阵雨','Thunderstorm':'雷阵雨','Light snow':'小雪','Moderate snow':'中雪','Heavy snow':'大雪','Light sleet':'雨夹雪','Freezing fog':'冻雾','Hail':'冰雹','Windy':'大风','Light rain with thunder':'雷雨' }};
+  var WEATHER_ZH = {{ 'Clear':'晴','Sunny':'晴','Partly cloudy':'多云','Cloudy':'阴','Overcast':'阴天','Mist':'薄雾','Fog':'雾','Light drizzle':'毛毛雨','Drizzle':'毛毛雨','Light rain':'小雨','Moderate rain':'中雨','Heavy rain':'大雨','Torrential rain shower':'暴雨','Light rain shower':'阵雨','Moderate or heavy rain shower':'中到大雨','Patchy rain possible':'局部有雨','Thundery outbreaks possible':'雷阵雨','Thunderstorm':'雷阵雨','Light snow':'小雪','Moderate snow':'中雪','Heavy snow':'大雪','Light sleet':'雨夹雪','Freezing fog':'冻雾','Hail':'冰雹','Windy':'大风','Light rain with thunder':'雷雨','Smoky haze':'烟霾','Haze':'霾','Patches of fog':'局部有雾','Thundery outbreaks in nearby':'附近雷阵雨','Patchy light drizzle':'零星毛毛雨','Moderate or heavy rain with thunder':'雷中到大雨' }};
   function weatherZh(desc) {{
     if (!desc) return '';
     var key = String(desc).trim();
-    return WEATHER_ZH[key] || key;
+    if (WEATHER_ZH[key]) return WEATHER_ZH[key];
+    var lk = key.toLowerCase();
+    for (var k in WEATHER_ZH) {{ if (k.toLowerCase() === lk) return WEATHER_ZH[k]; }}
+    return key;
   }}
   function loadWeather() {{
     var mainEl = document.getElementById('weatherMain');
@@ -896,16 +909,47 @@ fn render_html(
         var cur = data.current_condition && data.current_condition[0];
         if (!cur) throw new Error('no data');
         var desc = cur.lang_zh && cur.lang_zh[0] ? cur.lang_zh[0].value : (cur.weatherDesc && cur.weatherDesc[0] ? cur.weatherDesc[0].value : '');
-        mainEl.textContent = cur.temp_C + '°C ' + weatherZh(desc);
+        mainEl.textContent = cur.temp_C + '°';
+        var condEl = document.getElementById('weatherCond');
+        var d0 = data.weather && data.weather[0] ? data.weather[0] : null;
+        if (condEl) {{
+          var hi = d0 ? d0.maxtempC : '';
+          var lo = d0 ? d0.mintempC : '';
+          condEl.textContent = weatherZh(desc) + (hi !== '' && lo !== '' ? ' · 最高 ' + hi + '° / 最低 ' + lo + '°' : '');
+        }}
         detailEl.textContent = '湿度 ' + cur.humidity + '% · 体感 ' + cur.FeelsLikeC + '°C';
-        var days = (data.weather || []).slice(0, 3);
-        if (days.length > 0) {{
-          var fHtml = days.map(function(d) {{
-            var wName = '日一二三四五六'[new Date(d.date).getDay()];
-            var dDesc = d.hourly && d.hourly[0] && d.hourly[0].lang_zh && d.hourly[0].lang_zh[0] ? d.hourly[0].lang_zh[0].value : '';
-            return '<div class="f-day"><b>' + d.maxtempC + '°</b><span>' + wName + '</span><span>' + weatherZh(dDesc) + '</span></div>';
+        var daysEl = document.getElementById('weatherDays');
+        var WK = '日一二三四五六';
+        function renderDays(list) {{
+          if (!daysEl || !list || !list.length) return;
+          daysEl.innerHTML = list.map(function(d) {{
+            return '<div class="wd"><b>' + d.label + '</b><span>' + d.mx + '°/' + d.mn + '°</span><span>' + d.txt + '</span></div>';
           }}).join('');
-          detailEl.innerHTML = detailEl.textContent + '<div class="forecast">' + fHtml + '</div>';
+        }}
+        /* 兜底：先用 wttr 天级数据（通常 3 天）*/
+        if (daysEl && data.weather && data.weather.length) {{
+          renderDays(data.weather.map(function(d, i) {{
+            var dt = new Date(d.date + 'T00:00:00');
+            var dDesc = d.hourly && d.hourly[0] && d.hourly[0].lang_zh && d.hourly[0].lang_zh[0] ? d.hourly[0].lang_zh[0].value : '';
+            return {{ label: i === 0 ? '今天' : '周' + WK[dt.getDay()], mx: d.maxtempC, mn: d.mintempC, txt: weatherZh(dDesc) }};
+          }}));
+        }}
+        /* 升级：Open-Meteo 精确补到 5 天（需 CSP connect-src 放行 api.open-meteo.com）*/
+        if (daysEl) {{
+          fetch('https://api.open-meteo.com/v1/forecast?latitude=35.02&longitude=111.00&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FShanghai&forecast_days=5')
+            .then(function(r) {{ return r.json(); }})
+            .then(function(om) {{
+              var dd = om.daily; if (!dd || !dd.time) return;
+              var WM = {{ 0:'晴',1:'晴间多云',2:'多云',3:'阴',45:'雾',48:'雾凇',51:'毛毛雨',53:'毛毛雨',55:'密毛雨',56:'冻雨',57:'冻雨',61:'小雨',63:'中雨',65:'大雨',66:'冻雨',67:'冻雨',71:'小雪',73:'中雪',75:'大雪',77:'雪粒',80:'阵雨',81:'中阵雨',82:'强阵雨',85:'阵雪',86:'强阵雪',95:'雷阵雨',96:'雷阵雨',99:'强雷暴' }};
+              var list = [];
+              var n = dd.time.length < 5 ? dd.time.length : 5;
+              for (var i = 0; i < n; i++) {{
+                var dt = new Date(dd.time[i] + 'T00:00:00');
+                list.push({{ label: i === 0 ? '今天' : '周' + WK[dt.getDay()], mx: dd.temperature_2m_max ? dd.temperature_2m_max[i] : '', mn: dd.temperature_2m_min ? dd.temperature_2m_min[i] : '', txt: WM[dd.weather_code ? dd.weather_code[i] : 0] || '' }});
+              }}
+              renderDays(list);
+            }})
+            .catch(function() {{}});
         }}
       }})
       .catch(function() {{
