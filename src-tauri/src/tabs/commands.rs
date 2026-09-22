@@ -256,21 +256,25 @@ pub async fn hibernate_idle_tabs(
         .unwrap_or_else(|e| e.into_inner())
         .clone();
 
-    // 性能 P1（2026-09-22）：标签数阈值触发——标签数超过 TAB_COUNT_THRESHOLD 时，
+    // 性能 P1（2026-09-22）：标签数阈值触发——标签数超过 tab_hibernate_count 时，
     // 后台（非激活）标签**切走即可休眠**（不再等 30 分钟无操作），
     // 把常驻渲染进程控制在阈值内（多标签内存主要来源）。
-    const TAB_COUNT_THRESHOLD: usize = 8;
+    // 阈值来自 settings.tab_hibernate_count（默认 8；0 = 关闭数量阈值，仅按超时）。
+    let count_threshold: usize = crate::db::settings_cache::get(&db.pool, "tab_hibernate_count")
+        .await
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(8);
     let tab_count = state
         .tabs
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .len();
-    let count_pressure = tab_count > TAB_COUNT_THRESHOLD;
+    let count_pressure = count_threshold > 0 && tab_count > count_threshold;
     if count_pressure {
         log::info!(
             "[perf] 标签数 {} 超阈值 {}，后台标签将提前休眠",
             tab_count,
-            TAB_COUNT_THRESHOLD
+            count_threshold
         );
     }
 

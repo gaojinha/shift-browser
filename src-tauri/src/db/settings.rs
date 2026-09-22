@@ -62,6 +62,8 @@ const ALLOWED_KEYS: &[&str] = &[
     "privacy_whitelist",
     // 性能：空闲标签休眠超时（分钟，0=关闭）
     "tab_hibernate_minutes",
+    // 性能：空闲标签休眠的数量阈值（标签数超过该值即切走即休；0=关闭数量阈值，仅按超时）
+    "tab_hibernate_count",
     // 翻译源（google / bing，默认 google；失败自动回退另一方）
     "translate_engine",
     // 翻译目标语言（zh-CN 等）+ 翻译超时（秒，5-120）
@@ -223,6 +225,8 @@ pub async fn set_settings_bulk(db: tauri::State<'_, Db>, settings: Vec<Setting>)
 /// 批量设置内部实现（抽出来便于测试）
 async fn set_settings_bulk_inner(db: &Db, settings: Vec<Setting>) -> DbResult<()> {
     let mut tx = db.pool.begin().await?;
+    // 先收集待写缓存的键值对；commit 成功后才统一回填，避免事务中途失败/回滚时留下脏缓存
+    let mut cache_updates: Vec<(String, String)> = Vec::new();
     for s in settings {
         // 敏感设置不允许批量写入
         if is_sensitive(&s.key) {
@@ -246,10 +250,13 @@ async fn set_settings_bulk_inner(db: &Db, settings: Vec<Setting>) -> DbResult<()
         .bind(&s.value)
         .execute(&mut *tx)
         .await?;
-        // 性能 P0：缓存同步（批量）
-        crate::db::settings_cache::update(&s.key, &s.value);
+        cache_updates.push((s.key, s.value));
     }
     tx.commit().await?;
+    // 性能 P0：commit 成功后统一同步缓存（避免回滚时缓存与库不一致）
+    for (key, value) in cache_updates {
+        crate::db::settings_cache::update(&key, &value);
+    }
     Ok(())
 }
 

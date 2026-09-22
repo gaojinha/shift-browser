@@ -13,9 +13,10 @@
 //!   缓存 = 白名单键 ×（写走 set_setting 透传） → 一致性闭环。
 //! 白名单选键原则 = **恰好是走 set_setting 写的热路径键**，其余（低频/裸写）不缓存。
 //!
-//! 白名单键（5 个 · 全部在 settings.ALLOWED_KEYS 内，写必然走 set_setting 透传）：
+//! 白名单键（6 个 · 全部在 settings.ALLOWED_KEYS 内，写必然走 set_setting 透传）：
 //!   - record_history          （页面加载 · tabs.rs 热路径）
 //!   - tab_hibernate_minutes   （休眠时长 · tabs.rs 热路径）
+//!   - tab_hibernate_count     （休眠标签数阈值 · tabs.rs 热路径，0 = 关闭数量阈值）
 //!   - translate_engine/target/timeout（翻译 · translate.rs 热路径）
 //!
 //! 敏感键（master_key / ai_api_key）不在白名单 → 明文永不常驻内存，兼收安全收益。
@@ -32,6 +33,8 @@ const WHITELIST: &[&str] = &[
     "record_history",
     // 内存水位休眠（tabs.rs）
     "tab_hibernate_minutes",
+    // 内存水位休眠——标签数阈值（tabs.rs，0 = 关闭数量阈值）
+    "tab_hibernate_count",
     // 翻译（translate.rs）
     "translate_engine",
     "translate_target",
@@ -51,21 +54,16 @@ fn is_cachable(key: &str) -> bool {
 
 /// 启动时预热白名单（在 Db::init 之后调用一次）
 pub async fn warmup(pool: &SqlitePool) {
-    // 只预热白名单键：非白名单键本来就回源，预热只服务热路径
-    let mut keys = vec![];
+    // 只预热白名单键：非白名单键本来就回源，预热只服务热路径。
+    // 占位符数量随 WHITELIST 动态生成，不硬编码 bind 数量——
+    // 增删白名单键不会越界 panic，也不会漏预热。
+    let placeholders = vec!["?"; WHITELIST.len()].join(", ");
+    let sql = format!("SELECT key, value FROM settings WHERE key IN ({})", placeholders);
+    let mut query = sqlx::query_as::<_, (String, String)>(&sql);
     for k in WHITELIST {
-        keys.push((*k).to_string());
+        query = query.bind(*k);
     }
-    let rows: Vec<(String, String)> =
-        sqlx::query_as("SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?)")
-            .bind(&keys[0])
-            .bind(&keys[1])
-            .bind(&keys[2])
-            .bind(&keys[3])
-            .bind(&keys[4])
-            .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+    let rows: Vec<(String, String)> = query.fetch_all(pool).await.unwrap_or_default();
     let mut map = HashMap::with_capacity(rows.len());
     for (k, v) in rows {
         map.insert(k, v);
@@ -146,6 +144,7 @@ mod tests {
         // 白名单键允许进缓存
         assert!(is_cachable("record_history"));
         assert!(is_cachable("tab_hibernate_minutes"));
+        assert!(is_cachable("tab_hibernate_count"));
         assert!(is_cachable("translate_engine"));
         // 非白名单（裸写/敏感）一律拒绝
         assert!(!is_cachable("master_key"));
