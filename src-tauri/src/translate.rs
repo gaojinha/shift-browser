@@ -35,11 +35,7 @@ fn client() -> &'static Client {
 /// 当前翻译超时（秒）：settings.translate_timeout，默认 15，合法范围 5-120
 pub async fn current_timeout(db: &crate::db::Db) -> u64 {
     let row: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM settings WHERE key = 'translate_timeout'")
-            .fetch_optional(&db.pool)
-            .await
-            .ok()
-            .flatten();
+        crate::db::settings_cache::get(&db.pool, "translate_timeout").await.map(|v| (v,));
     row.and_then(|r| r.0.parse::<u64>().ok())
         .filter(|v| *v >= 5 && *v <= 120)
         .unwrap_or(15)
@@ -245,22 +241,14 @@ pub async fn translate_with(
 /// 读取当前翻译源（settings.translate_engine，默认 google）
 pub async fn current_engine(db: &crate::db::Db) -> String {
     let row: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM settings WHERE key = 'translate_engine'")
-            .fetch_optional(&db.pool)
-            .await
-            .ok()
-            .flatten();
+        crate::db::settings_cache::get(&db.pool, "translate_engine").await.map(|v| (v,));
     row.map(|r| r.0).unwrap_or_else(|| "google".to_string())
 }
 
 /// 当前翻译目标语言（设置 → 通用 → 翻译目标语言，默认 zh-CN）
 pub async fn current_target(db: &crate::db::Db) -> String {
     let row: Option<(String,)> =
-        sqlx::query_as("SELECT value FROM settings WHERE key = 'translate_target'")
-            .fetch_optional(&db.pool)
-            .await
-            .ok()
-            .flatten();
+        crate::db::settings_cache::get(&db.pool, "translate_target").await.map(|v| (v,));
     row.map(|r| r.0).unwrap_or_else(|| "zh-CN".to_string())
 }
 

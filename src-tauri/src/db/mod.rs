@@ -7,6 +7,7 @@ pub mod history;
 pub mod passwords;
 pub mod sessions;
 pub mod settings;
+pub mod settings_cache;
 pub mod sync;
 pub mod tab_groups;
 pub mod users;
@@ -20,6 +21,9 @@ use std::path::PathBuf;
 /// 全局数据库连接池（Tauri State 管理）
 pub struct Db {
     pub pool: SqlitePool,
+    /// 资讯抓取专用连接池（性能 P1 · 2026-09-22）：与 UI 命令的 pool 隔离，
+    /// 避免 62 源并发写与 UI 抢连接/写锁（原共用一个 5 连接池 → 启动后卡顿）
+    pub feed_pool: SqlitePool,
     /// 密码主密钥文件路径（独立于数据库，权限 600）
     pub key_path: PathBuf,
     /// 密码库主密码包裹文件路径（vault.key，权限 600；文件存在 = 已设主密码）
@@ -96,9 +100,22 @@ impl Db {
         // 执行迁移
         Self::run_migrations(&pool).await?;
 
+        // 性能 P1：资讯抓取独立连接池（2 连接，够 16 路信号量排队用）
+        let feed_options = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true)
+            .foreign_keys(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+            .busy_timeout(std::time::Duration::from_secs(10));
+        let feed_pool = SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect_with(feed_options)
+            .await?;
+
         log::info!("[ShiftBrowser] 数据库已初始化: {}", db_path.display());
         Ok(Self {
             pool,
+            feed_pool,
             key_path: app_data_dir.join("master.key"),
             vault_path: app_data_dir.join("vault.key"),
             master_key: tokio::sync::Mutex::new(None),
@@ -189,6 +206,11 @@ impl Db {
                 14,
                 "certificates",
                 include_str!("../../migrations/20260922000000_certificates.sql"),
+            ),
+            (
+                15,
+                "feed_url_index",
+                include_str!("../../migrations/20260922000001_feed_url_index.sql"),
             ),
         ];
 

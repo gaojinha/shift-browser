@@ -1369,6 +1369,12 @@ pub fn run() {
         log::info!("[ShiftBrowser] 用户脚本注入缓存已刷新");
       }
 
+      // 性能 P0：settings 缓存预热（消除热路径 N+1 查库）
+      {
+        let db = app.state::<crate::db::Db>();
+        tauri::async_runtime::block_on(crate::db::settings_cache::warmup(&db.pool));
+      }
+
       // 权限白名单载入内存（安全 #2 · 2026-09-22）
       {
         let db = app.state::<crate::db::Db>();

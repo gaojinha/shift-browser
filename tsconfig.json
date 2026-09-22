@@ -20,5 +20,7 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue"]
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue"],
+  // 测试文件由 vitest 处理（用 node 内置模块，不需进 vue-tsc 类型检查）
+  "exclude": ["src/**/*.test.ts"]
 }

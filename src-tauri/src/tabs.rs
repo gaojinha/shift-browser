@@ -461,15 +461,10 @@ impl TabManager {
 
               tauri::async_runtime::spawn(async move {
                 let db = app3.state::<Db>();
-                let enabled: Option<(String,)> = sqlx::query_as(
-                  "SELECT value FROM settings WHERE key = 'record_history'",
-                )
-                .fetch_optional(&db.pool)
-                .await
-                .ok()
-                .flatten();
+                // 性能 P0：走 settings 缓存（原每次页面加载都查库）
+                let enabled = crate::db::settings_cache::get(&db.pool, "record_history").await;
                 // 隐私优先（2026-09-22）：未显式开启则不记录历史
-                let record = enabled.map(|v| v.0 == "true").unwrap_or(false);
+                let record = enabled.map(|v| v == "true").unwrap_or(false);
                 if record {
                   if let Err(e) = history::record_history(db, url_str, title_opt).await {
                     log::warn!("[tabs] record_history 失败: {}", e);

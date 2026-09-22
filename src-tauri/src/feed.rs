@@ -256,20 +256,26 @@ async fn fetch_one(
         Ok(t) => t,
         Err(_) => return 0,
     };
-    for (title, link, published) in items.iter().take(50) {
-        let r = sqlx::query(
-            "INSERT INTO feed_items (source, category, title, url, published_at) VALUES (?, ?, ?, ?, ?)
-             ON CONFLICT(url) DO UPDATE SET title = excluded.title",
-        )
-        .bind(source)
-        .bind(category)
-        .bind(title)
-        .bind(link)
-        .bind(published)
-        .execute(&mut *tx)
-        .await;
-        if r.is_ok() {
-            count += 1;
+    // 性能 P1：批量 INSERT（QueryBuilder 一次多值），替代逐条 execute
+    // 原 50 条 × 62 源 ≈ 3100 次往返 → 现每源 1 次
+    {
+        use sqlx::QueryBuilder;
+        let batch: Vec<_> = items.iter().take(50).collect();
+        if !batch.is_empty() {
+            let mut qb: QueryBuilder<sqlx::Sqlite> = QueryBuilder::new(
+                "INSERT INTO feed_items (source, category, title, url, published_at) ",
+            );
+            qb.push_values(batch.iter(), |mut b, (title, link, published)| {
+                b.push_bind(source)
+                    .push_bind(category)
+                    .push_bind(title)
+                    .push_bind(link)
+                    .push_bind(published);
+            });
+            qb.push(" ON CONFLICT(url) DO UPDATE SET title = excluded.title");
+            if qb.build().execute(&mut *tx).await.is_ok() {
+                count = batch.len();
+            }
         }
     }
     // 每源只留最新 50 条
@@ -307,15 +313,17 @@ pub async fn refresh_all(db: &Db) -> usize {
     for (name, url, category) in sources {
         let client = client.clone();
         let pool = db.pool.clone();
+        let feed_pool = db.feed_pool.clone();
         let sem = sem.clone();
         set.spawn(async move {
             // 信号量只在被 close 时 acquire 失败（本应用不会发生），失败直接放弃该源
             let Ok(_permit) = sem.acquire_owned().await else {
                 return 0;
             };
-            // fetch_one 只使用 pool，key_path 用临时空值（密码相关操作不会走到这里）
+            // 性能 P1：fetch_one 用独立 feed_pool（与 UI 命令的 pool 隔离，避免抢锁）
             let db_owned = Db {
-                pool,
+                pool: feed_pool.clone(),
+                feed_pool,
                 key_path: std::path::PathBuf::new(),
                 vault_path: std::path::PathBuf::new(),
                 master_key: tokio::sync::Mutex::new(None),

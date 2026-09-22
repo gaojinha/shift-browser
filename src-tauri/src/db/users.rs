@@ -1020,7 +1020,8 @@ mod tests {
         (
             dir,
             Db {
-                pool,
+                pool: pool.clone(),
+                feed_pool: pool,
                 key_path,
                 vault_path,
                 master_key: tokio::sync::Mutex::new(None),

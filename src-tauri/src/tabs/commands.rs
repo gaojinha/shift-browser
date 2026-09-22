@@ -241,15 +241,11 @@ pub async fn hibernate_idle_tabs(
     db: tauri::State<'_, Db>,
 ) -> Result<u32, String> {
     // 读取超时配置（默认 30 分钟；0 表示关闭该功能）
-    let minutes: i64 = {
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT value FROM settings WHERE key = 'tab_hibernate_minutes'")
-                .fetch_optional(&db.pool)
-                .await
-                .ok()
-                .flatten();
-        row.and_then(|(v,)| v.parse::<i64>().ok()).unwrap_or(30)
-    };
+    // 性能 P0：走 settings 缓存
+    let minutes: i64 = crate::db::settings_cache::get(&db.pool, "tab_hibernate_minutes")
+        .await
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(30);
     if minutes <= 0 {
         return Ok(0);
     }
@@ -260,15 +256,35 @@ pub async fn hibernate_idle_tabs(
         .unwrap_or_else(|e| e.into_inner())
         .clone();
 
-    // 选出候选：非激活、未休眠、且最后激活时间早于阈值
+    // 性能 P1（2026-09-22）：标签数阈值触发——标签数超过 TAB_COUNT_THRESHOLD 时，
+    // 后台（非激活）标签**切走即可休眠**（不再等 30 分钟无操作），
+    // 把常驻渲染进程控制在阈值内（多标签内存主要来源）。
+    const TAB_COUNT_THRESHOLD: usize = 8;
+    let tab_count = state
+        .tabs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .len();
+    let count_pressure = tab_count > TAB_COUNT_THRESHOLD;
+    if count_pressure {
+        log::info!(
+            "[perf] 标签数 {} 超阈值 {}，后台标签将提前休眠",
+            tab_count,
+            TAB_COUNT_THRESHOLD
+        );
+    }
+
+    // 选出候选：非激活、未休眠，且（超时 或 标签数超阈值）
     let candidates: Vec<String> = {
         let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
         let last = state.last_active.lock().unwrap_or_else(|e| e.into_inner());
         tabs.iter()
             .filter(|(id, t)| {
-                !t.hibernated
-                    && Some((*id).clone()) != active
-                    && last.get(*id).map(|ts| *ts < threshold).unwrap_or(true)
+                if t.hibernated || Some((*id).clone()) == active {
+                    return false;
+                }
+                // 超阈值：后台标签直接候选；否则按"最后激活时间早于阈值"
+                count_pressure || last.get(*id).map(|ts| *ts < threshold).unwrap_or(true)
             })
             .map(|(id, _)| id.clone())
             .collect()

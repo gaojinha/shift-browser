@@ -448,7 +448,8 @@ mod tests {
         .await
         .unwrap();
         let db = Db {
-            pool,
+            pool: pool.clone(),
+            feed_pool: pool,
             key_path: dir.path().join("master.key"),
             vault_path: dir.path().join("vault.key"),
             master_key: tokio::sync::Mutex::new(None),

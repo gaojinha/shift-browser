@@ -628,16 +628,9 @@ export const useTabsStore = defineStore('tabs', {
         // 避免同步的 is_active 覆盖用户刚点的 switchTab/closeTab 结果
         const active = tabs.find((t) => t.is_active)
         if (active && my === this._opSeq) this.activeTabId = active.id
-        // WebKit 原生历史栈状态（覆盖乐观追踪：内链跳转/JS history 也正确反映）
-        try {
-          const nav = await invoke<{ canGoBack: boolean; canGoForward: boolean }>(
-            'get_nav_state'
-          )
-          this.canGoBack = nav.canGoBack
-          this.canGoForward = nav.canGoForward
-        } catch (e) {
-          console.error('[tabs] 同步导航状态失败:', e)
-        }
+        // 性能 P2（2026-09-22）：兜底轮询**不再**查 get_nav_state（该命令需 GTK 主线程）。
+        // 导航状态改由事件驱动：切标签 / 页面加载完成 / 前进后退时调 syncNavState()。
+        // （SPA pushState 等无事件场景，由 8s 轮询里的 syncNavState 兜底，见 startPolling）
       } catch (e) {
         console.error('[tabs] 同步标签失败:', e)
       }
@@ -654,6 +647,8 @@ export const useTabsStore = defineStore('tabs', {
       if (this.pollTimer) return
       // 空闲标签休眠检查的轮次计数（每 8 轮 ≈64s 触发一次）
       let hibernateTick = 0
+      // 性能 P2：nav_state 兜底轮询计数（每 3 轮 ≈24s 一次）
+      let navTick = 0
       listen('tabs-updated', () => {
         this.syncTabs()
         // 页面加载完成/标题变化时同步真实导航状态（修复前进/后退按钮卡住 · 2026-09-22）
@@ -669,8 +664,11 @@ export const useTabsStore = defineStore('tabs', {
         // 窗口不可见时跳过（省 CPU/GTK 主线程调用；恢复可见后事件或下轮会补上）
         if (document.hidden) return
         this.syncTabs()
-        // 兜底：SPA 内路由（pushState）不发 tabs-updated 事件，靠轮询补同步导航状态
-        this.syncNavState()
+        // 性能 P2：nav_state 兜底降频——每 3 轮（≈24s）查一次，覆盖 SPA pushState 场景
+        if (++navTick >= 3) {
+          navTick = 0
+          this.syncNavState()
+        }
         // 每 8 轮（≈64s）触发一次"空闲标签休眠"检查：销毁久未激活标签的 webview
         // 回收渲染进程内存（WebKitGTK 默认不主动回收，多标签内存线性增长）。
         // 阈值由 settings.tab_hibernate_minutes 控制（默认 30 分钟，0=关闭）

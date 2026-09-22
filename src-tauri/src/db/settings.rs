@@ -182,6 +182,8 @@ pub async fn set_setting(db: tauri::State<'_, Db>, key: String, value: String) -
     .bind(&value)
     .execute(&db.pool)
     .await?;
+    // 性能 P0：同步更新缓存，保持一致性
+    crate::db::settings_cache::update(&key, &value);
     Ok(())
 }
 
@@ -207,6 +209,8 @@ pub async fn delete_setting(db: tauri::State<'_, Db>, key: String) -> DbResult<(
         .bind(&key)
         .execute(&db.pool)
         .await?;
+    // 性能 P0：同步移除缓存
+    crate::db::settings_cache::remove(&key);
     Ok(())
 }
 
@@ -242,6 +246,8 @@ async fn set_settings_bulk_inner(db: &Db, settings: Vec<Setting>) -> DbResult<()
         .bind(&s.value)
         .execute(&mut *tx)
         .await?;
+        // 性能 P0：缓存同步（批量）
+        crate::db::settings_cache::update(&s.key, &s.value);
     }
     tx.commit().await?;
     Ok(())
@@ -358,7 +364,8 @@ mod tests {
         .await
         .unwrap();
         let db = Db {
-            pool,
+            pool: pool.clone(),
+            feed_pool: pool,
             key_path: dir.path().join("master.key"),
             vault_path: dir.path().join("vault.key"),
             master_key: tokio::sync::Mutex::new(None),
