@@ -25,6 +25,9 @@ ShiftBrowser 是一款基于 **Tauri 2 + Rust + Vue 3** 的 AI 增强型桌面�
 - **全局快捷键**：Ctrl+T / W / R / L / H、Ctrl+Tab 前后切换、F12 开发者工具 —— GTK 顶层统一路由，焦点在网页时也生效
 - **启动页**：Bing 每日壁纸、RSS 资讯聚合（62 源：URL 去重 / 编码自动探测 / 标题质量过滤 / 失败重试）、快捷访问、天气
 - **系统托盘**：关闭窗口 = 缩托盘（不退出），托盘左键单击显隐窗口；菜单四项：显示/隐藏窗口 · 下载管理 · 密码库 · 退出（ksni 走 D-Bus SNI，图标用应用自身图标）
+- **默认浏览器**：设置页一键设为默认（xdg-settings 集成），desktop 文件声明 MimeType + `%U`，外部链接启动自动开新标签
+- **单实例**：已有实例运行时新实例退出并把命令行 URL 转发给已有实例开新标签 + 窗口前置（tauri-plugin-single-instance）
+- **登录持久化**：Cookie 落盘（cookies.sqlite），重启保留登录态
 
 ### AI 原生内核
 
@@ -36,10 +39,11 @@ ShiftBrowser 是一款基于 **Tauri 2 + Rust + Vue 3** 的 AI 增强型桌面�
 - **多步任务编排**：`browser_action_plan` 整体确认 + 按序执行，动作回放 / 整批重试（断点续跑）
 - **AI 友好度检测**：对齐 Lighthouse Agentic Browsing 四信号（WebMCP 工具注册 / 无障碍树 / CLS / llms.txt）
 - **WebMCP polyfill 试验**（默认关闭）：捕获网站 WebMCP 工具声明，只捕获不伪造能力
+- **MCP Server**：独立二进制 `shift-browser-mcp`（MCP 2025-03-26 stdio / newline-delimited JSON-RPC），25 个工具（13 读 + 12 写）与开放 API 同名同参，直连 Unix socket 零依赖；任何 MCP 客户端（opencode / Claude Desktop 等）配一行即驱动浏览器，eval / tool_call 不暴露
 
 ### 隐私与安全
 
-- **广告拦截 2.0**：引擎级内容过滤（`WebKitUserContentFilterStore`，手写 FFI 对接），75 条内置网络层规则 + 自定义关键词，规则变更免重启即时生效
+- **广告拦截 2.0**：引擎级内容过滤（`WebKitUserContentFilterStore`，手写 FFI 对接），79 条内置网络层规则 + 自定义关键词，规则变更免重启即时生效
 - **反指纹 2.0**：加噪 / 统一化双模式 + 指纹自测面板（"信任需要证明"）
 - **GPC**：`Sec-GPC: 1` 请求头 + `/.well-known/gpc.json` 站点声明感知
 - **零遥测审计**：全量网络出口清单，可验证"无外联"
@@ -47,12 +51,13 @@ ShiftBrowser 是一款基于 **Tauri 2 + Rust + Vue 3** 的 AI 增强型桌面�
 - **数据保护**：数据目录 700 / 数据库文件 600，settings 读写白名单，CSP 全面配置
 - **本地账号**：PBKDF2-SHA512（21 万迭代，旧账号验证成功后自动透明升级）
 - **AI 调用 SSRF 防护**：仅允许 https、拒绝内网 / 本机地址
+- **证书管理**：查看站点 TLS 证书（颁发者 / 有效期 / DNS 名 / 指纹 / 例外状态），自签 / 过期 / 主机名不匹配时拦截并提示，用户可一键放行并落库例外（gio GTlsCertificate，glib v2_70 特性）
 
 ### 可观测性
 
 - **自检（selfcheck）**：17 项只读体检（版本环境 / 数据存储 / 运行时 / 能力状态），设置页一键查看，启动自动执行
 - **结构化日志**：tauri-plugin-log，分级 + 模块 + 时间戳
-- **E2E 冒烟**：`scripts/smoke.sh` 12 项关键链路检查，防架构解耦回归
+- **E2E 冒烟**：`scripts/smoke.sh` 10 项关键链路检查（自检健康 / 引擎版本 / 快捷键 / 布局 / reparent / 注入 / 无 panic），防架构解耦回归
 
 ---
 
@@ -72,8 +77,8 @@ ShiftBrowser 是一款基于 **Tauri 2 + Rust + Vue 3** 的 AI 增强型桌面�
 ```
 src/                    # Vue 3 前端
 ├── App.vue             # 主布局：标签栏 / 地址栏 / 书签栏 / 内容区 / 状态栏
-├── components/         # TabBar、AddressBar、AISidebar、各管理弹窗
-├── stores/             # Pinia：tabs / bookmarks / ai / workspaces / mcp 等
+├── components/         # TabBar / VerticalTabBar / AddressBar / AISidebar / CommandPalette(Ctrl+K) / SpaceSwitcher / SettingsDialog / CertificatesDialog 等管理弹窗
+├── stores/             # Pinia：tabs / bookmarks / ai / workspaces / settings / passwords / downloads / extensions / groups 等
 └── types/              # 与 Rust 端的跨端契约（语义快照等）
 
 src-tauri/src/
@@ -86,16 +91,22 @@ src-tauri/src/
 │   ├── mcp.rs          #   MCP 客户端（stdio JSON-RPC 2.0）
 │   ├── agent.rs        #   Agent 执行层（动作白名单 + JS 模板防注入）
 │   ├── webmcp.rs       #   WebMCP polyfill（试验，默认关）
-│   └── llmsxtxt.rs     #   llms.txt 检测（Agentic Browsing 信号）
-├── db/                 # sqlx 数据层：bookmarks / history / passwords / sessions / mcp …
+│   └── llmstxt.rs      #   llms.txt 检测（Agentic Browsing 信号）
+├── db/                 # sqlx 数据层：bookmarks / history / passwords / sessions / settings / vault / sync / certificates / workspaces …
 ├── tabs.rs             # TabManager：多 webview 生命周期 + WebKit 信号回调
 ├── ai.rs               # AI 命令：对话 / 流式 / function calling 工具循环（≤6 轮）
+├── api.rs              # 开放 API（28 命令，Unix socket + HTTP 双形态，鉴权 / 只读 / IP 白名单）
+├── auto_tasks.rs       # 自动化任务（批量操作 / 定时任务 / Agent 编排）
 ├── extensions.rs       # 用户脚本 / 样式注入（UserContentManager）
 ├── feed.rs             # RSS 聚合（62 源，16 路并发，4MB 响应上限）
 ├── reader.rs           # 阅读模式正文提取 + ammonia 净化
 ├── translate.rs        # 翻译（选中文本 / 整页分批）
+├── tray.rs             # 系统托盘（ksni → D-Bus SNI）
+├── tls.rs              # 证书管理 / 监测 / 验证（P1-P3，gio GTlsCertificate）
+├── netmon.rs           # 网络出口监控（零遥测审计数据源）
 ├── gpc.rs / audit.rs   # GPC 请求头 / 零遥测审计
 ├── selfcheck.rs        # 只读自检
+├── bin/mcp_server.rs   # MCP Server 二进制（25 工具，stdio JSON-RPC 2.0）
 └── migrations/         # SQLite 迁移（版本 + 事务 + 记录表）
 ```
 
@@ -135,14 +146,25 @@ cd src-tauri && cargo build --release
 
 > **铁律**：Tauri release 把 `dist` 编译期嵌入二进制，改前端必须 `npm run build && cargo build --release`（前端在前），否则跑旧前端。
 
+### MCP Server 构建（可选）
+
+```bash
+cd src-tauri
+cargo build --release --bin shift-browser-mcp   # 生成 MCP Server 二进制（25 工具）
+cp target/release/shift-browser-mcp ~/.local/bin/   # 装到 PATH，供 MCP 客户端调用
+```
+
+配置示例（opencode / Claude Desktop 等）：`{ "mcpServers": { "shift-browser": { "command": "shift-browser-mcp" } } }`，详见 [docs/local-api.md](docs/local-api.md)。
+
 ### 测试与检查
 
 ```bash
 npm run lint                     # ESLint
 npm run build                    # 含 vue-tsc 类型检查
-cargo test                       # Rust 单测（108 个）
-scripts/smoke.sh                 # E2E 冒烟（12 项，完整模式会重启浏览器）
+cargo test                       # Rust 单测（118 个）
+scripts/smoke.sh                 # E2E 冒烟（10 项，完整模式会重启浏览器）
 scripts/smoke.sh --no-restart    # 只检查当前实例
+scripts/package-deb.sh           # 一键 deb 打包（校验工具链 → 构建扩展 → 前端 → release deb）
 ```
 
 CI（GitHub Actions）：前端 lint + 构建；后端 `cargo fmt --check` + `check` + `clippy -D warnings` + `test`。
@@ -175,7 +197,7 @@ AI 对话默认使用 AGNES AI（OpenAI 兼容协议）。API Key 两种配置�
 | 1 · AI 原生内核 | 页面理解 / Provider 抽象 / MCP 工具层 / Agent 执行层 / 标准跟踪 | ✅（持续增强） |
 | 2 · 隐私主权 | 反指纹 2.0、GPC、零遥测审计、密码库主密码、E2E 加密同步（服务器零知识） | ✅（Passkeys 实测引擎未暴露 WebAuthn，已降级为密码管理器增强） |
 | 3 · 交互形态与平台化 | 分屏 ✅、垂直标签 ✅、命令栏（Ctrl+K）✅、空间（Spaces）✅、真扩展体系（网络层拦截/头改写/热更新）✅、用户脚本 ✅、自动化（批量操作/定时任务/Agent 编排）✅、系统托盘 ✅ | ✅ |
-| 4 · 开放生态 | 开放 API（16 命令，Unix socket + HTTP 双形态，端口可配/局域网开关/eval 闸门）、多端协同（密码库/书签/会话/历史 E2E 加密同步）、自托管服务端套件（同步 / 工具网关 MCP / 管理页状态面板 / 模型网关） | ✅（持续增强：多端形态、API 扩展） |
+| 4 · 开放生态 | 开放 API（28 命令，Unix socket + HTTP 双形态，端口可配 / 局域网开关 / eval 闸门 / 只读模式 `api_readonly` / IP 白名单 `api_allowed_ips`）、MCP Server（`shift-browser-mcp`，25 工具，AI 标准协议驱动）、多端协同（密码库/书签/会话/历史 E2E 加密同步）、自托管服务端套件（同步 / 工具网关 MCP / 管理页状态面板 / 模型网关） | ✅（持续增强：多端形态） |
 
 ## 文档
 
@@ -186,7 +208,11 @@ AI 对话默认使用 AGNES AI（OpenAI 兼容协议）。API Key 两种配置�
 | [docs/spike-engine-capabilities-2026-09-19.md](docs/spike-engine-capabilities-2026-09-19.md) | 引擎能力实测报告（WebKitGTK 边界） |
 | [docs/standard-tracking-2026-09-20.md](docs/standard-tracking-2026-09-20.md) | WebMCP / Agentic Browsing 标准跟踪 |
 | [docs/browser-privacy-fingerprint-research-2026.md](docs/browser-privacy-fingerprint-research-2026.md) | 浏览器指纹识别调研 |
-| [scripts/](scripts/) | `smoke.sh`（E2E 冒烟）· `backup.sh`（数据库备份） |
+| [docs/local-api.md](docs/local-api.md) | 本地开放 API：28 命令、Unix socket + HTTP 双形态、鉴权与配置 |
+| [docs/spike-extension-capabilities-2026-09-21.md](docs/spike-extension-capabilities-2026-09-21.md) | 扩展体系能力边界实测（WebProcessExtension 网络层拦截） |
+| [docs/架构修复方案_2026-09-22.md](docs/架构修复方案_2026-09-22.md) | 架构修复方案（待审批） |
+| [docs/跨平台移植规划_2026-09-22.md](docs/跨平台移植规划_2026-09-22.md) | Windows / Android 双端移植规划 |
+| [scripts/](scripts/) | `smoke.sh`（E2E 冒烟）· `backup.sh`（数据库备份）· `build-extension.sh`（构建 Web 扩展 .so）· `package-deb.sh`（一键 deb 打包） |
 
 ## License
 
