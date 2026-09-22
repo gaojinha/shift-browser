@@ -18,13 +18,13 @@ const extensionsStore = useExtensionsStore()
 // 侧边导航：当前激活区块
 const activeSection = ref('general')
 const SECTIONS = [
-  { id: 'general', icon: '🏠', label: '通用' },
-  { id: 'appearance', icon: '🎨', label: '外观' },
-  { id: 'ai', icon: '🤖', label: 'AI 助手' },
-  { id: 'mcp', icon: '🔌', label: 'MCP 工具' },
-  { id: 'extensions', icon: '🧩', label: '扩展' },
-  { id: 'privacy', icon: '🛡', label: '隐私' },
-  { id: 'selfcheck', icon: '🩺', label: '自检' },
+  { id: 'general', icon: 'house', label: '通用' },
+  { id: 'appearance', icon: 'palette', label: '外观' },
+  { id: 'ai', icon: 'sparkles', label: 'AI 助手' },
+  { id: 'mcp', icon: 'plug', label: 'MCP 工具' },
+  { id: 'extensions', icon: 'puzzle', label: '扩展' },
+  { id: 'privacy', icon: 'shield', label: '隐私' },
+  { id: 'selfcheck', icon: 'activity', label: '自检' },
 ]
 
 // ---- 系统自检（可观测性）：一键汇总版本/存储/运行时/能力状态 ----
@@ -934,7 +934,7 @@ async function onRemoveKeyword(k: string) {
   <div class="dialog-overlay" v-if="props.show" @click.self="emit('close')">
     <div class="dialog settings-dialog">
       <div class="dialog-header">
-        <span>⚙ 设置</span>
+        <span class="dialog-title"><AppIcon name="gear" :size="15" /> 设置</span>
         <button class="close-btn" aria-label="关闭" @click="emit('close')">✕</button>
       </div>
       <div class="dialog-body settings-body">
@@ -947,7 +947,7 @@ async function onRemoveKeyword(k: string) {
             :class="{ active: activeSection === s.id }"
             @click="activeSection = s.id"
           >
-            <span class="nav-icon">{{ s.icon }}</span>
+            <span class="nav-icon"><AppIcon :name="s.icon" :size="16" /></span>
             <span class="nav-label">{{ s.label }}</span>
           </div>
         </div>
@@ -957,7 +957,7 @@ async function onRemoveKeyword(k: string) {
           <!-- 通用 -->
           <div v-if="activeSection === 'general'" class="settings-scroll">
             <div class="card">
-              <div class="card-title">🖥 通用</div>
+              <div class="card-title"><AppIcon name="monitor" :size="14" /> 通用</div>
               <div class="field">
                 <label>默认浏览器</label>
                 <span class="field-desc">
@@ -1133,7 +1133,7 @@ async function onRemoveKeyword(k: string) {
           </div>
           <div v-if="activeSection === 'appearance'" class="settings-scroll">
             <div class="card">
-              <div class="card-title">🎨 外观</div>
+              <div class="card-title"><AppIcon name="palette" :size="14" /> 外观</div>
               <div class="field">
                 <label>主题</label>
                 <div class="theme-picker">
@@ -1166,7 +1166,7 @@ async function onRemoveKeyword(k: string) {
                   <span class="slider"></span>
                 </label>
               </div>
-              <div class="card-title" style="margin-top: 16px">🏠 启动页</div>
+              <div class="card-title" style="margin-top: 16px"><AppIcon name="house" :size="14" /> 启动页</div>
               <div class="field">
                 <label>动态背景</label>
                 <span class="field-desc">Bing 每日高清壁纸 + 缓慢缩放动画</span>
@@ -1200,7 +1200,7 @@ async function onRemoveKeyword(k: string) {
           <!-- AI 助手 -->
           <div v-if="activeSection === 'ai'" class="settings-scroll">
             <div class="card">
-              <div class="card-title">🤖 AI 助手</div>
+              <div class="card-title"><AppIcon name="sparkles" :size="14" /> AI 助手</div>
               <div class="field">
                 <label>推理服务（Provider）</label>
                 <select
@@ -1258,7 +1258,7 @@ async function onRemoveKeyword(k: string) {
           <!-- MCP 工具（阶段 1.3：AI 面板可调用外部工具） -->
           <div v-if="activeSection === 'mcp'" class="settings-scroll">
             <div class="card">
-              <div class="card-title">🔌 MCP 工具</div>
+              <div class="card-title"><AppIcon name="plug" :size="14" /> MCP 工具</div>
               <div class="field-hint">
                 配置 MCP server（本地进程，stdio 传输）后，AI 助手对话会自动携带这些工具（function
                 calling），可让 AI 读写文件、查日历等。每次工具调用都会写入审计日志。
@@ -1294,7 +1294,7 @@ async function onRemoveKeyword(k: string) {
             </div>
 
             <div class="card">
-              <div class="card-title">🧰 可用工具（{{ mcpTools.length }}）</div>
+              <div class="card-title"><AppIcon name="puzzle" :size="14" /> 可用工具（{{ mcpTools.length }}）</div>
               <div v-if="mcpTools.length === 0" class="field-hint">暂无可用工具（需启用且能连通的 server）</div>
               <div v-for="t in mcpTools" :key="t.name" class="mcp-tool-row">
                 <span class="mcp-tool-name">{{ t.name }}</span>
@@ -1303,7 +1303,7 @@ async function onRemoveKeyword(k: string) {
             </div>
 
             <div class="card">
-              <div class="card-title">🖐 手动调用测试</div>
+              <div class="card-title"><AppIcon name="pointer" :size="14" /> 手动调用测试</div>
               <div class="mcp-add-row">
                 <select v-model="mcpCallTool">
                   <option value="">选择工具…</option>
@@ -1318,7 +1318,7 @@ async function onRemoveKeyword(k: string) {
             </div>
 
             <div class="card">
-              <div class="card-title">📋 审计日志（最近 {{ mcpAudit.length }} 条）</div>
+              <div class="card-title"><AppIcon name="list" :size="14" /> 审计日志（最近 {{ mcpAudit.length }} 条）</div>
               <div v-if="mcpAudit.length === 0" class="field-hint">暂无工具调用记录</div>
               <div v-for="a in mcpAudit" :key="a.id" class="mcp-audit-row" :class="{ fail: !a.success }">
                 <span class="mcp-audit-time">{{ a.createdAt }}</span>
@@ -1332,7 +1332,7 @@ async function onRemoveKeyword(k: string) {
           <!-- 扩展 -->
           <div v-if="activeSection === 'extensions'" class="settings-scroll">
             <div class="card">
-              <div class="card-title">🧩 扩展</div>
+              <div class="card-title"><AppIcon name="puzzle" :size="14" /> 扩展</div>
               <div class="ext-load-row">
                 <input
                   v-model="extPath"
@@ -1373,7 +1373,7 @@ async function onRemoveKeyword(k: string) {
           <!-- 隐私 -->
           <div v-if="activeSection === 'privacy'" class="settings-scroll">
             <div class="card">
-              <div class="card-title">🛡 隐私</div>
+              <div class="card-title"><AppIcon name="shield" :size="14" /> 隐私</div>
               <div class="field">
                 <label>隐私防护</label>
                 <select class="privacy-select" :value="privacyLevel" @change="onChangePrivacyLevel">
@@ -1506,9 +1506,12 @@ async function onRemoveKeyword(k: string) {
                     class="ps-item"
                     :class="{ fail: c.remote_ip.indexOf('127.') !== 0 && c.remote_ip !== '::1' }"
                   >
-                    <span class="ps-icon">{{
-                      c.remote_ip.indexOf('127.') === 0 || c.remote_ip === '::1' ? '🏠' : '🌐'
-                    }}</span>
+                    <span class="ps-icon">
+                      <AppIcon
+                        :name="c.remote_ip.indexOf('127.') === 0 || c.remote_ip === '::1' ? 'house' : 'globe'"
+                        :size="12"
+                      />
+                    </span>
                     <span class="ps-label">{{ c.remote_ip }}:{{ c.remote_port }}</span>
                     <span class="ps-detail">{{ c.proto }} · {{ c.state }} · pid {{ c.pid }}</span>
                   </div>
@@ -1869,7 +1872,7 @@ async function onRemoveKeyword(k: string) {
           <div v-if="activeSection === 'selfcheck'" class="settings-scroll">
             <div class="card">
               <div class="card-title">
-                🩺 系统自检
+                <AppIcon name="activity" :size="14" /> 系统自检
                 <button class="selfcheck-btn" :disabled="selfCheckLoading" @click="runSelfCheck">
                   {{ selfCheckLoading ? '检查中…' : '重新检查' }}
                 </button>
@@ -1900,10 +1903,11 @@ async function onRemoveKeyword(k: string) {
 
 <style scoped>
 .settings-dialog {
-  width: min(620px, calc(100vw - 32px));
-  height: min(600px, calc(100vh - 120px));
+  width: min(860px, calc(100vw - 48px));
+  height: min(660px, calc(100vh - 96px));
   display: flex;
   flex-direction: column;
+  border-radius: var(--radius-lg);
 }
 .settings-body {
   display: flex;
@@ -1916,27 +1920,28 @@ async function onRemoveKeyword(k: string) {
 
 /* 左侧导航 */
 .settings-nav {
-  width: 132px;
+  width: 184px;
   flex-shrink: 0;
   border-right: 1px solid var(--border-subtle);
-  padding: 10px 8px;
+  padding: 12px 10px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  background: var(--bg-secondary);
+  gap: 3px;
+  background: var(--bg-primary);
 }
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 7px;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13px;
   color: var(--text-secondary);
   transition:
-    background 0.15s,
-    color 0.15s;
+    background var(--dur),
+    color var(--dur),
+    box-shadow var(--dur);
   user-select: none;
 }
 .nav-item:hover {
@@ -1944,15 +1949,19 @@ async function onRemoveKeyword(k: string) {
   color: var(--text-primary);
 }
 .nav-item.active {
-  background: rgba(74, 158, 255, 0.15);
-  color: var(--accent);
+  background: var(--grad-accent);
+  color: #fff;
   font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 .nav-icon {
-  font-size: 15px;
   width: 18px;
-  text-align: center;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  color: inherit;
 }
 
 /* 右侧内容 */
@@ -2045,12 +2054,23 @@ async function onRemoveKeyword(k: string) {
   word-break: break-all;
 }
 .card-title {
-  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
   color: var(--text-primary);
   font-weight: 600;
-  margin-bottom: 10px;
-  padding-bottom: 6px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--border-subtle);
+}
+.card-title .app-icon {
+  color: var(--accent);
+}
+.dialog-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .field {
@@ -2120,7 +2140,7 @@ async function onRemoveKeyword(k: string) {
   background: var(--bg-hover);
 }
 .seg-btn.active {
-  background: rgba(74, 158, 255, 0.15);
+  background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
@@ -2202,11 +2222,11 @@ async function onRemoveKeyword(k: string) {
   transition: 0.2s;
 }
 .switch input:checked + .slider {
-  background: rgba(74, 158, 255, 0.45);
+  background: var(--accent);
 }
 .switch input:checked + .slider::before {
   transform: translateX(16px);
-  background: var(--accent);
+  background: #fff;
 }
 
 /* 危险操作 */
@@ -2424,7 +2444,7 @@ async function onRemoveKeyword(k: string) {
 .ext-badge {
   font-size: 10px;
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.15);
+  background: var(--accent-soft);
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -2449,11 +2469,11 @@ async function onRemoveKeyword(k: string) {
   color: var(--bg-primary);
 }
 .mini-btn.primary {
-  background: rgba(74, 158, 255, 0.18);
+  background: var(--accent-soft);
   color: #cfe4ff;
 }
 .mini-btn.primary:hover {
-  background: rgba(74, 158, 255, 0.3);
+  background: var(--accent-soft);
 }
 .mini-btn.danger {
   color: #ff8a8a;
@@ -2518,7 +2538,7 @@ async function onRemoveKeyword(k: string) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: rgba(74, 158, 255, 0.15);
+  background: var(--accent-soft);
   color: #cfe4ff;
   border-radius: 12px;
   padding: 3px 8px;

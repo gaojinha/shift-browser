@@ -1,0 +1,27 @@
+/* 设计令牌（Design Tokens）：圆角 / 阴影 / 缓动 / 时长
+   各组件 scoped 样式逐步引用，替代散落硬编码的 6/7/8/10/16px */
+:root {
+  /* 圆角 */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 999px;
+
+  /* 阴影（深色为主，浅色自动减淡见主题） */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.18);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.24);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.36);
+
+  /* 缓动与时长 */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 0.12s;
+  --dur: 0.18s;
+  --dur-slow: 0.28s;
+}
+
+/* 统一的控件 focus 光圈（输入框 / 按钮 / 选择器通用） */
+.focus-ring {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}

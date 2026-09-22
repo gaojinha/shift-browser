@@ -588,7 +588,7 @@ watch(
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  background: linear-gradient(135deg, #0d1220 0%, #111828 50%, #16233c 100%);
   overflow: hidden;
 }
 /* 主体：横向标签时仅一个主列；垂直标签时左侧栏 + 主列 */
@@ -608,7 +608,7 @@ watch(
 .content-area {
   flex: 1;
   position: relative;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  background: linear-gradient(135deg, #0d1220 0%, #111828 50%, #16233c 100%);
 }
 </style>
 
@@ -616,32 +616,38 @@ watch(
 /* 主题变量：深色（默认）+ 浅色（.theme-light 覆盖）
    各组件 scoped 样式引用 var(--xxx)，实现全局深浅色切换 */
 :root {
-  --bg-primary: #16213e;
-  --bg-secondary: #1e2a45;
-  --bg-hover: #26345a;
-  --bg-active: #2b3a5e;
-  --text-primary: #e0e0e0;
-  --text-secondary: #ccc;
-  --text-muted: #9aa5b8;
-  --border-color: rgba(255, 255, 255, 0.12);
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --accent: #4a9eff;
-  --success: #43a047;
+  --bg-primary: #0f1522;
+  --bg-secondary: #182033;
+  --bg-hover: #1f2940;
+  --bg-active: #283450;
+  --text-primary: #e6ebf4;
+  --text-secondary: #b7c1d0;
+  --text-muted: #8591a5;
+  --border-color: rgba(255, 255, 255, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --accent: #5b8cff;
+  --accent-2: #7c5cff;
+  --accent-soft: rgba(91, 140, 255, 0.16);
+  --grad-accent: linear-gradient(135deg, #5b8cff, #7c5cff);
+  --success: #34c759;
   --danger: #e53935;
 }
 .theme-light {
-  --bg-primary: #f5f5f5;
+  --bg-primary: #f7f8fa;
   --bg-secondary: #ffffff;
-  --bg-hover: #ececec;
-  --bg-active: #e0e0e0;
-  --text-primary: #333333;
-  --text-secondary: #444444;
-  --text-muted: #888888;
-  --border-color: #cccccc;
-  --border-subtle: #dddddd;
-  --accent: #1a73e8;
-  --success: #2e7d32;
-  --danger: #c62828;
+  --bg-hover: #eeeef2;
+  --bg-active: #e4e6ee;
+  --text-primary: #1f2430;
+  --text-secondary: #4a5263;
+  --text-muted: #8a93a5;
+  --border-color: #d7dbe3;
+  --border-subtle: #e8ebf0;
+  --accent: #3a7afe;
+  --accent-2: #6c4dff;
+  --accent-soft: rgba(58, 122, 254, 0.14);
+  --grad-accent: linear-gradient(135deg, #3a7afe, #6c4dff);
+  --success: #15a34a;
+  --danger: #dc2626;
 }
 
 /* 全局按钮反馈 */
