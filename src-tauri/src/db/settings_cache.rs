@@ -1,22 +1,42 @@
-//! settings 内存缓存（性能 P0 · 2026-09-22）
+//! settings 内存缓存（性能 P0 · 2026-09-22；v2 白名单加固 · 2026-09-22）
 //!
 //! 问题：settings 是"高频读、低频写"数据，但 Rust 侧每次读都直连 SQLite
-//! （页面加载查 record_history、休眠查 tab_hibernate_minutes、翻译查 engine/target/timeout…）。
+//! （页面加载查 record_history、休眠查 tab_hibernate_minutes、翻译查 engine/timeout…）。
 //! 实测 39 处 `SELECT value FROM settings WHERE key`，其中多在热路径 → N+1 查库。
 //!
-//! 方案：进程内 `RwLock<HashMap>` 缓存
-//! - 启动时 `warmup()` 全量预热
-//! - `get(key)` 命中即返回；未命中回源并回填
-//! - `set/delete` 写库后同步更新缓存（保持一致性）
+//! 方案：进程内 `RwLock<HashMap>` 缓存 + **白名单**。
 //!
-//! 注意：**敏感键（master_key）不进缓存**（避免明文常驻内存）。
+//! v2 关键改动（2026-09-22 隐患收口）：**只缓存白名单键**。
+//! 理由：settings 表有 39+ 处直接写（privacy/adblock/perms/useragent…多为裸 SQL 绕过 set_setting），
+//! 若缓存"全量预热"，任何一处裸写一旦与读热路径重合，就会读到脏缓存。
+//! 改为白名单后——非白名单键**一律直接回源（不缓存）**，从结构上保证"永远不会脏"：
+//!   缓存 = 白名单键 ×（写走 set_setting 透传） → 一致性闭环。
+//! 白名单选键原则 = **恰好是走 set_setting 写的热路径键**，其余（低频/裸写）不缓存。
+//!
+//! 白名单键（5 个 · 全部在 settings.ALLOWED_KEYS 内，写必然走 set_setting 透传）：
+//!   - record_history          （页面加载 · tabs.rs 热路径）
+//!   - tab_hibernate_minutes   （休眠时长 · tabs.rs 热路径）
+//!   - translate_engine/target/timeout（翻译 · translate.rs 热路径）
+//!
+//! 敏感键（master_key / ai_api_key）不在白名单 → 明文永不常驻内存，兼收安全收益。
 
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
-/// 不缓存的敏感键
-const SKIP_KEYS: &[&str] = &["master_key"];
+/// 白名单：**唯一**允许进缓存的热路径键。
+/// 约束（硬契约）：白名单键必须都在 db/settings.rs 的 ALLOWED_KEYS 内
+/// （保证写路径走 set_setting → 缓存透传 update），否则缓存永不命中/脏读。
+const WHITELIST: &[&str] = &[
+    // 页面加载 / 历史记录（tabs.rs）
+    "record_history",
+    // 内存水位休眠（tabs.rs）
+    "tab_hibernate_minutes",
+    // 翻译（translate.rs）
+    "translate_engine",
+    "translate_target",
+    "translate_timeout",
+];
 
 static CACHE: OnceLock<RwLock<HashMap<String, String>>> = OnceLock::new();
 
@@ -24,30 +44,43 @@ fn cache() -> &'static RwLock<HashMap<String, String>> {
     CACHE.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-/// 启动时全量预热（在 Db::init 之后调用一次）
+/// 是否允许进缓存（白名单判定，兼做敏感排除）
+fn is_cachable(key: &str) -> bool {
+    WHITELIST.contains(&key)
+}
+
+/// 启动时预热白名单（在 Db::init 之后调用一次）
 pub async fn warmup(pool: &SqlitePool) {
-    let rows: Vec<(String, String)> = sqlx::query_as("SELECT key, value FROM settings")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
+    // 只预热白名单键：非白名单键本来就回源，预热只服务热路径
+    let mut keys = vec![];
+    for k in WHITELIST {
+        keys.push((*k).to_string());
+    }
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?)")
+            .bind(&keys[0])
+            .bind(&keys[1])
+            .bind(&keys[2])
+            .bind(&keys[3])
+            .bind(&keys[4])
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
     let mut map = HashMap::with_capacity(rows.len());
     for (k, v) in rows {
-        if SKIP_KEYS.contains(&k.as_str()) {
-            continue;
-        }
         map.insert(k, v);
     }
     let n = map.len();
     if let Ok(mut c) = cache().write() {
         *c = map;
     }
-    log::info!("[settings-cache] 预热完成：{} 项", n);
+    log::info!("[settings-cache] 白名单预热完成：{} 项（共 {})", n, WHITELIST.len());
 }
 
-/// 读设置（缓存优先，未命中回源并回填）
+/// 读设置（白名单 → 缓存优先；非白名单 → 直接回源不缓存）
 pub async fn get(pool: &SqlitePool, key: &str) -> Option<String> {
-    if SKIP_KEYS.contains(&key) {
-        // 敏感键直连库（不缓存）
+    if !is_cachable(key) {
+        // 非白名单（敏感/裸写低频键）：永不进缓存，避免脏读
         return sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = ?")
             .bind(key)
             .fetch_optional(pool)
@@ -77,14 +110,16 @@ pub async fn get(pool: &SqlitePool, key: &str) -> Option<String> {
 }
 
 /// 同步读（仅用于已在缓存中的热路径；未命中返回 None，调用方自行回源）
-/// 注意：不能在 async 上下文里跨 await 持有读锁——本函数不 await，安全。
 pub fn get_sync(key: &str) -> Option<String> {
+    if !is_cachable(key) {
+        return None; // 非白名单不缓存，同步读等价于未命中
+    }
     cache().read().ok().and_then(|c| c.get(key).cloned())
 }
 
-/// 写设置后同步更新缓存
+/// 写设置后同步更新缓存（仅白名单键；非白名单不缓存自然无更新）
 pub fn update(key: &str, value: &str) {
-    if SKIP_KEYS.contains(&key) {
+    if !is_cachable(key) {
         return;
     }
     if let Ok(mut c) = cache().write() {
@@ -92,8 +127,11 @@ pub fn update(key: &str, value: &str) {
     }
 }
 
-/// 删除设置后同步移除缓存
+/// 删除设置后同步移除缓存（仅白名单键）
 pub fn remove(key: &str) {
+    if !is_cachable(key) {
+        return;
+    }
     if let Ok(mut c) = cache().write() {
         c.remove(key);
     }
@@ -103,21 +141,30 @@ pub fn remove(key: &str) {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn cache_hit_and_update() {
-        // 直接测内存缓存语义（不依赖真实库）
-        update("homepage", "https://example.com");
-        assert_eq!(get_sync("homepage").as_deref(), Some("https://example.com"));
-        update("homepage", "https://bing.com");
-        assert_eq!(get_sync("homepage").as_deref(), Some("https://bing.com"));
-        remove("homepage");
-        assert_eq!(get_sync("homepage"), None);
+    #[test]
+    fn whitelist_only() {
+        // 白名单键允许进缓存
+        assert!(is_cachable("record_history"));
+        assert!(is_cachable("tab_hibernate_minutes"));
+        assert!(is_cachable("translate_engine"));
+        // 非白名单（裸写/敏感）一律拒绝
+        assert!(!is_cachable("master_key"));
+        assert!(!is_cachable("ai_api_key"));
+        assert!(!is_cachable("privacy_shield_level"));
+        assert!(!is_cachable("user_agent"));
     }
 
     #[test]
-    fn sensitive_keys_not_cached() {
-        // master_key 不应进缓存
-        update("master_key", "secret");
-        assert_eq!(get_sync("master_key"), None);
+    fn non_whitelist_never_stored() {
+        // 模拟热路径误写非白名单键：缓存拒收
+        update("ai_api_key", "sk-xxx");
+        assert_eq!(get_sync("ai_api_key"), None);
+        update("user_agent", "Mozilla/5.0");
+        assert_eq!(get_sync("user_agent"), None);
+        // 白名单正常
+        update("record_history", "true");
+        assert_eq!(get_sync("record_history").as_deref(), Some("true"));
+        remove("record_history");
+        assert_eq!(get_sync("record_history"), None);
     }
 }
