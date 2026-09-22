@@ -538,7 +538,7 @@ pub fn run() {
           tokio::time::sleep(std::time::Duration::from_millis(300)).await;
           for url in urls {
             if let Some(state) = app_handle.try_state::<TabManager>() {
-              match tabs::create_tab(app_handle.clone(), state, url.clone(), None).await {
+              match crate::tabs::commands::create_tab(app_handle.clone(), state, url.clone(), None).await {
                 Ok(tab) => log::info!("[single-instance] 外部链接已打开: {}", tab.id),
                 Err(e) => log::warn!("[single-instance] 外部链接打开失败: {} ({})", redact_url(&url), e),
               }
@@ -601,7 +601,7 @@ pub fn run() {
       useragent::set_user_agent,
       useragent::set_user_agent_override,
       // 一键清除浏览数据（隐私 · 2026-09-22）
-      tabs::clear_browsing_data,
+      tabs::commands::clear_browsing_data,
       // 权限请求（安全 #2 · 2026-09-22）
       perms::respond_permission,
       perms::list_permission_rules,
@@ -669,36 +669,36 @@ pub fn run() {
       db::sync::sync_pull,
       db::sync::sync_clear,
       // 标签页
-      tabs::create_tab,
-      tabs::close_tab,
-      tabs::close_all_tabs,
-      tabs::switch_tab,
+      tabs::commands::create_tab,
+      tabs::commands::close_tab,
+      tabs::commands::close_all_tabs,
+      tabs::commands::switch_tab,
       // 性能：空闲标签休眠（回收渲染进程内存）
-      tabs::hibernate_idle_tabs,
+      tabs::commands::hibernate_idle_tabs,
       // 翻译：对当前活动标签整页翻译（复用 whole_page_translate.js）
-      tabs::translate_current_page,
-      tabs::navigate_tab,
-      tabs::go_back,
-      tabs::go_forward,
-      tabs::get_tabs,
-      tabs::set_webview_visible,
-      tabs::update_tab,
-      tabs::reload_tab,
-      tabs::reorder_tabs,
-      tabs::toggle_pin,
-      tabs::toggle_mute,
-      tabs::toggle_maximize,
-      tabs::minimize_window,
-      tabs::close_window,
-      tabs::start_drag_window,
-      tabs::set_bookmarks_bar_visible,
-      tabs::set_vertical_tabs,
-      tabs::set_split_tab,
-      tabs::clear_split,
-      tabs::get_split_tab,
-      tabs::get_nav_state,
-      tabs::set_webview_ai_panel,
-      tabs::open_devtools,
+      tabs::commands::translate_current_page,
+      tabs::commands::navigate_tab,
+      tabs::commands::go_back,
+      tabs::commands::go_forward,
+      tabs::commands::get_tabs,
+      tabs::commands::set_webview_visible,
+      tabs::commands::update_tab,
+      tabs::commands::reload_tab,
+      tabs::commands::reorder_tabs,
+      tabs::commands::toggle_pin,
+      tabs::commands::toggle_mute,
+      tabs::commands::toggle_maximize,
+      tabs::commands::minimize_window,
+      tabs::commands::close_window,
+      tabs::commands::start_drag_window,
+      tabs::commands::set_bookmarks_bar_visible,
+      tabs::commands::set_vertical_tabs,
+      tabs::commands::set_split_tab,
+      tabs::commands::clear_split,
+      tabs::commands::get_split_tab,
+      tabs::commands::get_nav_state,
+      tabs::commands::set_webview_ai_panel,
+      tabs::commands::open_devtools,
       // 自检（可观测性）
       selfcheck_cmd,
       // AI 侧边栏
@@ -1620,7 +1620,7 @@ pub fn run() {
             tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
             for url in urls {
               let state = app_handle.state::<TabManager>();
-              match tabs::create_tab(app_handle.clone(), state, url.clone(), None).await {
+              match crate::tabs::commands::create_tab(app_handle.clone(), state, url.clone(), None).await {
                 Ok(tab) => log::info!("[default-browser] 外部链接已打开: {}", tab.id),
                 Err(e) => log::warn!("[default-browser] 外部链接打开失败: {} ({})", redact_url(&url), e),
               }

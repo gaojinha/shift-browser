@@ -487,7 +487,7 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };
-            match crate::tabs::create_tab(app.clone(), state, url, None).await {
+            match crate::tabs::commands::create_tab(app.clone(), state, url, None).await {
                 Ok(t) => json!({"ok": true, "data": t}),
                 Err(e) => json!({"ok": false, "error": e}),
             }
@@ -506,9 +506,9 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };
             let r = match cmd {
-                "close_tab" => crate::tabs::close_tab(app.clone(), state, id).await,
-                "switch_tab" => crate::tabs::switch_tab(app.clone(), state, id).await,
-                _ => crate::tabs::reload_tab(app.clone(), state, id).await,
+                "close_tab" => crate::tabs::commands::close_tab(app.clone(), state, id).await,
+                "switch_tab" => crate::tabs::commands::switch_tab(app.clone(), state, id).await,
+                _ => crate::tabs::commands::reload_tab(app.clone(), state, id).await,
             };
             match r {
                 Ok(t) => json!({"ok": true, "data": t}),
@@ -534,7 +534,7 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };
-            match crate::tabs::navigate_tab(app.clone(), state, id, url).await {
+            match crate::tabs::commands::navigate_tab(app.clone(), state, id, url).await {
                 Ok(t) => json!({"ok": true, "data": t}),
                 Err(e) => json!({"ok": false, "error": e}),
             }
@@ -571,7 +571,7 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };
-            match crate::tabs::create_tab(app.clone(), state, url, None).await {
+            match crate::tabs::commands::create_tab(app.clone(), state, url, None).await {
                 Ok(t) => json!({"ok": true, "data": t}),
                 Err(e) => json!({"ok": false, "error": e}),
             }
@@ -581,7 +581,7 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };
             // 注意：Rust 侧 create_tab 需要绝对 URL，"newtab" 会解析失败 → 用 shift://newtab
-            match crate::tabs::create_tab(app.clone(), state, "shift://newtab".to_string(), None).await {
+            match crate::tabs::commands::create_tab(app.clone(), state, "shift://newtab".to_string(), None).await {
                 Ok(t) => json!({"ok": true, "data": t}),
                 Err(e) => json!({"ok": false, "error": e}),
             }
@@ -864,7 +864,7 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };
-            match crate::tabs::toggle_pin(state, id).await {
+            match crate::tabs::commands::toggle_pin(state, id).await {
                 Ok(v) => json!({"ok": true, "data": v}),
                 Err(e) => json!({"ok": false, "error": e}),
             }
@@ -878,16 +878,16 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };
-            match crate::tabs::toggle_mute(app.clone(), state, id).await {
+            match crate::tabs::commands::toggle_mute(app.clone(), state, id).await {
                 Ok(v) => json!({"ok": true, "data": v}),
                 Err(e) => json!({"ok": false, "error": e}),
             }
         }
-        "minimize_window" => match crate::tabs::minimize_window(app.clone()).await {
+        "minimize_window" => match crate::tabs::commands::minimize_window(app.clone()).await {
             Ok(_) => json!({"ok": true, "data": null}),
             Err(e) => json!({"ok": false, "error": e}),
         },
-        "maximize_window" => match crate::tabs::toggle_maximize(app.clone()).await {
+        "maximize_window" => match crate::tabs::commands::toggle_maximize(app.clone()).await {
             Ok(v) => json!({"ok": true, "data": v}),
             Err(e) => json!({"ok": false, "error": e}),
         },
