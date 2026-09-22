@@ -3,7 +3,6 @@
 //! 29 个 #[tauri::command] 从 tabs.rs 迁出。依赖主文件的 TabManager/Tab 等。
 
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use super::*;
 
@@ -314,6 +313,7 @@ pub async fn hibernate_idle_tabs(
 /// 复用既有整页翻译脚本：脚本自包含（进度浮层 + 分批调 shift://__translate__/batch + 回填 DOM），
 /// 放在 tabs.rs 是为了直接访问 TabManager 的 active_id（该字段不对外暴露）
 #[tauri::command]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub async fn translate_current_page(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,

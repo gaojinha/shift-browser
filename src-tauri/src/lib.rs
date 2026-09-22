@@ -1,5 +1,4 @@
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod agent_cmd;
 mod ai;
@@ -446,6 +445,7 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub fn run() {
     // ===== 画面闪烁修复：禁用 WebKitGTK 的 DMA-BUF 渲染器 =====
     // WebKitGTK 2.42+ 默认走 DMA-BUF 渲染路径，在部分核显（本机 Intel HD 630 / i915）

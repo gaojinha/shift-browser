@@ -7,7 +7,6 @@
 //! 3. 确认后执行动作（仅当前活动标签），返回结果给工具循环
 
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -23,6 +22,7 @@ fn pending() -> &'static Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool
 
 /// 请求动作（AI 工具循环调用）：发确认事件给前端，等待用户确认（60s 超时）。
 /// 返回 Ok(true) 已允许 / Ok(false) 用户拒绝 / Err 超时或系统错误
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub async fn request_agent_action(
     app: &AppHandle,
     params: &crate::engine::agent::AgentActionParams,
@@ -59,6 +59,7 @@ pub async fn request_agent_action(
 
 /// 前端确认回调：用户点"允许/拒绝"后调用
 #[tauri::command]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub fn agent_confirm_action(request_id: String, approved: bool) -> Result<(), String> {
     let mut map = pending().lock().unwrap();
     let tx = map
@@ -70,6 +71,7 @@ pub fn agent_confirm_action(request_id: String, approved: bool) -> Result<(), St
 }
 
 /// 请求多步动作（AI 工具循环调用）：发确认事件给前端，等待用户一次性确认整个计划。
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub async fn request_multi_step_action(
     app: &AppHandle,
     plan: &crate::engine::agent::MultiStepPlan,
@@ -105,6 +107,7 @@ pub async fn request_multi_step_action(
 
 /// 前端多步确认回调：用户点"允许全部/拒绝"后调用
 #[tauri::command]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub fn agent_confirm_multi_step(request_id: String, approved: bool) -> Result<(), String> {
     let mut map = pending().lock().unwrap();
     let tx = map

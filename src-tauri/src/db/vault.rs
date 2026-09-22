@@ -74,6 +74,7 @@ pub fn derive_key(password: &str, salt: &[u8]) -> [u8; KEY_LEN] {
 }
 
 /// 包裹主密钥 → base64(salt || nonce || 密文)
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub fn wrap_key(master: &[u8; KEY_LEN], password: &str) -> String {
     let mut salt = [0u8; SALT_LEN];
     rand::thread_rng().fill_bytes(&mut salt);

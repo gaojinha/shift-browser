@@ -14,7 +14,6 @@
 //! - 每次调用写 tool_audit_log（审计）
 
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -201,6 +200,7 @@ pub async fn add_server(
 }
 
 /// 删除 server 配置（同时断开连接缓存）
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub async fn remove_server(pool: &SqlitePool, id: i64) -> Result<(), String> {
     sqlx::query("DELETE FROM mcp_servers WHERE id = ?")
         .bind(id)
@@ -213,6 +213,7 @@ pub async fn remove_server(pool: &SqlitePool, id: i64) -> Result<(), String> {
 }
 
 /// 切换 server 启用状态
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub async fn set_server_enabled(pool: &SqlitePool, id: i64, enabled: bool) -> Result<(), String> {
     sqlx::query("UPDATE mcp_servers SET enabled = ? WHERE id = ?")
         .bind(if enabled { 1 } else { 0 })
@@ -227,6 +228,7 @@ pub async fn set_server_enabled(pool: &SqlitePool, id: i64, enabled: bool) -> Re
 }
 
 /// 建立（或复用）连接：spawn 进程 + initialize 握手
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 async fn connect(_pool: &SqlitePool, row: &McpServerRow) -> Result<Arc<tokio::sync::Mutex<McpConnection>>, String> {
     if let Some(conn) = connections().lock().unwrap().get(&row.id) {
         return Ok(conn.clone());

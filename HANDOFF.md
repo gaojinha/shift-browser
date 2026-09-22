@@ -2621,7 +2621,33 @@ src-tauri/src/extensions/adblock.rs  # 广告拦截（301 行）
 
 ---
 
-## 下一步（截至第一百零四章）
+## 第一百零五章（架构收紧）：循环依赖断开 + unwrap 护栏提精度
+
+**背景**：复测发现两处"做得不够细"的问题，本轮修正。
+
+### 1. 彻底断开 engine → ai 循环依赖
+- 上轮只把 `ChatMessage` 下沉到 `engine/types.rs`，**漏了其字段引用的 `ToolCall`/`ToolCallFunction`**
+  （`engine/types.rs:19` 仍写 `Vec<crate::ai::ToolCall>`）→ 循环依赖未解干净。
+- 本轮：`ToolCall`/`ToolCallFunction` 一并下沉到 `engine/types.rs`，`ai.rs` re-export 保持路径。
+- **结果**：`engine/` 全目录已无 `crate::ai::` 引用，循环依赖彻底断开。
+
+### 2. unwrap 护栏从「文件级」收紧到「函数级」
+- 上轮为让 CI 通过，给 12 个文件加了**文件级** `#![allow]`（整文件豁免）→ 护栏退化为
+  "只防新增文件"，这些文件内新增 unwrap 不会被拦。
+- 本轮：
+  - 删除 5 个**多余**的文件级 allow（`api.rs`/`content_cmd.rs`/`db/userscripts.rs`/`reader.rs`/
+    `tabs/util.rs` —— 实测 0 处 unwrap，当初批量加多了）
+  - 其余改为 **16 处函数级 `#[allow]`**（精确到含 unwrap 的函数）
+  - 补上此前漏统计的 `db/vault.rs::wrap_key` 与 `translate.rs::client`（其用法是 `.expect()` 非
+    `.unwrap()`，上轮 grep 漏掉）
+- **结果**：`cargo clippy --lib -D unwrap_used -D expect_used` 通过，且**新增 unwrap 会被 CI 拦截**
+  （护栏精度恢复）。
+
+**验证**：Rust **116 passed**；`clippy --lib` unwrap 护栏通过；真机运行正常，0 崩溃。
+
+---
+
+## 下一步（截至第一百零五章）
 
 - **阶段 4 继续**：多端形态（移动/平板协同）——路线图剩的最后一块大件。
 - **实战检验（进行中）**：下载目录、系统托盘已修并验收；开放 API 扩展（C2）已交付；

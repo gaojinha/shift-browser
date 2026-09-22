@@ -1,5 +1,4 @@
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 // 标签页管理器
 // 管理标签元数据 + 嵌入式 webview 生命周期
@@ -110,6 +109,7 @@ impl TabManager {
     }
 
     /// 记录标签激活时间（休眠判定的输入）
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
     pub fn touch_active(&self, id: &str) {
         self.last_active
             .lock()
@@ -228,6 +228,7 @@ impl TabManager {
     }
 
     /// 创建嵌入式 webview
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
     fn create_webview(app: &AppHandle, id: &str, url: &str, private: bool) -> Result<(), String> {
         let window = app
             .get_window("main")

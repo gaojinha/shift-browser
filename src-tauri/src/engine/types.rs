@@ -16,5 +16,22 @@ pub struct ChatMessage {
     pub tool_call_id: Option<String>,
     /// assistant 消息请求工具调用时填
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<crate::ai::ToolCall>>,
+    pub tool_calls: Option<Vec<ToolCall>>,
+}
+
+/// OpenAI function calling 的工具调用请求（assistant 消息里）
+/// （原 `ai::ToolCall`，下沉以彻底断开 engine→ai 反向依赖）
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub call_type: String,
+    pub function: ToolCallFunction,
+}
+
+/// 工具调用中的函数信息
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ToolCallFunction {
+    pub name: String,
+    pub arguments: String,
 }

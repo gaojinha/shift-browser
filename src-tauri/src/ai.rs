@@ -1,5 +1,4 @@
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 // AI 侧边栏：对接 AGNES AI（OpenAI 兼容 API）
 // baseURL: https://apihub.agnes-ai.com/v1（从环境变量 AGNES_API_KEY 读 key）
@@ -26,20 +25,9 @@ impl ChatMessage {
     }
 }
 
-/// OpenAI function calling 的工具调用请求（assistant 消息里）
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ToolCall {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub call_type: String,
-    pub function: ToolCallFunction,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ToolCallFunction {
-    pub name: String,
-    pub arguments: String,
-}
+// P0-2 补完（2026-09-22）：ToolCall/ToolCallFunction 下沉到 engine::types，
+// 与 ChatMessage 一同断开 engine→ai 反向依赖。此处 re-export 保持路径不变。
+pub use crate::engine::types::{ToolCall, ToolCallFunction};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ChatRequest {
@@ -98,6 +86,7 @@ fn cancel_flags() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
 
 /// 取消指定 request_id 的流式请求（前端"停止生成"按钮调用）
 #[tauri::command]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub fn ai_cancel_stream(request_id: String) {
     if let Some(flag) = cancel_flags().lock().unwrap().get(&request_id) {
         flag.store(true, Ordering::Relaxed);
@@ -457,6 +446,7 @@ pub async fn agnes_chat_impl(
 /// AI 对话（流式，SSE 逐块推送）——经 Provider 抽象路由（默认 AGNES）
 /// 前端点"停止"时调 ai_cancel_stream(request_id)，本命令检测到取消标志后提前返回。
 #[tauri::command]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub async fn ai_chat_stream(
     request_id: String,
     provider: Option<String>,

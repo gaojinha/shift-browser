@@ -1,5 +1,4 @@
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 // 阅读模式：用 readability 算法提取正文，生成干净的大字排版页，新标签打开
 // 注意：readability::scrape 内部是 blocking reqwest，必须 spawn_blocking，

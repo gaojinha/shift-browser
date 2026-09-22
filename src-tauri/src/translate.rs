@@ -21,6 +21,7 @@ const CHROME_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
 /// 值来自设置 translate_timeout（默认 15 秒，可在设置界面调整）
 static CLIENT: OnceLock<Client> = OnceLock::new();
 
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 fn client() -> &'static Client {
     CLIENT.get_or_init(|| {
         Client::builder()
