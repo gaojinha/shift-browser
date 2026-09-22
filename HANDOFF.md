@@ -2211,12 +2211,165 @@ setup 完成后延迟 2 秒（等前端初始化建初始标签）逐条 `create
 
 ---
 
-## 下一步（截至第八十七章）
+## 第八十八章（阶段 4）：启动页天气卡 Bing 三层格式
+
+参考 Bing「永济天气」答案卡的版式，把启动页天气卡从"一行文字"重排为三层：
+- **大字温度**（40px 锚点）+ **状况行**（晴/多云 + 最高/最低）+ **底部 5 天预报**（5 列网格）
+- 数据源不变：当前/当天走 `wttr.in/Yuncheng`（运城）；wttr 的 j1 只给 3 天，5 天日报改走
+  **Open-Meteo**（运城坐标 35.02,111.00，无 key、CORS 友好）
+- CSP `connect-src` 放行 `https://api.open-meteo.com`
+- 翻译表补 `Smoky haze→烟霾`、`Partly Cloudy→多云`，并把查表改为**大小写不敏感**
+- 卡片宽度修正（`#weatherCard > div { width:100% }`），消除预报条溢出
+
+**真机验证**：自家浏览器截图确认三层卡渲染正常（大字 21° / 烟霾·最高26°最低17° / 5 天条）。
+提交 `b650633`。
+
+---
+
+## 第八十九章（阶段 4）：证书管理 / 监测 / 验证（三件套）
+
+浏览器首次具备完整证书能力，分三期交付：
+
+**P1 看证书**：`tls.rs` 走 `web_view.tls_info()` + gio 取主题/签发者/有效期/SAN/链，
+SHA-256 指纹自算；`get_tls_info` 等命令；地址栏 🔒 可点开**证书中心**。
+
+**P2 验证/放行**：挂钩 `load-failed-with-tls-errors` → 缓存证书 + 弹**危险站点拦截页**
+（`CertWarning.vue`，继续前往 / 返回）；`accept_cert_exception` 调
+`allow_tls_certificate_for_host` 放行并落库。
+
+**P3 监测**：页面加载完成自动采集比对**指纹变更**（疑似中间人 → 事件告警）；
+`scan_cert_expiry` 扫临期；`cert_events` 事件流；证书中心四页签（当前网页/已监测/例外/事件）。
+
+**数据层**：迁移 v14 三表（`certificates` / `cert_exceptions` / `cert_events`）+ `db/certificates.rs`。
+
+**踩坑**：`PermissionRequest` 类接口类型不支持 `Cast`，类型判定改走 `GTypeInstance` FFI 取实例
+类型名；`with_webview` 是**异步派发**，取值须用 oneshot 通道 + 超时。
+
+**踩坑**：拦截页是 Vue 层覆盖层，会被 `apply_split_layout` 的"隐藏-再显示"覆盖 → 新增
+`UI_OVERLAY_ACTIVE` 覆盖层锁，布局重排时只隐藏不显示。
+
+**真机验证**：迁移 v14 入库；youtube.com 证书自动落库（指纹/签发者/有效期 + first_seen 事件）；
+`self-signed.badssl.com` 触发拦截（"未知的 CA"），拦截页稳定显示（高哥目视确认）。
+提交 `b8d57fd`。
+
+---
+
+## 第九十章（安全）：7 项安全加固
+
+| # | 问题 | 加固 |
+|---|---|---|
+| 1 | Cookie 库按 umask 落盘（664，组/其他可读） | 启动 + 每 120s 重扫收紧到 600 |
+| 2 | WebKit 权限请求无处理器（不可控不可审计） | 新模块 `perms.rs`：默认挂起 + 白名单 + `PermissionPrompt.vue` + 落库 `perm_allow` |
+| 3 | 本地 API token 逐字符比较（时序侧信道） | `ct_eq()` 常量时间比较（Bearer + 查询串两处） |
+| 4 | LAN 绑定 + 空 IP 白名单 = 整个局域网可达 | 强制要求非空白名单，否则拒绝绑定退回本机 |
+| 6 | DevTools 全局开启 | 改设置项 `enable_devtools`，默认关 |
+| 7 | `get_password(domain)` 信任前端入参 | 后端校验 domain 必须匹配活动标签 host |
+| 9 | 证书例外永久有效 | 默认 90 天有效期，`has_exception` 校验未过期 |
+
+**未做**：#5 CSP nonce 化（取消 `script-src 'unsafe-inline'`）——首版注入未生效，导致启动页/主 UI
+内联脚本被 CSP 拒绝，**已回退**，待重做（需改造运行时 HTML 注入 + 充分回归）。
+
+**真机验证**：cookie 权限 `-rw-------`；`[perm] 白名单已载入`；`enable_devtools` 默认未开。
+提交 `b8d57fd`。
+
+---
+
+## 第九十一章（修复）：视频进程崩溃（WebKit 硬解 padding 断言）
+
+**症状**：播放某些 H.264 视频时 WebKitWebProcess 直接 abort：
+```
+** (WebKitWebProcess:PID): ERROR **: video meta uses 368x480 instead of 360x480
+```
+
+**成因（推断）**：`360 → 368` 是按 16 字节对齐补宽，典型**硬件解码器输出 padding**；WebKit 的
+video meta 校验期望未对齐宽度，断言失败 → `g_error()` → 进程终止。（未能定位 WebKit 该断言的
+确切源码，搜索引擎/源码检索均未命中。）
+
+**修复①**：启动时设 `GST_PLUGIN_FEATURE_RANK`，把 V4L2/VA-API 硬件解码器 rank 压 0 → 回退软件
+解码（libav），绕开对齐 padding 路径。可被用户环境变量覆盖。
+
+**修复②**：挂 `connect_web_process_terminated` → 崩溃/内存超限**自动重载**（30s 冷却）+ 前端
+toast，避免标签直接变白。
+
+**真机验证**：高哥持续刷视频站**未再崩溃**；日志 0 条崩溃/自动恢复记录；6 个 WebKit 子进程均继承
+该环境变量。
+
+---
+
+## 第九十二章（隐私）：日志脱敏 + 历史默认关
+
+**问题**：日志记了**完整 URL**（`create_tab: url=…`、`page_load_finished: title=…`）且文件权限 664；
+浏览历史默认开启（`record_history=true`，已记 396 条）。
+
+**修复**：
+- 新增 `redact_url()`：日志里 URL 一律只输出 `scheme://host`，砍掉路径/查询/片段（搜索词、文档名、
+  token 都在那里）——覆盖 10 处 URL 日志点
+- `page_load_finished` 不再记页面标题，改记 host
+- 日志目录/文件纳入周期加固（700 / 600）
+- `record_history` 默认改为 **false**（前端默认值 + Rust 默认值 + 当前设置三处统一）
+
+**真机验证**：日志 URL 只剩 host、泄露行数 0、日志文件 `-rw-------`、历史停在 0 条（存量 396 条
+已按高哥要求清空）。
+
+---
+
+## 第九十三章（隐私）：无痕标签（private tab）
+
+浏览器首个**真·隔离**的隐私形态（此前"无痕/隐私窗口"全项目 0 命中）。
+
+- **真隔离而非伪装**：`create_tab` 新增 `private` 参数 → `WebviewBuilder.incognito(true)` →
+  wry 走 **ephemeral WebContext**（`WebsiteDataManager::new_ephemeral()`），
+  **Cookie / 缓存 / 存储不落盘**，与常规标签完全隔离。
+- **不计历史**：`Tab.private` 在页面加载完成记录历史前强制短路（不看设置）。
+- **休眠唤醒保属性**：唤醒时按 `tab.private` 重建，仍为无痕。
+- **入口**：标签栏「+」旁新增 🕶 按钮；无痕标签标题前带 🕶 标识。
+
+**踩坑**：`create_webview` 签名从 3 参变 4 参，牵动 `api.rs`（3 处）、`lib.rs`（单实例/默认浏览器 2 处）、
+`tabs.rs`（on_new_window 1 处）全部补齐实参。
+
+**验证**：`cargo check` 通过；前端 `vue-tsc` 通过。**交互待高哥点 🕶 实测**。
+
+---
+
+## 第九十四章（隐私）：一键清除浏览数据 + 设置内证书入口
+
+**一键清除浏览数据**：新增命令 `clear_browsing_data(scopes)`，按需清除
+**历史 / Cookie / 缓存 / 本地存储 / 下载记录 / 会话**：
+- DB 侧：`DELETE FROM history|downloads|sessions`
+- WebKit 侧（主线程）：`CookieManager.delete_all_cookies()` + `WebContext.clear_cache()` +
+  `WebsiteDataManager.clear(LOCAL_STORAGE|SESSION_STORAGE|INDEXEDDB_DATABASES|DOM_CACHE, …)`
+- UI：设置→隐私 底部新增卡片（勾选框 + 「立即清除」）
+
+**设置内证书入口**：设置→隐私新增「证书管理 → 打开证书中心」（`emit('openCerts')`，
+由 App.vue 接 `showCerts = true`），此前只能点地址栏 🔒。
+
+**踩坑**：`WebsiteDataManager::clear` 在**手动绑定** `WebsiteDataManagerExtManual`
+（非 auto 的 `WebsiteDataManagerExt`），trait 名选错会报"trait bounds not satisfied"。
+
+**未做（延期，如实记录）**：
+- **设置分区重构**：现「隐私」分区 450 行、混装隐私/密码库/同步/本地API，拆分需大段模板手术 +
+  回归，另立一轮。
+- **加密 DNS（DoH）**：WebKitGTK 不暴露 DoH 配置，需自建本地解析器，独立工程。
+
+**验证**：`cargo check` + `vue-tsc` 通过；真机启动 0 崩溃。交互待高哥实测。
+
+---
+
+## 下一步（截至第九十四章）
 
 - **阶段 4 继续**：多端形态（移动/平板协同）——路线图剩的最后一块大件。
 - **实战检验（进行中）**：下载目录、系统托盘已修并验收；开放 API 扩展（C2）已交付；
   deb 打包安装闭环（第八十四章）；默认浏览器设置（第八十五章）+ 登录持久化/单实例
   （第八十六章）待高哥实测确认；MCP Server（第八十七章）待高哥在 opencode/其它 MCP
   客户端接入实测。
-- **工程**：HANDOFF 逐章记录机制（已补至 87 章，后续每章随提交更新）。
+- **证书/安全/隐私（2026-09-22 交付）**：证书三件套（88/89 章）待高哥进一步实测证书中心交互；
+  安全加固 7 项（90 章）已生效；视频崩溃修复（91 章）高哥实测不再崩；日志脱敏 + 历史默认关
+  （92 章）已生效。
+- **待重做**：#5 CSP nonce 化（取消脚本 `'unsafe-inline'`）——已回退，需改造运行时 HTML 注入 +
+  充分回归后再上。
+- **待排查**：视频崩溃的**确切 WebKit 断言源码**未定位（现为规避方案）；若软解性能不足，
+  可改"只降 V4L2、保 VA-API"的折中。
+- **隐私（2026-09-22 第二批）**：无痕标签（93 章）与本轮清除浏览数据/证书入口（94 章）**待高哥交互实测**。
+- **延期待做**：设置分区重构（隐私/安全/本地服务三拆）、加密 DNS（DoH）。
+- **工程**：HANDOFF 逐章记录机制（已补至 94 章，后续每章随提交更新）。
 
