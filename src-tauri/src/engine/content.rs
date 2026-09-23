@@ -9,13 +9,15 @@
 //!
 //! 复用：正文提取（content/extract）走 reader.rs 的 curl+readability 管线（独立命令）。
 
+use ts_rs::TS;
 use serde::{Deserialize, Serialize};
 use crate::engine::webmcp::WebmcpToolDef;
 
 /// 结构体：无障碍树语义元素（阶段 1.5 试验：对齐 Lighthouse Agentic Browsing
 /// "代理为中心的无障碍"信号——每个可交互元素要有**程序化名称**（aria-label）与
 /// **有效角色**（role），Agent 靠它们语义定位，不再只靠标签文本猜）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct AriaElement {
     /// 元素角色（role 属性或推导角色，如 button/link/checkbox/combobox）
     pub role: String,
@@ -28,7 +30,8 @@ pub struct AriaElement {
 }
 
 /// 语义快照（页面理解层的核心产出）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct Snapshot {
     /// 页面标题
     pub title: String,
@@ -119,7 +122,8 @@ pub fn ai_friendliness(snap: &Snapshot) -> AiFriendlinessReport {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct InteractiveStats {
     pub links: usize,
     pub buttons: usize,
@@ -129,14 +133,16 @@ pub struct InteractiveStats {
     pub iframes: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct FormField {
     pub name: String,
     pub field_type: String,
     pub placeholder: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct LinkInfo {
     pub text: String,
     pub href: String,

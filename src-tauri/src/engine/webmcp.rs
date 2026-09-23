@@ -15,6 +15,7 @@
 //! - 捕获的工具声明只存内存（window 变量），不落盘、不出网
 //! - 幂等：重复注入无害
 
+use ts_rs::TS;
 /// polyfill 注入脚本（document_start）。幂等：已安装则直接返回。
 pub const WEBMCP_POLYFILL_JS: &str = r#"
 (() => {
@@ -42,10 +43,12 @@ pub const WEBMCP_POLYFILL_JS: &str = r#"
 "#;
 
 /// WebMCP 工具声明（快照附带给 AI）
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct WebmcpToolDef {
     pub name: String,
     pub description: String,
+    #[ts(type = "unknown | null")]
     pub parameters: Option<serde_json::Value>,
 }
 

@@ -99,11 +99,11 @@ export const useAIStore = defineStore('ai', {
             const text = (snap.text || '').slice(0, 800)
             snapshotDesc = `【页面语义快照】标题：${snap.title}；地址：${snap.url}；正文摘要：${text || '(无可读文本)'}；可交互元素：链接 ${snap.interactive?.links ?? 0} 个、按钮 ${snap.interactive?.buttons ?? 0} 个、输入框 ${snap.interactive?.inputs ?? 0} 个。`
             // 阶段 1.5 WebMCP polyfill 试验：页面暴露的工具声明附给 AI（供理解与引导操作）
-            if (snap.webmcpTools && snap.webmcpTools.length > 0) {
-              const toolsDesc = snap.webmcpTools
+            if (snap.webmcp_tools && snap.webmcp_tools.length > 0) {
+              const toolsDesc = snap.webmcp_tools
                 .map((t) => `${t.name}：${t.description || '(无描述)'}`)
                 .join('；')
-              snapshotDesc += ` 页面通过 WebMCP 暴露了 ${snap.webmcpTools.length} 个工具：${toolsDesc}。`
+              snapshotDesc += ` 页面通过 WebMCP 暴露了 ${snap.webmcp_tools.length} 个工具：${toolsDesc}。`
             }
             // Lighthouse Agentic 信号②·代理为中心无障碍→Agent 定位（阶段 1.5 落地）：
             // 把程序化名称（aria-label/labelledby）+ 有效角色 + 隐藏态提炼成"Agent 可执行的
@@ -116,10 +116,10 @@ export const useAIStore = defineStore('ai', {
                   .slice(0, 10)
                   .map(
                     (a, idx) =>
-                      `${idx + 1}. ${a.tag}[role=${a.role}]「${a.label || '(无名)'}」`,
+                      `${idx + 1}. ${a.tag}[role=${a.role}]「${a.name || '(无名)'}」`,
                   )
                   .join('；')
-                snapshotDesc += ` 页面带程序化名称的可交互元素：${ariaList}。要对"「${usual[0].label || '首页'}」按钮"操作时,优先用无障碍自述里的语义定位（角色+名称）而不是猜 CSS。`
+                snapshotDesc += ` 页面带程序化名称的可交互元素：${ariaList}。要对"「${usual[0].name || '首页'}」按钮"操作时,优先用无障碍自述里的语义定位（角色+名称）而不是猜 CSS。`
               }
             }
           }

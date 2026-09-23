@@ -201,8 +201,12 @@
   → 前端 download/session/extension/password 四个 types 改为 re-export 生成物
   （password.ts 保留前端附加的 `PasswordEntry`：含明文，仅内存传递）
   过程中发现差异：手写 `title?`/`groupId?` 可选 vs Rust `Option`（生成物 `string | null` 更准确）
-- [ ] `content.ts`（`Snapshot` 嵌套类型多：interactive/forms/links/aria）评估纳入
-  - 验收：字段/可选性与 Rust 一致；vue-tsc 干净
+- [x] **content.ts（Snapshot + 5 个嵌套类型）纳入（✅ 2026-09-23）**
+  `Snapshot`/`AriaElement`/`InteractiveStats`/`FormField`/`LinkInfo`/`WebmcpToolDef` 全部生成；
+  **顺带抓到并修复真实运行时 bug**：前端 `snap.webmcpTools`（后端是 `webmcp_tools`）、
+  `a.label`（后端是 `name`）→ 字段名不匹配导致 **AI 上下文里 WebMCP 工具声明与无障碍
+  定位清单一直是空的**，现已对齐
+  - 至此 `src/types/` 下**全部类型均由 Rust 单一定义生成**
 
 ### P3 · 工具注册表（MCP / API / Agent 三源合一）
 

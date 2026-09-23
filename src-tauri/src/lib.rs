@@ -1769,5 +1769,11 @@ mod ts_export_tests {
         crate::db::sessions::Session::export().expect("导出 Session 失败");
         crate::db::sessions::SessionTab::export().expect("导出 SessionTab 失败");
         crate::extensions::manager::ExtensionInfo::export().expect("导出 ExtensionInfo 失败");
+        crate::engine::content::Snapshot::export().expect("导出 Snapshot 失败");
+        crate::engine::content::AriaElement::export().expect("导出 AriaElement 失败");
+        crate::engine::content::InteractiveStats::export().expect("导出 InteractiveStats 失败");
+        crate::engine::content::FormField::export().expect("导出 FormField 失败");
+        crate::engine::content::LinkInfo::export().expect("导出 LinkInfo 失败");
+        crate::engine::webmcp::WebmcpToolDef::export().expect("导出 WebmcpToolDef 失败");
     }
 }
