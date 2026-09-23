@@ -14,10 +14,8 @@ use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::sync::{Mutex, OnceLock};
 
-/// 动作白名单（AI 只能请求这些动作）
-pub const AGENT_ACTIONS: [&str; 9] = [
-    "click", "fill", "scroll", "read", "wait", "navigate", "back", "snapshot", "submit",
-];
+/// 动作白名单（AI 只能请求这些动作）——单一来源见 `capabilities::agent_actions`
+pub use crate::capabilities::agent_actions::IDS as AGENT_ACTIONS;
 
 /// 多步计划中的单步（AI 编排提示词的最小单元）
 #[derive(Debug, Clone, serde::Deserialize)]

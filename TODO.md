@@ -214,7 +214,10 @@
     参数校验与默认值统一由浏览器 API 侧负责（唯一实现）。
     **实测**：`tools/list` 25 工具；`tools/call status` → `{tabs:2,version:5.7.0}`；
     `history`（缺 limit）→ 走 API 默认 50 并返回数据
-  - [ ] Agent 动作表接入 registry（`Risk::Agent` 分级 + 动作校验）
+  - [x] **Agent 动作表接入 registry（✅ 2026-09-23）**
+    `capabilities::agent_actions`（9 个动作 + desc + required 参数 + IDS 数组）为单一来源；
+    `engine/agent.rs` 的 `AGENT_ACTIONS` 改为 `pub use ... IDS`（动作白名单/function calling enum 同源）；
+    新增测试 `ids_match_actions`（IDS 与 ACTIONS 防漂移）
   - 验收：MCP `tools/list` 数量不变（25）；API 行为不变（基线样本回放）
 - [ ] **P3b · 写类能力迁移（12 个）+ `capabilities/list` + MCP 动态拉取**
   - MCP Server（独立二进制）启动时向浏览器请求 `capabilities/list`，动态构建 `tools/list`
