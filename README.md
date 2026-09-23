@@ -73,6 +73,7 @@ ShiftBrowser 是一款基于 **Tauri 2 + Rust + Vue 3** 的 AI 增强型桌面�
 | 数据库 | SQLite（sqlx 0.8 异步连接池，WAL 模式，自建迁移系统） |
 | 加密 | aes-gcm / pbkdf2 / hmac-sha2 |
 | AI 通信 | reqwest（rustls，流式 SSE）· OpenAI 兼容协议 · MCP JSON-RPC 2.0 |
+| 契约生成 | `build.rs`（常量/契约 → TS）+ `ts-rs`（Rust struct → TS interface） |
 
 ## 架构
 
@@ -119,6 +120,54 @@ src-tauri/src/
 - **多 webview 布局**：主 webview（Vue UI）+ 标签 webview 经 GtkFixed 绝对定位叠层，resize / 书签栏显隐 / AI 分屏由 `ContentGeometry` 一处算清
 - **Agent 安全铁律**：动作白名单、每步人工确认、仅当前标签、凭据永不外泄
 
+## 统一治理（单一事实来源）
+
+> 规划与实施记录：[docs/架构-能力与常量统一治理方案_2026-09-23.md](docs/架构-能力与常量统一治理方案_2026-09-23.md)
+
+### 为什么
+
+常量、跨端契约、工具、技能、插件原先散落各处，靠注释写"与后端一致"人肉同步。已修复的典型漂移：
+
+- 搜索引擎 URL **4 处**、默认 favicon **2 处**、布局高度**前端 + Rust + CSS 三层**各写一遍
+- 后端设置白名单 **41 键** ↔ 前端默认值 **24 键**（缺 17 个 → `get()` 回退空串导致显示失真）
+- MCP 工具 schema 手写 **200 行** + 工具名清单 **2 份** + Agent 动作表各写一遍
+- 前端 `snap.webmcpTools` vs 后端 `webmcp_tools`（字段名不匹配 → AI 上下文**静默失效**）
+
+### 机制
+
+```
+Rust 单一来源                    build.rs / 运行时生成              消费方
+──────────────────────────────────────────────────────────────────────────────
+src/constants.rs      ──────▶  src/constants.ts          ──▶ 前端 LAYOUT / SEARCH_ENGINES / UI / EVENTS / URLS / TIMEOUT / SHORTCUTS / SKILLS
+src/contracts.rs      ──────▶  （同上文件）                ──▶ 后端设置白名单 + 前端默认值（同源）
+src/capabilities.rs   ──────▶  capabilities/list API      ──▶ MCP Server 运行时拉取（零编译耦合）
+src/tabs.rs 等 struct ──────▶  src/types/generated/       ──▶ 前端类型（cargo test --lib ts_export）
+```
+
+- **`src/constants.rs`**：布局尺寸 / 搜索引擎 / 色板 / favicon（自包含，供 `build.rs` `include!`）
+- **`src/contracts.rs`**：跨端契约 —— 设置键（41）/ IPC 事件名（18）/ 内部 URL / 超时（14）/ 快捷键（12）/ 技能（4）
+- **`src/capabilities.rs`**：能力总表 —— 工具（25）/ Agent 动作（9）/ 技能（4）/ 插件形态（4）
+- **`src/types/generated/`**：由 `ts-rs` 从 Rust struct 生成（14 个类型），**前端零手写**
+
+### 怎么加 / 改（改一处，两端自动跟上）
+
+| 要加什么 | 改哪里 | 自动生效于 |
+|---|---|---|
+| MCP 工具 / 开放 API 命令 | `capabilities.rs`（schema）+ `api.rs`（实现） | MCP `tools/list`、API 分发 |
+| AI 技能 | `contracts.rs::skills` | 前端快捷入口按钮 + `skills/list` |
+| 设置项 | `contracts.rs::settings` | 后端白名单 + 前端默认值 |
+| 跨端类型 | Rust struct 加 `#[derive(TS)]` + 导出测试 | `src/types/generated/` |
+| 常量 / 快捷键 / 事件名 / 超时 | `constants.rs` / `contracts.rs` | 前端重新构建即得 |
+
+### 校验
+
+```bash
+cd src-tauri && cargo test --lib ts_export   # 重新生成 TS 类型
+cd src-tauri && cargo test --lib             # 含"防漂移"测试（IDS/ALL 与主表一致性等）
+```
+
+---
+
 ## 快速开始
 
 ### 前置依赖
@@ -163,7 +212,7 @@ cp target/release/shift-browser-mcp ~/.local/bin/   # 装到 PATH，供 MCP 客�
 ```bash
 npm run lint                     # ESLint
 npm run build                    # 含 vue-tsc 类型检查
-cargo test                       # Rust 单测（118 个）
+cargo test                       # Rust 单测（139 个）
 scripts/smoke.sh                 # E2E 冒烟（10 项，完整模式会重启浏览器）
 scripts/smoke.sh --no-restart    # 只检查当前实例
 scripts/package-deb.sh           # 一键 deb 打包（校验工具链 → 构建扩展 → 前端 → release deb）
