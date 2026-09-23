@@ -808,6 +808,9 @@ pub fn run() {
       db::vault::lock_vault,
       db::vault::remove_vault_password,
       db::vault::set_vault_idle_lock,
+      // 本地开放 API：token 热轮换 / 状态面板一次性门票（HANDOFF P2-3）
+      api::rotate_api_token,
+      api::create_dashboard_ticket,
       // 上云 E2E 加密同步（第 45 章 · 服务器零知识）
       db::sync::sync_status,
       db::sync::sync_configure,

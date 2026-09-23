@@ -17,10 +17,15 @@
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
 
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
+use tokio::sync::RwLock;
 
 /// 套接字路径（应用数据目录，与 vault.key/sync.key 同级）
 pub fn socket_path(app: &AppHandle) -> Option<PathBuf> {
@@ -50,8 +55,17 @@ pub fn spawn(app: AppHandle) {
     };
     // 清理上次残留
     let _ = std::fs::remove_file(&path);
-    // 同时起本地 HTTP API（阶段4 自托管服务端套件最小版）——必须在下面 move app 之前克隆
-    spawn_http(app.clone());
+    // 同时起本地 HTTP API（阶段4 自托管服务端套件最小版）——必须在下面 move app 之前克隆。
+    // token/tickets 以 Tauri state 共享：rotate_api_token / create_dashboard_ticket
+    // 两个命令与 HTTP 服务操作同一份运行期状态
+    if let Some(token) = ensure_token(&app) {
+        let token_shared = ApiTokenShared(Arc::new(RwLock::new(token)));
+        app.manage(token_shared.clone());
+        app.manage(DashboardTickets::new());
+        spawn_http(app.clone(), token_shared);
+    } else {
+        log::warn!("[api] api-token 初始化失败，HTTP API 未启动");
+    }
     tauri::async_runtime::spawn(async move {
         let listener = match UnixListener::bind(&path) {
             Ok(l) => l,
@@ -107,18 +121,147 @@ fn ensure_token(app: &AppHandle) -> Option<String> {
             return Some(t);
         }
     }
-    let t = format!(
+    let t = generate_token();
+    let _ = atomic_write_token(&path, &t);
+    Some(t)
+}
+
+/// 生成 API token（两个 uuid v4 去横线拼接：256bit 随机、64 hex 字符）
+fn generate_token() -> String {
+    format!(
         "{}{}",
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
-    );
-    let _ = std::fs::write(&path, &t);
+    )
+}
+
+/// 原子写 token：同目录临时文件 0600 + rename，防半写/替换窗口读到空文件
+fn atomic_write_token(path: &std::path::Path, token: &str) -> std::io::Result<()> {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("api-token");
+    let tmp = path.with_file_name(format!("{name}.rotate-tmp"));
+    std::fs::write(&tmp, token)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
     }
-    Some(t)
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// 运行期共享的 API token：`rotate_api_token` 替换后，HTTP 服务下一请求即认新 token，
+/// 无需重启（连接任务每请求读取一次）
+#[derive(Clone)]
+pub(crate) struct ApiTokenShared(Arc<RwLock<String>>);
+
+/// 状态面板一次性门票：TTL 内兑换**一次即焚**，取代 URL query 里的长期 token
+///（长期 token 进 query 会落浏览器历史、Referer、代理日志）
+#[derive(Clone)]
+pub(crate) struct DashboardTickets(Arc<Mutex<HashMap<String, Instant>>>);
+
+/// 门票有效期（秒）
+const DASHBOARD_TICKET_TTL: Duration = Duration::from_secs(300);
+
+impl DashboardTickets {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(HashMap::new())))
+    }
+
+    /// 签发一张新门票（32 hex / 128bit 随机）；顺带清理过期票防无界增长
+    fn issue(&self) -> String {
+        let ticket = uuid::Uuid::new_v4().simple().to_string();
+        if let Ok(mut map) = self.0.lock() {
+            let now = Instant::now();
+            map.retain(|_, at| now.duration_since(*at) < DASHBOARD_TICKET_TTL);
+            map.insert(ticket.clone(), now);
+        }
+        ticket
+    }
+
+    /// 兑换门票：存在且未过期 → 删除并返回 true；错误/过期票不影响其它门票
+    fn consume(&self, ticket: &str) -> bool {
+        let Ok(mut map) = self.0.lock() else {
+            return false;
+        };
+        let now = Instant::now();
+        let valid = map
+            .get(ticket)
+            .is_some_and(|at| now.duration_since(*at) < DASHBOARD_TICKET_TTL);
+        if valid {
+            map.remove(ticket);
+        }
+        map.retain(|_, at| now.duration_since(*at) < DASHBOARD_TICKET_TTL);
+        valid
+    }
+}
+
+/// LAN 认证失败限速状态：同一 peer 连续 401 后指数退避。
+/// 只对非 loopback 生效——本机调用不计数不锁定（本地工具配错 token 不应被自锁）。
+#[derive(Default)]
+struct LoginGuard {
+    map: Mutex<HashMap<IpAddr, FailState>>,
+}
+
+#[derive(Clone, Copy)]
+struct FailState {
+    /// 连续失败次数（成功认证清零）
+    fails: u32,
+    /// 封禁截止时刻；到期后允许重试，但 fails 保留（持续探测维持高水位退避）
+    locked_until: Option<Instant>,
+}
+
+/// 第 fails 次失败后的封禁秒数：1, 2, 4, 8 … 封顶 300
+fn backoff_secs(fails: u32) -> u64 {
+    2u64.saturating_pow(fails.saturating_sub(1)).min(300)
+}
+
+impl LoginGuard {
+    /// 封禁中返回剩余秒数；loopback 与未锁定返回 None（先于 token 校验调用）
+    fn check(&self, ip: &IpAddr, now: Instant) -> Option<u64> {
+        if ip.is_loopback() {
+            return None;
+        }
+        let map = self.map.lock().ok()?;
+        map.get(ip)
+            .and_then(|s| s.locked_until)
+            .filter(|until| now < *until)
+            .map(|until| until.saturating_duration_since(now).as_secs().max(1))
+    }
+
+    /// 记录一次凭据错误，返回本次封禁秒数（loopback 返回 0 表示不锁）
+    fn record_failure(&self, ip: &IpAddr, now: Instant) -> u64 {
+        if ip.is_loopback() {
+            return 0;
+        }
+        let Ok(mut map) = self.map.lock() else {
+            return 0;
+        };
+        // 简单防无界增长：条目过多时先淘汰已解封的
+        if map.len() > 256 {
+            map.retain(|_, s| s.locked_until.is_some_and(|t| t > now));
+        }
+        let state = map.entry(*ip).or_insert(FailState {
+            fails: 0,
+            locked_until: None,
+        });
+        state.fails = state.fails.saturating_add(1);
+        let secs = backoff_secs(state.fails);
+        state.locked_until = Some(now + Duration::from_secs(secs));
+        secs
+    }
+
+    /// 认证成功：清零该 peer 的失败计数
+    fn record_success(&self, ip: &IpAddr) {
+        if ip.is_loopback() {
+            return;
+        }
+        if let Ok(mut map) = self.map.lock() {
+            map.remove(ip);
+        }
+    }
 }
 
 /// 起 HTTP API：`POST http://127.0.0.1:19701/api`，body 为同款 JSON 命令；
@@ -151,18 +294,86 @@ fn read_setting_blocking(app: &AppHandle, key: &str) -> Option<String> {
     })
 }
 
-/// IP 白名单校验：名单为空 = 不限制；否则逗号分隔，按前缀匹配
-/// （如 `192.168.1.` 匹配整个 192.168.1.x 网段；`127.0.0.1` 精确匹配）
+/// IP 白名单校验：名单为空 = 不限制；非空时逗号分隔，每个条目须为以下之一：
+///
+/// - 精确 IP：`192.168.1.5`、`::1`
+/// - CIDR：`192.168.1.0/24`、`10.0.0.0/8`、`fe80::/10`
+/// - 旧式段前缀（向后兼容，**必须以点结尾**）：`192.168.1.` 匹配该 C 段
+///
+/// 安全（HANDOFF P2-3）：旧实现裸 `starts_with`，配置 `192.168.1` 会误放行
+/// `192.168.10.x`；现在不带尾点的条目必须是合法 IP/CIDR，非法条目忽略并告警。
+/// IPv4-mapped IPv6（`::ffff:1.2.3.4`）先归一化，防用 v6 形态绕过 v4 规则。
 fn ip_allowed(ip: &str, allowlist: &str) -> bool {
     let allow = allowlist.trim();
     if allow.is_empty() {
         return true;
     }
-    allow
+    let Ok(peer): Result<IpAddr, _> = ip.parse() else {
+        return false;
+    };
+    // IPv4-mapped IPv6 归一化为 IPv4
+    let peer = match peer {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(IpAddr::V6(v6), IpAddr::V4),
+        v4 => v4,
+    };
+    let peer_str = peer.to_string();
+    for raw in allow
         .split(',')
-        .map(|s| s.trim())
+        .map(str::trim)
         .filter(|s| !s.is_empty())
-        .any(|pat| ip == pat || ip.starts_with(pat))
+    {
+        if raw.contains('/') {
+            match cidr_contains(peer, raw) {
+                Some(true) => return true,
+                Some(false) => continue,
+                None => log::warn!("[api] 白名单 CIDR 条目非法，已忽略: {raw}"),
+            }
+        } else if raw.ends_with('.') {
+            // 旧式段前缀：尾点保证不跨段（"192.168.1." 不会碰到 "192.168.10.x"）
+            if peer.is_ipv4() && peer_str.starts_with(raw) {
+                return true;
+            }
+        } else if let Ok(entry) = raw.parse::<IpAddr>() {
+            if entry == peer {
+                return true;
+            }
+        } else {
+            log::warn!(
+                "[api] 白名单条目非法（需为 IP / CIDR / 尾点段前缀如 192.168.1.），已忽略: {raw}"
+            );
+        }
+    }
+    false
+}
+
+/// CIDR 包含判定；条目语法非法返回 None（同族才比较，v4 前缀 0..=32，v6 0..=128）
+fn cidr_contains(peer: IpAddr, cidr: &str) -> Option<bool> {
+    let (net_s, prefix_s) = cidr.split_once('/')?;
+    let prefix: u32 = prefix_s.trim().parse().ok()?;
+    let net: IpAddr = net_s.trim().parse().ok()?;
+    // 用 octets()+from_be_bytes 而非 to_bits()（后者 1.80 才稳定，本仓 MSRV 1.77.2）
+    let (a, n, width) = match (peer, net) {
+        (IpAddr::V4(a), IpAddr::V4(n)) => (
+            u32::from_be_bytes(a.octets()) as u128,
+            u32::from_be_bytes(n.octets()) as u128,
+            32,
+        ),
+        (IpAddr::V6(a), IpAddr::V6(n)) => (
+            u128::from_be_bytes(a.octets()),
+            u128::from_be_bytes(n.octets()),
+            128,
+        ),
+        _ => return Some(false),
+    };
+    if prefix > width {
+        return None;
+    }
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u128::MAX << (width - prefix)
+    };
+    Some((a & mask) == (n & mask))
 }
 
 /// HTTP 请求头上限（64KB，远超正常请求头；超出按畸形请求断开）
@@ -258,10 +469,12 @@ fn content_length_of(head: &str) -> Option<usize> {
     })
 }
 
-fn spawn_http(app: AppHandle) {
-    let Some(token) = ensure_token(&app) else {
-        return;
-    };
+/// dashboard 页面安全响应头：禁被嵌入任意框架（点击劫持），CSP 收紧到无脚本/无外联
+const DASHBOARD_HEADERS: &str = "X-Frame-Options: DENY\r\n\
+Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'\r\n\
+Referrer-Policy: no-referrer\r\n";
+
+fn spawn_http(app: AppHandle, tokens: ApiTokenShared) {
     // 端口/绑定可配（默认 127.0.0.1:19701）；改完需重启生效
     let port: u16 = read_setting_blocking(&app, "api_http_port")
         .and_then(|v| v.trim().parse::<u16>().ok())
@@ -285,6 +498,8 @@ fn spawn_http(app: AppHandle) {
     if lan {
         log::info!("[api] HTTP 已绑 0.0.0.0，IP 白名单: {}", allowed_ips);
     }
+    // LAN 认证失败限速状态（仅绑定 0.0.0.0 时有意义，本机绑定下 peer 全是 loopback 不计数）
+    let guard = Arc::new(LoginGuard::default());
     tauri::async_runtime::spawn(async move {
         let addr = format!("{}:{}", host, port);
         let listener = match tokio::net::TcpListener::bind(&addr).await {
@@ -303,8 +518,8 @@ fn spawn_http(app: AppHandle) {
                 continue;
             };
             // IP 白名单校验（空名单放行）
-            let peer_ip = peer.ip().to_string();
-            if !ip_allowed(&peer_ip, &allowed_ips) {
+            let peer_ip = peer.ip();
+            if !ip_allowed(&peer_ip.to_string(), &allowed_ips) {
                 log::warn!(
                     "[api] 拒绝非白名单 IP: {}（api_allowed_ips={}）",
                     peer_ip,
@@ -313,111 +528,318 @@ fn spawn_http(app: AppHandle) {
                 continue;
             }
             let app = app.clone();
-            let token = token.clone();
+            let tokens = tokens.clone();
+            let guard = guard.clone();
             tauri::async_runtime::spawn(async move {
-                use tokio::io::AsyncWriteExt;
                 // 完整读取请求（头部可能跨 TCP 包；body 按 Content-Length 读满——
                 // 旧实现只读一次 64KB，长对话经模型网关转发必然 JSON 截断）
                 let (head, body) = match read_http_request(&mut stream).await {
                     HttpReq::Complete(h, b) => (h, b),
                     HttpReq::TooLarge => {
-                        let payload =
-                            json!({"error": {"message": "请求体过大（上限 8MB）"}}).to_string();
-                        let out = format!(
-                            "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                            payload.len(),
-                            payload
-                        );
-                        let _ = stream.write_all(out.as_bytes()).await;
+                        write_http(
+                            &mut stream,
+                            413,
+                            "Payload Too Large",
+                            "application/json",
+                            "",
+                            json!({"error": {"message": "请求体过大（上限 8MB）"}})
+                                .to_string()
+                                .as_bytes(),
+                        )
+                        .await;
                         return;
                     }
                     HttpReq::Bad => return,
                 };
-                let path = head
+                // 请求行：method 与 target（target 可能带 query；path 取问号前）
+                let request_line = head.lines().next().unwrap_or("");
+                let mut rl = request_line.split_whitespace();
+                let method = rl.next().unwrap_or("GET");
+                let target = rl.next().unwrap_or("/");
+                let path = target.split('?').next().unwrap_or("/").to_string();
+                // 限速闸门（HANDOFF P2-3）：封禁期先于一切凭据校验直接 429
+                if let Some(retry) = guard.check(&peer_ip, Instant::now()) {
+                    log::warn!("[api] peer {peer_ip} 封禁中，429（{retry}s）");
+                    write_http(
+                        &mut stream,
+                        429,
+                        "Too Many Requests",
+                        "application/json",
+                        &format!("Retry-After: {retry}\r\n"),
+                        json!({"error": {"message": format!("认证失败过多，请 {retry} 秒后重试")}})
+                            .to_string()
+                            .as_bytes(),
+                    )
+                    .await;
+                    return;
+                }
+                // 每请求读取当前 token（轮换后立即生效）
+                let token = tokens.0.read().await.clone();
+                let has_auth_header = head
                     .lines()
-                    .next()
-                    .and_then(|l| l.split_whitespace().nth(1))
-                    .unwrap_or("/")
-                    .to_string();
-                let auth_ok = head.lines().any(|l| {
-                    l.to_ascii_lowercase().starts_with("authorization:")
-                        && l.splitn(2, ':')
-                            .nth(1)
-                            .map(|v| {
-                                ct_eq(
-                                    v.trim().trim_start_matches("Bearer ").trim(),
-                                    token.as_str(),
-                                )
-                            })
-                            .unwrap_or(false)
-                });
+                    .any(|l| l.to_ascii_lowercase().starts_with("authorization:"));
+                let bearer_ok = bearer_token_ok(&head, &token);
                 // 模型网关（阶段4）：POST /v1/chat/completions → 转发到配置的 provider
                 if path.starts_with("/v1/chat/completions") {
-                    let out_json = if !auth_ok {
-                        json!({"error": {"message": "未授权：需要 Authorization: Bearer <token>"}})
+                    let (status, reason, extra, payload) = if bearer_ok {
+                        guard.record_success(&peer_ip);
+                        let s = serde_json::to_string(&model_gateway(&app, &body).await)
+                            .unwrap_or_else(|_| "{}".into());
+                        (200u16, "OK", String::new(), s)
                     } else {
-                        model_gateway(&app, &body).await
+                        let retry = guard.record_failure(&peer_ip, Instant::now());
+                        log::warn!("[api] 模型网关未授权 peer={peer_ip}（封禁 {retry}s）");
+                        (
+                            401,
+                            "Unauthorized",
+                            format!("Retry-After: {retry}\r\n"),
+                            json!({"error": {"message": "未授权：需要 Authorization: Bearer <token>"}})
+                                .to_string(),
+                        )
                     };
-                    let s = serde_json::to_string(&out_json).unwrap_or_else(|_| "{}".into());
-                    let out = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                        s.len(),
-                        s
-                    );
-                    let _ = stream.write_all(out.as_bytes()).await;
+                    write_http(
+                        &mut stream,
+                        status,
+                        reason,
+                        "application/json",
+                        &extra,
+                        payload.as_bytes(),
+                    )
+                    .await;
                     return;
                 }
-                // 状态面板（浏览器用）：GET /?token=<t>（浏览器不便发 Bearer 头，故支持查询串）
+                // 状态面板（浏览器用）。凭据三种（HANDOFF P2-3 起长期 token 禁止走 URL query）：
+                // 1) Bearer 头；2) GET ?ticket=<一次性门票>（应用内按钮签发，5 分钟/用后即焚）；
+                // 3) POST 表单字段 token（可贴长期 token 或门票——不进历史/Referer/代理日志）
                 if !path.starts_with("/api") {
-                    let qtok = path
-                        .splitn(2, '?')
-                        .nth(1)
-                        .unwrap_or("")
-                        .split('&')
-                        .find_map(|kv| {
-                            let mut it = kv.splitn(2, '=');
-                            let k = it.next()?;
-                            let v = it.next().unwrap_or("");
-                            (k == "token").then(|| v.to_string())
-                        });
-                    let ok = qtok
-                        .as_deref()
-                        .map(|t| ct_eq(t, token.as_str()))
-                        .unwrap_or(false)
-                        || auth_ok;
-                    let html = if ok {
-                        dashboard_html(&app).await
+                    let query_ticket = if method == "POST" {
+                        None
                     } else {
-                        "<!doctype html><meta charset=utf-8><h2>ShiftBrowser API</h2><p>需要 token：在地址后加 <code>?token=&lt;api-token 文件里的值&gt;</code></p>".to_string()
+                        kv_value(target.split('?').nth(1).unwrap_or(""), "ticket")
                     };
-                    let out = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                        html.len(),
-                        html
-                    );
-                    let _ = stream.write_all(out.as_bytes()).await;
+                    let posted = if method == "POST" {
+                        kv_value(body.trim(), "token")
+                    } else {
+                        None
+                    };
+                    let tickets_ok = app.try_state::<DashboardTickets>();
+                    let ticket_ok = query_ticket.as_deref().is_some_and(|t| {
+                        tickets_ok.as_ref().is_some_and(|s| s.consume(t))
+                    }) || posted.as_deref().is_some_and(|t| {
+                        tickets_ok.as_ref().is_some_and(|s| s.consume(t))
+                    });
+                    let ok = bearer_ok
+                        || ticket_ok
+                        || posted.as_deref().is_some_and(|t| ct_eq(t, &token));
+                    if ok {
+                        guard.record_success(&peer_ip);
+                        write_http(
+                            &mut stream,
+                            200,
+                            "OK",
+                            "text/html; charset=utf-8",
+                            DASHBOARD_HEADERS,
+                            dashboard_html(&app).await.as_bytes(),
+                        )
+                        .await;
+                        return;
+                    }
+                    // 只有真的提交了凭据（表单/Authorization 头/带 ticket 链接）才计失败；
+                    // 裸开登录页与浏览器预取不触发限速
+                    let submitted = has_auth_header
+                        || query_ticket.is_some()
+                        || posted.is_some();
+                    let retry = if submitted {
+                        guard.record_failure(&peer_ip, Instant::now())
+                    } else {
+                        0
+                    };
+                    if submitted {
+                        log::warn!("[api] 状态面板凭据无效 peer={peer_ip}（封禁 {retry}s）");
+                    }
+                    let extra = if retry > 0 {
+                        format!("Retry-After: {retry}\r\n")
+                    } else {
+                        String::new()
+                    };
+                    let err = if submitted {
+                        Some("凭据无效或门票已过期")
+                    } else {
+                        None
+                    };
+                    write_http(
+                        &mut stream,
+                        200,
+                        "OK",
+                        "text/html; charset=utf-8",
+                        &format!("{DASHBOARD_HEADERS}{extra}"),
+                        dashboard_login_html(err, retry).as_bytes(),
+                    )
+                    .await;
                     return;
                 }
-                let resp = if path != "/api" {
-                    json!({"ok": false, "error": "请用 POST /api 发 JSON 命令"})
-                } else if !auth_ok {
-                    json!({"ok": false, "error": "未授权：需要 Authorization: Bearer <token>"})
+                let (status, reason, extra, payload) = if path != "/api" {
+                    (
+                        200u16,
+                        "OK",
+                        String::new(),
+                        json!({"ok": false, "error": "请用 POST /api 发 JSON 命令"}).to_string(),
+                    )
+                } else if !bearer_ok {
+                    let retry = guard.record_failure(&peer_ip, Instant::now());
+                    log::warn!("[api] /api 未授权 peer={peer_ip}（封禁 {retry}s）");
+                    (
+                        401,
+                        "Unauthorized",
+                        format!("Retry-After: {retry}\r\n"),
+                        json!({"ok": false, "error": "未授权：需要 Authorization: Bearer <token>"})
+                            .to_string(),
+                    )
                 } else {
-                    handle(&app, body.trim()).await
+                    guard.record_success(&peer_ip);
+                    (
+                        200,
+                        "OK",
+                        String::new(),
+                        serde_json::to_string(&handle(&app, body.trim()).await)
+                            .unwrap_or_else(|_| "{}".into()),
+                    )
                 };
-                let body_out = serde_json::to_string(&resp).unwrap_or_else(|_| "{}".into());
-                let out = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body_out.len(),
-                    body_out
-                );
-                let _ = stream.write_all(out.as_bytes()).await;
+                write_http(
+                    &mut stream,
+                    status,
+                    reason,
+                    "application/json",
+                    &extra,
+                    payload.as_bytes(),
+                )
+                .await;
             });
         }
     });
 }
 
-/// 状态面板 HTML（自托管套件的"管理页"，浏览器打开 `/?token=<t>`）
+/// 写一个完整 HTTP/1.1 响应（连接固定 close；`extra_headers` 每行需自带 `\r\n`）
+async fn write_http(
+    stream: &mut tokio::net::TcpStream,
+    status: u16,
+    reason: &str,
+    content_type: &str,
+    extra_headers: &str,
+    body: &[u8],
+) {
+    let head = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n{extra_headers}Connection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = stream.write_all(head.as_bytes()).await;
+    let _ = stream.write_all(body).await;
+}
+
+/// 校验 Authorization 头是否为匹配的 Bearer token（常量时间比较）
+fn bearer_token_ok(head: &str, token: &str) -> bool {
+    head.lines().any(|l| {
+        if !l.to_ascii_lowercase().starts_with("authorization:") {
+            return false;
+        }
+        l.splitn(2, ':')
+            .nth(1)
+            .map(|v| {
+                let v = v.trim();
+                let v = v
+                    .strip_prefix("Bearer ")
+                    .or_else(|| v.strip_prefix("bearer "))
+                    .unwrap_or(v)
+                    .trim();
+                ct_eq(v, token)
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// 从 `a=b&c=d` 形式串（query 或 form body）取值并 percent-decode
+fn kv_value(encoded: &str, key: &str) -> Option<String> {
+    encoded.split('&').find_map(|kv| {
+        let mut it = kv.splitn(2, '=');
+        let k = it.next()?;
+        (k == key).then(|| url_decode(it.next().unwrap_or("")))
+    })
+}
+
+/// 最小 percent-decode（`%XX` 与 `+`；非法转义原样保留）
+fn url_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let hex = |c: u8| match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    };
+    let mut out: Vec<u8> = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b'%' if i + 2 < b.len() => {
+                if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
+                    out.push(h * 16 + l);
+                    i += 3;
+                } else {
+                    out.push(b'%');
+                    i += 1;
+                }
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// 状态面板登录页（无脚本、严格 CSP；长期 token 只接受 POST 表单）
+fn dashboard_login_html(error: Option<&str>, retry_after: u64) -> String {
+    let esc = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    };
+    let banner = if retry_after > 0 {
+        format!("<p class=err>认证失败过多，请 {retry_after} 秒后再试</p>")
+    } else {
+        String::new()
+    };
+    let error_html = error
+        .map(|e| format!("<p class=err>{}</p>", esc(e)))
+        .unwrap_or_default();
+    r##"<!doctype html><meta charset=utf-8><title>ShiftBrowser API 登录</title>
+<style>body{font:14px/1.6 system-ui,sans-serif;max-width:560px;margin:64px auto;padding:0 16px;color:#222}
+h1{font-size:20px} .card{border:1px solid #ddd;border-radius:10px;padding:18px 20px;margin:12px 0}
+input{width:100%;box-sizing:border-box;padding:8px 10px;margin:10px 0;font:13px monospace;border:1px solid #ccc;border-radius:6px}
+button{padding:8px 18px;border:0;border-radius:6px;background:#2f6fed;color:#fff;font-size:14px;cursor:pointer}
+.hint{color:#888;font-size:12px;line-height:1.7} .err{color:#c0392b} code{background:#f2f2f2;padding:1px 5px;border-radius:4px}</style>
+<h1>ShiftBrowser API</h1>
+<div class=card>
+<form method="post" action="/">
+  <label>粘贴 API token（或一次性门票）</label>
+  <input name="token" autocomplete="off" autofocus required placeholder="api-token 文件内容 / 应用内签发的门票">
+  <button type="submit">打开状态面板</button>
+</form>
+{BANNER}{ERROR}
+<p class=hint>长期 token 不再支持放在 URL 查询串（<code>?token=</code> 会落入浏览器历史、Referer 与代理日志）。
+两种安全方式：① 在此表单粘贴（POST body，不进 URL）；② 在应用「设置 → 开放 API」点「打开状态面板」，
+自动签发 5 分钟有效、用后即焚的一次性门票。</p>
+</div>"##
+        .replace("{BANNER}", &banner)
+        .replace("{ERROR}", &error_html)
+}
+
+/// 状态面板 HTML（自托管套件的"管理页"；凭据见 spawn_http 中三种安全方式）
 async fn dashboard_html(app: &AppHandle) -> String {
     let (n, active) = match app.try_state::<crate::tabs::TabManager>() {
         Some(s) => {
@@ -464,6 +886,33 @@ h1{{font-size:20px}} .u{{color:#888;font-size:12px}} code{{background:#f2f2f2;pa
         active = active_html,
         cmds = cmds,
     )
+}
+
+/// 轮换 API token（HANDOFF P2-3）：生成新 token 原子落盘并热替换运行期状态，
+/// 旧 token 在下一请求立即失效（HTTP 服务无需重启）。返回新 token，仅本次展示。
+#[tauri::command]
+pub(crate) async fn rotate_api_token(
+    app: AppHandle,
+    tokens: tauri::State<'_, ApiTokenShared>,
+) -> Result<String, String> {
+    let db = app
+        .try_state::<crate::db::Db>()
+        .ok_or_else(|| "数据库未就绪".to_string())?;
+    let path = db.vault_path.with_file_name("api-token");
+    let new = generate_token();
+    atomic_write_token(&path, &new).map_err(|e| format!("写入 api-token 失败: {e}"))?;
+    *tokens.0.write().await = new.clone();
+    log::info!("[api] API token 已轮换（旧 token 即时失效）");
+    Ok(new)
+}
+
+/// 签发状态面板一次性门票：32hex 随机，5 分钟有效、兑换一次即焚。
+/// 前端拿到后拼 `http://127.0.0.1:<port>/?ticket=<t>` 用外部浏览器打开。
+#[tauri::command]
+pub(crate) fn create_dashboard_ticket(
+    tickets: tauri::State<'_, DashboardTickets>,
+) -> Result<String, String> {
+    Ok(tickets.issue())
 }
 
 /// 模型网关：把 OpenAI 兼容的 chat/completions 请求转发到设置里的 provider。
@@ -1299,5 +1748,148 @@ mod http_req_tests {
         assert_eq!(content_length_of("POST / HTTP/1.1\r\nHost: x\r\n"), None);
         assert_eq!(find_header_end(b"abc\r\n\r\nbody"), Some(7),);
         assert_eq!(find_header_end(b"abc\r\n\r"), None);
+    }
+
+    #[test]
+    fn ip_allowlist_empty_allows_all() {
+        assert!(ip_allowed("8.8.8.8", ""));
+        assert!(ip_allowed("8.8.8.8", "   "));
+    }
+
+    #[test]
+    fn ip_allowlist_bare_prefix_no_longer_matches_neighbor_segment() {
+        // 旧 bug：裸 starts_with("192.168.1") 误放行 192.168.10.x
+        assert!(!ip_allowed("192.168.10.5", "192.168.1"));
+        // 裸前缀现在是非法条目（不是精确 IP/CIDR），同样不放行
+        assert!(!ip_allowed("192.168.1.5", "192.168.1"));
+    }
+
+    #[test]
+    fn ip_allowlist_dotted_segment_prefix_backcompat() {
+        assert!(ip_allowed("192.168.1.5", "192.168.1."));
+        assert!(ip_allowed("192.168.1.200", "192.168.1."));
+        assert!(!ip_allowed("192.168.10.5", "192.168.1."));
+        assert!(!ip_allowed("192.169.1.5", "192.168.1."));
+    }
+
+    #[test]
+    fn ip_allowlist_exact_and_cidr() {
+        assert!(ip_allowed("192.168.1.5", "192.168.1.5"));
+        assert!(!ip_allowed("192.168.1.6", "192.168.1.5"));
+        assert!(ip_allowed("192.168.1.1", "192.168.1.0/24"));
+        assert!(ip_allowed("192.168.1.254", "192.168.1.0/24"));
+        assert!(!ip_allowed("192.168.2.1", "192.168.1.0/24"));
+        assert!(ip_allowed("10.1.2.3", "10.0.0.0/8"));
+        assert!(!ip_allowed("11.1.2.3", "10.0.0.0/8"));
+        // 多值 + 空白容忍
+        assert!(ip_allowed("1.2.3.4", "  10.0.0.0/8 , 1.2.3.4 "));
+        assert!(!ip_allowed("5.6.7.8", "10.0.0.0/8,1.2.3.4"));
+        // 非法 CIDR（前缀越界）与垃圾条目不影响合法条目
+        assert!(ip_allowed("10.0.0.1", "garbage,10.0.0.0/8,99.0.0.0/33"));
+    }
+
+    #[test]
+    fn ip_allowlist_ipv6_and_mapped_v4() {
+        assert!(ip_allowed("::1", "::1"));
+        assert!(ip_allowed("fe80::1234", "fe80::/10"));
+        assert!(!ip_allowed("2001::1", "fe80::/10"));
+        // IPv4-mapped IPv6 归一化后按 v4 规则判定（防 v6 形态绕过）
+        assert!(ip_allowed("::ffff:192.168.1.5", "192.168.1.0/24"));
+        assert!(ip_allowed("::ffff:192.168.1.5", "192.168.1."));
+        assert!(!ip_allowed("::ffff:192.168.2.5", "192.168.1.0/24"));
+        // 跨族不匹配
+        assert!(!ip_allowed("::1", "127.0.0.0/8"));
+    }
+
+    #[test]
+    fn backoff_exponential_caps_at_300() {
+        assert_eq!(backoff_secs(1), 1);
+        assert_eq!(backoff_secs(2), 2);
+        assert_eq!(backoff_secs(3), 4);
+        assert_eq!(backoff_secs(9), 256);
+        assert_eq!(backoff_secs(10), 300);
+        assert_eq!(backoff_secs(100), 300);
+    }
+
+    #[test]
+    fn login_guard_loopback_never_locked() {
+        let g = LoginGuard::default();
+        let t0 = Instant::now();
+        let v4: IpAddr = "127.0.0.1".parse().unwrap();
+        let v6: IpAddr = "::1".parse().unwrap();
+        assert_eq!(g.record_failure(&v4, t0), 0);
+        assert!(g.check(&v4, t0).is_none());
+        g.record_success(&v6); // 不 panic、不产生状态
+    }
+
+    #[test]
+    fn login_guard_locks_then_recovers_on_success() {
+        let g = LoginGuard::default();
+        let ip: IpAddr = "192.168.5.5".parse().unwrap();
+        let t0 = Instant::now();
+        assert_eq!(g.record_failure(&ip, t0), 1);
+        // 封禁窗口内 429
+        assert!(g.check(&ip, t0).is_some());
+        assert!(g.check(&ip, t0 + Duration::from_millis(500)).is_some());
+        // 1s 后窗口过了，放行（fails 保留）
+        assert!(g.check(&ip, t0 + Duration::from_secs(2)).is_none());
+        // 再失败：fails=2 → 封 2s
+        assert_eq!(g.record_failure(&ip, t0 + Duration::from_secs(2)), 2);
+        assert!(g.check(&ip, t0 + Duration::from_secs(3)).is_some());
+        // 成功认证清零：立刻放行，且下一次失败从 1s 重新计
+        g.record_success(&ip);
+        assert!(g.check(&ip, t0 + Duration::from_secs(3)).is_none());
+        assert_eq!(g.record_failure(&ip, t0 + Duration::from_secs(3)), 1);
+    }
+
+    #[test]
+    fn login_guard_peers_independent() {
+        let g = LoginGuard::default();
+        let t0 = Instant::now();
+        g.record_failure(&"192.168.0.1".parse().unwrap(), t0);
+        assert!(g.check(&"192.168.0.2".parse().unwrap(), t0).is_none());
+    }
+
+    #[test]
+    fn dashboard_ticket_single_use() {
+        let tk = DashboardTickets::new();
+        let t = tk.issue();
+        assert_eq!(t.len(), 32, "门票为 32hex");
+        assert!(tk.consume(&t));
+        assert!(!tk.consume(&t), "用后即焚");
+        assert!(!tk.consume("deadbeefdeadbeefdeadbeefdeadbeef"));
+        // 错误票不影响另一张合法票
+        let t2 = tk.issue();
+        assert!(tk.consume(&t2));
+    }
+
+    #[test]
+    fn kv_value_and_url_decode() {
+        assert_eq!(
+            kv_value("a=1&token=ab%20c&d", "token").as_deref(),
+            Some("ab c")
+        );
+        assert_eq!(kv_value("token=a+b", "token").as_deref(), Some("a b"));
+        assert_eq!(kv_value("x=1", "token"), None);
+        assert_eq!(kv_value("", "token"), None);
+        assert_eq!(url_decode("100%25"), "100%");
+        assert_eq!(url_decode("%zz"), "%zz");
+    }
+
+    #[test]
+    fn bearer_header_check() {
+        assert!(bearer_token_ok(
+            "POST /api HTTP/1.1\r\nAuthorization: Bearer secret123\r\n",
+            "secret123"
+        ));
+        assert!(!bearer_token_ok(
+            "POST /api HTTP/1.1\r\nAuthorization: Bearer wrong\r\n",
+            "secret123"
+        ));
+        assert!(bearer_token_ok(
+            "POST /api HTTP/1.1\r\nauthorization: bearer secret123\r\n",
+            "secret123"
+        ));
+        assert!(!bearer_token_ok("POST /api HTTP/1.1\r\nX-A: 1\r\n", "secret123"));
     }
 }

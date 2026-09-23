@@ -479,6 +479,56 @@ const extPath = ref('')
 const extError = ref('')
 const extLoading = ref(false)
 
+// 开放 API：一次性门票打开状态面板 / token 热轮换
+const dashboardOpening = ref(false)
+const rotatingToken = ref(false)
+const rotatedToken = ref('')
+
+async function openDashboard() {
+  if (dashboardOpening.value) return
+  dashboardOpening.value = true
+  try {
+    const port = settingsStore.get('api_http_port') || '19701'
+    const ticket = await invoke<string>('create_dashboard_ticket')
+    await openUrl(`http://127.0.0.1:${port}/?ticket=${encodeURIComponent(ticket)}`)
+    useToastStore().success('状态面板已在浏览器打开（门票 5 分钟内一次有效）')
+  } catch (e) {
+    console.error('[settings] 打开状态面板失败:', e)
+    useToastStore().error('打开状态面板失败')
+  } finally {
+    dashboardOpening.value = false
+  }
+}
+
+async function rotateApiToken() {
+  if (rotatingToken.value) return
+  if (
+    !window.confirm('轮换后旧 token 立即失效，正在调用 API 的程序需换成新 token。确定轮换？')
+  ) {
+    return
+  }
+  rotatingToken.value = true
+  try {
+    rotatedToken.value = await invoke<string>('rotate_api_token')
+    useToastStore().success('API token 已轮换，请立即复制保存')
+  } catch (e) {
+    console.error('[settings] 轮换 API token 失败:', e)
+    useToastStore().error('轮换 API token 失败')
+  } finally {
+    rotatingToken.value = false
+  }
+}
+
+async function copyRotatedToken() {
+  try {
+    await navigator.clipboard.writeText(rotatedToken.value)
+    useToastStore().success('新 token 已复制')
+  } catch (e) {
+    console.error('[settings] 复制 token 失败:', e)
+    useToastStore().error('复制失败，请手动选择文本复制')
+  }
+}
+
 async function onSet(key: string, value: string) {
   await settingsStore.set(key, value)
   // 书签栏显隐切换需同步通知 Rust 侧重算 top_offset
@@ -1950,6 +2000,19 @@ async function onRemoveKeyword(k: string) {
                 </label>
               </div>
               <div class="field">
+                <label>API IP 白名单</label>
+                <input
+                  class="task-num api-allowlist-input"
+                  type="text"
+                  placeholder="192.168.1.0/24, 10.0.0.5"
+                  :value="settingsStore.get('api_allowed_ips')"
+                  @change="onSet('api_allowed_ips', ($event.target as HTMLInputElement).value)"
+                />
+                <span class="field-desc">
+                  绑局域网时必填；逗号分隔精确 IP 或 CIDR（如 192.168.1.0/24）；改完重启生效
+                </span>
+              </div>
+              <div class="field">
                 <label>允许模型网关（消耗额度）</label>
                 <span class="field-desc">
                   POST /v1/chat/completions → 转发到 AI provider，其它程序可用同一模型（耗你的额度）
@@ -1962,6 +2025,33 @@ async function onRemoveKeyword(k: string) {
                   />
                   <span class="slider"></span>
                 </label>
+              </div>
+              <div class="field">
+                <label>状态面板与 token</label>
+                <div class="api-actions">
+                  <button
+                    class="selfcheck-btn"
+                    :disabled="dashboardOpening"
+                    @click="openDashboard"
+                  >
+                    {{ dashboardOpening ? '打开中…' : '在浏览器打开状态面板' }}
+                  </button>
+                  <button
+                    class="selfcheck-btn"
+                    :disabled="rotatingToken"
+                    @click="rotateApiToken"
+                  >
+                    {{ rotatingToken ? '轮换中…' : '轮换 API token' }}
+                  </button>
+                </div>
+                <span class="field-desc">
+                  打开面板走一次性门票（5 分钟有效、用后即焚），token 不会出现在网址里；
+                  轮换后旧 token 立即失效，使用 API 的程序需更新
+                </span>
+                <div v-if="rotatedToken" class="api-token-result">
+                  <code>{{ rotatedToken }}</code>
+                  <button class="selfcheck-btn" @click="copyRotatedToken">复制新 token</button>
+                </div>
               </div>
               <div class="field webmcp-field" :class="{ 'experiment-tag': webmcpPolyfill }">
                 <label>
@@ -2180,6 +2270,41 @@ async function onRemoveKeyword(k: string) {
 .selfcheck-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.api-allowlist-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.api-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 6px 0 2px;
+}
+.api-actions .selfcheck-btn,
+.api-token-result .selfcheck-btn {
+  float: none;
+  flex-shrink: 0;
+  padding: 5px 12px;
+}
+.api-token-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.api-token-result code {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: var(--bg-secondary, #f5f5f5);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
 }
 .selfcheck-summary {
   margin: 8px 0 12px;

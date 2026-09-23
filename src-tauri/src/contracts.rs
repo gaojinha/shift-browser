@@ -91,7 +91,7 @@ pub mod settings {
         SettingDef { key: "api_bind_lan", default: "false", kind: Kind::Bool, sensitive: false, desc: "API 绑局域网（0.0.0.0）" },
         SettingDef { key: "api_model_gateway", default: "false", kind: Kind::Bool, sensitive: false, desc: "模型网关" },
         SettingDef { key: "api_readonly", default: "false", kind: Kind::Bool, sensitive: false, desc: "API 只读模式（禁写命令）" },
-        SettingDef { key: "api_allowed_ips", default: "", kind: Kind::Str, sensitive: false, desc: "API IP 白名单（逗号分隔前缀）" },
+        SettingDef { key: "api_allowed_ips", default: "", kind: Kind::Str, sensitive: false, desc: "API IP 白名单（逗号分隔 IP/CIDR，如 192.168.1.0/24）" },
     ];
 
     /// 是否为敏感设置键
