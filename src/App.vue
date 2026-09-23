@@ -197,6 +197,12 @@ function handleGlobalAction(action: string) {
     case 'devtools':
       invoke('open_devtools').catch(() => {})
       break
+    case 'lock-vault':
+      // 手动立即锁定密码库（Ctrl+Shift+L）：未设主密码/已锁定时后端为无害空操作
+      invoke('lock_vault')
+        .then(() => useToastStore().success('密码库已锁定'))
+        .catch(() => {})
+      break
   }
 }
 
@@ -304,6 +310,12 @@ function onGlobalKeydown(e: KeyboardEvent) {
     if (matchShortcut(e, SHORTCUTS.COMMAND_PALETTE)) {
       e.preventDefault()
       showCommandPalette.value = !showCommandPalette.value
+      return
+    }
+    // Ctrl+Shift+L 立即锁定密码库（安全动作，弹窗/输入框内也生效）
+    if (matchShortcut(e, SHORTCUTS.LOCK_VAULT)) {
+      e.preventDefault()
+      handleGlobalAction('lock-vault')
       return
     }
     // 弹窗打开时，其余标签快捷键不响应（避免误关标签/新建标签）
@@ -575,6 +587,11 @@ onMounted(async () => {
     if (!prompt) return
     openPanel('ai')
     nextTick(() => aiStore.sendMessage(prompt))
+  }).catch(() => {})
+
+  // 密码库空闲自动锁定：后端 watchdog 清空内存主密码后提示用户
+  listen(EVENTS.VAULT_AUTO_LOCKED, () => {
+    useToastStore().show('密码库已因空闲自动锁定', 'info', 5000)
   }).catch(() => {})
 })
 

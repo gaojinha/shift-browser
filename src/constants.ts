@@ -90,6 +90,7 @@ export const EVENTS = {
   TRANSLATE_PROGRESS: 'translate-progress',
   TRAY_OPEN_DOWNLOADS: 'tray-open-downloads',
   TRAY_OPEN_PASSWORDS: 'tray-open-passwords',
+  VAULT_AUTO_LOCKED: 'vault-auto-locked',
   AGENT_ACTION_REQUEST: 'agent-action-request',
   AGENT_MULTI_STEP_REQUEST: 'agent-multi-step-request',
   NET_STATUS_UPDATED: 'net-status-updated',
@@ -138,6 +139,7 @@ export const SHORTCUTS = {
   HISTORY: 'ctrl+h',
   COMMAND_PALETTE: 'ctrl+k',
   SESSIONS: 'ctrl+shift+s',
+  LOCK_VAULT: 'ctrl+shift+l',
 } as const
 
 export const SKILLS = [

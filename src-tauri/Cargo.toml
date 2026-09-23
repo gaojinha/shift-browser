@@ -43,6 +43,8 @@ base64 = "0.22"
 pbkdf2 = "0.12"
 hmac = "0.12"
 sha2 = "0.10"
+# 主密码 NFKC 归一化（全角/兼容字符在设置与解锁两侧得到同一密码）
+unicode-normalization = "0.1"
 hex = "0.4"
 tokio = { version = "1", features = ["full"] }
 # 流式读取（feed.rs 响应体边读边计数，防内存炸弹）

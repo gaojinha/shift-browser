@@ -129,6 +129,7 @@ pub mod events {
     pub const PAGE_LOAD_FAILED: &str = "page-load-failed";
     pub const PERMISSION_REQUEST: &str = "permission-request";
     pub const TLS_ERROR: &str = "tls-error";
+    pub const VAULT_AUTO_LOCKED: &str = "vault-auto-locked";
     pub const WEB_PROCESS_CRASHED: &str = "web-process-crashed";
 
     /// (前端常量名, 事件名) —— 供 build.rs 生成前端 `EVENTS`
@@ -144,6 +145,7 @@ pub mod events {
         ("TRANSLATE_PROGRESS", TRANSLATE_PROGRESS),
         ("TRAY_OPEN_DOWNLOADS", TRAY_OPEN_DOWNLOADS),
         ("TRAY_OPEN_PASSWORDS", TRAY_OPEN_PASSWORDS),
+        ("VAULT_AUTO_LOCKED", VAULT_AUTO_LOCKED),
         ("AGENT_ACTION_REQUEST", AGENT_ACTION_REQUEST),
         ("AGENT_MULTI_STEP_REQUEST", AGENT_MULTI_STEP_REQUEST),
         ("NET_STATUS_UPDATED", NET_STATUS_UPDATED),
@@ -271,6 +273,7 @@ pub mod shortcuts {
         Shortcut { id: "history", key: "h", ctrl: true, shift: false, gdk_keyval: 0x48, gdk_keyval_shift: 0x68, gtk_fallback: true, gtk_always: false, desc: "历史记录" },
         Shortcut { id: "command-palette", key: "k", ctrl: true, shift: false, gdk_keyval: 0x4B, gdk_keyval_shift: 0x6B, gtk_fallback: true, gtk_always: false, desc: "命令栏" },
         Shortcut { id: "sessions", key: "s", ctrl: true, shift: true, gdk_keyval: 0x73, gdk_keyval_shift: 0x53, gtk_fallback: true, gtk_always: false, desc: "会话管理" },
+        Shortcut { id: "lock-vault", key: "l", ctrl: true, shift: true, gdk_keyval: 0x6C, gdk_keyval_shift: 0x4C, gtk_fallback: true, gtk_always: false, desc: "立即锁定密码库" },
     ];
 
     /// 按 id 查找（取第一个匹配；同 id 多条为同一动作的不同按键）
@@ -292,6 +295,7 @@ pub mod shortcuts {
         ("HISTORY", "ctrl+h"),
         ("COMMAND_PALETTE", "ctrl+k"),
         ("SESSIONS", "ctrl+shift+s"),
+        ("LOCK_VAULT", "ctrl+shift+l"),
     ];
 }
 

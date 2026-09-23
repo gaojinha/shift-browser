@@ -753,15 +753,34 @@ async function runEgressAudit() {
 interface VaultStatus {
   protected: boolean
   unlocked: boolean
+  idle_lock_minutes: number
 }
 const vaultStatus = ref<VaultStatus | null>(null)
 const vaultPassword = ref('')
 const vaultBusy = ref(false)
+/** 空闲自动锁定分钟数（0 = 关闭，上限 1440） */
+const vaultIdleMinutes = ref<number>(15)
 async function loadVaultStatus() {
   try {
     vaultStatus.value = await invoke<VaultStatus>('vault_status')
+    vaultIdleMinutes.value = vaultStatus.value.idle_lock_minutes
   } catch (e) {
     console.error('[settings] 读取密码库状态失败:', e)
+  }
+}
+async function saveVaultIdleLock() {
+  const mins = Number(vaultIdleMinutes.value)
+  if (!Number.isFinite(mins) || mins < 0 || mins > 1440) {
+    useToastStore().error('空闲锁定需为 0–1440 分钟（0 = 关闭）')
+    return
+  }
+  try {
+    await invoke('set_vault_idle_lock', { minutes: Math.floor(mins) })
+    await loadVaultStatus()
+    useToastStore().success(mins === 0 ? '空闲自动锁定已关闭' : `空闲 ${mins} 分钟后自动锁定`)
+  } catch (e) {
+    console.error('[settings] 保存空闲锁定设置失败:', e)
+    useToastStore().error('保存失败：' + e)
   }
 }
 async function setVaultPassword() {
@@ -1711,6 +1730,20 @@ async function onRemoveKeyword(k: string) {
                       移除主密码
                     </button>
                   </template>
+                </div>
+                <div v-if="vaultStatus?.protected" class="kw-add" style="margin-top: 8px">
+                  <span class="kw-hint" style="margin-right: 8px">
+                    空闲自动锁定（无操作 N 分钟后清内存主密码，0 = 关闭）：
+                  </span>
+                  <input
+                    v-model.number="vaultIdleMinutes"
+                    type="number"
+                    min="0"
+                    max="1440"
+                    style="width: 80px"
+                  />
+                  <span style="margin: 0 8px">分钟</span>
+                  <button class="mini-btn primary" @click="saveVaultIdleLock">保存</button>
                 </div>
               </div>
               <div class="kw-block">

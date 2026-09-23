@@ -779,6 +779,7 @@ pub fn run() {
       db::vault::unlock_vault,
       db::vault::lock_vault,
       db::vault::remove_vault_password,
+      db::vault::set_vault_idle_lock,
       // 上云 E2E 加密同步（第 45 章 · 服务器零知识）
       db::sync::sync_status,
       db::sync::sync_configure,
@@ -1348,6 +1349,10 @@ pub fn run() {
       };
       app.manage(db);
       log::info!("[ShiftBrowser] 数据库初始化成功");
+
+      // 密码库空闲自动锁定守护（R1）：默认 15 分钟无解锁活动即清除内存主密钥，
+      // 设置 vault_idle_lock_minutes 可调，0 关闭
+      crate::db::vault::spawn_idle_lock_watchdog(app.handle().clone());
 
       // 锁屏前预生成新标签页 + 后台刷新壁纸——锁屏 dialog 阻塞 setup 期间，
       // 这些异步任务照常跑（tokio 不依赖 GTK 主循环），解锁时 index.html 已就绪，
