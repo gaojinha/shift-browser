@@ -92,7 +92,7 @@ pub async fn request_multi_step_action(
     );
     log::info!("[agent] 请求多步动作确认: {} ({} 步, {})", description, plan.steps.len(), request_id);
 
-    match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
+    match tokio::time::timeout(std::time::Duration::from_secs(crate::contracts::timeout::AGENT_STEP_SECS), rx).await {
         Ok(Ok(approved)) => {
             log::info!("[agent] 多步动作确认结果: approved={}", approved);
             Ok(approved)
@@ -302,7 +302,7 @@ pub async fn execute_agent_action(
     .map_err(|e| format!("动作执行失败: {}", e))?;
 
     let raw = rx
-        .recv_timeout(std::time::Duration::from_secs(6))
+        .recv_timeout(std::time::Duration::from_secs(crate::contracts::timeout::WEBVIEW_IPC_SECS))
         .map_err(|e| format!("动作执行超时: {}", e))?
         .map_err(|e| format!("页面脚本执行失败: {}", e))?;
     crate::engine::agent::parse_js_result(&raw)

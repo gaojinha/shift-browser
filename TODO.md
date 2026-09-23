@@ -167,11 +167,18 @@
     TranslateProgress/DownloadsDialog/tabs.ts 共 6 文件）；
     后端 11 处 `emit("xxx")` → `crate::contracts::events::XXX`（9 个 rs 文件）。
     事件名不再是裸字符串，拼错类型检查/编译期即暴露
-  - [ ] **内部 URL 迁移**：`shift://newtab`×3、`/newtab/`×4、`shift://worldnav`×2 → `contracts::urls`（🔴 下一步）
-  - [ ] **超时/间隔契约**：Rust 21 处 + 前端 10 处裸数字 → `contracts::timeout`（语义命名）
-  - [ ] **快捷键表**：前端 keydown ↔ Rust GTK 兜底（F12/Ctrl+Shift+I 两处各写一遍）
-    → `contracts::SHORTCUTS` 单一来源
-  - 验收：设置页各项显示正常（不再空串失真）；快捷键（网页持焦时 F12）仍生效
+  - [x] **内部 URL + 超时契约（✅ 2026-09-23）**
+    `contracts.rs::urls` 补 `WORLD_NAV_FILE`/`READER_MARKER` → 生成 `URLS`（5 常量）；
+    内部 URL 迁移（`api.rs` 的 `shift://newtab`、`commands.rs`/`tabs.rs` 的
+    `/newtab/`、`/reader/`、`world-nav.html`）；
+    `contracts.rs::timeout`（14 项语义命名）→ 生成 `TIMEOUT`；
+    超时裸数字替换：mcp(30s)/feed(15s)/content_cmd+agent_cmd(6s)/agent_cmd(120s)/
+    translate(120s)/db(10s)/sync(20s)
+  - [ ] **快捷键表契约**：前端 keydown ↔ Rust GTK 兜底（F12/Ctrl+Shift+I 两处各写一遍）
+    → `contracts::SHORTCUTS` 单一来源（🔴 下一步）
+  - [x] **验收（✅ 2026-09-23）**
+    设置页各项显示正常（17 个补齐键不再空串失真）；事件链路（托盘菜单/启动页按钮/
+    资讯分屏/状态栏网络状态）实测正常
 
 ### P2 · 类型契约生成
 

@@ -69,7 +69,7 @@ impl Db {
             .foreign_keys(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
             // 写锁等待 10 秒：下载进度频繁更新 + 多连接并发写时避免 database is locked 立即失败
-            .busy_timeout(std::time::Duration::from_secs(10));
+            .busy_timeout(std::time::Duration::from_secs(crate::contracts::timeout::DB_BUSY_SECS));
 
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
@@ -106,7 +106,7 @@ impl Db {
             .create_if_missing(true)
             .foreign_keys(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
-            .busy_timeout(std::time::Duration::from_secs(10));
+            .busy_timeout(std::time::Duration::from_secs(crate::contracts::timeout::DB_BUSY_SECS));
         let feed_pool = SqlitePoolOptions::new()
             .max_connections(2)
             .connect_with(feed_options)

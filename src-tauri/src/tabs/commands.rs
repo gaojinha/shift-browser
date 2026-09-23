@@ -32,9 +32,9 @@ pub async fn create_tab(
     match parsed.scheme() {
         "http" | "https" | "shift" => {}
         "file" => {
-            if !url.contains("/newtab/")
-                && !url.contains("world-nav.html")
-                && !url.contains("/reader/")
+            if !url.contains(crate::contracts::urls::NEWTAB_MARKER)
+                && !url.contains(crate::contracts::urls::WORLD_NAV_FILE)
+                && !url.contains(crate::contracts::urls::READER_MARKER)
             {
                 return Err("不允许打开本地文件".to_string());
             }
@@ -400,7 +400,7 @@ pub async fn navigate_tab(
     match parsed_url.scheme() {
         "http" | "https" | "shift" => {}
         "file" => {
-            if !url.contains("/newtab/") && !url.contains("world-nav.html") {
+            if !url.contains(crate::contracts::urls::NEWTAB_MARKER) && !url.contains(crate::contracts::urls::WORLD_NAV_FILE) {
                 return Err("不允许导航到本地文件".to_string());
             }
         }

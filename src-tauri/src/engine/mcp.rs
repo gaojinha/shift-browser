@@ -79,7 +79,7 @@ impl McpConnection {
             .await
             .map_err(|e| format!("MCP 刷新失败: {}", e))?;
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(crate::contracts::timeout::MCP_REQUEST_SECS);
         loop {
             if std::time::Instant::now() > deadline {
                 return Err(format!("MCP server '{}' 响应超时（{}）", self.server_name, method));

@@ -90,6 +90,13 @@ fn generate_ts_constants() {
     for (name, value) in urls::ALL {
         s.push_str(&format!("  {name}: '{value}',\n"));
     }
+    s.push_str("} as const\n\n");
+
+    // ---- 超时 / 间隔（语义命名）----
+    s.push_str("export const TIMEOUT = {\n");
+    for (name, value) in timeout::ALL {
+        s.push_str(&format!("  {name}: {value},\n"));
+    }
     s.push_str("} as const\n");
 
     let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/constants.ts");

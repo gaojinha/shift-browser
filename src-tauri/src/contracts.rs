@@ -164,6 +164,8 @@ pub mod urls {
     pub const NEWTAB_MARKER: &str = "/newtab/";
     /// 阅读模式产物路径标记
     pub const READER_MARKER: &str = "/reader/";
+    /// 世界导航页文件名（file:// 路径判断用）
+    pub const WORLD_NAV_FILE: &str = "world-nav.html";
 
     /// 是否为内部启动页 URL（协议版或旧 file:// 版）
     pub fn is_newtab(u: &str) -> bool {
@@ -171,6 +173,61 @@ pub mod urls {
     }
 
     /// (前端常量名, URL) —— 供 build.rs 生成前端 `URLS`
-    pub const ALL: &[(&str, &str)] =
-        &[("NEWTAB", NEWTAB), ("WORLD_NAV", WORLD_NAV), ("NEWTAB_MARKER", NEWTAB_MARKER)];
+    pub const ALL: &[(&str, &str)] = &[
+        ("NEWTAB", NEWTAB),
+        ("WORLD_NAV", WORLD_NAV),
+        ("NEWTAB_MARKER", NEWTAB_MARKER),
+        ("READER_MARKER", READER_MARKER),
+        ("WORLD_NAV_FILE", WORLD_NAV_FILE),
+    ];
+}
+
+/// 超时 / 间隔（语义命名，杜绝"6 秒是什么？"的裸数字——改前先看名字）
+pub mod timeout {
+    /// webview IPC 往返等待（采集页面内容 / 执行动作）
+    pub const WEBVIEW_IPC_SECS: u64 = 6;
+    /// webview 就绪等待
+    pub const WEBVIEW_READY_SECS: u64 = 2;
+    /// MCP JSON-RPC 单次请求
+    pub const MCP_REQUEST_SECS: u64 = 30;
+    /// 开放 API 命令执行（含长任务）
+    pub const API_COMMAND_SECS: u64 = 120;
+    /// AI Agent 单步执行
+    pub const AGENT_STEP_SECS: u64 = 120;
+    /// AI 工具循环单轮
+    pub const AI_TOOL_ROUND_SECS: u64 = 60;
+    /// RSS 单源抓取
+    pub const FEED_FETCH_SECS: u64 = 15;
+    /// RSS 后台循环间隔（30 分钟）
+    pub const FEED_LOOP_SECS: u64 = 30 * 60;
+    /// 多端同步请求
+    pub const SYNC_REQUEST_SECS: u64 = 20;
+    /// 翻译请求
+    pub const TRANSLATE_SECS: u64 = 120;
+    /// 数据库 busy 等待
+    pub const DB_BUSY_SECS: u64 = 10;
+    /// 单实例 URL 转发等待（毫秒）
+    pub const SINGLE_INSTANCE_WAIT_MS: u64 = 300;
+    /// 默认浏览器启动等待（毫秒）
+    pub const DEFAULT_BROWSER_WAIT_MS: u64 = 2000;
+    /// 标签同步兜底轮询（毫秒，前端用）
+    pub const TAB_POLL_MS: u64 = 8000;
+
+    /// (前端常量名, 值) —— 供 build.rs 生成前端 `TIMEOUT`
+    pub const ALL: &[(&str, u64)] = &[
+        ("WEBVIEW_IPC_SECS", WEBVIEW_IPC_SECS),
+        ("WEBVIEW_READY_SECS", WEBVIEW_READY_SECS),
+        ("MCP_REQUEST_SECS", MCP_REQUEST_SECS),
+        ("API_COMMAND_SECS", API_COMMAND_SECS),
+        ("AGENT_STEP_SECS", AGENT_STEP_SECS),
+        ("AI_TOOL_ROUND_SECS", AI_TOOL_ROUND_SECS),
+        ("FEED_FETCH_SECS", FEED_FETCH_SECS),
+        ("FEED_LOOP_SECS", FEED_LOOP_SECS),
+        ("SYNC_REQUEST_SECS", SYNC_REQUEST_SECS),
+        ("TRANSLATE_SECS", TRANSLATE_SECS),
+        ("DB_BUSY_SECS", DB_BUSY_SECS),
+        ("SINGLE_INSTANCE_WAIT_MS", SINGLE_INSTANCE_WAIT_MS),
+        ("DEFAULT_BROWSER_WAIT_MS", DEFAULT_BROWSER_WAIT_MS),
+        ("TAB_POLL_MS", TAB_POLL_MS),
+    ];
 }

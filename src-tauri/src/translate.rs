@@ -26,7 +26,7 @@ fn client() -> &'static Client {
     CLIENT.get_or_init(|| {
         Client::builder()
             .user_agent(CHROME_UA)
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(std::time::Duration::from_secs(crate::contracts::timeout::TRANSLATE_SECS))
             .build()
             .expect("reqwest client 初始化失败")
     })

@@ -1333,7 +1333,7 @@ fn is_internal_newtab_url(url: &str) -> bool {
     match url.parse::<tauri::Url>() {
         Ok(u) => match u.scheme() {
             "shift" => matches!(u.host_str(), Some("newtab") | Some("worldnav")),
-            "file" => url.contains("/newtab/") || url.contains("world-nav.html"),
+            "file" => url.contains(crate::contracts::urls::NEWTAB_MARKER) || url.contains(crate::contracts::urls::WORLD_NAV_FILE),
             _ => false,
         },
         Err(_) => false,

@@ -35,7 +35,7 @@ pub async fn content_snapshot(app: AppHandle) -> Result<crate::engine::content::
     .map_err(|e| format!("提取失败: {}", e))?;
 
     let snap = rx
-        .recv_timeout(std::time::Duration::from_secs(6))
+        .recv_timeout(std::time::Duration::from_secs(crate::contracts::timeout::WEBVIEW_IPC_SECS))
         .map_err(|e| format!("快照提取超时: {}", e))?
         .map_err(|e| e)?;
 

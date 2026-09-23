@@ -152,7 +152,7 @@ fn save_store(db: &Db, store: &SyncStore, key: &[u8; 32]) -> DbResult<()> {
 /// HTTP 客户端（复用 feed.rs 同款构建）
 fn http_client() -> DbResult<reqwest::Client> {
     reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
+        .timeout(std::time::Duration::from_secs(crate::contracts::timeout::SYNC_REQUEST_SECS))
         .user_agent(format!(
             "ShiftBrowser/{} (E2E sync)",
             env!("CARGO_PKG_VERSION")

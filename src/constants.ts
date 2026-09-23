@@ -103,4 +103,23 @@ export const URLS = {
   NEWTAB: 'shift://newtab',
   WORLD_NAV: 'shift://worldnav',
   NEWTAB_MARKER: '/newtab/',
+  READER_MARKER: '/reader/',
+  WORLD_NAV_FILE: 'world-nav.html',
+} as const
+
+export const TIMEOUT = {
+  WEBVIEW_IPC_SECS: 6,
+  WEBVIEW_READY_SECS: 2,
+  MCP_REQUEST_SECS: 30,
+  API_COMMAND_SECS: 120,
+  AGENT_STEP_SECS: 120,
+  AI_TOOL_ROUND_SECS: 60,
+  FEED_FETCH_SECS: 15,
+  FEED_LOOP_SECS: 1800,
+  SYNC_REQUEST_SECS: 20,
+  TRANSLATE_SECS: 120,
+  DB_BUSY_SECS: 10,
+  SINGLE_INSTANCE_WAIT_MS: 300,
+  DEFAULT_BROWSER_WAIT_MS: 2000,
+  TAB_POLL_MS: 8000,
 } as const

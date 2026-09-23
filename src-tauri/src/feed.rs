@@ -301,7 +301,7 @@ async fn fetch_one(
 pub async fn refresh_all(db: &Db) -> usize {
     let sources = load_sources();
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(crate::contracts::timeout::FEED_FETCH_SECS))
         .user_agent(format!(
             "ShiftBrowser/{} (RSS reader)",
             env!("CARGO_PKG_VERSION")
