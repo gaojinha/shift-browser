@@ -1,12 +1,3 @@
-// 扩展类型（对应 Rust extensions.rs 的 ExtensionInfo）
-export interface Extension {
-  id: number
-  name: string
-  path: string
-  enabled: boolean
-  version: string | null
-  description: string | null
-  js_count: number
-  css_count: number
-  created_at: string
-}
+// 扩展类型：由 ts-rs 从 Rust `extensions::manager::ExtensionInfo` 生成（唯一来源，勿手改）。
+// 生成命令：cd src-tauri && cargo test --lib ts_export
+export type { ExtensionInfo as Extension } from './generated/ExtensionInfo'

@@ -1,13 +1,10 @@
-// 密码类型（对应 Rust 侧 db/passwords.rs）
-export interface PasswordMeta {
-  id: number
-  domain: string
-  username: string | null
-  notes: string | null
-  created_at: string
-  updated_at: string
-}
+// 密码类型：PasswordMeta 由 ts-rs 从 Rust `db::passwords::PasswordMeta` 生成
+//（唯一来源，勿手改；生成命令：cd src-tauri && cargo test --lib ts_export）。
+// PasswordEntry 是前端附加（含明文密码，仅内存传递，Rust 侧不落库）。
+import type { PasswordMeta } from './generated/PasswordMeta'
 
-export interface PasswordEntry extends PasswordMeta {
+export type { PasswordMeta }
+
+export type PasswordEntry = PasswordMeta & {
   password: string
 }

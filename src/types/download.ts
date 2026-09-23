@@ -1,12 +1,3 @@
-// 下载记录类型（对应 Rust db/downloads.rs 的 Download）
-export interface Download {
-  id: number
-  filename: string
-  url: string | null
-  path: string | null
-  total_bytes: number
-  received_bytes: number
-  /** in_progress / completed / failed / cancelled */
-  state: string
-  created_at: string
-}
+// 下载记录类型：由 ts-rs 从 Rust `db::downloads::Download` 生成（唯一来源，勿手改）。
+// 生成命令：cd src-tauri && cargo test --lib ts_export
+export type { Download } from './generated/Download'

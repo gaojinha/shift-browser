@@ -1,23 +1,29 @@
 // 会话管理：保存/恢复标签页状态
+use ts_rs::TS;
 use crate::db::{Db, DbResult};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct Session {
+    #[ts(type = "number")]
     pub id: i64,
     pub name: String,
+    #[ts(type = "number | null")]
     pub workspace_id: Option<i64>,
     /// 标签页 JSON 快照：[{"url":"...","title":"..."}]
     pub data: String,
     pub created_at: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct SessionTab {
     pub url: String,
     pub title: Option<String>,
     /// 标签分组归属（持久化；null = 未分组）。serde(default) 兼容旧快照无此字段
     #[serde(default, rename = "groupId")]
+    #[ts(type = "number | null")]
     pub group_id: Option<i64>,
 }
 

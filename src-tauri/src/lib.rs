@@ -1764,5 +1764,10 @@ mod ts_export_tests {
         crate::tabs::Tab::export().expect("导出 Tab 失败");
         crate::db::bookmarks::Bookmark::export().expect("导出 Bookmark 失败");
         crate::db::history::HistoryEntry::export().expect("导出 HistoryEntry 失败");
+        crate::db::downloads::Download::export().expect("导出 Download 失败");
+        crate::db::passwords::PasswordMeta::export().expect("导出 PasswordMeta 失败");
+        crate::db::sessions::Session::export().expect("导出 Session 失败");
+        crate::db::sessions::SessionTab::export().expect("导出 SessionTab 失败");
+        crate::extensions::manager::ExtensionInfo::export().expect("导出 ExtensionInfo 失败");
     }
 }

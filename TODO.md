@@ -196,7 +196,12 @@
 - [x] **Bookmark / HistoryEntry 前端类型接入生成物（✅ 2026-09-23）**
   修正 ts-rs 的 i64 映射（`#[ts(type = "number")]`；`Option<i64>` 用 `"number | null"`）；
   前端 `bookmark.ts`/`history.ts` 改为 re-export 生成物，手写 interface 全部消除
-- [ ] 其余 `src/types/*.ts`（session/download/extension/password/content）评估是否纳入生成
+- [x] **其余 types 纳入（✅ 2026-09-23）**
+  Download / ExtensionInfo / PasswordMeta / Session / SessionTab 五个 Rust struct 加 `derive(TS)`
+  → 前端 download/session/extension/password 四个 types 改为 re-export 生成物
+  （password.ts 保留前端附加的 `PasswordEntry`：含明文，仅内存传递）
+  过程中发现差异：手写 `title?`/`groupId?` 可选 vs Rust `Option`（生成物 `string | null` 更准确）
+- [ ] `content.ts`（`Snapshot` 嵌套类型多：interactive/forms/links/aria）评估纳入
   - 验收：字段/可选性与 Rust 一致；vue-tsc 干净
 
 ### P3 · 工具注册表（MCP / API / Agent 三源合一）

@@ -1,15 +1,20 @@
 // 下载记录管理
+use ts_rs::TS;
 use crate::db::{Db, DbResult};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct Download {
+    #[ts(type = "number")]
     pub id: i64,
     pub filename: String,
     pub url: Option<String>,
     pub path: Option<String>,
+    #[ts(type = "number")]
     pub total_bytes: i64,
+    #[ts(type = "number")]
     pub received_bytes: i64,
     /// in_progress / completed / failed / cancelled
     pub state: String,

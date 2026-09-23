@@ -2,6 +2,7 @@
 // 主密钥存独立密钥文件（app_data/master.key，权限 600），与数据库分离——
 // 即使数据库文件泄露，没有密钥文件也无法解密密码。
 // 每条密码：随机 12 字节 nonce + 密文，base64 编码后存 password 字段
+use ts_rs::TS;
 use crate::db::{Db, DbError, DbResult};
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
@@ -403,8 +404,10 @@ pub async fn delete_password(db: tauri::State<'_, Db>, id: i64) -> DbResult<()> 
 }
 
 /// 密码元信息（不含明文）
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct PasswordMeta {
+    #[ts(type = "number")]
     pub id: i64,
     pub domain: String,
     pub username: Option<String>,

@@ -2,11 +2,14 @@
 //!
 //! 扩展目录解析（manifest.json + content.js/css）+ 加载/启停/删除命令。原在 extensions.rs。
 
+use ts_rs::TS;
 use super::*;
 
 /// 返回给前端的数据（含注入内容摘要，便于显示）
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct ExtensionInfo {
+    #[ts(type = "number")]
     pub id: i64,
     pub name: String,
     pub path: String,
