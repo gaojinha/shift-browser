@@ -633,10 +633,10 @@ watch(
   --bg-hover: #1f2940;
   --bg-active: #283450;
   --text-primary: #e6ebf4;
-  --text-secondary: #b7c1d0;
-  --text-muted: #8591a5;
-  --border-color: rgba(255, 255, 255, 0.1);
-  --border-subtle: rgba(255, 255, 255, 0.06);
+  --text-secondary: #c6d0df;
+  --text-muted: #9aa8bd;
+  --border-color: rgba(255, 255, 255, 0.14);
+  --border-subtle: rgba(255, 255, 255, 0.09);
   --accent: #5b8cff;
   --accent-2: #7c5cff;
   --accent-soft: rgba(91, 140, 255, 0.16);
@@ -651,9 +651,9 @@ watch(
   --bg-active: #e4e6ee;
   --text-primary: #1f2430;
   --text-secondary: #4a5263;
-  --text-muted: #8a93a5;
-  --border-color: #d7dbe3;
-  --border-subtle: #e8ebf0;
+  --text-muted: #6b7488;
+  --border-color: #c9ced8;
+  --border-subtle: #e0e4eb;
   --accent: #3a7afe;
   --accent-2: #6c4dff;
   --accent-soft: rgba(58, 122, 254, 0.14);
@@ -666,6 +666,12 @@ watch(
 button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* 输入类控件占位文字：深色主题下必须可见（默认浏览器灰太暗） */
+::placeholder {
+  color: var(--text-muted);
+  opacity: 0.8;
 }
 button:active:not(:disabled) {
   transform: scale(0.97);

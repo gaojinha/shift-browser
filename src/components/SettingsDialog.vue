@@ -3,6 +3,7 @@
 // 设置项存 settings 表（key-value），保存即生效
 import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { setWebviewVisible } from '../utils/webview'
 import { useSettingsStore } from '../stores/settings'
 import { useExtensionsStore } from '../stores/extensions'
@@ -23,8 +24,11 @@ const SECTIONS = [
   { id: 'ai', icon: 'sparkles', label: 'AI 助手' },
   { id: 'mcp', icon: 'plug', label: 'MCP 工具' },
   { id: 'extensions', icon: 'puzzle', label: '扩展' },
-  { id: 'privacy', icon: 'shield', label: '隐私' },
+  { id: 'privacy', icon: 'shield', label: '隐私防护' },
+  { id: 'data', icon: 'lock', label: '数据安全' },
+  { id: 'api', icon: 'plug', label: '开放 API' },
   { id: 'selfcheck', icon: 'activity', label: '自检' },
+  { id: 'about', icon: 'info', label: '关于' },
 ]
 
 // ---- 系统自检（可观测性）：一键汇总版本/存储/运行时/能力状态 ----
@@ -73,6 +77,48 @@ const selfCheckGroups = computed(() => {
 /** 打开自检分区时自动跑一次 */
 watch(activeSection, (v) => {
   if (v === 'selfcheck' && !selfCheckReport.value) runSelfCheck()
+})
+
+/** 「关于」页信息（只读，打开即显示） */
+interface AboutInfo {
+  appName: string
+  version: string
+  webkitVersion: string
+  osArch: string
+  dataDir: string
+  repoUrl: string
+  profile: string
+}
+const aboutInfo = ref<AboutInfo | null>(null)
+async function loadAbout() {
+  try {
+    aboutInfo.value = await invoke<AboutInfo>('app_about_cmd')
+  } catch (e) {
+    console.error('[settings] 读取关于信息失败:', e)
+  }
+}
+/** 打开项目主页（外部浏览器） */
+async function openRepo() {
+  if (!aboutInfo.value?.repoUrl) return
+  try {
+    await openUrl(aboutInfo.value.repoUrl)
+  } catch (e) {
+    console.error('[settings] 打开项目主页失败:', e)
+    useToastStore().error('打开项目主页失败')
+  }
+}
+/** 打开数据目录（文件管理器） */
+async function openDataDir() {
+  if (!aboutInfo.value?.dataDir) return
+  try {
+    await openUrl(aboutInfo.value.dataDir)
+  } catch (e) {
+    console.error('[settings] 打开数据目录失败:', e)
+    useToastStore().error('打开数据目录失败')
+  }
+}
+watch(activeSection, (v) => {
+  if (v === 'about' && !aboutInfo.value) loadAbout()
 })
 
 // AI Key 输入框：不回显掩码（get_all_settings 返回前4后4掩码），
@@ -1370,10 +1416,11 @@ async function onRemoveKeyword(k: string) {
             </div>
           </div>
 
-          <!-- 隐私 -->
+          <!-- 隐私防护 -->
           <div v-if="activeSection === 'privacy'" class="settings-scroll">
+            <!-- ① 浏览防护 -->
             <div class="card">
-              <div class="card-title"><AppIcon name="shield" :size="14" /> 隐私</div>
+              <div class="card-title"><AppIcon name="shield" :size="14" /> 浏览防护</div>
               <div class="field">
                 <label>隐私防护</label>
                 <select class="privacy-select" :value="privacyLevel" @change="onChangePrivacyLevel">
@@ -1382,6 +1429,13 @@ async function onRemoveKeyword(k: string) {
                   <option value="off">关闭</option>
                 </select>
               </div>
+              <div class="privacy-desc">
+                <b>标准</b>：Canvas / WebGL / 音频 / WebGPU 反指纹加噪，GPC 隐私信号，WebRTC 内网 IP 防护，
+                字体与设备探针收敛，追踪参数清洗，第三方 Cookie 阻断。<br />
+                <b>严格</b>：再移除 WebUSB / 蓝牙 / 串口 / HID / Gamepad / 传感器等高危 API，归一化语音音色、
+                降级高精度计时（部分网站功能可能受影响）。<br />
+                切换后刷新页面即对已开标签生效。
+              </div>
               <div class="field">
                 <label>反指纹模式</label>
                 <select class="privacy-select" :value="fpMode" @change="onChangeFpMode">
@@ -1389,24 +1443,17 @@ async function onRemoveKeyword(k: string) {
                   <option value="uniform">统一化（Tor/Mullvad 派）</option>
                 </select>
               </div>
-              <div class="kw-hint">
-                <b>加噪</b>：Canvas / WebGL / 音频加"同源稳定、跨源不同"的确定性噪声——
-                网站仍能正常用，但你的指纹不再稳定可追踪。<br />
-                <b>统一化</b>：Canvas / WebGL / 音频返回<strong>固定值</strong>，让所有使用者在该模式下
-                呈现一致指纹（更强匿名，但个别依赖画布/音频的应用可能受影响）。<br />
+              <div class="privacy-desc">
+                <b>加噪</b>：Canvas / WebGL / 音频加「同源稳定、跨源不同」的确定性噪声——网站仍能正常用，
+                但你的指纹不再稳定可追踪。<br />
+                <b>统一化</b>：返回<strong>固定值</strong>，所有使用者呈现一致指纹（更强匿名，但个别依赖
+                画布/音频的应用可能受影响）。<br />
                 切换后刷新页面即生效。
-              </div>
-              <div class="kw-hint">
-                <b>标准</b>：Canvas / WebGL / 音频 / WebGPU 反指纹加噪，GPC 隐私信号，WebRTC 内网 IP 防护，
-                字体与设备探针收敛，追踪参数清洗，第三方 Cookie 阻断。<br />
-                <b>严格</b>：在标准之上再移除 WebUSB / 蓝牙 / 串口 / HID / Gamepad / 传感器等高危 API，
-                并归一化语音音色、降级高精度计时（部分网站功能可能受影响）。<br />
-                切换后刷新页面即对已开标签生效。
               </div>
               <div class="kw-block" v-if="privacyLevel !== 'off'">
                 <div class="kw-hint">
-                  <b>加噪白名单</b>：下列站点<strong>不做加噪</strong>（Canvas 敏感的在线地图、
-                  设计工具、视频剪辑等可加进来）。每行一个域名，子域名自动包含。
+                  <b>加噪白名单</b>：下列站点<strong>不做加噪</strong>（Canvas 敏感的在线地图、设计工具、
+                  视频剪辑等可加进来）。每行一个域名，子域名自动包含。
                 </div>
                 <textarea
                   class="kw-textarea"
@@ -1417,29 +1464,29 @@ async function onRemoveKeyword(k: string) {
                 ></textarea>
                 <button class="mini-btn primary" @click="saveWhitelist">保存白名单</button>
               </div>
-              <div class="kw-hint" style="margin-top: 10px">
-                <b>防护统计</b>（本次运行）：已清洗追踪参数
-                <b>{{ privacyStats?.cleaned_params ?? 0 }}</b> 次 · 隐私防护注入
-                <b>{{ privacyStats?.privacy_injections ?? 0 }}</b> 次 · 广告拦截注入
-                <b>{{ privacyStats?.adblock_injections ?? 0 }}</b> 次
-                <button class="mini-btn" style="margin-left: 8px" @click="resetPrivacyStats">
-                  重置
-                </button>
+              <div class="stat-row">
+                <span class="stat-text">
+                  <b>防护统计</b>（本次运行）：清洗追踪参数 <b>{{ privacyStats?.cleaned_params ?? 0 }}</b> 次 ·
+                  隐私注入 <b>{{ privacyStats?.privacy_injections ?? 0 }}</b> 次 ·
+                  广告拦截 <b>{{ privacyStats?.adblock_injections ?? 0 }}</b> 次
+                </span>
+                <button class="mini-btn" @click="resetPrivacyStats">重置</button>
               </div>
-              <div class="kw-block" v-if="privacyLevel !== 'off'" style="margin-top: 10px">
+              <div class="kw-block" v-if="privacyLevel !== 'off'">
                 <div class="kw-hint">
                   <b>防护自测</b>：在当前标签页核对各项防护是否<strong>真的生效</strong>（对齐「信任需要证明」）。
                   需先打开一个网页。
+                </div>
+                <div class="btn-row">
                   <button
                     class="mini-btn primary"
-                    style="margin-left: 8px"
                     :disabled="privacySelfTestRunning"
                     @click="runPrivacySelfTest"
                   >
                     {{ privacySelfTestRunning ? '自测中…' : '运行自测' }}
                   </button>
                 </div>
-                <div v-if="privacySelfTest" class="kw-hint" style="margin-top: 6px">
+                <div v-if="privacySelfTest" class="test-summary">
                   档位 <b>{{ privacySelfTest.shield_level }}</b> · 反指纹
                   <b>{{ privacySelfTest.fp_mode === 'uniform' ? '统一化' : '加噪' }}</b> · 站点
                   <b>{{ privacySelfTest.hostname || '(未知)' }}</b> · 通过
@@ -1461,38 +1508,119 @@ async function onRemoveKeyword(k: string) {
                   </div>
                 </div>
               </div>
-              <div class="kw-block" v-if="privacyLevel !== 'off'" style="margin-top: 10px">
+            </div>
+
+            <!-- ② 网络与追踪 -->
+            <div class="card">
+              <div class="card-title"><AppIcon name="globe" :size="14" /> 网络与追踪</div>
+              <div class="field">
+                <label>GPC 请求头（Sec-GPC: 1）</label>
+                <span class="field-desc">W3C Global Privacy Control：网络层告诉站点「别卖我的数据」</span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('gpc_header') !== 'false'"
+                    @change="onSet('gpc_header', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>广告拦截</label>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('adblock_enabled') !== 'false'"
+                    @change="onToggleAdblock"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="kw-block" v-if="settingsStore.get('adblock_enabled') !== 'false'">
                 <div class="kw-hint">
-                  <b>站点 GPC 声明</b>：抓取本站的
-                  <code>/.well-known/gpc.json</code>，看站点是否声明遵守 GPC（需先打开网页）。
+                  内置已含「关闭广告 / 头条报 / 推广」等。下面可手工加词，刷新页面后生效。
+                </div>
+                <div class="kw-list" v-if="customKeywords.length > 0">
+                  <span v-for="k in customKeywords" :key="k" class="kw-chip">
+                    {{ k }}
+                    <button class="kw-x" title="删除" @click="onRemoveKeyword(k)">✕</button>
+                  </span>
+                </div>
+                <div class="kw-add">
+                  <input
+                    v-model="newKeyword"
+                    type="text"
+                    placeholder="输入关键词，回车添加"
+                    spellcheck="false"
+                    @keyup.enter="onAddKeyword"
+                  />
+                  <button class="mini-btn primary" @click="onAddKeyword">添加</button>
+                </div>
+                <div v-if="kwMsg" class="cleared-msg">{{ kwMsg }}</div>
+              </div>
+              <div class="kw-block">
+                <div class="kw-hint">
+                  <b>网络层拦截规则</b>（阶段3.2）：每行一个 URL 子串，命中即<strong>取消该请求</strong>
+                  （请求出网前拦，比内容层更彻底）。保存后约 <strong>2 秒自动生效</strong>（热更新）。
+                </div>
+                <textarea
+                  class="net-rules"
+                  :value="settingsStore.get('net_block_rules')"
+                  placeholder="每行一个 URL 子串，例如：doubleclick.net"
+                  spellcheck="false"
+                  rows="4"
+                  @change="onSet('net_block_rules', ($event.target as HTMLTextAreaElement).value)"
+                ></textarea>
+              </div>
+              <div class="kw-block">
+                <div class="kw-hint">
+                  <b>自定义请求头</b>（阶段3.2）：每行 <code>Name: Value</code>，注入到每个出网请求
+                  （如 <code>DNT: 1</code>、自定义 UA）。保存后约 <strong>2 秒自动生效</strong>。
+                  <br />注：<code>Sec-GPC: 1</code> 已默认常开，无需在此重复。
+                </div>
+                <textarea
+                  class="net-rules"
+                  :value="settingsStore.get('net_headers')"
+                  placeholder="每行 Name: Value，例如：DNT: 1"
+                  spellcheck="false"
+                  rows="4"
+                  @change="onSet('net_headers', ($event.target as HTMLTextAreaElement).value)"
+                ></textarea>
+              </div>
+              <div class="kw-block" v-if="privacyLevel !== 'off'">
+                <div class="kw-hint">
+                  <b>站点 GPC 声明</b>：抓取本站的 <code>/.well-known/gpc.json</code>，看站点是否声明遵守
+                  GPC（需先打开网页）。
+                </div>
+                <div class="btn-row">
                   <button
                     class="mini-btn primary"
-                    style="margin-left: 8px"
                     :disabled="gpcChecking"
                     @click="checkGpcSite"
                   >
                     {{ gpcChecking ? '检测中…' : '检测本站声明' }}
                   </button>
                 </div>
-                <div v-if="gpcSite" class="kw-hint" style="margin-top: 6px">
+                <div v-if="gpcSite" class="test-summary">
                   <b>{{ gpcSite.origin }}</b> · {{ gpcSite.summary }}
                   <span v-if="gpcSite.last_update">（更新于 {{ gpcSite.last_update }}）</span>
                 </div>
               </div>
-              <div class="kw-block" v-if="privacyLevel !== 'off'" style="margin-top: 10px">
+              <div class="kw-block" v-if="privacyLevel !== 'off'">
                 <div class="kw-hint">
-                  <b>外联审计</b>：列出本应用及其子进程当前的全部网络出口连接（只读
-                  <code>/proc</code>，零出网）——「可验证无外联」。
+                  <b>外联审计</b>：列出本应用及其子进程当前的全部网络出口连接（只读 <code>/proc</code>，
+                  零出网）——「可验证无外联」。
+                </div>
+                <div class="btn-row">
                   <button
                     class="mini-btn primary"
-                    style="margin-left: 8px"
                     :disabled="egressRunning"
                     @click="runEgressAudit"
                   >
                     {{ egressRunning ? '审计中…' : '运行审计' }}
                   </button>
                 </div>
-                <div v-if="egressReport" class="kw-hint" style="margin-top: 6px">
+                <div v-if="egressReport" class="test-summary">
                   进程 <b>{{ egressReport.processes }}</b> · 连接
                   <b>{{ egressReport.connections.length }}</b> · 外网
                   <b>{{ egressReport.external }}</b> · 本机回环
@@ -1517,7 +1645,15 @@ async function onRemoveKeyword(k: string) {
                   </div>
                 </div>
               </div>
-              <div class="kw-block" style="margin-top: 10px">
+            </div>
+          </div>
+          <!-- 数据安全 -->
+          <div v-if="activeSection === 'data'" class="settings-scroll">
+
+            <!-- ③ 数据安全 -->
+            <div class="card">
+              <div class="card-title"><AppIcon name="lock" :size="14" /> 数据安全</div>
+              <div class="kw-block">
                 <div class="kw-hint">
                   <b>密码库主密码</b>：设置后密码库启动即<strong>锁定</strong>，须输入主密码解锁
                   ——同机拿到密钥文件也无法解密（数据主权底线）。
@@ -1531,7 +1667,7 @@ async function onRemoveKeyword(k: string) {
                     }}</b>
                   </span>
                 </div>
-                <div class="kw-add" style="margin-top: 6px">
+                <div class="kw-add">
                   <input
                     v-model="vaultPassword"
                     type="password"
@@ -1568,10 +1704,10 @@ async function onRemoveKeyword(k: string) {
                   </template>
                 </div>
               </div>
-              <div class="kw-block" style="margin-top: 10px">
+              <div class="kw-block">
                 <div class="kw-hint">
-                  <b>上云 E2E 加密同步（服务器零知识）</b>：把<strong>密码库 + 书签 + 会话 + 历史</strong>加密推送到
-                  自建 Nextcloud（WebDAV）。同步包用<strong>主密码</strong>整包加密，服务器只存密文，
+                  <b>上云 E2E 加密同步（服务器零知识）</b>：把<strong>密码库 + 书签 + 会话 + 历史</strong>
+                  加密推送到自建 Nextcloud（WebDAV）。同步包用<strong>主密码</strong>整包加密，服务器只存密文，
                   没主密码谁也解不开。须先设主密码并解锁。
                   <span v-if="syncStatus">
                     当前：<b>{{
@@ -1585,25 +1721,22 @@ async function onRemoveKeyword(k: string) {
                     }}</b>
                   </span>
                 </div>
-                <div class="kw-add" style="margin-top: 6px; flex-wrap: wrap; gap: 6px">
+                <div class="kw-add sync-config">
                   <input
                     v-model="syncUrl"
                     placeholder="WebDAV 地址，如 https://host/remote.php/dav/files/user"
                     spellcheck="false"
-                    style="min-width: 260px"
                   />
                   <input
                     v-model="syncUser"
                     placeholder="用户名"
                     spellcheck="false"
-                    style="max-width: 150px"
                   />
                   <input
                     v-model="syncPass"
                     type="password"
                     placeholder="密码"
                     spellcheck="false"
-                    style="max-width: 150px"
                   />
                   <button
                     class="mini-btn"
@@ -1613,7 +1746,7 @@ async function onRemoveKeyword(k: string) {
                     保存配置
                   </button>
                 </div>
-                <div class="kw-add" style="margin-top: 6px">
+                <div class="btn-row">
                   <button
                     class="mini-btn primary"
                     :disabled="syncBusy || !syncStatus?.ready"
@@ -1636,37 +1769,104 @@ async function onRemoveKeyword(k: string) {
                   >
                     清除配置
                   </button>
-                  <span v-if="syncStatus?.last_push_at" class="kw-hint" style="margin-left: 8px">
+                  <span v-if="syncStatus?.last_push_at" class="sync-meta">
                     上次推送：{{ syncStatus.last_push_at }}
                   </span>
-                  <span v-if="syncStatus?.last_pull_at" class="kw-hint" style="margin-left: 8px">
+                  <span v-if="syncStatus?.last_pull_at" class="sync-meta">
                     上次拉取：{{ syncStatus.last_pull_at }}
                   </span>
                 </div>
               </div>
               <div class="field">
-                <label>广告拦截</label>
+                <label>启动锁屏（每次启动输入账号密码解锁）</label>
                 <label class="switch">
                   <input
                     type="checkbox"
-                    :checked="settingsStore.get('adblock_enabled') !== 'false'"
-                    @change="onToggleAdblock"
+                    :checked="settingsStore.get('lock_enabled') === 'true'"
+                    @change="onSet('lock_enabled', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
                   />
                   <span class="slider"></span>
                 </label>
+              </div>
+            </div>
+
+            <!-- ④ 数据管理 -->
+            <div class="card">
+              <div class="card-title"><AppIcon name="trash" :size="14" /> 数据管理</div>
+              <div class="field">
+                <label>记录浏览历史</label>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('record_history') !== 'false'"
+                    @change="onSet('record_history', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field danger-field">
+                <label>历史记录</label>
+                <div class="history-actions">
+                  <button class="danger-btn" @click="onClearHistory">清除历史数据</button>
+                  <span v-if="clearedMsg" class="cleared-msg">{{ clearedMsg }}</span>
+                </div>
+              </div>
+              <div class="field danger-field clear-data-field">
+                <label>清除浏览数据</label>
+                <div class="clear-scopes">
+                  <label><input type="checkbox" v-model="clearScopes.history" /> 浏览历史</label>
+                  <label><input type="checkbox" v-model="clearScopes.cookies" /> Cookie</label>
+                  <label><input type="checkbox" v-model="clearScopes.cache" /> 缓存</label>
+                  <label><input type="checkbox" v-model="clearScopes.storage" /> 本地存储</label>
+                  <label><input type="checkbox" v-model="clearScopes.downloads" /> 下载记录</label>
+                  <label><input type="checkbox" v-model="clearScopes.sessions" /> 会话</label>
+                </div>
+                <div class="history-actions">
+                  <button class="danger-btn" @click="onClearBrowsingData">立即清除</button>
+                  <span v-if="clearMsg" class="cleared-msg">{{ clearMsg }}</span>
+                </div>
               </div>
               <div class="field">
-                <label>GPC 请求头（Sec-GPC: 1）</label>
-                <span class="field-desc">W3C Global Privacy Control：网络层告诉站点"别卖我的数据"</span>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('gpc_header') !== 'false'"
-                    @change="onSet('gpc_header', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-                  />
-                  <span class="slider"></span>
-                </label>
+                <label>证书管理</label>
+                <div class="history-actions">
+                  <button class="mini-btn" @click="emit('openCerts')">打开证书中心</button>
+                  <span class="field-desc">查看/管理证书、例外与监测事件</span>
+                </div>
               </div>
+              <div class="field ua-field">
+                <label>User-Agent</label>
+                <div class="ua-body">
+                  <div class="field-desc">
+                    部分网站按 UA 版本判定「浏览器不受支持」，可在此升级/自定义
+                  </div>
+                  <input class="ua-input" v-model="uaInput" placeholder="留空 = 使用默认 UA" />
+                  <div class="history-actions">
+                    <button class="mini-btn" @click="saveUa">保存</button>
+                    <button class="mini-btn" @click="resetUa">恢复默认</button>
+                    <span v-if="uaMsg" class="cleared-msg">{{ uaMsg }}</span>
+                  </div>
+                  <div class="field-desc">站点级覆盖（某些站需特定 UA）</div>
+                  <div class="ua-override-row">
+                    <input class="ua-input sm" v-model="uaSiteHost" placeholder="域名，如 example.com" />
+                    <input class="ua-input sm" v-model="uaSiteValue" placeholder="该站 UA" />
+                    <button class="mini-btn" @click="saveUaOverride">添加</button>
+                  </div>
+                  <div v-if="Object.keys(uaConfig.overrides).length" class="ua-overrides">
+                    <div v-for="(_, h) in uaConfig.overrides" :key="h" class="ua-ov-item">
+                      <span class="mono">{{ h }}</span>
+                      <button class="btn-x" @click="delUaOverride(h)">删除</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- 开放 API -->
+          <div v-if="activeSection === 'api'" class="settings-scroll">
+
+            <!-- ⑤ 开放 API（高级） -->
+            <div class="card">
+              <div class="card-title"><AppIcon name="plug" :size="14" /> 开放 API（高级）</div>
               <div class="field">
                 <label>允许 API 执行 JS（危险）</label>
                 <span class="field-desc">
@@ -1721,35 +1921,6 @@ async function onRemoveKeyword(k: string) {
                   <span class="slider"></span>
                 </label>
               </div>
-              <div class="kw-block">
-                <div class="kw-hint">
-                  <b>网络层拦截规则</b>（阶段3.2）：每行一个 URL 子串，命中即<strong>取消该请求</strong>
-                  （请求出网前拦，比内容层更彻底）。保存后约 <strong>2 秒自动生效</strong>（热更新）。
-                </div>
-                <textarea
-                  class="net-rules"
-                  :value="settingsStore.get('net_block_rules')"
-                  placeholder="每行一个 URL 子串，例如：doubleclick.net"
-                  spellcheck="false"
-                  rows="4"
-                  @change="onSet('net_block_rules', ($event.target as HTMLTextAreaElement).value)"
-                ></textarea>
-              </div>
-              <div class="kw-block">
-                <div class="kw-hint">
-                  <b>自定义请求头</b>（阶段3.2）：每行 <code>Name: Value</code>，注入到每个出网请求
-                  （如 <code>DNT: 1</code>、自定义 UA）。保存后约 <strong>2 秒自动生效</strong>。
-                  <br />注：<code>Sec-GPC: 1</code> 已默认常开，无需在此重复。
-                </div>
-                <textarea
-                  class="net-rules"
-                  :value="settingsStore.get('net_headers')"
-                  placeholder="每行 Name: Value，例如：DNT: 1"
-                  spellcheck="false"
-                  rows="4"
-                  @change="onSet('net_headers', ($event.target as HTMLTextAreaElement).value)"
-                ></textarea>
-              </div>
               <div class="field webmcp-field" :class="{ 'experiment-tag': webmcpPolyfill }">
                 <label>
                   WebMCP polyfill <span class="exp-badge" v-if="webmcpPolyfill">试验中</span>
@@ -1762,108 +1933,11 @@ async function onRemoveKeyword(k: string) {
                   />
                   <span class="slider"></span>
                 </label>
-                <div class="kw-hint" style="width: 100%">
+                <div class="kw-hint webmcp-hint">
                   试验特性（阶段 1.5）· 默认关。开启后向页面注入
                   <code>navigator.modelContext.registerTool</code> polyfill，捕获网站声明的 WebMCP
                   工具，让 AI 助手能感知「网站为智能体暴露了哪些工具」。仅捕获声明、不伪造执行
                   能力，试验完不留痕，可随时关闭。
-                </div>
-              </div>
-              <div class="kw-block" v-if="settingsStore.get('adblock_enabled') !== 'false'">
-                <div class="kw-hint">
-                  内置已含「关闭广告 / 头条报 / 推广」等。下面可手工加词，刷新页面后生效。
-                </div>
-                <div class="kw-list" v-if="customKeywords.length > 0">
-                  <span v-for="k in customKeywords" :key="k" class="kw-chip">
-                    {{ k }}
-                    <button class="kw-x" title="删除" @click="onRemoveKeyword(k)">✕</button>
-                  </span>
-                </div>
-                <div class="kw-add">
-                  <input
-                    v-model="newKeyword"
-                    type="text"
-                    placeholder="输入关键词，回车添加"
-                    spellcheck="false"
-                    @keyup.enter="onAddKeyword"
-                  />
-                  <button class="mini-btn primary" @click="onAddKeyword">添加</button>
-                </div>
-                <div v-if="kwMsg" class="cleared-msg">{{ kwMsg }}</div>
-              </div>
-              <div class="field">
-                <label>记录浏览历史</label>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('record_history') !== 'false'"
-                    @change="onSet('record_history', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-                  />
-                  <span class="slider"></span>
-                </label>
-              </div>
-              <div class="field">
-                <label>启动锁屏（每次启动输入账号密码解锁）</label>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('lock_enabled') === 'true'"
-                    @change="onSet('lock_enabled', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-                  />
-                  <span class="slider"></span>
-                </label>
-              </div>
-              <div class="field danger-field">
-                <label>历史记录</label>
-                <div class="history-actions">
-                  <button class="danger-btn" @click="onClearHistory">清除历史数据</button>
-                  <span v-if="clearedMsg" class="cleared-msg">{{ clearedMsg }}</span>
-                </div>
-              </div>
-              <div class="field danger-field" style="margin-top: 14px">
-                <label>清除浏览数据</label>
-                <div class="clear-scopes">
-                  <label><input type="checkbox" v-model="clearScopes.history" /> 浏览历史</label>
-                  <label><input type="checkbox" v-model="clearScopes.cookies" /> Cookie</label>
-                  <label><input type="checkbox" v-model="clearScopes.cache" /> 缓存</label>
-                  <label><input type="checkbox" v-model="clearScopes.storage" /> 本地存储</label>
-                  <label><input type="checkbox" v-model="clearScopes.downloads" /> 下载记录</label>
-                  <label><input type="checkbox" v-model="clearScopes.sessions" /> 会话</label>
-                </div>
-                <div class="history-actions">
-                  <button class="danger-btn" @click="onClearBrowsingData">立即清除</button>
-                  <span v-if="clearMsg" class="cleared-msg">{{ clearMsg }}</span>
-                </div>
-              </div>
-              <div class="field">
-                <label>证书管理</label>
-                <div class="history-actions">
-                  <button class="mini-btn" @click="emit('openCerts')">打开证书中心</button>
-                  <span class="field-desc">查看/管理证书、例外与监测事件</span>
-                </div>
-              </div>
-              <div class="field" style="margin-top: 14px">
-                <label>User-Agent</label>
-                <div class="field-desc" style="margin-bottom: 6px">
-                  部分网站按 UA 版本判定"浏览器不受支持"，可在此升级/自定义
-                </div>
-                <input class="ua-input" v-model="uaInput" placeholder="留空 = 使用默认 UA" />
-                <div class="history-actions" style="margin-top: 6px">
-                  <button class="mini-btn" @click="saveUa">保存</button>
-                  <button class="mini-btn" @click="resetUa">恢复默认</button>
-                  <span v-if="uaMsg" class="cleared-msg">{{ uaMsg }}</span>
-                </div>
-                <div class="field-desc" style="margin-top: 10px">站点级覆盖（某些站需特定 UA）</div>
-                <div class="ua-override-row">
-                  <input class="ua-input sm" v-model="uaSiteHost" placeholder="域名，如 example.com" />
-                  <input class="ua-input sm" v-model="uaSiteValue" placeholder="该站 UA" />
-                  <button class="mini-btn" @click="saveUaOverride">添加</button>
-                </div>
-                <div v-if="Object.keys(uaConfig.overrides).length" class="ua-overrides">
-                  <div v-for="(_, h) in uaConfig.overrides" :key="h" class="ua-ov-item">
-                    <span class="mono">{{ h }}</span>
-                    <button class="btn-x" @click="delUaOverride(h)">删除</button>
-                  </div>
                 </div>
               </div>
             </div>
@@ -1892,6 +1966,54 @@ async function onRemoveKeyword(k: string) {
                   </div>
                 </div>
               </template>
+            </div>
+          </div>
+
+          <!-- 关于 -->
+          <div v-if="activeSection === 'about'" class="settings-scroll">
+            <div class="card about-hero">
+              <div class="about-logo"><AppIcon name="shield" :size="30" /></div>
+              <div class="about-name">{{ aboutInfo?.appName || 'Shift Browser' }}</div>
+              <div class="about-version">
+                v{{ aboutInfo?.version || '—' }}
+                <span class="about-badge">{{ aboutInfo?.profile === 'debug' ? '调试版' : '正式版' }}</span>
+              </div>
+              <div class="about-tagline">本地优先的隐私浏览器，数据主权在你手里。</div>
+              <div class="about-env">
+                <span class="about-env-item"><AppIcon name="monitor" :size="12" /> WebKitGTK {{ aboutInfo?.webkitVersion || '—' }}</span>
+                <span class="about-env-item"><AppIcon name="gear" :size="12" /> {{ aboutInfo?.osArch || '—' }}</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-title"><AppIcon name="sparkles" :size="14" /> 核心能力</div>
+              <div class="about-feature"><span class="about-feature-icon">🛡</span><div><b>隐私防护 2.0</b><div class="about-feature-desc">反指纹加噪 / 统一化、追踪参数清洗、GPC 隐私信号</div></div></div>
+              <div class="about-feature"><span class="about-feature-icon">🔒</span><div><b>数据主权</b><div class="about-feature-desc">主密码加密密码库、E2E 上云同步（服务器零知识）</div></div></div>
+              <div class="about-feature"><span class="about-feature-icon">🔌</span><div><b>开放 API + MCP 工具</b><div class="about-feature-desc">本机脚本与智能体可安全调用浏览器能力</div></div></div>
+              <div class="about-feature"><span class="about-feature-icon">📰</span><div><b>RSS 订阅 · 阅读模式 · AI 助手</b><div class="about-feature-desc">信息聚合与智能辅助一站完成</div></div></div>
+            </div>
+
+            <div class="card">
+              <div class="card-title"><AppIcon name="lock" :size="14" /> 数据与隐私承诺</div>
+              <div class="about-feature"><span class="about-feature-icon">📍</span><div><b>本地优先</b><div class="about-feature-desc">历史、书签、密码库全部存在本机</div></div></div>
+              <div class="about-feature"><span class="about-feature-icon">📡</span><div><b>零遥测</b><div class="about-feature-desc">默认不收集任何数据，外联审计可随时验证</div></div></div>
+              <div class="about-feature"><span class="about-feature-icon">🔓</span><div><b>开源透明</b><div class="about-feature-desc">代码仓库公开，可审计</div></div></div>
+            </div>
+
+            <div class="card">
+              <div class="card-title"><AppIcon name="info" :size="14" /> 项目与致谢</div>
+              <div class="about-link-row">
+                <span class="about-link-label">项目主页</span>
+                <button class="mini-btn" @click="openRepo">打开仓库</button>
+              </div>
+              <div class="about-link-row">
+                <span class="about-link-label">数据目录</span>
+                <button class="mini-btn" @click="openDataDir">打开文件夹</button>
+              </div>
+              <div class="field-hint" style="margin-top: 8px">
+                技术栈：Tauri 2 · Rust · WebKitGTK · Vue 3<br />
+                致谢：Lucide 图标（ISC）、Nextcloud（WebDAV 同步）、W3C GPC 规范
+              </div>
             </div>
           </div>
         </div>
@@ -1962,6 +2084,13 @@ async function onRemoveKeyword(k: string) {
   justify-content: center;
   flex-shrink: 0;
   color: inherit;
+}
+.nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 右侧内容 */
@@ -2083,7 +2212,23 @@ async function onRemoveKeyword(k: string) {
 .field-desc {
   flex: 1;
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
+}
+/* 区块提示文字（此前无样式定义，字迹不清晰） */
+.field-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.field-hint code {
+  color: var(--accent);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
 }
 .field label {
   font-size: 13px;
@@ -2108,7 +2253,7 @@ async function onRemoveKeyword(k: string) {
 }
 .field select {
   padding-right: 26px;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='%23999' d='M2.5 4.5L6 8l3.5-3.5'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='%23c6d0df' d='M2.5 4.5L6 8l3.5-3.5'/></svg>");
   background-repeat: no-repeat;
   background-position: right 8px center;
   background-size: 12px;
@@ -2116,6 +2261,10 @@ async function onRemoveKeyword(k: string) {
 .field input:focus,
 .field select:focus {
   border-color: var(--accent);
+}
+/* 隐私防护/反指纹下拉框：与 .field select 一致但独立命名，避免样式漂移 */
+.privacy-select {
+  max-width: 240px;
 }
 
 /* 搜索引擎分段按钮 */
@@ -2265,6 +2414,105 @@ async function onRemoveKeyword(k: string) {
   color: #43a047;
 }
 
+/* 隐私分组（浏览防护 / 网络与追踪 / 数据安全 / 数据管理 / 开放 API） */
+.privacy-desc {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  margin: -4px 0 12px;
+  padding: 8px 10px;
+  background: var(--bg-primary);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+}
+.privacy-desc b {
+  color: var(--text-secondary);
+}
+.stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 0 12px;
+  padding: 8px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+.stat-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.stat-text b {
+  color: var(--accent);
+}
+.btn-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.test-summary {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+}
+.test-summary b {
+  color: var(--accent);
+}
+.sync-config {
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.sync-config input {
+  min-width: 180px;
+}
+.sync-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.exp-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #ffb454;
+  background: rgba(255, 180, 84, 0.14);
+  border: 1px solid rgba(255, 180, 84, 0.35);
+  border-radius: 999px;
+  vertical-align: 1px;
+}
+.webmcp-hint {
+  width: 100%;
+  margin-top: 8px;
+}
+.ua-field {
+  align-items: flex-start;
+}
+.ua-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.clear-data-field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+.clear-data-field .clear-scopes {
+  margin: 2px 0 4px;
+}
+
 /* 扩展 */
 .ext-load-row {
   display: flex;
@@ -2322,11 +2570,16 @@ async function onRemoveKeyword(k: string) {
   flex: 1 1 180px;
   min-width: 120px;
   background: var(--bg-primary);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   padding: 6px 8px;
   color: var(--text-primary);
   font-size: 12px;
+  outline: none;
+}
+.mcp-add-row input:focus,
+.mcp-add-row select:focus {
+  border-color: var(--accent);
 }
 .mcp-server-row {
   display: flex;
@@ -2456,31 +2709,44 @@ async function onRemoveKeyword(k: string) {
 }
 .mini-btn {
   background: var(--bg-active);
-  color: var(--text-secondary);
-  border: none;
-  border-radius: 6px;
-  padding: 5px 11px;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  padding: 5px 12px;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
+  white-space: nowrap;
 }
 .mini-btn:hover {
-  background: var(--text-secondary);
-  color: var(--bg-primary);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.mini-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .mini-btn.primary {
-  background: var(--accent-soft);
-  color: #cfe4ff;
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 .mini-btn.primary:hover {
-  background: var(--accent-soft);
+  background: var(--accent-2);
+  color: #fff;
+  border-color: var(--accent-2);
 }
 .mini-btn.danger {
   color: #ff8a8a;
-  background: rgba(229, 57, 53, 0.1);
+  background: rgba(229, 57, 53, 0.16);
+  border-color: rgba(229, 57, 53, 0.45);
 }
 .mini-btn.danger:hover {
-  background: rgba(229, 57, 53, 0.25);
+  background: rgba(229, 57, 53, 0.34);
+  color: #ffb3b3;
+  border-color: rgba(229, 57, 53, 0.6);
 }
 
 /* 关键词 */
@@ -2622,5 +2888,106 @@ async function onRemoveKeyword(k: string) {
   flex: 1 1 auto;
   opacity: 0.75;
   text-align: right;
+}
+
+/* 关于页 */
+.about-hero {
+  text-align: center;
+  padding: 22px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.about-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--grad-accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-md);
+  margin-bottom: 4px;
+}
+.about-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.about-version {
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.about-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.about-tagline {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.about-env {
+  display: flex;
+  gap: 14px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.about-env-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.about-env-item .app-icon {
+  color: var(--accent);
+}
+.about-feature {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 7px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.about-feature b {
+  font-weight: 600;
+}
+.about-feature-icon {
+  flex: 0 0 auto;
+  font-size: 16px;
+  line-height: 1.3;
+}
+.about-feature-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  line-height: 1.5;
+}
+.about-link-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border-subtle);
+}
+.about-link-label {
+  font-size: 13px;
+  color: var(--text-primary);
 }
 </style>

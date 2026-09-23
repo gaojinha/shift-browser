@@ -2,6 +2,7 @@
 
 mod agent_cmd;
 mod ai;
+mod about;
 mod audit;
 mod content_cmd;
 mod db;
@@ -189,6 +190,21 @@ async fn selfcheck_cmd(app: tauri::AppHandle) -> Result<selfcheck::SelfCheckRepo
         }
     }
     Ok(report)
+}
+
+/// 「关于」页信息（只读，打开即显示，不依赖自检）
+#[tauri::command]
+fn app_about_cmd(app: tauri::AppHandle) -> about::AboutInfo {
+    let info = about::collect(&app);
+    log::info!(
+        "[about] {} v{} · WebKitGTK {} · {} · {}",
+        info.app_name,
+        info.version,
+        info.webkit_version,
+        info.os_arch,
+        info.profile
+    );
+    info
 }
 
 /// 简易 percent-decode（处理 shift:// query 参数，避免引入 url crate）
@@ -704,6 +720,8 @@ pub fn run() {
       tabs::commands::open_devtools,
       // 自检（可观测性）
       selfcheck_cmd,
+      // 关于页信息（只读，打开即显示）
+      app_about_cmd,
       // AI 侧边栏
       ai::ai_chat,
       ai::ai_chat_stream,
