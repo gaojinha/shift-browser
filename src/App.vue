@@ -31,7 +31,7 @@ import { useWorkspacesStore } from './stores/workspaces'
 import { useAIStore } from './stores/ai'
 import { useToastStore } from './stores/toast'
 // 布局常量单一来源（build.rs 由 src-tauri/src/constants.rs 生成）→ 注入 CSS 变量
-import { EVENTS, LAYOUT } from './constants'
+import { EVENTS, LAYOUT, SHORTCUTS } from './constants'
 
 const tabsStore = useTabsStore()
 const groupsStore = useGroupsStore()
@@ -257,59 +257,78 @@ function onPaletteAskAi(query: string) {
   }
 }
 
+/** 快捷键匹配：组合键字符串形如 'ctrl+shift+t'
+ *  组合定义来自 constants.ts 的 SHORTCUTS（源：src-tauri/src/contracts.rs），
+ *  与 Rust GTK 层兜底表同一份定义，改一处两端同步。 */
+function matchShortcut(e: KeyboardEvent, combo: string): boolean {
+  const parts = combo.toLowerCase().split('+')
+  const key = parts[parts.length - 1]
+  return (
+    e.key.toLowerCase() === key &&
+    e.ctrlKey === parts.includes('ctrl') &&
+    e.shiftKey === parts.includes('shift') &&
+    !e.altKey &&
+    !e.metaKey
+  )
+}
+
 function onGlobalKeydown(e: KeyboardEvent) {
   // F12 / Ctrl+Shift+I：打开当前标签的开发者工具（Web Inspector）
-  if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i'))) {
+  if (matchShortcut(e, SHORTCUTS.DEVTOOLS) || matchShortcut(e, SHORTCUTS.DEVTOOLS_ALT)) {
     e.preventDefault()
     handleGlobalAction('devtools')
     return
   }
 
   // Ctrl+Tab / Ctrl+Shift+Tab：切换前后标签
-  if (e.ctrlKey && e.key === 'Tab') {
+  if (matchShortcut(e, SHORTCUTS.NEXT_TAB)) {
     e.preventDefault()
-    handleGlobalAction(e.shiftKey ? 'prev-tab' : 'next-tab')
+    handleGlobalAction('next-tab')
+    return
+  }
+  if (matchShortcut(e, SHORTCUTS.PREV_TAB)) {
+    e.preventDefault()
+    handleGlobalAction('prev-tab')
     return
   }
 
   // Ctrl 组合快捷键（不拦截无 Ctrl 的普通按键）
   if (e.ctrlKey && !e.altKey && !e.metaKey) {
-    const k = e.key.toLowerCase()
     // Ctrl+L 聚焦地址栏（任何情况下都生效，含输入框内）
-    if (k === 'l') {
+    if (matchShortcut(e, SHORTCUTS.FOCUS_ADDRESS)) {
       e.preventDefault()
       handleGlobalAction('focus-address')
       return
     }
     // Ctrl+K 命令栏（切换：任何情况下都生效，含输入框内）
-    if (k === 'k') {
+    if (matchShortcut(e, SHORTCUTS.COMMAND_PALETTE)) {
       e.preventDefault()
       showCommandPalette.value = !showCommandPalette.value
       return
     }
     // 弹窗打开时，其余标签快捷键不响应（避免误关标签/新建标签）
     if (anyDialogOpen()) return
-    // Ctrl+Shift+T 打开翻译面板 / Ctrl+Shift+S 会话管理（不影响 Ctrl+T 建标签）
-    if (k === 't' && e.shiftKey) {
+    // Ctrl+Shift+T 翻译面板 / Ctrl+Shift+S 会话管理（不影响 Ctrl+T 建标签）
+    if (matchShortcut(e, SHORTCUTS.TRANSLATE_PANEL)) {
       e.preventDefault()
       handleGlobalAction('translate-panel')
       return
     }
-    if (k === 's' && e.shiftKey) {
+    if (matchShortcut(e, SHORTCUTS.SESSIONS)) {
       e.preventDefault()
       handleGlobalAction('sessions')
       return
     }
-    if (k === 't') {
+    if (matchShortcut(e, SHORTCUTS.NEW_TAB)) {
       e.preventDefault()
       handleGlobalAction('new-tab')
-    } else if (k === 'w') {
+    } else if (matchShortcut(e, SHORTCUTS.CLOSE_TAB)) {
       e.preventDefault()
       handleGlobalAction('close-tab')
-    } else if (k === 'r') {
+    } else if (matchShortcut(e, SHORTCUTS.RELOAD)) {
       e.preventDefault()
       handleGlobalAction('reload')
-    } else if (k === 'h') {
+    } else if (matchShortcut(e, SHORTCUTS.HISTORY)) {
       e.preventDefault()
       handleGlobalAction('history')
     }

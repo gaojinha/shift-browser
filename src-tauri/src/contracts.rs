@@ -261,16 +261,16 @@ pub mod shortcuts {
     pub const SHORTCUTS: &[Shortcut] = &[
         Shortcut { id: "devtools", key: "f12", ctrl: false, shift: false, gdk_keyval: GDK_F12, gdk_keyval_shift: GDK_F12, gtk_fallback: true, gtk_always: true, desc: "开发者工具" },
         Shortcut { id: "devtools", key: "i", ctrl: true, shift: true, gdk_keyval: 0x69, gdk_keyval_shift: 0x49, gtk_fallback: true, gtk_always: true, desc: "开发者工具（备用）" },
-        Shortcut { id: "next-tab", key: "tab", ctrl: true, shift: false, gdk_keyval: GDK_TAB, gdk_keyval_shift: GDK_TAB, gtk_fallback: false, gtk_always: false, desc: "下一个标签" },
-        Shortcut { id: "prev-tab", key: "tab", ctrl: true, shift: true, gdk_keyval: GDK_TAB, gdk_keyval_shift: GDK_TAB, gtk_fallback: false, gtk_always: false, desc: "上一个标签" },
+        Shortcut { id: "next-tab", key: "tab", ctrl: true, shift: false, gdk_keyval: GDK_TAB, gdk_keyval_shift: GDK_TAB, gtk_fallback: true, gtk_always: false, desc: "下一个标签" },
+        Shortcut { id: "prev-tab", key: "tab", ctrl: true, shift: true, gdk_keyval: GDK_TAB, gdk_keyval_shift: GDK_TAB, gtk_fallback: true, gtk_always: false, desc: "上一个标签" },
         Shortcut { id: "new-tab", key: "t", ctrl: true, shift: false, gdk_keyval: 0x74, gdk_keyval_shift: 0x54, gtk_fallback: true, gtk_always: false, desc: "新建标签" },
         Shortcut { id: "translate-panel", key: "t", ctrl: true, shift: true, gdk_keyval: 0x74, gdk_keyval_shift: 0x54, gtk_fallback: true, gtk_always: false, desc: "翻译面板" },
         Shortcut { id: "close-tab", key: "w", ctrl: true, shift: false, gdk_keyval: 0x77, gdk_keyval_shift: 0x57, gtk_fallback: true, gtk_always: false, desc: "关闭标签" },
         Shortcut { id: "reload", key: "r", ctrl: true, shift: false, gdk_keyval: 0x72, gdk_keyval_shift: 0x52, gtk_fallback: true, gtk_always: false, desc: "刷新" },
         Shortcut { id: "focus-address", key: "l", ctrl: true, shift: false, gdk_keyval: 0x6C, gdk_keyval_shift: 0x4C, gtk_fallback: true, gtk_always: false, desc: "聚焦地址栏" },
         Shortcut { id: "history", key: "h", ctrl: true, shift: false, gdk_keyval: 0x48, gdk_keyval_shift: 0x68, gtk_fallback: true, gtk_always: false, desc: "历史记录" },
-        Shortcut { id: "command-palette", key: "k", ctrl: true, shift: false, gdk_keyval: 0x4B, gdk_keyval_shift: 0x6B, gtk_fallback: false, gtk_always: false, desc: "命令栏" },
-        Shortcut { id: "sessions", key: "s", ctrl: true, shift: true, gdk_keyval: 0x73, gdk_keyval_shift: 0x53, gtk_fallback: false, gtk_always: false, desc: "会话管理" },
+        Shortcut { id: "command-palette", key: "k", ctrl: true, shift: false, gdk_keyval: 0x4B, gdk_keyval_shift: 0x6B, gtk_fallback: true, gtk_always: false, desc: "命令栏" },
+        Shortcut { id: "sessions", key: "s", ctrl: true, shift: true, gdk_keyval: 0x73, gdk_keyval_shift: 0x53, gtk_fallback: true, gtk_always: false, desc: "会话管理" },
     ];
 
     /// 按 id 查找（取第一个匹配；同 id 多条为同一动作的不同按键）

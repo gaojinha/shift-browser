@@ -1147,54 +1147,34 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
         if let Ok(gtk_win) = window.gtk_window() {
             let app_handle = app.handle().clone();
             gtk_win.connect_key_press_event(move |_, event| {
-                // 直接用 GDK 键值常量比对（避免 gdk 版本间 keys 常量路径差异）
-                // F12=0xFFC9 I/i=0x49/0x69 T/t=0x54/0x74 W/w=0x57/0x77 R/r=0x52/0x72
-                // L/l=0x4C/0x6C H/h=0x48/0x68 S/s=0x53/0x73 K/k=0x4B/0x6B Tab=0xFF09
-                const KEY_F12: u32 = 0xFFC9;
-                const KEY_TAB: u32 = 0xFF09;
+                // 快捷键表来自 contracts.rs（单一来源）：keyval / 修饰键 / 兜底标记
+                // 都在那里定义，避免此前裸 keycode（0xFFC9/0x69/0x74…）散落各处
+                use crate::contracts::shortcuts::SHORTCUTS;
                 let key: u32 = *event.keyval();
                 let state = event.state();
                 let ctrl = state.contains(gtk::gdk::ModifierType::CONTROL_MASK);
                 let shift = state.contains(gtk::gdk::ModifierType::SHIFT_MASK);
-                let is = |lo: u32, up: u32| key == lo || key == up;
 
-                // ① 开发者工具：不依赖焦点，任何情况都响应
-                if key == KEY_F12 || (ctrl && shift && is(0x69, 0x49)) {
+                let Some(sc) = SHORTCUTS.iter().find(|s| {
+                    (key == s.gdk_keyval || key == s.gdk_keyval_shift)
+                        && ctrl == s.ctrl
+                        && shift == s.shift
+                }) else {
+                    return gtk::glib::Propagation::Proceed;
+                };
+
+                // ① 无条件响应（F12 / Ctrl+Shift+I：不论焦点在哪都开开发者工具）
+                if sc.gtk_always {
                     open_devtools_for_active(&app_handle);
                     return gtk::glib::Propagation::Stop;
                 }
 
                 // ② 其余浏览器级快捷键：仅在「页面持焦」时兜底。
                 // UI 层持焦时前端 keydown 已处理，这里必须放行，否则会重复触发（如建两个标签）。
-                if ctrl && !UI_FOCUSED.load(std::sync::atomic::Ordering::Relaxed) {
-                    let action = if is(0x74, 0x54) && !shift {
-                        Some("new-tab")
-                    } else if is(0x74, 0x54) && shift {
-                        Some("translate-panel")
-                    } else if is(0x77, 0x57) {
-                        Some("close-tab")
-                    } else if is(0x72, 0x52) {
-                        Some("reload")
-                    } else if is(0x6C, 0x4C) {
-                        Some("focus-address")
-                    } else if is(0x68, 0x48) {
-                        Some("history")
-                    } else if is(0x6B, 0x4B) {
-                        Some("command-palette")
-                    } else if is(0x73, 0x53) && shift {
-                        Some("sessions")
-                    } else if key == KEY_TAB && !shift {
-                        Some("next-tab")
-                    } else if key == KEY_TAB && shift {
-                        Some("prev-tab")
-                    } else {
-                        None
-                    };
-                    if let Some(action) = action {
-                        log::debug!("[tabs] GTK 层转发快捷键: {}", action);
-                        let _ = app_handle.emit(crate::contracts::events::GLOBAL_SHORTCUT, action);
-                        return gtk::glib::Propagation::Stop;
-                    }
+                if !UI_FOCUSED.load(std::sync::atomic::Ordering::Relaxed) {
+                    log::debug!("[tabs] GTK 层转发快捷键: {}", sc.id);
+                    let _ = app_handle.emit(crate::contracts::events::GLOBAL_SHORTCUT, sc.id);
+                    return gtk::glib::Propagation::Stop;
                 }
                 gtk::glib::Propagation::Proceed
             });
