@@ -466,6 +466,63 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
         // 能力清单（单一来源：capabilities.rs）——MCP Server 启动时拉取，
         // 避免其内部再手写一份 schema（历史问题：25 工具曾三处各写一遍）
         "capabilities/list" => json!({ "ok": true, "data": crate::capabilities::list_json() }),
+
+        // 插件清单（四形态统一视图：用户脚本 / 内容过滤 / Web 扩展 / MCP 服务器）
+        "plugins/list" => {
+            use crate::capabilities::plugins::{entry, PluginKind};
+            let db = app.state::<crate::db::Db>();
+            let mut list: Vec<serde_json::Value> = Vec::new();
+
+            // 用户脚本
+            if let Ok(rows) =
+                sqlx::query_as::<_, (i64, String, i64)>("SELECT id, name, enabled FROM userscripts ORDER BY id")
+                    .fetch_all(&db.pool)
+                    .await
+            {
+                for (id, name, enabled) in rows {
+                    list.push(entry(PluginKind::UserScript, &id.to_string(), &name, enabled != 0, "注入页面"));
+                }
+            }
+
+            // MCP 服务器
+            if let Ok(rows) =
+                sqlx::query_as::<_, (i64, String, i64)>("SELECT id, name, enabled FROM mcp_servers ORDER BY id")
+                    .fetch_all(&db.pool)
+                    .await
+            {
+                for (id, name, enabled) in rows {
+                    list.push(entry(PluginKind::McpServer, &id.to_string(), &name, enabled != 0, "外部工具服务器"));
+                }
+            }
+
+            // 内容过滤（广告拦截）
+            let adblock_on = sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'adblock_enabled'")
+                .fetch_optional(&db.pool)
+                .await
+                .ok()
+                .flatten()
+                .map(|(v,)| v != "false")
+                .unwrap_or(true);
+            list.push(entry(
+                PluginKind::ContentFilter,
+                "adblock",
+                "广告与追踪拦截",
+                adblock_on,
+                "内置规则 + 自定义关键词",
+            ));
+
+            // Web 扩展（编译期加载）
+            list.push(entry(
+                PluginKind::WebExtension,
+                "shift-web-extension",
+                "网络层拦截扩展",
+                true,
+                "编译期 .so，随应用加载",
+            ));
+
+            let count = list.len();
+            json!({ "ok": true, "data": { "plugins": list, "count": count } })
+        }
         "status" => {
             let tabs = app
                 .try_state::<crate::tabs::TabManager>()
