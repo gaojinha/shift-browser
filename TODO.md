@@ -153,15 +153,22 @@
     `TabBar`/`AddressBar`/`BookmarksBar`/`StatusBar` 改用 `var()`
   - 验证：cargo check/clippy 0 error、118 测试过、vue-tsc/eslint/vite build 过
 
-- [ ] **P1-b · 契约生成（🔴 下一步）**
-  - **设置键**：后端 `ALLOWED_KEYS` **41 个** ↔ 前端 `DEFAULT_SETTINGS` **24 个**
-    → `contracts.rs::SETTINGS` 单一来源（键 + 默认值 + 类型 + 敏感标记），
-    后端白名单与前端默认值都从它派生 → **补齐前端缺失的 19 个键**
-    （`api_readonly`/`api_http_port`/`theme_color`/`wallpaper`/`weather_city`/`net_headers`…）
-  - **IPC 事件名**：后端 emit 11 ↔ 前端 listen 18（裸字符串）→ `contracts::events` 常量
-  - **内部 URL**：`shift://newtab`×3、`/newtab/`×4、`shift://worldnav`×2 → `contracts::urls`
-  - **超时/间隔**：Rust 21 处 + 前端 10 处裸数字 → `contracts::timeout`（语义命名）
-  - **快捷键表**：前端 keydown ↔ Rust GTK 兜底（F12/Ctrl+Shift+I 两处各写一遍）
+- [ ] **P1-b · 契约生成（🟡 进行中）**
+  - [x] **设置键契约（✅ 2026-09-23，`9470872`）**
+    `contracts.rs::settings` 单一来源（41 键 + 默认值 + 类型 + 敏感标记）→
+    `build.rs` 生成 `SETTINGS_SCHEMA`/`DEFAULT_SETTINGS`；
+    后端 `db/settings.rs` 删除手写 `ALLOWED_KEYS`（40 行）改委托；
+    前端 `settings.ts` 删除手写默认值（24 键）→ 用生成物（41 键），**补齐 17 个缺失键**
+  - [x] **事件名 + 内部 URL 契约（✅ 生成完成，前端迁移待做）**
+    `contracts.rs::events`（18 个 IPC 事件名）+ `contracts.rs::urls`（shift:// 路由）→
+    `build.rs` 生成 `EVENTS` / `URLS`
+  - [ ] **前端 listen 迁移到 `EVENTS.XXX`（🔴 下一步）**
+    分布：`App.vue`(12) / `StatusBar.vue`(10) / `stores/tabs.ts`(8) /
+    `AISidebar.vue`(5) / `TranslateProgress.vue`(4) / `DownloadsDialog.vue`(4)
+  - [ ] **后端 emit 迁移到 `contracts::events::XXX`**（11 处）
+  - [ ] **内部 URL 迁移**：`shift://newtab`×3、`/newtab/`×4、`shift://worldnav`×2 → `contracts::urls`
+  - [ ] **超时/间隔契约**：Rust 21 处 + 前端 10 处裸数字 → `contracts::timeout`（语义命名）
+  - [ ] **快捷键表**：前端 keydown ↔ Rust GTK 兜底（F12/Ctrl+Shift+I 两处各写一遍）
     → `contracts::SHORTCUTS` 单一来源
   - 验收：设置页各项显示正常（不再空串失真）；快捷键（网页持焦时 F12）仍生效
 

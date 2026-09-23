@@ -109,3 +109,68 @@ pub mod settings {
         SETTINGS.iter().find(|s| s.key == key).map(|s| s.default)
     }
 }
+
+/// IPC 事件名（后端 emit / 前端 listen 共用；裸字符串拼错不报错的历史到此为止）
+pub mod events {
+    pub const APP_UNLOCKED: &str = "app-unlocked";
+    pub const AUTO_AGENT: &str = "auto-agent";
+    pub const DOWNLOADS_UPDATED: &str = "downloads-updated";
+    pub const GLOBAL_SHORTCUT: &str = "global-shortcut";
+    pub const OPEN_AI_FROM_NEWTAB: &str = "open-ai-from-newtab";
+    pub const OPEN_SETTINGS_FROM_NEWTAB: &str = "open-settings-from-newtab";
+    pub const OPEN_URL_FROM_NEWTAB: &str = "open-url-from-newtab";
+    pub const TABS_UPDATED: &str = "tabs-updated";
+    pub const TRANSLATE_PROGRESS: &str = "translate-progress";
+    pub const TRAY_OPEN_DOWNLOADS: &str = "tray-open-downloads";
+    pub const TRAY_OPEN_PASSWORDS: &str = "tray-open-passwords";
+    pub const AGENT_ACTION_REQUEST: &str = "agent-action-request";
+    pub const AGENT_MULTI_STEP_REQUEST: &str = "agent-multi-step-request";
+    pub const NET_STATUS_UPDATED: &str = "net-status-updated";
+    pub const PAGE_LOAD_FAILED: &str = "page-load-failed";
+    pub const PERMISSION_REQUEST: &str = "permission-request";
+    pub const TLS_ERROR: &str = "tls-error";
+    pub const WEB_PROCESS_CRASHED: &str = "web-process-crashed";
+
+    /// (前端常量名, 事件名) —— 供 build.rs 生成前端 `EVENTS`
+    pub const ALL: &[(&str, &str)] = &[
+        ("APP_UNLOCKED", APP_UNLOCKED),
+        ("AUTO_AGENT", AUTO_AGENT),
+        ("DOWNLOADS_UPDATED", DOWNLOADS_UPDATED),
+        ("GLOBAL_SHORTCUT", GLOBAL_SHORTCUT),
+        ("OPEN_AI_FROM_NEWTAB", OPEN_AI_FROM_NEWTAB),
+        ("OPEN_SETTINGS_FROM_NEWTAB", OPEN_SETTINGS_FROM_NEWTAB),
+        ("OPEN_URL_FROM_NEWTAB", OPEN_URL_FROM_NEWTAB),
+        ("TABS_UPDATED", TABS_UPDATED),
+        ("TRANSLATE_PROGRESS", TRANSLATE_PROGRESS),
+        ("TRAY_OPEN_DOWNLOADS", TRAY_OPEN_DOWNLOADS),
+        ("TRAY_OPEN_PASSWORDS", TRAY_OPEN_PASSWORDS),
+        ("AGENT_ACTION_REQUEST", AGENT_ACTION_REQUEST),
+        ("AGENT_MULTI_STEP_REQUEST", AGENT_MULTI_STEP_REQUEST),
+        ("NET_STATUS_UPDATED", NET_STATUS_UPDATED),
+        ("PAGE_LOAD_FAILED", PAGE_LOAD_FAILED),
+        ("PERMISSION_REQUEST", PERMISSION_REQUEST),
+        ("TLS_ERROR", TLS_ERROR),
+        ("WEB_PROCESS_CRASHED", WEB_PROCESS_CRASHED),
+    ];
+}
+
+/// 内部 URL / 路由（`shift://` 自定义协议的唯一来源）
+pub mod urls {
+    /// 启动页
+    pub const NEWTAB: &str = "shift://newtab";
+    /// 世界导航页
+    pub const WORLD_NAV: &str = "shift://worldnav";
+    /// 启动页资源路径标记（file:// 或协议判断用）
+    pub const NEWTAB_MARKER: &str = "/newtab/";
+    /// 阅读模式产物路径标记
+    pub const READER_MARKER: &str = "/reader/";
+
+    /// 是否为内部启动页 URL（协议版或旧 file:// 版）
+    pub fn is_newtab(u: &str) -> bool {
+        u.starts_with(NEWTAB) || u.contains(NEWTAB_MARKER)
+    }
+
+    /// (前端常量名, URL) —— 供 build.rs 生成前端 `URLS`
+    pub const ALL: &[(&str, &str)] =
+        &[("NEWTAB", NEWTAB), ("WORLD_NAV", WORLD_NAV), ("NEWTAB_MARKER", NEWTAB_MARKER)];
+}

@@ -77,3 +77,30 @@ export const SETTINGS_SCHEMA = {
 export const DEFAULT_SETTINGS: Record<string, string> = Object.fromEntries(
   Object.entries(SETTINGS_SCHEMA).map(([k, v]) => [k, v.default]),
 )
+
+export const EVENTS = {
+  APP_UNLOCKED: 'app-unlocked',
+  AUTO_AGENT: 'auto-agent',
+  DOWNLOADS_UPDATED: 'downloads-updated',
+  GLOBAL_SHORTCUT: 'global-shortcut',
+  OPEN_AI_FROM_NEWTAB: 'open-ai-from-newtab',
+  OPEN_SETTINGS_FROM_NEWTAB: 'open-settings-from-newtab',
+  OPEN_URL_FROM_NEWTAB: 'open-url-from-newtab',
+  TABS_UPDATED: 'tabs-updated',
+  TRANSLATE_PROGRESS: 'translate-progress',
+  TRAY_OPEN_DOWNLOADS: 'tray-open-downloads',
+  TRAY_OPEN_PASSWORDS: 'tray-open-passwords',
+  AGENT_ACTION_REQUEST: 'agent-action-request',
+  AGENT_MULTI_STEP_REQUEST: 'agent-multi-step-request',
+  NET_STATUS_UPDATED: 'net-status-updated',
+  PAGE_LOAD_FAILED: 'page-load-failed',
+  PERMISSION_REQUEST: 'permission-request',
+  TLS_ERROR: 'tls-error',
+  WEB_PROCESS_CRASHED: 'web-process-crashed',
+} as const
+
+export const URLS = {
+  NEWTAB: 'shift://newtab',
+  WORLD_NAV: 'shift://worldnav',
+  NEWTAB_MARKER: '/newtab/',
+} as const

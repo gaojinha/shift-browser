@@ -76,7 +76,21 @@ fn generate_ts_constants() {
     s.push_str("} as const\n\n");
     s.push_str("export const DEFAULT_SETTINGS: Record<string, string> = Object.fromEntries(\n");
     s.push_str("  Object.entries(SETTINGS_SCHEMA).map(([k, v]) => [k, v.default]),\n");
-    s.push_str(")\n");
+    s.push_str(")\n\n");
+
+    // ---- IPC 事件名（后端 emit / 前端 listen 共用）----
+    s.push_str("export const EVENTS = {\n");
+    for (name, value) in events::ALL {
+        s.push_str(&format!("  {name}: '{value}',\n"));
+    }
+    s.push_str("} as const\n\n");
+
+    // ---- 内部 URL / 路由 ----
+    s.push_str("export const URLS = {\n");
+    for (name, value) in urls::ALL {
+        s.push_str(&format!("  {name}: '{value}',\n"));
+    }
+    s.push_str("} as const\n");
 
     let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/constants.ts");
     std::fs::write(&out, s).expect("生成 src/constants.ts 失败");
