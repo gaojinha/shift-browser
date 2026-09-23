@@ -101,7 +101,7 @@ pub fn ai_cancel_stream(request_id: String) {
 ///
 /// 说明：域名解析成内网 IP 的 DNS rebinding 属于高级攻击面，
 /// 这里做静态校验挡住绝大多数场景（恶意页面无法让 key 发往任意内网/本机）。
-fn validate_base_url(base_url: &str) -> Result<String, String> {
+pub(crate) fn validate_base_url(base_url: &str) -> Result<String, String> {
     let parsed = url::Url::parse(base_url).map_err(|_| "API 地址格式不合法".to_string())?;
     if parsed.scheme() != "https" {
         return Err("API 地址只允许 https://（防止 API Key 明文传输）".to_string());

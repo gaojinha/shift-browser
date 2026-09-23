@@ -92,7 +92,6 @@ pub fn spawn(app: AppHandle) {
             }
         }
     });
-
 }
 
 /// HTTP API 端口（**仅 127.0.0.1**；局域网暴露需自行改绑并保管好 token）
@@ -166,6 +165,99 @@ fn ip_allowed(ip: &str, allowlist: &str) -> bool {
         .any(|pat| ip == pat || ip.starts_with(pat))
 }
 
+/// HTTP 请求头上限（64KB，远超正常请求头；超出按畸形请求断开）
+const HTTP_MAX_HEADER: usize = 64 * 1024;
+/// HTTP 请求体上限（8MB；模型网关转发长对话 chat/completions 必需）
+const HTTP_MAX_BODY: usize = 8 * 1024 * 1024;
+
+/// HTTP 请求读取结果
+#[derive(Debug)]
+enum HttpReq {
+    /// (请求头文本[不含结尾 \r\n\r\n], body 文本)
+    Complete(String, String),
+    /// Content-Length 超过 [`HTTP_MAX_BODY`]
+    TooLarge,
+    /// 连接提前关闭 / 请求畸形 / 头部超限 / chunked 不支持
+    Bad,
+}
+
+/// 从任意 AsyncRead 完整读取一个 HTTP/1.x 请求：
+/// - 头部循环读到 `\r\n\r\n`（头部可能跨 TCP 包到达，旧实现只读一次必然漏读）；
+/// - 按 Content-Length 把 body 读满（body 也可能跨包，或与头部在同一次 read 中到达）；
+/// - 无 Content-Length 时 body 取已随头部读到的剩余字节（兼容简单客户端）。
+async fn read_http_request<R: tokio::io::AsyncRead + Unpin>(r: &mut R) -> HttpReq {
+    use tokio::io::AsyncReadExt;
+    let mut buf: Vec<u8> = Vec::with_capacity(4096);
+    let mut chunk = [0u8; 4096];
+    let header_end = loop {
+        let n = match r.read(&mut chunk).await {
+            Ok(0) => return HttpReq::Bad,
+            Ok(n) => n,
+            Err(_) => return HttpReq::Bad,
+        };
+        buf.extend_from_slice(&chunk[..n]);
+        if let Some(i) = find_header_end(&buf) {
+            break i;
+        }
+        if buf.len() > HTTP_MAX_HEADER {
+            return HttpReq::Bad;
+        }
+    };
+    let head = String::from_utf8_lossy(&buf[..header_end]).to_string();
+    // Transfer-Encoding: chunked 不支持（本地 API 面向程序客户端，均带 Content-Length）
+    if is_chunked(&head) {
+        return HttpReq::Bad;
+    }
+    let target_len = match content_length_of(&head) {
+        Some(len) => {
+            if len > HTTP_MAX_BODY {
+                return HttpReq::TooLarge;
+            }
+            header_end.saturating_add(len)
+        }
+        None => buf.len(),
+    };
+    while buf.len() < target_len {
+        let n = match r.read(&mut chunk).await {
+            Ok(0) => return HttpReq::Bad,
+            Ok(n) => n,
+            Err(_) => return HttpReq::Bad,
+        };
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    let body = String::from_utf8_lossy(&buf[header_end..target_len]).to_string();
+    HttpReq::Complete(head, body)
+}
+
+/// 在已读字节中定位 HTTP 头部结束位置（`\r\n\r\n` 之后的偏移）
+fn find_header_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 4)
+}
+
+/// 请求头是否声明 `Transfer-Encoding: chunked`
+fn is_chunked(head: &str) -> bool {
+    head.lines().skip(1).any(|l| {
+        l.split_once(':')
+            .map(|(k, v)| {
+                k.trim().eq_ignore_ascii_case("transfer-encoding")
+                    && v.split(',')
+                        .any(|te| te.trim().eq_ignore_ascii_case("chunked"))
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// 从请求头解析 Content-Length
+fn content_length_of(head: &str) -> Option<usize> {
+    head.lines().skip(1).find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        if !k.trim().eq_ignore_ascii_case("content-length") {
+            return None;
+        }
+        v.trim().parse().ok()
+    })
+}
+
 fn spawn_http(app: AppHandle) {
     let Some(token) = ensure_token(&app) else {
         return;
@@ -223,16 +315,23 @@ fn spawn_http(app: AppHandle) {
             let app = app.clone();
             let token = token.clone();
             tauri::async_runtime::spawn(async move {
-                use tokio::io::{AsyncReadExt, AsyncWriteExt};
-                let mut buf = vec![0u8; 1 << 16];
-                let n = match stream.read(&mut buf).await {
-                    Ok(n) => n,
-                    Err(_) => return,
-                };
-                let req = String::from_utf8_lossy(&buf[..n]).to_string();
-                let (head, body) = match req.find("\r\n\r\n") {
-                    Some(i) => (&req[..i], &req[i + 4..]),
-                    None => (req.as_str(), ""),
+                use tokio::io::AsyncWriteExt;
+                // 完整读取请求（头部可能跨 TCP 包；body 按 Content-Length 读满——
+                // 旧实现只读一次 64KB，长对话经模型网关转发必然 JSON 截断）
+                let (head, body) = match read_http_request(&mut stream).await {
+                    HttpReq::Complete(h, b) => (h, b),
+                    HttpReq::TooLarge => {
+                        let payload =
+                            json!({"error": {"message": "请求体过大（上限 8MB）"}}).to_string();
+                        let out = format!(
+                            "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            payload.len(),
+                            payload
+                        );
+                        let _ = stream.write_all(out.as_bytes()).await;
+                        return;
+                    }
+                    HttpReq::Bad => return,
                 };
                 let path = head
                     .lines()
@@ -245,7 +344,10 @@ fn spawn_http(app: AppHandle) {
                         && l.splitn(2, ':')
                             .nth(1)
                             .map(|v| {
-                                ct_eq(v.trim().trim_start_matches("Bearer ").trim(), token.as_str())
+                                ct_eq(
+                                    v.trim().trim_start_matches("Bearer ").trim(),
+                                    token.as_str(),
+                                )
                             })
                             .unwrap_or(false)
                 });
@@ -254,7 +356,7 @@ fn spawn_http(app: AppHandle) {
                     let out_json = if !auth_ok {
                         json!({"error": {"message": "未授权：需要 Authorization: Bearer <token>"}})
                     } else {
-                        model_gateway(&app, body).await
+                        model_gateway(&app, &body).await
                     };
                     let s = serde_json::to_string(&out_json).unwrap_or_else(|_| "{}".into());
                     let out = format!(
@@ -278,7 +380,11 @@ fn spawn_http(app: AppHandle) {
                             let v = it.next().unwrap_or("");
                             (k == "token").then(|| v.to_string())
                         });
-                    let ok = qtok.as_deref().map(|t| ct_eq(t, token.as_str())).unwrap_or(false) || auth_ok;
+                    let ok = qtok
+                        .as_deref()
+                        .map(|t| ct_eq(t, token.as_str()))
+                        .unwrap_or(false)
+                        || auth_ok;
                     let html = if ok {
                         dashboard_html(&app).await
                     } else {
@@ -402,6 +508,15 @@ async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Value {
             o.insert("model".to_string(), json!(model));
         }
     }
+    // SSRF 防护（P0-5，2026-09-24）：网关转发携带 API Key，上游地址必须与
+    // AI 聊天同一校验口径——https-only、拒绝 userinfo、拒绝本机/内网字面地址
+    // （含 IPv4 混淆与 IPv4-mapped IPv6 绕过）。否则持 token 的调用方可把
+    // 网关变成携带密钥打内网的跳板。
+    let base = base.trim();
+    if let Err(e) = crate::ai::validate_base_url(base) {
+        log::warn!("[api] 模型网关上游地址被安全策略拒绝: {} ({})", e, base);
+        return json!({"error": {"message": format!("上游地址未通过安全校验: {e}")}});
+    }
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .build()
@@ -410,34 +525,19 @@ async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Value {
         Err(e) => return json!({"error": {"message": format!("创建 HTTP 客户端失败: {}", e)}}),
     };
     let url = format!("{}/chat/completions", base.trim_end_matches('/'));
-    match client.post(&url).bearer_auth(&key).json(&payload).send().await {
+    match client
+        .post(&url)
+        .bearer_auth(&key)
+        .json(&payload)
+        .send()
+        .await
+    {
         Ok(resp) => match resp.json::<serde_json::Value>().await {
             Ok(v) => v,
             Err(e) => json!({"error": {"message": format!("解析上游响应失败: {}", e)}}),
         },
         Err(e) => json!({"error": {"message": format!("上游请求失败: {}", e)}}),
     }
-}
-
-/// 写命令（改变浏览器状态）；只读模式（api_readonly=true）下统一拒绝
-fn is_write_cmd(cmd: &str) -> bool {
-    matches!(
-        cmd,
-        "open_url"
-            | "close_tab"
-            | "switch_tab"
-            | "reload_tab"
-            | "navigate"
-            | "search"
-            | "new_tab"
-            | "eval"
-            | "plugins/set_enabled"
-            | "tool_call"
-            | "pin_tab"
-            | "mute_tab"
-            | "minimize_window"
-            | "maximize_window"
-    )
 }
 
 /// 处理一条请求
@@ -447,8 +547,10 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
         Err(e) => return json!({"ok": false, "error": format!("请求 JSON 非法: {}", e)}),
     };
     let cmd = req.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
-    // 只读模式（api_readonly=true）：拒绝一切写命令
-    if is_write_cmd(cmd) {
+    // 只读模式（api_readonly=true）：拒绝一切写命令。
+    // 写命令身份唯一来源：capabilities 注册表的 Risk 分类（P0-2，2026-09-24），
+    // 不再在本文件维护手写第二份名单。
+    if crate::capabilities::is_write(cmd) {
         let db = app.state::<crate::db::Db>();
         let ro = sqlx::query_scalar::<_, String>(
             "SELECT value FROM settings WHERE key = 'api_readonly'",
@@ -478,35 +580,51 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
             let mut list: Vec<serde_json::Value> = Vec::new();
 
             // 用户脚本
-            if let Ok(rows) =
-                sqlx::query_as::<_, (i64, String, i64)>("SELECT id, name, enabled FROM userscripts ORDER BY id")
-                    .fetch_all(&db.pool)
-                    .await
+            if let Ok(rows) = sqlx::query_as::<_, (i64, String, i64)>(
+                "SELECT id, name, enabled FROM userscripts ORDER BY id",
+            )
+            .fetch_all(&db.pool)
+            .await
             {
                 for (id, name, enabled) in rows {
-                    list.push(entry(PluginKind::UserScript, &id.to_string(), &name, enabled != 0, "注入页面"));
+                    list.push(entry(
+                        PluginKind::UserScript,
+                        &id.to_string(),
+                        &name,
+                        enabled != 0,
+                        "注入页面",
+                    ));
                 }
             }
 
             // MCP 服务器
-            if let Ok(rows) =
-                sqlx::query_as::<_, (i64, String, i64)>("SELECT id, name, enabled FROM mcp_servers ORDER BY id")
-                    .fetch_all(&db.pool)
-                    .await
+            if let Ok(rows) = sqlx::query_as::<_, (i64, String, i64)>(
+                "SELECT id, name, enabled FROM mcp_servers ORDER BY id",
+            )
+            .fetch_all(&db.pool)
+            .await
             {
                 for (id, name, enabled) in rows {
-                    list.push(entry(PluginKind::McpServer, &id.to_string(), &name, enabled != 0, "外部工具服务器"));
+                    list.push(entry(
+                        PluginKind::McpServer,
+                        &id.to_string(),
+                        &name,
+                        enabled != 0,
+                        "外部工具服务器",
+                    ));
                 }
             }
 
             // 内容过滤（广告拦截）
-            let adblock_on = sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'adblock_enabled'")
-                .fetch_optional(&db.pool)
-                .await
-                .ok()
-                .flatten()
-                .map(|(v,)| v != "false")
-                .unwrap_or(true);
+            let adblock_on = sqlx::query_as::<_, (String,)>(
+                "SELECT value FROM settings WHERE key = 'adblock_enabled'",
+            )
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(v,)| v != "false")
+            .unwrap_or(true);
             list.push(entry(
                 PluginKind::ContentFilter,
                 "adblock",
@@ -537,23 +655,29 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
             let flag: i64 = if enabled { 1 } else { 0 };
             let num_id: i64 = id.parse().unwrap_or(-1);
             let res = match kind {
-                "userscript" => sqlx::query("UPDATE userscripts SET enabled = ? WHERE id = ?")
-                    .bind(flag)
-                    .bind(num_id)
-                    .execute(&db.pool)
-                    .await,
-                "mcp_server" => sqlx::query("UPDATE mcp_servers SET enabled = ? WHERE id = ?")
-                    .bind(flag)
-                    .bind(num_id)
-                    .execute(&db.pool)
-                    .await,
-                "content_filter" => sqlx::query(
-                    "INSERT INTO settings (key, value) VALUES ('adblock_enabled', ?)
+                "userscript" => {
+                    sqlx::query("UPDATE userscripts SET enabled = ? WHERE id = ?")
+                        .bind(flag)
+                        .bind(num_id)
+                        .execute(&db.pool)
+                        .await
+                }
+                "mcp_server" => {
+                    sqlx::query("UPDATE mcp_servers SET enabled = ? WHERE id = ?")
+                        .bind(flag)
+                        .bind(num_id)
+                        .execute(&db.pool)
+                        .await
+                }
+                "content_filter" => {
+                    sqlx::query(
+                        "INSERT INTO settings (key, value) VALUES ('adblock_enabled', ?)
                      ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                )
-                .bind(if enabled { "true" } else { "false" })
-                .execute(&db.pool)
-                .await,
+                    )
+                    .bind(if enabled { "true" } else { "false" })
+                    .execute(&db.pool)
+                    .await
+                }
                 "web_extension" => {
                     return json!({ "ok": false, "error": "Web 扩展为编译期加载，不支持运行时启停" })
                 }
@@ -699,7 +823,15 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };
             // 注意：Rust 侧 create_tab 需要绝对 URL，"newtab" 会解析失败 → 用 shift://newtab
-            match crate::tabs::commands::create_tab(app.clone(), state, crate::contracts::urls::NEWTAB.to_string(), None, None).await {
+            match crate::tabs::commands::create_tab(
+                app.clone(),
+                state,
+                crate::contracts::urls::NEWTAB.to_string(),
+                None,
+                None,
+            )
+            .await
+            {
                 Ok(t) => json!({"ok": true, "data": t}),
                 Err(e) => json!({"ok": false, "error": e}),
             }
@@ -810,14 +942,15 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
         "eval" => {
             // 执行 JS（安全闸门：设置 api_allow_eval 必须为 'true'，默认关）
             let db = app.state::<crate::db::Db>();
-            let allowed: String =
-                sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'api_allow_eval'")
-                    .fetch_optional(&db.pool)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|(v,)| v)
-                    .unwrap_or_default();
+            let allowed: String = sqlx::query_as::<_, (String,)>(
+                "SELECT value FROM settings WHERE key = 'api_allow_eval'",
+            )
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(v,)| v)
+            .unwrap_or_default();
             if allowed != "true" {
                 return json!({"ok": false, "error": "执行 JS 已禁用：需在设置里显式开启「允许 API 执行 JS」"});
             }
@@ -1017,5 +1150,143 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
             json!({"ok": true, "data": active})
         }
         _ => json!({"ok": false, "error": format!("未知命令: {}", cmd)}),
+    }
+}
+
+#[cfg(test)]
+mod http_req_tests {
+    use super::*;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use tokio::io::{AsyncRead, ReadBuf};
+
+    /// 每次 poll_read 最多吐出 max_chunk 字节，模拟 TCP 跨包/拆包
+    struct SlowReader {
+        data: Vec<u8>,
+        pos: usize,
+        max_chunk: usize,
+    }
+
+    impl AsyncRead for SlowReader {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            let this = self.get_mut();
+            let remain = this.data.len() - this.pos;
+            if remain == 0 {
+                return Poll::Ready(Ok(()));
+            }
+            let n = remain.min(this.max_chunk).min(buf.remaining());
+            buf.put_slice(&this.data[this.pos..this.pos + n]);
+            this.pos += n;
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    fn post_request(body: &str) -> Vec<u8> {
+        format!(
+            "POST /api HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .into_bytes()
+    }
+
+    #[tokio::test]
+    async fn small_body_single_read() {
+        let mut r = SlowReader {
+            data: post_request("hello"),
+            pos: 0,
+            max_chunk: 4096,
+        };
+        match read_http_request(&mut r).await {
+            HttpReq::Complete(head, body) => {
+                assert!(head.starts_with("POST /api HTTP/1.1"));
+                assert_eq!(body, "hello");
+            }
+            other => panic!("期望 Complete，实际 {other:?}"),
+        }
+    }
+
+    /// 回归：旧实现只读一次 64KB，200KB body 的长对话必然被截断
+    #[tokio::test]
+    async fn large_body_read_full_across_packets() {
+        let body = "a".repeat(200 * 1024);
+        let mut r = SlowReader {
+            data: post_request(&body),
+            pos: 0,
+            max_chunk: 4096,
+        };
+        match read_http_request(&mut r).await {
+            HttpReq::Complete(_, got) => assert_eq!(got.len(), 200 * 1024),
+            other => panic!("期望 Complete，实际 {other:?}"),
+        }
+    }
+
+    /// 头部本身跨多个 TCP 包（\r\n\r\n 被拆开）也能正确定位
+    #[tokio::test]
+    async fn headers_split_across_packets() {
+        let mut r = SlowReader {
+            data: post_request("xy"),
+            pos: 0,
+            max_chunk: 13,
+        };
+        assert!(matches!(read_http_request(&mut r).await, HttpReq::Complete(_, b) if b == "xy"));
+    }
+
+    #[tokio::test]
+    async fn oversized_body_rejected() {
+        let body = "a".repeat(HTTP_MAX_BODY + 1);
+        let mut r = SlowReader {
+            data: post_request(&body),
+            pos: 0,
+            max_chunk: 16 * 1024,
+        };
+        assert!(matches!(read_http_request(&mut r).await, HttpReq::TooLarge));
+    }
+
+    #[tokio::test]
+    async fn body_without_content_length_uses_tail_bytes() {
+        let raw = b"POST /api HTTP/1.1\r\nHost: x\r\n\r\nabc".to_vec();
+        let mut r = SlowReader {
+            data: raw,
+            pos: 0,
+            max_chunk: 4096,
+        };
+        assert!(matches!(read_http_request(&mut r).await, HttpReq::Complete(_, b) if b == "abc"));
+    }
+
+    #[tokio::test]
+    async fn closed_connection_is_bad() {
+        let mut r = SlowReader {
+            data: vec![],
+            pos: 0,
+            max_chunk: 4096,
+        };
+        assert!(matches!(read_http_request(&mut r).await, HttpReq::Bad));
+    }
+
+    #[tokio::test]
+    async fn chunked_unsupported() {
+        let raw =
+            b"POST /api HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+                .to_vec();
+        let mut r = SlowReader {
+            data: raw,
+            pos: 0,
+            max_chunk: 4096,
+        };
+        assert!(matches!(read_http_request(&mut r).await, HttpReq::Bad));
+    }
+
+    #[test]
+    fn content_length_parsing() {
+        let head = "POST /api HTTP/1.1\r\ncontent-length: 42\r\n";
+        assert_eq!(content_length_of(head), Some(42));
+        assert_eq!(content_length_of("POST / HTTP/1.1\r\nHost: x\r\n"), None);
+        assert_eq!(find_header_end(b"abc\r\n\r\nbody"), Some(7),);
+        assert_eq!(find_header_end(b"abc\r\n\r"), None);
     }
 }

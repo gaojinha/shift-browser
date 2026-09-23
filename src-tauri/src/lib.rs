@@ -463,9 +463,99 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
     }
 }
 
+/// 致命错误提示：setup 失败路径（如数据库初始化失败）下 Vue UI 尚不可用，
+/// 只能走 GTK 原生层弹窗；与启动锁屏同模式——setup 在 GTK 主线程执行，
+/// `run()` 模态阻塞，用户确认后调用方返回 Err 退出。
+#[cfg(target_os = "linux")]
+fn show_fatal_dialog(app: &tauri::AppHandle, msg: &str) {
+    use gtk::prelude::*;
+    let parent = app.get_window("main").and_then(|w| w.gtk_window().ok());
+    let dialog = gtk::MessageDialog::new(
+        parent.as_ref(),
+        gtk::DialogFlags::MODAL,
+        gtk::MessageType::Error,
+        gtk::ButtonsType::Close,
+        msg,
+    );
+    dialog.set_title("Shift Browser 启动失败");
+    dialog.run();
+    dialog.close();
+}
+
+/// 非 Linux 平台暂无 GUI，致命信息落 stderr
+#[cfg(not(target_os = "linux"))]
+fn show_fatal_dialog(_app: &tauri::AppHandle, msg: &str) {
+    eprintln!("[ShiftBrowser] 致命错误: {msg}");
+}
+
+/// panic 日志目录（setup 中 app_data_dir 确定后注入）；未注入前 panic 至少落 stderr + 日志
+static PANIC_LOG_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// 安装全局 panic 钩子（P0-4，2026-09-24）。
+///
+/// 全应用无 `catch_unwind`：WebKit 网页进程崩溃有 UI 兜底，浏览器自身线程
+/// panic 却只会让进程静默消失，用户无法提供任何证据。钩子统一记录
+/// 线程/位置/载荷/backtrace 到 stderr、日志，并在数据目录追加 `panic.log`。
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let thread_name = std::thread::current()
+            .name()
+            .unwrap_or("unnamed")
+            .to_string();
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<非字符串 panic 载荷>".to_string());
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let line = format!(
+            "[panic] unix_ts={ts} thread={thread_name} location={location}\n          payload: {payload}\n{backtrace}"
+        );
+        // 1. stderr：logger 尚未初始化的最早启动阶段也能保留
+        eprintln!("{line}");
+        // 2. tauri-plugin-log（初始化后进入正式日志文件）
+        log::error!("{line}");
+        // 3. 数据目录 panic.log 追加落盘（用户事后可提供）
+        if let Some(dir) = PANIC_LOG_DIR.get() {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join("panic.log"))
+            {
+                let _ = writeln!(f, "{line}\n");
+            }
+        }
+    }));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 pub fn run() {
+    // 最早安装：任何后续初始化（含 GTK/WebKit）中 panic 都有证据
+    install_panic_hook();
+
+    // ===== WebKit DMA-BUF 线性格式兜底（P0-7，2026-09-24）=====
+    // WEBKIT_DMABUF_RENDERER_BUFFER_FORMAT=XR24:0 用于规避 WebKitGTK 2.42+
+    // AcceleratedBackingStore 竞态空指针崩溃（见 HANDOFF-2026-09-23 全记录）。
+    // 原先只写在 .desktop 模板的 Exec= env 前缀里——从终端/IDE/MCP 客户端等
+    // 非 desktop 入口启动时不生效。前移到进程启动最早处（任何 GTK/WebKit
+    // 初始化之前），覆盖全部启动入口；用户显式设置过同名变量则不覆盖。
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DMABUF_RENDERER_BUFFER_FORMAT").is_none() {
+        std::env::set_var("WEBKIT_DMABUF_RENDERER_BUFFER_FORMAT", "XR24:0");
+        log::info!("[ShiftBrowser] 已注入 WEBKIT_DMABUF_RENDERER_BUFFER_FORMAT=XR24:0（启动入口兜底，可被环境变量覆盖）");
+    }
+
     // ===== DMA-BUF 渲染器：不再默认禁用（2026-09-23 回退）=====
     // 【原方案】禁用它（WEBKIT_DISABLE_DMABUF_RENDERER=1）可修 Intel HD 630 上的
     // 网页/视频闪烁（WebKitGTK 2.42+ 默认走 DMA-BUF 路径，与 i915 配合不良）。
@@ -1236,16 +1326,28 @@ pub fn run() {
       log::info!("[ShiftBrowser] app_data_dir = {:?}", app_data_dir);
       log::info!("[ShiftBrowser] 目录存在: {}", app_data_dir.exists());
 
-      let db_handle = tauri::async_runtime::block_on(Db::init(app_data_dir.clone()));
-      match db_handle {
-        Ok(db) => {
-          app.manage(db);
-          log::info!("[ShiftBrowser] 数据库初始化成功");
-        }
+      // 注入 panic hook 的落盘目录（P0-4）：此后任何线程 panic 都会追加到 panic.log
+      let _ = PANIC_LOG_DIR.set(app_data_dir.clone());
+
+      // 数据库是全应用硬依赖（TabManager/API/AI/设置全部 state::<Db>()），
+      // 初始化失败必须**立即终止启动**——旧实现只记日志后继续，
+      // 后续任意 state::<Db>() 访问都会无提示 panic（P0-3，2026-09-24）。
+      let db = match tauri::async_runtime::block_on(Db::init(app_data_dir.clone())) {
+        Ok(db) => db,
         Err(e) => {
-          log::error!("[ShiftBrowser] 数据库初始化失败: {}", e);
+          log::error!("[ShiftBrowser] 数据库初始化失败，终止启动: {}", e);
+          show_fatal_dialog(
+            app.handle(),
+            &format!(
+              "数据库初始化失败，Shift Browser 无法启动。\n\n错误信息：{e}\n数据目录：{}\n\n请检查磁盘空间与目录权限。若数据库文件损坏，可先备份目录后删除其中的 *.sqlite 文件再重启（本地未同步数据将丢失）。",
+              app_data_dir.display()
+            ),
+          );
+          return Err(std::io::Error::other(format!("数据库初始化失败: {e}")).into());
         }
-      }
+      };
+      app.manage(db);
+      log::info!("[ShiftBrowser] 数据库初始化成功");
 
       // 锁屏前预生成新标签页 + 后台刷新壁纸——锁屏 dialog 阻塞 setup 期间，
       // 这些异步任务照常跑（tokio 不依赖 GTK 主循环），解锁时 index.html 已就绪，

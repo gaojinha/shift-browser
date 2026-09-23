@@ -14,55 +14,69 @@ use serde_json::{json, Value};
 
 /// 能力风险等级（决定 MCP 是否暴露、API 只读闸门、是否需要人工确认）
 ///
-/// 注：目前仅 `tool_defs`（MCP 视图）在用；API 只读闸门与 Agent 动作校验
-/// 将在 P3b 接入本枚举（TODO 已记录），故暂标 allow(dead_code)。
-#[allow(dead_code)]
+/// - `Read`/`Write`：MCP 视图与 API 只读闸门共用本枚举（2026-09-24 接入，
+///   消灭 api.rs 手写第二份写命令名单的漂移风险）；
+/// - `Agent`：预留给 Agent 动作校验（当前动作白名单在 `agent_actions`，
+///   每步已有人工确认，尚未并入本枚举）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
     /// 只读（低风险）
     Read,
     /// 写操作（受 `api_readonly` 只读闸门约束）
     Write,
-    /// Agent 浏览器动作（需人工确认）
+    /// Agent 浏览器动作（需人工确认；待接入）
+    #[allow(dead_code)]
     Agent,
+}
+
+/// 内部能力定义（带风险等级）；MCP JSON 视图由 [`tool_defs`] 投影生成，
+/// API 只读闸门从 [`risk_of`] 查询——同一注册表，不再两处手写。
+struct ToolDef {
+    name: &'static str,
+    description: &'static str,
+    props: Value,
+    required: Vec<&'static str>,
+    risk: Risk,
 }
 
 /// MCP 工具定义（读类全暴露；写类暴露但受只读闸门约束；
 /// `eval` / `tool_call` 不暴露——风险高，走浏览器 API 直连）。
 ///
 /// 名称 = 浏览器 API 命令名，参数一一对应；与 `api.rs` 的分发分支保持一致。
-
-fn tool_defs() -> Vec<Value> {
-    let t = |name: &str, description: &str, props: Value, required: Vec<&str>| {
-        json!({
-            "name": name,
-            "description": description,
-            "inputSchema": {
-                "type": "object",
-                "properties": props,
-                "required": required
-            }
-        })
+fn registry() -> Vec<ToolDef> {
+    let t = |name: &'static str,
+             description: &'static str,
+             props: Value,
+             required: Vec<&'static str>,
+             risk: Risk| ToolDef {
+        name,
+        description,
+        props,
+        required,
+        risk,
     };
     vec![
-        // ===== 读类 =====
+        // ===== 读类（不改变浏览器状态）=====
         t(
             "status",
             "获取浏览器状态：版本号 + 当前标签数。无参数。",
             json!({}),
             vec![],
+            Risk::Read,
         ),
         t(
             "list_tabs",
             "列出全部标签页（含 id、标题、URL、是否激活）。无参数。",
             json!({}),
             vec![],
+            Risk::Read,
         ),
         t(
             "active_tab",
             "获取当前活动标签页。无参数。",
             json!({}),
             vec![],
+            Risk::Read,
         ),
         t(
             "history",
@@ -71,12 +85,14 @@ fn tool_defs() -> Vec<Value> {
                 "limit": { "type": "integer", "description": "条数，默认 50，最大 500" }
             }),
             vec![],
+            Risk::Read,
         ),
         t(
             "bookmarks",
             "读取书签列表（含文件夹名）。无参数。",
             json!({}),
             vec![],
+            Risk::Read,
         ),
         t(
             "search_history",
@@ -86,36 +102,42 @@ fn tool_defs() -> Vec<Value> {
                 "limit": { "type": "integer", "description": "条数，默认 50" }
             }),
             vec!["query"],
+            Risk::Read,
         ),
         t(
             "list_downloads",
             "列出最近下载记录（最多 100 条）。无参数。",
             json!({}),
             vec![],
+            Risk::Read,
         ),
         t(
             "list_sessions",
             "列出会话快照（最多 50 条）。无参数。",
             json!({}),
             vec![],
+            Risk::Read,
         ),
         t(
             "list_groups",
             "列出标签分组。无参数。",
             json!({}),
             vec![],
+            Risk::Read,
         ),
         t(
             "list_spaces",
             "列出空间（工作区）。无参数。",
             json!({}),
             vec![],
+            Risk::Read,
         ),
         t(
             "list_userscripts",
             "列出用户脚本。无参数。",
             json!({}),
             vec![],
+            Risk::Read,
         ),
         t(
             "get_setting",
@@ -124,14 +146,16 @@ fn tool_defs() -> Vec<Value> {
                 "key": { "type": "string", "description": "设置键名，如 theme（必填）" }
             }),
             vec!["key"],
+            Risk::Read,
         ),
         t(
             "list_settings",
             "列出全部设置（敏感键已过滤）。无参数。",
             json!({}),
             vec![],
+            Risk::Read,
         ),
-        // ===== 写类 =====
+        // ===== 写类（改变浏览器状态，受 api_readonly 闸门约束）=====
         t(
             "open_url",
             "在新标签页打开网址（浏览器窗口前置）。",
@@ -139,12 +163,14 @@ fn tool_defs() -> Vec<Value> {
                 "url": { "type": "string", "description": "目标网址，如 https://example.com（必填）" }
             }),
             vec!["url"],
+            Risk::Write,
         ),
         t(
             "new_tab",
             "打开内置新标签页。无参数。",
             json!({}),
             vec![],
+            Risk::Write,
         ),
         t(
             "close_tab",
@@ -153,6 +179,7 @@ fn tool_defs() -> Vec<Value> {
                 "id": { "type": "string", "description": "标签 id（先 list_tabs 获取，必填）" }
             }),
             vec!["id"],
+            Risk::Write,
         ),
         t(
             "switch_tab",
@@ -161,6 +188,7 @@ fn tool_defs() -> Vec<Value> {
                 "id": { "type": "string", "description": "标签 id（必填）" }
             }),
             vec!["id"],
+            Risk::Write,
         ),
         t(
             "reload_tab",
@@ -169,6 +197,7 @@ fn tool_defs() -> Vec<Value> {
                 "id": { "type": "string", "description": "标签 id（必填）" }
             }),
             vec!["id"],
+            Risk::Write,
         ),
         t(
             "navigate",
@@ -178,6 +207,7 @@ fn tool_defs() -> Vec<Value> {
                 "url": { "type": "string", "description": "目标网址（必填）" }
             }),
             vec!["id", "url"],
+            Risk::Write,
         ),
         t(
             "search",
@@ -186,6 +216,7 @@ fn tool_defs() -> Vec<Value> {
                 "query": { "type": "string", "description": "搜索关键词（必填）" }
             }),
             vec!["query"],
+            Risk::Write,
         ),
         t(
             "pin_tab",
@@ -194,6 +225,7 @@ fn tool_defs() -> Vec<Value> {
                 "id": { "type": "string", "description": "标签 id（必填）" }
             }),
             vec!["id"],
+            Risk::Write,
         ),
         t(
             "mute_tab",
@@ -202,39 +234,85 @@ fn tool_defs() -> Vec<Value> {
                 "id": { "type": "string", "description": "标签 id（必填）" }
             }),
             vec!["id"],
+            Risk::Write,
         ),
         t(
             "minimize_window",
             "最小化主窗口。无参数。",
             json!({}),
             vec![],
+            Risk::Write,
         ),
         t(
             "maximize_window",
             "最大化 / 还原主窗口（返回当前是否最大化）。无参数。",
             json!({}),
             vec![],
+            Risk::Write,
         ),
+        // 截图只采集页面像素、不改变任何状态——按 Read 管理（与历史只读闸门行为一致）
         t(
             "screenshot",
             "截取当前活动标签页可见区域，PNG 落盘，返回文件路径。无参数。",
             json!({}),
             vec![],
+            Risk::Read,
         ),
     ]
 }
 
+/// 仅开放 API 暴露、不进 MCP 清单的高危命令风险等级
+/// （`eval`/`tool_call` 注释明确不暴露给 MCP，但 API 闸门必须覆盖）。
+fn extra_risk(name: &str) -> Option<Risk> {
+    match name {
+        "eval" | "tool_call" | "plugins/set_enabled" => Some(Risk::Write),
+        _ => None,
+    }
+}
+
+/// 查询命令风险等级（API 只读闸门唯一来源；未知命令返回 None）
+pub fn risk_of(name: &str) -> Option<Risk> {
+    registry()
+        .iter()
+        .find(|d| d.name == name)
+        .map(|d| d.risk)
+        .or_else(|| extra_risk(name))
+}
+
+/// 是否为写命令（`api_readonly=true` 时统一拒绝）
+pub fn is_write(name: &str) -> bool {
+    risk_of(name) == Some(Risk::Write)
+}
+
+/// MCP JSON 视图：把内部注册表（含风险等级）投影为工具 schema；
+/// risk 是内部安全元数据，不对外暴露。
+fn tool_defs() -> Vec<Value> {
+    registry()
+        .iter()
+        .map(|d| {
+            json!({
+                "name": d.name,
+                "description": d.description,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": d.props,
+                    "required": d.required
+                }
+            })
+        })
+        .collect()
+}
+
 /// 全部能力 id（供 API 校验 / Agent 动作白名单 / 文档生成）
 pub fn ids() -> Vec<String> {
-    tool_defs()
-        .iter()
-        .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(str::to_string))
-        .collect()
+    registry().iter().map(|d| d.name.to_string()).collect()
 }
 
 /// `capabilities/list` API 响应：能力清单 + schema（MCP Server 动态拉取用）
 pub fn list_json() -> Value {
-    json!({ "tools": tool_defs(), "count": tool_defs().len() })
+    let defs = tool_defs();
+    let count = defs.len();
+    json!({ "tools": defs, "count": count })
 }
 
 #[cfg(test)]
@@ -244,12 +322,18 @@ mod tests {
     #[test]
     fn tool_defs_wellformed() {
         let defs = tool_defs();
-        assert_eq!(defs.len(), 25, "工具数应为 25（读 13 + 写 12）");
+        assert_eq!(
+            defs.len(),
+            25,
+            "工具数应为 25（读 14 含 screenshot + 写 11）"
+        );
         for d in &defs {
             assert!(d.get("name").and_then(|v| v.as_str()).is_some(), "缺 name");
             assert!(d.get("description").is_some(), "缺 description");
             let schema = d.get("inputSchema").expect("缺 inputSchema");
             assert_eq!(schema.get("type").and_then(|v| v.as_str()), Some("object"));
+            // risk 是内部安全元数据，绝不能通过 MCP 视图泄露
+            assert!(d.get("risk").is_none(), "MCP 视图不得暴露 risk");
         }
     }
 
@@ -260,6 +344,58 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), n, "能力 id 必须唯一");
+    }
+
+    /// 防漂移（P0-2 核心）：注册表 Risk 分类必须与只读闸门判定同源一致。
+    /// 历史问题：api.rs 手写第二份写命令名单，新增写命令漏改即静默绕过只读模式。
+    #[test]
+    fn readonly_gate_matches_registry_risk() {
+        for d in registry() {
+            assert_eq!(
+                is_write(d.name),
+                d.risk == Risk::Write,
+                "命令 {} 的只读闸门判定与注册表 Risk::{:?} 不一致",
+                d.name,
+                d.risk
+            );
+        }
+        // 不进 MCP 清单的高危命令也必须被闸门覆盖
+        for name in ["eval", "tool_call", "plugins/set_enabled"] {
+            assert_eq!(risk_of(name), Some(Risk::Write), "{name} 应为写命令");
+            assert!(is_write(name), "{name} 必须被只读闸门拦截");
+        }
+        // 未知命令不享有写身份（match 分发本身会拒未知命令，这里双保险）
+        assert!(!is_write("definitely-not-a-command"));
+        assert_eq!(risk_of("definitely-not-a-command"), None);
+    }
+
+    #[test]
+    fn write_cmd_set_unchanged_snapshot() {
+        // 行为基线：与重构前 api.rs 手写名单完全一致（screenshot 历史上不拦截）
+        let expected = [
+            "open_url",
+            "new_tab",
+            "close_tab",
+            "switch_tab",
+            "reload_tab",
+            "navigate",
+            "search",
+            "pin_tab",
+            "mute_tab",
+            "minimize_window",
+            "maximize_window",
+            "eval",
+            "tool_call",
+            "plugins/set_enabled",
+        ];
+        for name in expected {
+            assert!(is_write(name), "基线写命令 {name} 丢失");
+        }
+        assert!(
+            !is_write("screenshot"),
+            "screenshot 历史行为为只读，不得收紧"
+        );
+        assert!(!is_write("status"));
     }
 }
 
@@ -337,7 +473,13 @@ pub mod plugins {
     }
 
     /// 统一插件条目
-    pub fn entry(kind: PluginKind, id: &str, name: &str, enabled: bool, detail: &str) -> serde_json::Value {
+    pub fn entry(
+        kind: PluginKind,
+        id: &str,
+        name: &str,
+        enabled: bool,
+        detail: &str,
+    ) -> serde_json::Value {
         serde_json::json!({
             "kind": kind.as_str(),
             "kindLabel": kind.label(),
@@ -370,7 +512,13 @@ mod plugins_tests {
 
     #[test]
     fn plugin_entry_shape() {
-        let e = entry(PluginKind::UserScript, "1", "测试脚本", true, "匹配 example.com");
+        let e = entry(
+            PluginKind::UserScript,
+            "1",
+            "测试脚本",
+            true,
+            "匹配 example.com",
+        );
         assert_eq!(e["kind"], "userscript");
         assert_eq!(e["enabled"], true);
         assert_eq!(e["togglable"], true);
@@ -393,15 +541,51 @@ pub mod agent_actions {
 
     /// 全部动作（唯一来源）
     pub const ACTIONS: &[Action] = &[
-        Action { id: "click", desc: "点击页面元素", required: &["selector"] },
-        Action { id: "fill", desc: "填写输入框", required: &["selector", "value"] },
-        Action { id: "scroll", desc: "滚动页面", required: &["direction"] },
-        Action { id: "read", desc: "读取页面文本", required: &[] },
-        Action { id: "wait", desc: "等待若干毫秒", required: &["ms"] },
-        Action { id: "navigate", desc: "跳转到指定 URL", required: &["url"] },
-        Action { id: "back", desc: "后退一页", required: &[] },
-        Action { id: "snapshot", desc: "采集页面语义快照", required: &[] },
-        Action { id: "submit", desc: "提交表单", required: &["selector"] },
+        Action {
+            id: "click",
+            desc: "点击页面元素",
+            required: &["selector"],
+        },
+        Action {
+            id: "fill",
+            desc: "填写输入框",
+            required: &["selector", "value"],
+        },
+        Action {
+            id: "scroll",
+            desc: "滚动页面",
+            required: &["direction"],
+        },
+        Action {
+            id: "read",
+            desc: "读取页面文本",
+            required: &[],
+        },
+        Action {
+            id: "wait",
+            desc: "等待若干毫秒",
+            required: &["ms"],
+        },
+        Action {
+            id: "navigate",
+            desc: "跳转到指定 URL",
+            required: &["url"],
+        },
+        Action {
+            id: "back",
+            desc: "后退一页",
+            required: &[],
+        },
+        Action {
+            id: "snapshot",
+            desc: "采集页面语义快照",
+            required: &[],
+        },
+        Action {
+            id: "submit",
+            desc: "提交表单",
+            required: &["selector"],
+        },
     ];
 
     /// 动作 id 数组（供 function calling 的 `enum` / 白名单校验直接用）
