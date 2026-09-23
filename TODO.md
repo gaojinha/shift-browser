@@ -1,6 +1,6 @@
 # ShiftBrowser 待办清单
 
-> 更新于 2026-09-21 · 对应 HANDOFF 第八十七章（MCP Server）
+> 更新于 2026-09-23 · 对应 HANDOFF 第八十七章（MCP Server）+ 设置页重构（`002afe1`）
 > 优先级：🔴 高 / 🟡 中 / 🟢 低 / ⚪ 遗留
 
 ---
@@ -98,3 +98,36 @@
 - [x] 默认浏览器设置（`21c0f3f`：xdg-settings 集成 + MimeType 声明 + 外部 URL 打开）
 - [x] 登录状态持久化 + 单实例（`9ce60c0`：Cookie 落盘 + single-instance 转发 URL）
 - [x] MCP Server（`cdfdc97`：`shift-browser-mcp` stdio 二进制，25 工具，AI 标准协议驱动浏览器）
+
+---
+
+## F. 设置页重构（2026-09-23，`002afe1`）
+
+- [x] **F1 · 隐私选项卡拆分（✅ 2026-09-23）**
+  原先一个「隐私」选项卡扛 5 组内容太重，拆成三个独立选项卡：
+  - **隐私防护**（浏览防护 + 网络与追踪）
+  - **数据安全**（数据安全 + 数据管理）
+  - **开放 API**（开放 API 配置）
+  导航由 7 项扩为 10 项：通用 / 外观 / AI 助手 / MCP 工具 / 扩展 /
+  隐私防护 / 数据安全 / 开放 API / 自检 / 关于。
+
+- [x] **F2 · 全局字迹/对比度修复（✅ 2026-09-23）**
+  高哥反馈设置页「字迹不清晰」，根因：`.field-hint` 用了 5 处但零样式定义、
+  无全局 placeholder 样式、`--border-subtle` 透明度 0.06 太淡、`--text-muted`
+  对比度不足、select 箭头 #999 太暗。修复：
+  - App.vue 主题变量提亮（深/浅两套：text-secondary/muted、border-color/subtle）
+  - 全局 `::placeholder` 样式
+  - 新增 `.field-hint` 提示块样式、MCP/AI 输入框边框 + focus 高亮、
+    select 箭头提亮、`.mini-btn` 普通/primary/danger 三态对比度加强
+
+- [x] **F3 · 新增「关于」选项卡（✅ 2026-09-23）**
+  导航最后一项（自检下面），4 卡片：产品信息（版本/WebKitGTK/OS/架构，动态读
+  不写死）+ 核心能力 + 数据与隐私承诺 + 项目与致谢（打开仓库/数据目录按钮）。
+  新增 Rust 只读命令 `app_about_cmd`（`about.rs`）+ AppIcon `info` 图标。
+
+- [x] **F4 · 打包修复（✅ 2026-09-23，`afd5d8e`）**
+  Cargo.toml 显式 `default-run = "shift-browser"`，避免 tauri bundle
+  因双 bin（主浏览器 + shift-browser-mcp）报 "failed to find main binary"。
+
+- [x] **F5 · 提交推送（✅ 2026-09-23）**
+  两个提交推 gitcode master（`6c06928..afd5d8e`），Git Hooks 检查通过。
