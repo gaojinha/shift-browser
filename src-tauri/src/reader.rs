@@ -65,6 +65,10 @@ fn fetch_and_extract(url: &str) -> Result<readability::extractor::Product, Strin
 pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<String, String> {
     let mut cur = url.to_string();
     for _ in 0..5 {
+        // P0-6：每一跳（含上一跳 Location）都先解析+校验并生成 --resolve pin。
+        // curl 建连只能连本次解析出且校验为公网的地址，不再自行二次解析，
+        // DNS-rebinding 无法在校验之后把目标换成 127.0.0.1/169.254.169.254。
+        let pins = curl_pin_args(&cur)?;
         // 单跳探测：拿状态码 + 重定向目标（curl 不带 -L 不自动跟随）
         let mut cmd = std::process::Command::new("curl");
         cmd.args([
@@ -77,6 +81,9 @@ pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<S
             "-w",
             "%{http_code} %{redirect_url}",
         ]);
+        for p in &pins {
+            cmd.args(["--resolve", p]);
+        }
         if let Some(u) = ua {
             cmd.args(["-A", u]);
         }
@@ -87,19 +94,19 @@ pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<S
         let code: u16 = parts.next().unwrap_or("0").parse().unwrap_or(0);
         let loc = parts.next().unwrap_or("").trim().to_string();
         if (300..400).contains(&code) && !loc.is_empty() {
-            // 重定向目标也必须是公网（防 SSRF 重定向绕过）
-            if let Err(e) = validate_public_host_blocking(&loc) {
-                return Err(e);
-            }
+            // 重定向目标的公网校验在下一轮循环顶部随 pin 一起完成
             cur = loc;
             continue;
         }
         if !(200..300).contains(&code) {
             return Err(format!("抓取失败: HTTP {}", code));
         }
-        // 2xx：拿正文
+        // 2xx：拿正文（同一 host，沿用同一 pin 集合）
         let mut cmd2 = std::process::Command::new("curl");
         cmd2.args(["-s", "--compressed", "--max-time", "20"]);
+        for p in &pins {
+            cmd2.args(["--resolve", p]);
+        }
         if let Some(u) = ua {
             cmd2.args(["-A", u]);
         }
@@ -119,23 +126,37 @@ pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<S
     Err("重定向次数过多".to_string())
 }
 
-/// 同步版 SSRF 主机校验（重定向逐跳用；初始 URL 用 async 版 validate_public_url）
-fn validate_public_host_blocking(url: &str) -> Result<(), String> {
+/// 同步解析一跳 URL 并生成 curl `--resolve` pin（P0-6，重定向逐跳调用）。
+/// - IP 字面量：校验公网后返回空列表（无 DNS 面，curl 直连即可）
+/// - 域名：用系统解析器只解析这一次，任一结果落内网即整体拒绝（双答 DNS
+///   混入 127.0.0.1/169.254.169.254 时拒绝），全部公网才返回 pin 列表；
+///   curl 拿到 pin 后建连阶段不再二次解析，TOCTOU 闭合
+fn curl_pin_args(url: &str) -> Result<Vec<String>, String> {
     use std::net::ToSocketAddrs;
-    let parsed = url::Url::parse(url).map_err(|_| "重定向目标 URL 不合法".to_string())?;
-    let host = parsed
+    let parsed = url::Url::parse(url).map_err(|_| "URL 不合法".to_string())?;
+    let raw = parsed
         .host_str()
-        .ok_or_else(|| "重定向目标缺少主机名".to_string())?;
+        .ok_or_else(|| "URL 缺少主机名".to_string())?;
+    let host = raw.trim_start_matches('[').trim_end_matches(']');
+    let port = parsed.port_or_known_default().unwrap_or(80);
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        return reject_private_ip(&ip);
+        reject_private_ip(&ip)?;
+        return Ok(Vec::new());
     }
-    let addrs = (host, 80)
+    let sock: Vec<_> = (host, port)
         .to_socket_addrs()
-        .map_err(|e| format!("DNS 解析失败: {} ({})", host, e))?;
-    for addr in addrs {
-        reject_private_ip(&addr.ip())?;
-    }
-    Ok(())
+        .map_err(|e| format!("DNS 解析失败: {} ({})", host, e))?
+        .collect();
+    let addrs = crate::ai::check_resolved_ips(host, sock.iter().map(|s| s.ip()), port)?;
+    Ok(addrs
+        .iter()
+        .map(|sa| curl_resolve_value(host, sa.port(), sa.ip()))
+        .collect())
+}
+
+/// 生成单条 curl `--resolve` 值：`host:port:ip`（IPv6 不带方括号，curl 可识别）
+fn curl_resolve_value(host: &str, port: u16, ip: std::net::IpAddr) -> String {
+    format!("{}:{}:{}", host, port, ip)
 }
 
 /// SSRF 校验：目标主机必须是公网地址。
@@ -146,9 +167,13 @@ pub(crate) async fn validate_public_url(url: &str) -> Result<(), String> {
         log::warn!("[reader] URL 解析失败: {} -> {}", url, e);
         "URL 格式不合法".to_string()
     })?;
-    let host = parsed
+    let raw_host = parsed
         .host_str()
-        .ok_or_else(|| "URL 缺少主机名".to_string())?
+        .ok_or_else(|| "URL 缺少主机名".to_string())?;
+    // url crate 对 IPv6 返回 "[::1]"，去括号后再解析/查询
+    let host = raw_host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
         .to_string();
     // IP 字面量：直接判
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
@@ -158,45 +183,26 @@ pub(crate) async fn validate_public_url(url: &str) -> Result<(), String> {
         }
         return r;
     }
-    // 域名：异步解析全部 A/AAAA，任一落在内网即拒绝
-    let addrs = tokio::net::lookup_host((host.as_str(), 80))
+    // 域名：异步解析全部 A/AAAA，统一走 ai::check_resolved_ips——任一落内网
+    // 或解析结果为空都拒绝（P0-6 fail-closed；旧实现空结果会被误放行）
+    let sock: Vec<_> = tokio::net::lookup_host((host.as_str(), 80))
         .await
         .map_err(|e| {
             log::warn!("[reader] DNS 解析失败: {} -> {}", host, e);
             format!("DNS 解析失败: {}", host)
-        })?;
-    for addr in addrs {
-        if let Err(e) = reject_private_ip(&addr.ip()) {
-            log::warn!(
-                "[reader] SSRF 拦截域名解析: {} -> {} ({})",
-                host,
-                addr.ip(),
-                e
-            );
-            return Err(e);
-        }
+        })?
+        .collect();
+    if let Err(e) = crate::ai::check_resolved_ips(&host, sock.iter().map(|s| s.ip()), 80) {
+        log::warn!("[reader] SSRF 拦截域名解析: {}", e);
+        return Err(e);
     }
     Ok(())
 }
 
 fn reject_private_ip(ip: &std::net::IpAddr) -> Result<(), String> {
-    let bad = match ip {
-        std::net::IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_broadcast()
-                || v4.is_unspecified()
-        }
-        std::net::IpAddr::V6(v6) => {
-            v6.is_loopback() || v6.is_unspecified() || {
-                // fc00::/7（ULA 内网）与 fe80::/10（链路本地）
-                let segs = v6.segments();
-                (segs[0] & 0xfe00) == 0xfc00 || (segs[0] & 0xffc0) == 0xfe80
-            }
-        }
-    };
-    if bad {
+    // P0-6：统一走 ai::is_private_ip。本函数旧私有实现漏判 IPv4-mapped IPv6
+    // （::ffff:127.0.0.1 / ::ffff:169.254.169.254 会被误放行）及 v6 组播/站点本地。
+    if crate::ai::is_private_ip(*ip) {
         Err("目标地址是内网/保留地址，已拦截（SSRF 防护）".to_string())
     } else {
         Ok(())
@@ -494,5 +500,59 @@ mod tests {
         assert!(s.contains("粗体"));
         assert!(s.contains("链接"));
         assert!(s.contains("<li>"));
+    }
+
+    #[test]
+    fn curl_resolve_value_formats_v4_and_brackets_free_v6() {
+        // curl --resolve 格式 host:port:ip；IPv6 不带方括号
+        let v4: std::net::IpAddr = "93.184.216.34".parse().unwrap();
+        assert_eq!(
+            curl_resolve_value("example.com", 443, v4),
+            "example.com:443:93.184.216.34"
+        );
+        let v6: std::net::IpAddr = "2606:4700::1111".parse().unwrap();
+        assert_eq!(
+            curl_resolve_value("v6.example", 8443, v6),
+            "v6.example:8443:2606:4700::1111"
+        );
+    }
+
+    #[test]
+    fn curl_pin_args_rejects_internal_ip_literals() {
+        // 本机/元数据/IPv6 环回字面量直接拒绝
+        assert!(curl_pin_args("http://127.0.0.1:19701/").is_err());
+        assert!(curl_pin_args("https://169.254.169.254/latest/meta-data").is_err());
+        assert!(curl_pin_args("https://[::1]/").is_err());
+        assert!(curl_pin_args("https://[fe80::1]/").is_err());
+    }
+
+    #[test]
+    fn curl_pin_args_rejects_ipv4_mapped_v6_literal() {
+        // 回归：旧 reject_private_ip 对 ::ffff:127.0.0.1 按"看似公网的 v6"误放行
+        assert!(curl_pin_args("https://[::ffff:127.0.0.1]/").is_err());
+        assert!(curl_pin_args("https://[::ffff:169.254.169.254]/").is_err());
+        assert!(reject_private_ip(
+            &"::ffff:192.168.0.1".parse::<std::net::IpAddr>().unwrap()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn curl_pin_args_public_ip_literal_needs_no_pin() {
+        // 公网 IP 字面量无 DNS 面：空 pin 列表，curl 直连
+        assert_eq!(
+            curl_pin_args("https://1.1.1.1/").unwrap(),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            curl_pin_args("https://[2606:4700::1111]/").unwrap(),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn curl_pin_args_rejects_bad_urls() {
+        assert!(curl_pin_args("not a url").is_err());
+        assert!(curl_pin_args("file:///etc/passwd").is_err());
     }
 }

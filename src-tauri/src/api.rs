@@ -517,10 +517,21 @@ async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Value {
         log::warn!("[api] 模型网关上游地址被安全策略拒绝: {} ({})", e, base);
         return json!({"error": {"message": format!("上游地址未通过安全校验: {e}")}});
     }
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-    {
+    // P0-6：域名解析后 pin 死公网地址，消除"校验时解析一次、发送时再解析一次"
+    // 的 DNS-rebinding TOCTOU（双答 DNS 在内网混答时直接拒绝）。
+    let (resolve_key, pinned) = match crate::ai::resolve_pin_for_https(base).await {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("[api] 模型网关注解/pin 上游地址失败: {} ({})", e, base);
+            return json!({"error": {"message": format!("上游地址未通过安全校验: {e}")}});
+        }
+    };
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120));
+    if let Some(addrs) = &pinned {
+        builder = builder.resolve_to_addrs(&resolve_key, addrs);
+    }
+    let client = match builder.build() {
         Ok(c) => c,
         Err(e) => return json!({"error": {"message": format!("创建 HTTP 客户端失败: {}", e)}}),
     };

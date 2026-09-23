@@ -139,8 +139,9 @@ fn is_private_host(host: &str) -> bool {
         || h.ends_with(".home")
 }
 
-/// 判断 IP 是否为本机/内网（v4/v6 统一入口）
-fn is_private_ip(ip: std::net::IpAddr) -> bool {
+/// 判断 IP 是否为本机/内网（v4/v6 统一入口；reader/api 等所有 SSRF 判定共用，
+/// 避免各处私有判定口径漂移——reader 旧实现就漏判了 IPv4-mapped IPv6）
+pub(crate) fn is_private_ip(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(v4) => is_private_v4(v4),
         std::net::IpAddr::V6(v6) => {
@@ -226,19 +227,70 @@ fn parse_int_radix(s: &str) -> Option<u64> {
     }
 }
 
-/// 实际解析域名并校验所有解析结果（防"域名解析到内网 IP"）
-/// 注：DNS rebinding（解析后到连接前换 IP）属于高级攻击面，静态+解析校验
-/// 能挡住常规场景（恶意域名静态解析到 127.0.0.1 等）。
-async fn validate_resolved_host(host: &str) -> Result<(), String> {
-    let addrs = tokio::net::lookup_host((host, 443))
-        .await
-        .map_err(|e| format!("域名解析失败: {}", e))?;
-    for addr in addrs {
-        if is_private_ip(addr.ip()) {
-            return Err(format!("API 地址解析到本机/内网，已拒绝: {}", addr.ip()));
-        }
+/// 对一次 DNS 解析的结果做 fail-closed 校验并产出 pin 地址（P0-6 核心纯函数）。
+/// - 任一结果落内网/保留段即整体拒绝——双答 DNS（公网+内网混答）无法靠"碰运气
+///   连到公网"或"校验时只看到公网"绕过
+/// - 空结果同样拒绝（不能把"解析不到地址"当成放行）
+///
+/// 通过的地址统一封装为带 `port` 的 SocketAddr，供 reqwest resolve_to_addrs /
+/// curl --resolve 直接使用，使建连阶段不再二次解析，闭合 TOCTOU。
+pub(crate) fn check_resolved_ips(
+  host: &str,
+  ips: impl IntoIterator<Item = std::net::IpAddr>,
+  port: u16,
+) -> Result<Vec<std::net::SocketAddr>, String> {
+  let mut out = Vec::new();
+  let mut count = 0u32;
+  for ip in ips {
+    count += 1;
+    if is_private_ip(ip) {
+      return Err(format!("域名 {host} 解析到本机/内网地址 {ip}，已拒绝（SSRF 防护）"));
     }
-    Ok(())
+    out.push(std::net::SocketAddr::new(ip, port));
+  }
+  if count == 0 {
+    return Err(format!("域名 {host} 没有可用的 DNS 解析结果，已拒绝（SSRF 防护）"));
+  }
+  Ok(out)
+}
+
+/// 解析已通过 `validate_base_url` 静态校验的 https URL，返回 pin 所需信息（P0-6）。
+/// 返回 `(resolve_key, pinned)`：
+/// - 标准 IP 字面量（静态校验已保证公网）：`pinned = None`，无 DNS 面，客户端直连即可
+/// - 域名 / 数字混淆主机：`pinned = 本次解析出的全部公网地址`，调用方必须用
+///   `reqwest::ClientBuilder::resolve_to_addrs(resolve_key, &pinned)` 注册，
+///   reqwest 建连时只在这些地址间选择、不再重新解析（DNS-rebinding TOCTOU 闭合）
+pub(crate) async fn resolve_pin_for_https(
+  url: &str,
+) -> Result<(String, Option<Vec<std::net::SocketAddr>>), String> {
+  let parsed = url::Url::parse(url).map_err(|_| "API 地址格式不合法".to_string())?;
+  let port = parsed.port_or_known_default().unwrap_or(443);
+  let raw = parsed
+    .host_str()
+    .ok_or_else(|| "API 地址缺少主机名".to_string())?;
+  // url crate 对 IPv6 返回带方括号的 "[::1]"，解析/resolve key 都用去括号形式
+  let host = raw.trim_start_matches('[').trim_end_matches(']').to_string();
+  // 标准 IP 字面量：validate_base_url 已拒绝内网/混淆写法，公网字面量无需 pin
+  if host.parse::<std::net::IpAddr>().is_ok() {
+    return Ok((host, None));
+  }
+  // IPv4 数字混淆主机（如 0x08080808）：归一化后按规范 IP pin；
+  // 内网写法已在 validate_base_url 静态拒绝，这里 fail-closed 再判一次
+  if let Some(v4) = parse_obfuscated_ipv4(&host) {
+    let addrs = check_resolved_ips(
+      &host,
+      std::iter::once(std::net::IpAddr::V4(v4)),
+      port,
+    )?;
+    return Ok((host, Some(addrs)));
+  }
+  // 域名：只解析这一次，校验全部结果，随后 pin 死交给调用方
+  let sock: Vec<_> = tokio::net::lookup_host((host.as_str(), port))
+    .await
+    .map_err(|e| format!("域名解析失败: {host} ({e})"))?
+    .collect();
+  let addrs = check_resolved_ips(&host, sock.iter().map(|s| s.ip()), port)?;
+  Ok((host, Some(addrs)))
 }
 
 /// AI 对话（经 Provider 抽象路由，默认 AGNES 云端）
@@ -377,21 +429,18 @@ pub async fn agnes_chat_impl(
     req: &crate::engine::ai_provider::ProviderRequest,
 ) -> Result<ChatMessage, String> {
     let base_url = validate_base_url(base_url)?;
-    // 实际解析域名，校验解析结果不指向本机/内网（P1-8）
-    let host = url::Url::parse(&base_url)
-        .map_err(|_| "API 地址格式不合法".to_string())?
-        .host_str()
-        .ok_or_else(|| "API 地址缺少主机名".to_string())?
-        .to_string();
-    if host.parse::<std::net::IpAddr>().is_err() {
-        validate_resolved_host(&host).await?;
-    }
+    // P0-6：解析一次并 pin 死公网地址，reqwest 建连不再二次解析（防 DNS rebinding）
+    let (resolve_key, pinned) = resolve_pin_for_https(&base_url).await?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(90))
-        .build()
-        .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
+    let mut builder = reqwest::Client::builder()
+      .timeout(std::time::Duration::from_secs(90));
+    if let Some(addrs) = &pinned {
+      builder = builder.resolve_to_addrs(&resolve_key, addrs);
+    }
+    let client = builder
+      .build()
+      .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
     let req_body = ChatRequest {
         model: req.model.clone(),
         messages: req.messages.clone(),
@@ -535,20 +584,18 @@ where
     F: Fn(String) -> Result<(), ()>,
 {
     let base_url = validate_base_url(base_url)?;
-    let host = url::Url::parse(&base_url)
-        .map_err(|_| "API 地址格式不合法".to_string())?
-        .host_str()
-        .ok_or_else(|| "API 地址缺少主机名".to_string())?
-        .to_string();
-    if host.parse::<std::net::IpAddr>().is_err() {
-        validate_resolved_host(&host).await?;
-    }
+    // P0-6：解析一次并 pin 死公网地址，reqwest 建连不再二次解析（防 DNS rebinding）
+    let (resolve_key, pinned) = resolve_pin_for_https(&base_url).await?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
+    let mut builder = reqwest::Client::builder()
+      .timeout(std::time::Duration::from_secs(120));
+    if let Some(addrs) = &pinned {
+      builder = builder.resolve_to_addrs(&resolve_key, addrs);
+    }
+    let client = builder
+      .build()
+      .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
     let req_body = ChatRequest {
         model: req.model.clone(),
         messages: req.messages.clone(),
@@ -762,5 +809,81 @@ mod tests {
         assert_eq!(parse_obfuscated_ipv4("example.com"), None);
         assert_eq!(parse_obfuscated_ipv4("999.1.1.1"), None);
         assert_eq!(parse_obfuscated_ipv4("256.0.0.1"), None);
+    }
+
+    #[test]
+    fn pin_accepts_all_public_addrs_and_carries_port() {
+        // 公网 v4 + 公网 v6 全部放行，pin 地址带上请求端口
+        let ips = [
+            "93.184.216.34".parse::<std::net::IpAddr>().unwrap(),
+            "2606:4700::1111".parse::<std::net::IpAddr>().unwrap(),
+        ];
+        let addrs = check_resolved_ips("example.com", ips, 8443).unwrap();
+        assert_eq!(addrs.len(), 2);
+        assert!(addrs.iter().all(|a| a.port() == 8443));
+    }
+
+    #[test]
+    fn pin_rejects_dual_answer_dns_with_one_internal_ip() {
+        // P0-6 核心场景：双答 DNS 公网+内网混答，必须 fail-closed 整体拒绝，
+        // 不能"连到公网那个就行"——攻击者靠交替应答在校验后换内网
+        let ips = [
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(93, 184, 216, 34)),
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+        ];
+        assert!(check_resolved_ips("rebind.evil", ips, 443).is_err());
+        // 云元数据地址混答同样拒绝
+        let ips2 = [
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(93, 184, 216, 34)),
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(169, 254, 169, 254)),
+        ];
+        assert!(check_resolved_ips("rebind.evil", ips2, 443).is_err());
+    }
+
+    #[test]
+    fn pin_rejects_all_private_v4_ranges() {
+        for bad in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.5.5",
+            "192.168.9.9",
+            "169.254.169.254",
+            "0.0.0.0",
+            "224.0.0.1",
+            "255.255.255.255",
+        ] {
+            let ip: std::net::IpAddr = bad.parse().unwrap();
+            assert!(check_resolved_ips("x.test", [ip], 443).is_err(), "{bad} 应拒绝");
+        }
+    }
+
+    #[test]
+    fn pin_rejects_native_and_mapped_v6_internal() {
+        for bad in [
+            "::1",
+            "fc00::1",
+            "fdff::1",
+            "fe80::1",
+            "fec0::1",
+            "ff02::1",
+            // IPv4-mapped 绕过形态必须按 v4 判定
+            "::ffff:127.0.0.1",
+            "::ffff:169.254.169.254",
+            "::ffff:10.0.0.1",
+        ] {
+            let ip: std::net::IpAddr = bad.parse().unwrap();
+            assert!(check_resolved_ips("x.test", [ip], 443).is_err(), "{bad} 应拒绝");
+        }
+    }
+
+    #[test]
+    fn pin_rejects_empty_dns_answer() {
+        // 空解析结果不能被当成放行（旧实现遍历空集合直接 Ok）
+        assert!(check_resolved_ips(
+            "nx.example",
+            std::iter::empty::<std::net::IpAddr>(),
+            443
+        )
+        .is_err());
     }
 }
