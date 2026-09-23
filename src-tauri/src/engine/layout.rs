@@ -17,6 +17,8 @@
 // 布局常量已收敛到 `constants.rs`（单一事实来源；前端镜像由 build.rs 自动生成，
 // 前后端不再靠注释人肉同步）。这里 re-export 以保持既有调用路径
 // （`crate::engine::layout::TAB_BAR_HEIGHT` 等）不变。
+// 注：部分常量（如 ADDRESS_BAR_HEIGHT）目前仅前端镜像引用，Rust 侧未直接使用。
+#[allow(unused_imports)]
 pub use crate::constants::layout::{
     ADDRESS_BAR_HEIGHT, AI_PANEL_WIDTH, BOOKMARKS_BAR_HEIGHT, CONTENT_TOP_OFFSET,
     CONTENT_TOP_OFFSET_NO_BOOKMARKS, MIN_CONTENT_HEIGHT, MIN_CONTENT_WIDTH, SPLIT_LEFT_RATIO,

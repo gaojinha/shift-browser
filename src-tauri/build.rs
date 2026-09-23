@@ -7,6 +7,7 @@
 //! 见 docs/架构-能力与常量统一治理方案_2026-09-23.md
 
 include!("src/constants.rs");
+include!("src/contracts.rs");
 
 fn main() {
     generate_ts_constants();
@@ -57,7 +58,25 @@ fn generate_ts_constants() {
     s.push_str(&format!("  spaceColors: {},\n", ts_str_array(ui::SPACE_COLORS)));
     s.push_str(&format!("  groupPalette: {},\n", ts_str_array(ui::GROUP_PALETTE)));
     s.push_str(&format!("  defaultFavicon: '{}',\n", ui::DEFAULT_FAVICON));
-    s.push_str("} as const\n");
+    s.push_str("} as const\n\n");
+
+    // ---- 设置契约（键 / 默认值 / 类型 / 敏感标记）----
+    // 后端白名单与前端默认值同源，杜绝"前端缺默认值 → get() 空串失真"
+    s.push_str("export const SETTINGS_SCHEMA = {\n");
+    for d in settings::SETTINGS {
+        s.push_str(&format!(
+            "  {}: {{ default: '{}', kind: '{}', sensitive: {}, desc: '{}' }},\n",
+            d.key,
+            escape_single(d.default),
+            d.kind.as_ts(),
+            d.sensitive,
+            escape_single(d.desc),
+        ));
+    }
+    s.push_str("} as const\n\n");
+    s.push_str("export const DEFAULT_SETTINGS: Record<string, string> = Object.fromEntries(\n");
+    s.push_str("  Object.entries(SETTINGS_SCHEMA).map(([k, v]) => [k, v.default]),\n");
+    s.push_str(")\n");
 
     let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/constants.ts");
     std::fs::write(&out, s).expect("生成 src/constants.ts 失败");
@@ -74,4 +93,9 @@ fn ts_str_array(items: &[&str]) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     )
+}
+
+/// 转义字符串里的单引号（描述文案里可能有 `'newtab'` 这类写法）
+fn escape_single(s: &str) -> String {
+    s.replace('\'', "\\'")
 }

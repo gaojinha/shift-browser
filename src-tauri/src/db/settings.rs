@@ -8,77 +8,17 @@ pub struct Setting {
     pub value: String,
 }
 
-/// 敏感设置键（禁止返回/写入前端）
-const SENSITIVE_KEYS: &[&str] = &["master_key"];
-
-/// 前端允许读写的设置键白名单（防止非法键写入垃圾数据）
-const ALLOWED_KEYS: &[&str] = &[
-    "homepage",
-    "search_engine",
-    "theme",
-    "show_bookmarks_bar",
-    // 垂直标签模式（阶段 3.1：标签栏移到左侧，内容区右移）
-    "vertical_tabs",
-    "record_history",
-    "ai_model",
-    "ai_base_url",
-    "ai_api_key",
-    "adblock_enabled",
-    "adblock_keywords",
-    // 网络层拦截规则（阶段3.2：写入 Web 进程扩展规则文件，每行一个 URL 子串）
-    "net_block_rules",
-    // 自定义请求头（阶段3.2：写入扩展请求头文件，每行 `Name: Value`）
-    "net_headers",
-    // 定时任务（阶段3 自动化；0 = 关闭）
-    "auto_clear_history_days",
-    "auto_refresh_feeds_minutes",
-    // 定时 Agent 提示词（阶段3 Agent 编排；0 = 关闭）
-    "auto_agent_minutes",
-    "auto_agent_prompt",
-    // 网络层 GPC 请求头开关（阶段2/3：Sec-GPC: 1；'false' = 关）
-    "gpc_header",
-    // 开放 API 是否允许「执行 JS」（阶段4；默认关，显式设 'true' 才开）
-    "api_allow_eval",
-    // 开放 API HTTP 端口（默认 19701）与是否绑局域网（默认关；'true' 才绑 0.0.0.0）
-    "api_http_port",
-    "api_bind_lan",
-    // 模型网关（阶段4 自托管套件；默认关，显式设 'true' 才开）
-    "api_model_gateway",
-    // 开放 API 鉴权细化（阶段4 C2）：只读模式（禁写命令）/ IP 白名单（逗号分隔前缀）
-    "api_readonly",
-    "api_allowed_ips",
-    "show_lunar",
-    "show_quote",
-    "show_weather",
-    "font_size",
-    "weather_city",
-    "theme_color",
-    "wallpaper",
-    "show_bg",
-    "lock_enabled",
-    // 隐私防护（2026-09-18 补入：此前缺失导致"改变隐私设置不能保存"）
-    "privacy_shield",
-    "privacy_shield_level",
-    "privacy_whitelist",
-    // 性能：空闲标签休眠超时（分钟，0=关闭）
-    "tab_hibernate_minutes",
-    // 性能：空闲标签休眠的数量阈值（标签数超过该值即切走即休；0=关闭数量阈值，仅按超时）
-    "tab_hibernate_count",
-    // 翻译源（google / bing，默认 google；失败自动回退另一方）
-    "translate_engine",
-    // 翻译目标语言（zh-CN 等）+ 翻译超时（秒，5-120）
-    "translate_target",
-    "translate_timeout",
-];
+// 设置键白名单与敏感键来自 contracts.rs（单一来源）——后端校验与前端默认值
+// 由 build.rs 从同一份定义生成，杜绝白名单漂移与"前端缺默认值 → get() 空串失真"。
 
 /// 是否为敏感设置键
 fn is_sensitive(key: &str) -> bool {
-    SENSITIVE_KEYS.contains(&key)
+    crate::contracts::settings::is_sensitive(key)
 }
 
 /// 是否为白名单允许的键
 fn is_allowed(key: &str) -> bool {
-    ALLOWED_KEYS.contains(&key)
+    crate::contracts::settings::is_allowed(key)
 }
 
 /// API Key 掩码（保留前 4 后 4，中间 ****；太短则全掩）

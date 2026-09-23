@@ -6,6 +6,7 @@ mod about;
 mod audit;
 mod constants;
 mod content_cmd;
+mod contracts;
 mod db;
 mod default_browser;
 mod engine;
