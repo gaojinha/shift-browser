@@ -6,6 +6,8 @@ import { listen } from '@tauri-apps/api/event'
 import type { Tab } from '../types/tab'
 import type { Session, SessionTab } from '../types/session'
 import { useGroupsStore } from './groups'
+// 分组配色池（单一来源）
+import { UI } from '../constants'
 import { useSettingsStore } from './settings'
 import { useToastStore } from './toast'
 
@@ -27,19 +29,7 @@ async function isLockedNow(): Promise<boolean> {
 }
 
 // ---- 自动分组（按域名归类，替代手动建分组）----
-// 分组色板（循环取色）
-const GROUP_COLORS = [
-  '#4a9eff',
-  '#f06292',
-  '#ffb74d',
-  '#66bb6a',
-  '#ab47bc',
-  '#26c6da',
-  '#ec407a',
-  '#7e57c2',
-  '#8d6e63',
-  '#9ccc65',
-]
+// 分组色板（循环取色）——来自 constants.ts（唯一来源）
 /** 取 URL 注册域名（去 www 前缀）；非 http(s) 返回 null */
 function extractDomain(url: string): string | null {
   try {
@@ -229,7 +219,7 @@ export const useTabsStore = defineStore('tabs', {
           // 仅存在于内存，标签全部关闭后由 pruneAutoGroups 丢弃
           const id = await groups.createGroup(
             domain,
-            GROUP_COLORS[groups.groups.length % GROUP_COLORS.length],
+            UI.groupColors[groups.groups.length % UI.groupColors.length],
             true,
           )
           const g = groups.groups.find((x) => x.id === id)

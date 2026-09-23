@@ -131,3 +131,66 @@
 
 - [x] **F5 · 提交推送（✅ 2026-09-23）**
   两个提交推 gitcode master（`6c06928..afd5d8e`），Git Hooks 检查通过。
+
+---
+
+## G. 能力与常量统一治理（2026-09-23 规划）
+
+> 方案全文：[docs/架构-能力与常量统一治理方案_2026-09-23.md](docs/架构-能力与常量统一治理方案_2026-09-23.md)
+> 目标：把散落的**常量 / 技能 / 工具 / 插件**提取为**单一事实来源（SSOT）**。
+> 统一手段：**Rust 侧单一来源 → `build.rs` 生成前端契约层**（消除"注释写'与后端一致'"的人肉同步）。
+
+### P1 · 常量 + 契约生成管线
+
+- [x] **P1-a · 常量中心 + 生成管线（✅ 2026-09-23）**
+  - 新建 `src-tauri/src/constants.rs`（自包含设计，供 build.rs `include!`）：
+    布局 11 个 / 搜索引擎 3 个 / 色板 3 套 / favicon
+  - `build.rs` 生成 `src/constants.ts` → 前后端常量零漂移
+  - 迁移收敛：布局常量（`layout.rs` re-export 保持调用路径不变）、
+    搜索引擎 URL **4 处 → 1 处**、favicon **2 处 → 1 处**（**统一地球图标**）、
+    色板 **3 套 → 1 处**
+  - CSS 变量注入：`App.vue` 注入 `--sb-*-h`，
+    `TabBar`/`AddressBar`/`BookmarksBar`/`StatusBar` 改用 `var()`
+  - 验证：cargo check/clippy 0 error、118 测试过、vue-tsc/eslint/vite build 过
+
+- [ ] **P1-b · 契约生成（🔴 下一步）**
+  - **设置键**：后端 `ALLOWED_KEYS` **41 个** ↔ 前端 `DEFAULT_SETTINGS` **24 个**
+    → `contracts.rs::SETTINGS` 单一来源（键 + 默认值 + 类型 + 敏感标记），
+    后端白名单与前端默认值都从它派生 → **补齐前端缺失的 19 个键**
+    （`api_readonly`/`api_http_port`/`theme_color`/`wallpaper`/`weather_city`/`net_headers`…）
+  - **IPC 事件名**：后端 emit 11 ↔ 前端 listen 18（裸字符串）→ `contracts::events` 常量
+  - **内部 URL**：`shift://newtab`×3、`/newtab/`×4、`shift://worldnav`×2 → `contracts::urls`
+  - **超时/间隔**：Rust 21 处 + 前端 10 处裸数字 → `contracts::timeout`（语义命名）
+  - **快捷键表**：前端 keydown ↔ Rust GTK 兜底（F12/Ctrl+Shift+I 两处各写一遍）
+    → `contracts::SHORTCUTS` 单一来源
+  - 验收：设置页各项显示正常（不再空串失真）；快捷键（网页持焦时 F12）仍生效
+
+### P2 · 类型契约生成
+
+- [ ] 引入 `ts-rs` 或 `typeshare`：`Tab`/`Bookmark`/`HistoryEntry` 等 Rust struct → TS interface
+  - 前端 `src/types/*.ts`（8 个文件）逐步替换为生成物（保留手写 interface 过渡）
+  - 验收：字段/可选性与 Rust 一致；vue-tsc 干净
+
+### P3 · 工具注册表（MCP / API / Agent 三源合一）
+
+- [ ] **P3a · 读类能力迁移（约 13 个）**
+  - 新建 `capabilities/registry.rs`（`id` / `desc` / `params` schema / `risk` / `handler` 单一声明）
+  - MCP `tool_defs()`、API `match cmd`、Agent 动作表改为**从 registry 派生**
+  - 验收：MCP `tools/list` 数量不变（25）；API 行为不变（基线样本回放）
+- [ ] **P3b · 写类能力迁移（12 个）+ `capabilities/list` + MCP 动态拉取**
+  - MCP Server（独立二进制）启动时向浏览器请求 `capabilities/list`，动态构建 `tools/list`
+  - 验收：MCP 客户端实测调用；只读闸门行为不变
+
+### P4 · 技能清单
+
+- [ ] `capabilities/skills.rs`：声明式技能（总结页 / 翻译 / 阅读模式 / 解释页面…）
+  - 新增 `skills/list` API；前端快捷操作改为**数据驱动**（不再硬编码在 `ai.ts`）
+  - 注入 AI system prompt 的"能力自述"（AI 知道自己能做什么）
+  - 验收：AI 面板快捷按钮正常；prompt 含能力清单
+
+### P5 · 插件体系
+
+- [ ] `capabilities/plugins.rs`：统一四形态（用户脚本 / 内容过滤 / Web 扩展 / MCP server）注册
+  - 统一启停 `plugins::set_enabled`、统一审计（复用 `tool_audit_log`）、统一发现 `plugins/list`
+  - 现有四套注册逻辑各包一层 `Plugin` 适配器（底层实现不动）
+  - 验收：设置页扩展列表；启停生效；审计有记录

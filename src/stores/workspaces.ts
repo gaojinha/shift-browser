@@ -4,6 +4,8 @@ import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { useTabsStore } from './tabs'
 import { useToastStore } from './toast'
+// 空间配色池（单一来源）
+import { UI } from '../constants'
 
 export interface Workspace {
   id: number
@@ -14,17 +16,7 @@ export interface Workspace {
   created_at: string
 }
 
-/** 新建空间时按序分配的调色板 */
-export const SPACE_COLORS = [
-  '#4a9eff',
-  '#43a047',
-  '#e53935',
-  '#fb8c00',
-  '#8e24aa',
-  '#00acc1',
-  '#f06292',
-  '#5e35b1',
-]
+/** 新建空间时按序分配的调色板——来自 constants.ts（唯一来源） */
 
 interface WorkspacesState {
   workspaces: Workspace[]
@@ -73,7 +65,7 @@ export const useWorkspacesStore = defineStore('workspaces', {
         const n = this.workspaces.length + 1
         const id = await invoke<number>('create_workspace', { name: `空间 ${n}` })
         // 分配主题色（按序号取调色板）
-        const color = SPACE_COLORS[(n - 1) % SPACE_COLORS.length]
+        const color = UI.spaceColors[(n - 1) % UI.spaceColors.length]
         await invoke('update_workspace', { id, name: null, sort_order: null, color })
         await this.loadWorkspaces()
         return id

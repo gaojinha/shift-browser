@@ -187,12 +187,9 @@ pub async fn generate(db: &Db, path: &std::path::Path) -> Result<String, String>
     }
     let search_engine = setting(db, "search_engine")
         .await
-        .unwrap_or_else(|| "bing".into());
-    let search_url = match search_engine.as_str() {
-        "baidu" => "https://www.baidu.com/s?wd=",
-        "google" => "https://www.google.com/search?q=",
-        _ => "https://www.bing.com/search?q=",
-    };
+        .unwrap_or_else(|| crate::constants::search::DEFAULT_ENGINE.into());
+    // 搜索引擎 URL 模板来自 constants.rs（唯一来源，未知 id 自动回退默认引擎）
+    let search_url = crate::constants::search::url_template(&search_engine);
     let quick_sites: Vec<(String, String, String)> = match setting(db, "quick_sites").await {
         Some(j) => serde_json::from_str::<Vec<serde_json::Value>>(&j)
             .map(|arr| {

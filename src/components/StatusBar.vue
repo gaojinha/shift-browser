@@ -213,7 +213,7 @@ function openHelp() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 22px;
+  height: var(--sb-status-bar-h);
   background: var(--bg-primary);
   border-top: 1px solid var(--border-subtle);
   padding: 0 12px;

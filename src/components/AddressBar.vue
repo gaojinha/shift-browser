@@ -9,6 +9,8 @@ import type { HistoryEntry } from '../types/history'
 import TranslateProgress from './TranslateProgress.vue'
 import SpaceSwitcher from './SpaceSwitcher.vue'
 import AppIcon from './AppIcon.vue'
+// 搜索引擎 URL 模板（单一来源，与设置弹窗/新标签页/开放 API 同源）
+import { SEARCH_URLS } from '../constants'
 
 const tabsStore = useTabsStore()
 const settingsStore = useSettingsStore()
@@ -37,12 +39,7 @@ const emit = defineEmits<{
   (e: 'openCerts'): void
 }>()
 
-// 搜索引擎 URL 模板（与设置弹窗 SEARCH_ENGINES 一致）
-const SEARCH_URLS: Record<string, string> = {
-  bing: 'https://www.bing.com/search?q=',
-  baidu: 'https://www.baidu.com/s?wd=',
-  google: 'https://www.google.com/search?q=',
-}
+// 搜索引擎 URL 模板已收敛到 constants.ts（唯一来源）
 
 // 当前活动标签变化时同步地址栏（空 URL 也清空，避免残留上一个标签的地址）
 watch(
@@ -331,7 +328,7 @@ async function onReader() {
 .address-bar {
   display: flex;
   align-items: center;
-  height: 36px;
+  height: var(--sb-address-bar-h);
   background: var(--bg-primary);
   padding: 0 8px;
   gap: 4px;

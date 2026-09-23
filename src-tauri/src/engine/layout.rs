@@ -14,28 +14,14 @@
 //!  └─ 底部状态栏（STATUS_BAR_HEIGHT）
 //! ```
 
-/// 标签栏高度（与前端 CSS 保持一致）
-pub const TAB_BAR_HEIGHT: f64 = 38.0;
-/// 地址栏高度
-pub const ADDRESS_BAR_HEIGHT: f64 = 36.0;
-/// 书签栏高度（可显隐）
-pub const BOOKMARKS_BAR_HEIGHT: f64 = 26.0;
-/// 底部状态栏高度
-pub const STATUS_BAR_HEIGHT: f64 = 22.0;
-/// AI 侧边栏占用的右侧宽度：AI 面板打开时内容区让出该宽度
-pub const AI_PANEL_WIDTH: f64 = 380.0;
-/// 垂直标签栏占用的左侧宽度：垂直标签模式下内容区让出该宽度（阶段 3.1）
-pub const VERTICAL_TAB_BAR_WIDTH: f64 = 220.0;
-/// 分屏左栏占比：左窄右宽（资讯分屏左边看列表、右边看原文；1/4 左、3/4 右）
-pub const SPLIT_LEFT_RATIO: f64 = 0.25;
-/// 内容区顶部偏移（含书签栏）
-pub const CONTENT_TOP_OFFSET: f64 = TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT + BOOKMARKS_BAR_HEIGHT;
-/// 内容区顶部偏移（不含书签栏）
-pub const CONTENT_TOP_OFFSET_NO_BOOKMARKS: f64 = TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT;
-/// 内容区宽度下限（窗口过窄时保底）
-pub const MIN_CONTENT_WIDTH: f64 = 400.0;
-/// 内容区高度下限
-pub const MIN_CONTENT_HEIGHT: f64 = 100.0;
+// 布局常量已收敛到 `constants.rs`（单一事实来源；前端镜像由 build.rs 自动生成，
+// 前后端不再靠注释人肉同步）。这里 re-export 以保持既有调用路径
+// （`crate::engine::layout::TAB_BAR_HEIGHT` 等）不变。
+pub use crate::constants::layout::{
+    ADDRESS_BAR_HEIGHT, AI_PANEL_WIDTH, BOOKMARKS_BAR_HEIGHT, CONTENT_TOP_OFFSET,
+    CONTENT_TOP_OFFSET_NO_BOOKMARKS, MIN_CONTENT_HEIGHT, MIN_CONTENT_WIDTH, SPLIT_LEFT_RATIO,
+    STATUS_BAR_HEIGHT, TAB_BAR_HEIGHT, VERTICAL_TAB_BAR_WIDTH,
+};
 
 /// 内容区几何（逻辑像素，已换算缩放）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

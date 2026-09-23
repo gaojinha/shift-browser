@@ -562,14 +562,11 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 .ok()
                 .flatten()
                 .map(|(v,)| v)
-                .unwrap_or_else(|| "bing".to_string())
+                .unwrap_or_else(|| crate::constants::search::DEFAULT_ENGINE.to_string())
             };
-            let (base, param) = match engine.as_str() {
-                "baidu" => ("https://www.baidu.com/s", "wd"),
-                "google" => ("https://www.google.com/search", "q"),
-                _ => ("https://www.bing.com/search", "q"),
-            };
-            let url = format!("{}?{}={}", base, param, url_encode(&q));
+            // 搜索引擎 URL 模板来自 constants.rs（唯一来源，未知 id 自动回退默认引擎）
+            let template = crate::constants::search::url_template(&engine);
+            let url = format!("{}{}", template, url_encode(&q));
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };

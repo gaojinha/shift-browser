@@ -7,16 +7,14 @@ import { useToastStore } from '../stores/toast'
 import { invoke } from '@tauri-apps/api/core'
 import { setWebviewVisible } from '../utils/webview'
 import type { Tab } from '../types/tab'
+// 默认网站图标（单一来源：constants.ts，地球版）
+import { UI } from '../constants'
 
 const tabsStore = useTabsStore()
 const groupsStore = useGroupsStore()
 
-// 默认网站图标（蓝色地球 SVG，与 Electron 版一致）
-const DEFAULT_FAVICON =
-  'data:image/svg+xml;utf8,' +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="var(--accent)"/><ellipse cx="8" cy="8" rx="3" ry="6.5" fill="none" stroke="#fff" stroke-width="0.8"/><path d="M1.5 8h13" stroke="#fff" stroke-width="0.8"/></svg>',
-  )
+// 默认网站图标（地球 SVG，与 Electron 版一致）
+const DEFAULT_FAVICON = UI.defaultFavicon
 
 // 固定标签永远排最前（固定标签之间保持原相对顺序），普通标签按原顺序
 function pinnedFirst(tabs: Tab[]): Tab[] {
@@ -587,7 +585,7 @@ function onFaviconError(e: Event) {
 .tab-bar {
   display: flex;
   align-items: center;
-  height: 38px;
+  height: var(--sb-tab-bar-h);
   background: var(--bg-primary);
   padding: 0 8px;
   flex-shrink: 0;

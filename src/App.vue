@@ -30,6 +30,8 @@ import { useSettingsStore } from './stores/settings'
 import { useWorkspacesStore } from './stores/workspaces'
 import { useAIStore } from './stores/ai'
 import { useToastStore } from './stores/toast'
+// 布局常量单一来源（build.rs 由 src-tauri/src/constants.rs 生成）→ 注入 CSS 变量
+import { LAYOUT } from './constants'
 
 const tabsStore = useTabsStore()
 const groupsStore = useGroupsStore()
@@ -39,6 +41,16 @@ const aiStore = useAIStore()
 
 // 垂直标签模式（阶段 3.1）：标签栏在左（true）vs 在上（false）
 const verticalTabs = computed(() => settingsStore.get('vertical_tabs') === 'true')
+
+// 布局尺寸注入为 CSS 变量：CSS 与 JS 共用同一常量源（constants.ts），
+// 消除"JS 改了、CSS 没改"的第三层漂移（组件 CSS 用 var(--sb-*-h)）
+const layoutCssVars = computed(() => ({
+  '--sb-tab-bar-h': `${LAYOUT.tabBar}px`,
+  '--sb-address-bar-h': `${LAYOUT.addressBar}px`,
+  '--sb-bookmarks-bar-h': `${LAYOUT.bookmarksBar}px`,
+  '--sb-status-bar-h': `${LAYOUT.statusBar}px`,
+  '--sb-ai-panel-w': `${LAYOUT.aiPanelWidth}px`,
+}))
 
 /** 切换标签栏方向：写设置 + 通知 Rust 重算内容区几何（top 与 left 都变） */
 async function onToggleVerticalTabs() {
@@ -566,7 +578,11 @@ watch(
 </script>
 
 <template>
-  <div class="app" :class="{ 'theme-light': settingsStore.isLight, 'vertical-tabs': verticalTabs }">
+  <div
+    class="app"
+    :class="{ 'theme-light': settingsStore.isLight, 'vertical-tabs': verticalTabs }"
+    :style="layoutCssVars"
+  >
     <!-- 主体：垂直标签时「左侧栏 + 主列」，横向时只有主列 -->
     <div class="app-body">
       <VerticalTabBar v-if="verticalTabs" @toggle="onToggleVerticalTabs" />

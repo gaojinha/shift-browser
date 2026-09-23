@@ -9,6 +9,8 @@ import { useSettingsStore } from '../stores/settings'
 import { useExtensionsStore } from '../stores/extensions'
 import { useToastStore } from '../stores/toast'
 import type { Extension } from '../types/extension'
+// 搜索引擎清单（单一来源，与地址栏/新标签页/开放 API 同源）
+import { SEARCH_ENGINES } from '../constants'
 
 const props = defineProps<{ show: boolean; initialSection?: string }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'openCerts'): void }>()
@@ -396,10 +398,7 @@ const TRANSLATE_TARGETS = [
   { id: 'it', label: '意大利语' },
 ]
 
-const SEARCH_ENGINES = [  { id: 'bing', label: '必应', url: 'https://www.bing.com/search?q=' },
-  { id: 'baidu', label: '百度', url: 'https://www.baidu.com/s?wd=' },
-  { id: 'google', label: '谷歌', url: 'https://www.google.com/search?q=' },
-]
+// 搜索引擎清单已收敛到 constants.ts（唯一来源）
 
 const clearedMsg = ref('')
 // User-Agent 管理（方案 B · 2026-09-22）

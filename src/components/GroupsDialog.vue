@@ -6,6 +6,8 @@ import { setWebviewVisible } from '../utils/webview'
 import { useGroupsStore } from '../stores/groups'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
+// 分组色板（单一来源）
+import { UI } from '../constants'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -19,16 +21,7 @@ const editingId = ref<number | null>(null)
 const editName = ref('')
 const errorMsg = ref('')
 
-const COLORS = [
-  'var(--accent)',
-  '#e53935',
-  '#43a047',
-  '#fb8c00',
-  '#8e24aa',
-  '#00acc1',
-  '#6d4c41',
-  '#546e7a',
-]
+// 分组色板来自 constants.ts（唯一来源）
 
 // 弹窗显示时隐藏所有标签 webview（child 盖在 Vue UI 上），关闭时恢复
 // 竞态防护：seq 令牌丢弃过期回调；加载失败也必须在 finally 里恢复/隐藏 webview
@@ -151,7 +144,7 @@ function cancelDelete() {
           <div class="color-row">
             <span class="color-label">颜色</span>
             <button
-              v-for="c in COLORS"
+              v-for="c in UI.groupPalette"
               :key="c"
               class="color-dot"
               :class="{ selected: form.color === c }"
@@ -188,7 +181,7 @@ function cancelDelete() {
               </button>
               <div class="color-mini-row">
                 <button
-                  v-for="c in COLORS"
+                  v-for="c in UI.groupPalette"
                   :key="c"
                   class="color-dot mini"
                   :class="{ selected: g.color === c }"

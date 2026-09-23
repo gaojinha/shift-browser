@@ -4,6 +4,7 @@ mod agent_cmd;
 mod ai;
 mod about;
 mod audit;
+mod constants;
 mod content_cmd;
 mod db;
 mod default_browser;

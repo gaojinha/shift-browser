@@ -6,15 +6,13 @@ import { invoke } from '@tauri-apps/api/core'
 import { useTabsStore } from '../stores/tabs'
 import type { Tab } from '../types/tab'
 import AppIcon from './AppIcon.vue'
+// 默认网站图标（单一来源：constants.ts，与横向标签栏统一为地球图标）
+import { UI } from '../constants'
 
 const emit = defineEmits<{ (e: 'toggle'): void }>()
 const tabsStore = useTabsStore()
 
-const DEFAULT_FAVICON =
-  'data:image/svg+xml;utf8,' +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="var(--accent)"/></svg>',
-  )
+const DEFAULT_FAVICON = UI.defaultFavicon
 
 // 固定标签永远排最前（与横向标签栏一致）
 function pinnedFirst(tabs: Tab[]): Tab[] {

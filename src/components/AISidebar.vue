@@ -8,6 +8,8 @@ import { useAIStore } from '../stores/ai'
 import { useTabsStore } from '../stores/tabs'
 import { useSettingsStore } from '../stores/settings'
 import { renderMarkdown, copyText } from '../utils/markdown'
+// 布局常量单一来源（build.rs 由 src-tauri/src/constants.rs 生成）
+import { LAYOUT } from '../constants'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -19,10 +21,11 @@ const input = ref('')
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const listRef = ref<HTMLElement | null>(null)
 
-// 内容区顶部偏移（标签栏 38 + 地址栏 36 + 书签栏 26 可显隐），与后端 CONTENT_TOP_OFFSET 一致
+// 内容区顶部偏移（标签栏 + 地址栏 + 书签栏可显隐）——常量来自 constants.ts，
+// 与后端 CONTENT_TOP_OFFSET 同源，不再手工对齐
 const topOffset = computed(() => {
-  const bookmarkH = settingsStore.showBookmarksBar ? 26 : 0
-  return 38 + 36 + bookmarkH
+  const bookmarkH = settingsStore.showBookmarksBar ? LAYOUT.bookmarksBar : 0
+  return LAYOUT.tabBar + LAYOUT.addressBar + bookmarkH
 })
 
 // 打开/关闭：分屏模式——不隐藏 webview，而是让 webview 让出右侧 AI_PANEL_WIDTH，
@@ -165,7 +168,7 @@ function onOverlaySelf() {
   <div v-if="props.show" class="ai-overlay" @click.self="onOverlaySelf">
     <div
       class="ai-sidebar"
-      :style="{ top: topOffset + 'px', height: `calc(100vh - ${topOffset}px - 22px)` }"
+      :style="{ top: topOffset + 'px', height: `calc(100vh - ${topOffset}px - ${LAYOUT.statusBar}px)` }"
     >
       <!-- 头部 -->
       <div class="ai-header">
