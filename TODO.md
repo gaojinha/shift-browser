@@ -153,7 +153,7 @@
     `TabBar`/`AddressBar`/`BookmarksBar`/`StatusBar` 改用 `var()`
   - 验证：cargo check/clippy 0 error、118 测试过、vue-tsc/eslint/vite build 过
 
-- [ ] **P1-b · 契约生成（🟡 进行中）**
+- [x] **P1-b · 契约生成（✅ 2026-09-23）**
   - [x] **设置键契约（✅ 2026-09-23，`9470872`）**
     `contracts.rs::settings` 单一来源（41 键 + 默认值 + 类型 + 敏感标记）→
     `build.rs` 生成 `SETTINGS_SCHEMA`/`DEFAULT_SETTINGS`；
@@ -228,20 +228,20 @@
     `engine/agent.rs` 的 `AGENT_ACTIONS` 改为 `pub use ... IDS`（动作白名单/function calling enum 同源）；
     新增测试 `ids_match_actions`（IDS 与 ACTIONS 防漂移）
   - 验收：MCP `tools/list` 数量不变（25）；API 行为不变（基线样本回放）
-- [ ] **P3b · 写类能力迁移（12 个）+ `capabilities/list` + MCP 动态拉取**
+- [x] **P3b · 写类能力迁移（12 个）+ `capabilities/list` + MCP 动态拉取（✅ 2026-09-23）**
   - MCP Server（独立二进制）启动时向浏览器请求 `capabilities/list`，动态构建 `tools/list`
   - 验收：MCP 客户端实测调用；只读闸门行为不变
 
 ### P4 · 技能清单
 
-- [ ] `capabilities/skills.rs`：声明式技能（总结页 / 翻译 / 阅读模式 / 解释页面…）
+- [x] `capabilities/skills.rs`：声明式技能（总结页 / 翻译 / 阅读模式 / 解释页面…）（✅ 2026-09-23）
   - 新增 `skills/list` API；前端快捷操作改为**数据驱动**（不再硬编码在 `ai.ts`）
   - 注入 AI system prompt 的"能力自述"（AI 知道自己能做什么）
   - 验收：AI 面板快捷按钮正常；prompt 含能力清单
 
 ### P5 · 插件体系（含统一审计）
 
-- [ ] `capabilities/plugins.rs`：统一四形态（用户脚本 / 内容过滤 / Web 扩展 / MCP server）注册
+- [x] `capabilities/plugins.rs`：统一四形态（用户脚本 / 内容过滤 / Web 扩展 / MCP server）注册（✅ 2026-09-23）
   - 统一启停 `plugins::set_enabled`、统一审计（复用 `tool_audit_log`）、统一发现 `plugins/list`
   - 现有四套注册逻辑各包一层 `Plugin` 适配器（底层实现不动）
   - [x] **统一审计（✅ 2026-09-23）**

@@ -2,7 +2,7 @@
 Type=Application
 Name={{name}}
 Comment={{comment}}
-Exec={{exec}} %U
+Exec=env WEBKIT_DMABUF_RENDERER_BUFFER_FORMAT=XR24:0 {{exec}} %U
 Icon={{icon}}
 Terminal=false
 Categories=Network;WebBrowser;
