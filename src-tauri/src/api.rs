@@ -557,9 +557,25 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 other => return json!({ "ok": false, "error": format!("未知插件形态: {}", other) }),
             };
             match res {
-                Ok(r) => json!({ "ok": true, "data": {
-                    "kind": kind, "id": id, "enabled": enabled, "affected": r.rows_affected()
-                }}),
+                Ok(r) => {
+                    // 统一审计：插件启停记入 tool_audit_log（与 MCP 工具调用同一张表，
+                    // server_name='plugin' 区分来源；后续审计面板一屏看全部能力调用）
+                    let _ = sqlx::query(
+                        "INSERT INTO tool_audit_log
+                         (server_id, server_name, tool_name, arguments, result_summary, success)
+                         VALUES (NULL, 'plugin', 'set_enabled', ?, ?, 1)",
+                    )
+                    .bind(
+                        serde_json::json!({ "kind": kind, "id": id, "enabled": enabled })
+                            .to_string(),
+                    )
+                    .bind(format!("affected={}", r.rows_affected()))
+                    .execute(&db.pool)
+                    .await;
+                    json!({ "ok": true, "data": {
+                        "kind": kind, "id": id, "enabled": enabled, "affected": r.rows_affected()
+                    }})
+                }
                 Err(e) => json!({ "ok": false, "error": format!("启停失败: {}", e) }),
             }
         }

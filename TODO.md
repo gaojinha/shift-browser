@@ -230,9 +230,12 @@
   - 注入 AI system prompt 的"能力自述"（AI 知道自己能做什么）
   - 验收：AI 面板快捷按钮正常；prompt 含能力清单
 
-### P5 · 插件体系
+### P5 · 插件体系（含统一审计）
 
 - [ ] `capabilities/plugins.rs`：统一四形态（用户脚本 / 内容过滤 / Web 扩展 / MCP server）注册
   - 统一启停 `plugins::set_enabled`、统一审计（复用 `tool_audit_log`）、统一发现 `plugins/list`
   - 现有四套注册逻辑各包一层 `Plugin` 适配器（底层实现不动）
+  - [x] **统一审计（✅ 2026-09-23）**
+    `plugins/set_enabled` 成功后写入 `tool_audit_log`（server_name=`plugin`，与 MCP 工具调用
+    同一张表）→ 插件启停与工具调用共用一套审计，后续审计面板一屏看全
   - 验收：设置页扩展列表；启停生效；审计有记录
