@@ -468,6 +468,9 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
         // 避免其内部再手写一份 schema（历史问题：25 工具曾三处各写一遍）
         "capabilities/list" => json!({ "ok": true, "data": crate::capabilities::list_json() }),
 
+        // 技能清单（单一来源：contracts::skills，与前端生成物同源；P4）
+        "skills/list" => json!({ "ok": true, "data": crate::capabilities::skills_list_json() }),
+
         // 插件清单（四形态统一视图：用户脚本 / 内容过滤 / Web 扩展 / MCP 服务器）
         "plugins/list" => {
             use crate::capabilities::plugins::{entry, PluginKind};

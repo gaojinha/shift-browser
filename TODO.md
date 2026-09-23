@@ -235,9 +235,10 @@
 ### P4 · 技能清单
 
 - [x] `capabilities/skills.rs`：声明式技能（总结页 / 翻译 / 阅读模式 / 解释页面…）（✅ 2026-09-23）
-  - 新增 `skills/list` API；前端快捷操作改为**数据驱动**（不再硬编码在 `ai.ts`）
+  - 新增 `skills/list` API（`api.rs` 接线 `capabilities::skills_list_json()`，2026-09-24 补齐注册）；
+    前端快捷操作改为**数据驱动**（不再硬编码在 `ai.ts`）
   - 注入 AI system prompt 的"能力自述"（AI 知道自己能做什么）
-  - 验收：AI 面板快捷按钮正常；prompt 含能力清单
+  - 验收：AI 面板快捷按钮正常；prompt 含能力清单；API `skills/list` 返回 4 技能
 
 ### P5 · 插件体系（含统一审计）
 
