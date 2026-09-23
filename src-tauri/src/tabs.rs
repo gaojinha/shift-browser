@@ -1058,6 +1058,16 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
                     fixed.show();
 
                     log::info!("[tabs] setup: GtkOverlay 布局初始化完成 top={}", top);
+
+                    // 无边框窗口边缘拉伸：decorations=false 时 GTK/GNOME 不提供边缘 resize
+                    // 热区，这里在窗口最上层铺一圈边缘原生部件补上（见 engine/window_resize.rs）
+                    if let Some(tl) = main_gtk.toplevel() {
+                        if let Ok(gtk_win) = tl.downcast::<gtk::Window>() {
+                            crate::engine::window_resize::install(&overlay, &gtk_win);
+                        } else {
+                            log::warn!("[window-resize] toplevel 不是 GtkWindow，跳过边缘拉伸");
+                        }
+                    }
                 } else {
                     log::info!("[tabs] setup: 主 webview 的 parent 不是 GtkBox，跳过 reparent");
                 }

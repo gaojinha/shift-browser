@@ -8,6 +8,7 @@ import type { Bookmark } from '../types/bookmark'
 import type { HistoryEntry } from '../types/history'
 import TranslateProgress from './TranslateProgress.vue'
 import SpaceSwitcher from './SpaceSwitcher.vue'
+import AppIcon from './AppIcon.vue'
 
 const tabsStore = useTabsStore()
 const settingsStore = useSettingsStore()
@@ -240,9 +241,11 @@ async function onReader() {
 <template>
   <div class="address-bar">
     <SpaceSwitcher />
-    <button class="nav-btn" title="后退" :disabled="!tabsStore.canGoBack" @click="onBack">←</button>
+    <button class="nav-btn" title="后退" :disabled="!tabsStore.canGoBack" @click="onBack">
+      <AppIcon name="arrowLeft" :size="15" />
+    </button>
     <button class="nav-btn" title="前进" :disabled="!tabsStore.canGoForward" @click="onForward">
-      →
+      <AppIcon name="arrowRight" :size="15" />
     </button>
     <button
       class="nav-btn"
@@ -251,11 +254,15 @@ async function onReader() {
       :disabled="isLoading"
       @click="onRefresh"
     >
-      ↻
+      <AppIcon name="rotateCw" :size="15" />
     </button>
-    <button class="nav-btn" title="主页" @click="onHome">⌂</button>
+    <button class="nav-btn" title="主页" @click="onHome">
+      <AppIcon name="house" :size="15" />
+    </button>
     <div class="address-container">
-      <span v-if="isHttps" class="lock-icon" title="查看证书（点击打开证书中心）" @click="emit('openCerts')">🔒</span>
+      <span v-if="isHttps" class="lock-icon" title="查看证书（点击打开证书中心）" @click="emit('openCerts')">
+        <AppIcon name="lock" :size="12" />
+      </span>
       <input
         ref="inputEl"
         v-model="addressInput"
@@ -275,7 +282,9 @@ async function onReader() {
           :class="{ selected: i === selectedIndex }"
           @mousedown.prevent="openSuggestion(s)"
         >
-          <span class="suggest-icon">{{ s.type === 'bookmark' ? '🔖' : '🕘' }}</span>
+          <span class="suggest-icon">
+            <AppIcon :name="s.type === 'bookmark' ? 'folder' : 'clock'" :size="12" />
+          </span>
           <span class="suggest-title">{{ s.title }}</span>
           <span class="suggest-url">{{ s.url }}</span>
         </div>
@@ -287,18 +296,34 @@ async function onReader() {
       :title="readerTip || '阅读模式（提取正文大字看）'"
       @click="onReader"
     >
-      {{ readerLoading ? '⏳' : '📖' }}
+      <AppIcon name="bookOpen" :size="15" :class="{ 'icon-spin': readerLoading }" />
     </button>
     <span v-if="readerTip" class="reader-tip" :title="readerTip">{{ readerTip }}</span>
     <TranslateProgress />
-    <button class="action-btn translate-btn" title="翻译（粘贴文本→中文）" @click="emit('openTranslate')">🌐</button>
-    <button class="action-btn ai-btn" title="AI 助手" @click="emit('openAi')">AI</button>
-    <button class="action-btn" title="密码管理" @click="emit('openPasswords')">🔑</button>
-    <button class="action-btn" title="标签分组" @click="emit('openGroups')">🗂</button>
-    <button class="action-btn" title="用户脚本" @click="emit('openUserscripts')">📜</button>
-    <button class="action-btn" title="历史记录（Ctrl+H）" @click="emit('openHistory')">🕘</button>
-    <button class="action-btn" title="下载管理" @click="emit('openDownloads')">⬇</button>
-    <button class="action-btn" title="设置" @click="emit('openSettings')">⚙</button>
+    <button class="action-btn translate-btn" title="翻译（粘贴文本→中文）" @click="emit('openTranslate')">
+      <AppIcon name="globe" :size="15" />
+    </button>
+    <button class="action-btn ai-btn" title="AI 助手" @click="emit('openAi')">
+      <AppIcon name="sparkles" :size="15" />
+    </button>
+    <button class="action-btn" title="密码管理" @click="emit('openPasswords')">
+      <AppIcon name="key" :size="15" />
+    </button>
+    <button class="action-btn" title="标签分组" @click="emit('openGroups')">
+      <AppIcon name="folder" :size="15" />
+    </button>
+    <button class="action-btn" title="用户脚本" @click="emit('openUserscripts')">
+      <AppIcon name="scroll" :size="15" />
+    </button>
+    <button class="action-btn" title="历史记录（Ctrl+H）" @click="emit('openHistory')">
+      <AppIcon name="clock" :size="15" />
+    </button>
+    <button class="action-btn" title="下载管理" @click="emit('openDownloads')">
+      <AppIcon name="download" :size="15" />
+    </button>
+    <button class="action-btn" title="设置" @click="emit('openSettings')">
+      <AppIcon name="gear" :size="15" />
+    </button>
   </div>
 </template>
 
@@ -356,12 +381,9 @@ async function onReader() {
 }
 .ai-btn {
   color: var(--accent);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
 }
-.translate-btn {
-  font-size: 15px;
+.icon-spin {
+  animation: nav-spin 0.8s linear infinite;
 }
 .nav-btn:hover:not(:disabled),
 .action-btn:hover {
@@ -374,8 +396,8 @@ async function onReader() {
 }
 .address-container {
   flex: 1;
-  /* 限制最大宽度，给右侧按钮腾空间（按钮多时不被挤压隐藏） */
-  max-width: 640px;
+  /* 自动长度：占满两侧按钮之外的剩余空间——右侧图标多/宽时自动变短，少/窄时自动变长 */
+  min-width: 120px;
   display: flex;
   align-items: center;
   background: var(--bg-secondary);

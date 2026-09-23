@@ -5,6 +5,7 @@ import { computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useTabsStore } from '../stores/tabs'
 import type { Tab } from '../types/tab'
+import AppIcon from './AppIcon.vue'
 
 const emit = defineEmits<{ (e: 'toggle'): void }>()
 const tabsStore = useTabsStore()
@@ -53,13 +54,24 @@ function closeWin() {
 <template>
   <div class="vtab-bar">
     <div class="vtab-head">
-      <button class="vtab-btn" title="新建标签页" @click="onNew">＋</button>
-      <button class="vtab-btn" title="切换回横向标签栏" @click="emit('toggle')">⇤ 横向</button>
+      <button class="vtab-btn" title="新建标签页" @click="onNew">
+        <AppIcon name="plus" :size="13" />
+      </button>
+      <button class="vtab-btn" title="切换回横向标签栏" @click="emit('toggle')">
+        <AppIcon name="layout" :size="13" />
+        <span>横向</span>
+      </button>
     </div>
     <div class="vtab-winrow">
-      <button class="vtab-win" title="最小化" @click="minimize">—</button>
-      <button class="vtab-win" title="最大化/还原" @click="maximize">▢</button>
-      <button class="vtab-win danger" title="关闭窗口" @click="closeWin">✕</button>
+      <button class="vtab-win" title="最小化" @click="minimize">
+        <AppIcon name="minus" :size="12" />
+      </button>
+      <button class="vtab-win" title="最大化/还原" @click="maximize">
+        <AppIcon name="square" :size="12" />
+      </button>
+      <button class="vtab-win danger" title="关闭窗口" @click="closeWin">
+        <AppIcon name="x" :size="12" />
+      </button>
     </div>
     <div class="vtab-list">
       <div
@@ -78,7 +90,9 @@ function closeWin() {
           @error="($event.target as HTMLImageElement).src = DEFAULT_FAVICON"
         />
         <span class="vtab-title">{{ t.title || t.url || '新标签页' }}</span>
-        <button class="vtab-close" title="关闭" @click="onClose($event, t.id)">✕</button>
+        <button class="vtab-close" title="关闭" @click="onClose($event, t.id)">
+          <AppIcon name="x" :size="10" />
+        </button>
       </div>
     </div>
   </div>
@@ -115,6 +129,9 @@ function closeWin() {
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .vtab-win:hover {
   background: var(--bg-hover);
@@ -133,6 +150,10 @@ function closeWin() {
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 .vtab-btn:hover {
   background: var(--bg-hover);
@@ -174,7 +195,6 @@ function closeWin() {
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-  line-height: 16px;
   border: none;
   border-radius: 4px;
   background: transparent;
@@ -182,6 +202,9 @@ function closeWin() {
   cursor: pointer;
   font-size: 11px;
   opacity: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .vtab-item:hover .vtab-close {
   opacity: 1;

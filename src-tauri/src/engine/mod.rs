@@ -20,3 +20,4 @@ pub mod types;
 pub mod llmstxt;
 pub mod webmcp;
 pub mod webview;
+pub mod window_resize;
