@@ -439,6 +439,14 @@ pub fn open_settings_from_newtab(app: AppHandle) {
     let _ = app.emit("open-settings-from-newtab", ());
 }
 
+/// 启动页资讯点击：通知主界面在**当前标签右侧**新开标签打开该 URL（列表页保留）。
+/// 走事件而非直接建标签，是为了复用前端 createTab 的完整同步逻辑（顺序/激活/归组）。
+#[tauri::command]
+pub fn open_url_from_newtab(app: AppHandle, url: String) {
+    log::info!("[newtab] 资讯点击 → 右侧新标签: {}", crate::redact_url(&url));
+    let _ = app.emit("open-url-from-newtab", url);
+}
+
 /// 待办清单存储键（settings 表）
 const TODO_KEY: &str = "todos";
 

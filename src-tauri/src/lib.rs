@@ -557,7 +557,7 @@ pub fn run() {
           tokio::time::sleep(std::time::Duration::from_millis(300)).await;
           for url in urls {
             if let Some(state) = app_handle.try_state::<TabManager>() {
-              match crate::tabs::commands::create_tab(app_handle.clone(), state, url.clone(), None).await {
+              match crate::tabs::commands::create_tab(app_handle.clone(), state, url.clone(), None, None).await {
                 Ok(tab) => log::info!("[single-instance] 外部链接已打开: {}", tab.id),
                 Err(e) => log::warn!("[single-instance] 外部链接打开失败: {} ({})", redact_url(&url), e),
               }
@@ -787,6 +787,7 @@ pub fn run() {
       newtab::todo_save,
       newtab::open_ai_from_newtab,
       newtab::open_settings_from_newtab,
+      newtab::open_url_from_newtab,
       // 用户账号（个人中心）
       users::user_register,
       users::user_login,
@@ -1606,7 +1607,7 @@ pub fn run() {
             tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
             for url in urls {
               let state = app_handle.state::<TabManager>();
-              match crate::tabs::commands::create_tab(app_handle.clone(), state, url.clone(), None).await {
+              match crate::tabs::commands::create_tab(app_handle.clone(), state, url.clone(), None, None).await {
                 Ok(tab) => log::info!("[default-browser] 外部链接已打开: {}", tab.id),
                 Err(e) => log::warn!("[default-browser] 外部链接打开失败: {} ({})", redact_url(&url), e),
               }

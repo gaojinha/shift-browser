@@ -792,16 +792,18 @@
         localStorage.setItem('sb_feed_read', JSON.stringify(read));
         el.classList.add('read');
       });
-      // 2026-09-19：点资讯标题不再导航新页面，改为在主区（右侧）打开分栏阅读，
-      // 左侧面板保持打开，随时点下一条；📖 按钮走原有内嵌阅读（stopPropagation 已隔开）
+      // 点资讯标题 → 左窗格保持列表页/面板，右窗格分屏打开资讯原文（占满右半）；
+      // 📖 按钮走原有内嵌大字阅读（stopPropagation 已隔开）
       el.addEventListener('click', function(e) {
         e.preventDefault();
         var url = el.dataset.url;
-        var f = null;
-        for (var i = 0; i < FEED_DATA.length; i++) {
-          if (FEED_DATA[i][1] === url) { f = FEED_DATA[i]; break; }
+        if (window.__TAURI_INTERNALS__) {
+          window.__TAURI_INTERNALS__.invoke('open_url_from_newtab', { url: url }).catch(function() {
+            window.open(url, '_blank');
+          });
+        } else {
+          window.open(url, '_blank');
         }
-        if (f) openFeedSplit(f);
       });
     });
   }
@@ -1367,6 +1369,7 @@
 
   // ---- 主区资讯分栏阅读：左列表 + 右内容，点一条看一条（2026-09-19）----
   // 需求：点资讯不跳标签，启动页内"左列表右内容"浏览，随时点下一条
+  // 2026-09-23：资讯点击已改为「当前标签右侧新标签打开原文」，本分栏保留备用（暂不触发）
   var feedSplitActive = false;
   var feedSplitBackHtml = '';
   function openFeedSplit(f) {
@@ -1445,10 +1448,15 @@
       if (!href || href.indexOf('http') !== 0) return; // 只拦截 http/https 外链
       e.preventDefault();
       if (container.id === 'feedList') {
-        var all = container.querySelectorAll('.feed-item');
-        var idx = Array.prototype.indexOf.call(all, a);
-        var items = FEED_DATA.slice(0, 12);
-        if (idx >= 0 && items[idx]) { openFeedSplit(items[idx]); return; }
+        // 资讯点击 → 左窗格保持列表页，右窗格分屏打开资讯原文（占满右半区域）
+        if (window.__TAURI_INTERNALS__) {
+          window.__TAURI_INTERNALS__.invoke('open_url_from_newtab', { url: href }).catch(function() {
+            window.open(href, '_blank');
+          });
+        } else {
+          window.open(href, '_blank');
+        }
+        return;
       }
       window.open(href, '_blank');
     });

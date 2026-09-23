@@ -486,6 +486,22 @@ onMounted(async () => {
   listen('open-settings-from-newtab', () => {
     showSettings.value = true
   }).catch(() => {})
+  // 启动页资讯点击 → 左窗格保持列表页，右窗格分屏打开资讯原文（占满右半区域）
+  listen<string>('open-url-from-newtab', async (e) => {
+    if (!e.payload) return
+    // 已有分屏：右窗格直接换内容（"点一条看一条"，不重复开标签）
+    const existing = tabsStore.splitTabId
+    if (existing && tabsStore.tabs.some((t) => t.id === existing)) {
+      await tabsStore.navigateTab(existing, e.payload)
+      return
+    }
+    const leftId = tabsStore.activeTabId
+    const tab = await tabsStore.createTab(e.payload)
+    if (!tab) return
+    // 活动标签切回列表页（左窗格），资讯标签放右窗格分屏
+    if (leftId && leftId !== tab.id) await tabsStore.switchTab(leftId)
+    await tabsStore.setSplit(tab.id)
+  }).catch(() => {})
 
   // 系统托盘菜单 → 打开面板（Rust 侧 emit，见 tray.rs）
   listen('tray-open-downloads', () => {

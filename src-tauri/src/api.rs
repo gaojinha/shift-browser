@@ -489,7 +489,7 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };
-            match crate::tabs::commands::create_tab(app.clone(), state, url, None).await {
+            match crate::tabs::commands::create_tab(app.clone(), state, url, None, None).await {
                 Ok(t) => json!({"ok": true, "data": t}),
                 Err(e) => json!({"ok": false, "error": e}),
             }
@@ -573,7 +573,7 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };
-            match crate::tabs::commands::create_tab(app.clone(), state, url, None).await {
+            match crate::tabs::commands::create_tab(app.clone(), state, url, None, None).await {
                 Ok(t) => json!({"ok": true, "data": t}),
                 Err(e) => json!({"ok": false, "error": e}),
             }
@@ -583,7 +583,7 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };
             // 注意：Rust 侧 create_tab 需要绝对 URL，"newtab" 会解析失败 → 用 shift://newtab
-            match crate::tabs::commands::create_tab(app.clone(), state, "shift://newtab".to_string(), None).await {
+            match crate::tabs::commands::create_tab(app.clone(), state, "shift://newtab".to_string(), None, None).await {
                 Ok(t) => json!({"ok": true, "data": t}),
                 Err(e) => json!({"ok": false, "error": e}),
             }

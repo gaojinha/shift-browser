@@ -13,8 +13,11 @@ pub async fn create_tab(
     state: tauri::State<'_, TabManager>,
     url: String,
     private: Option<bool>,
+    after_active: Option<bool>,
 ) -> Result<Tab, String> {
     let is_private = private.unwrap_or(false);
+    // 新标签插入位置：true = 插到当前活动标签之后（"在列表页右边打开"）；默认追加末尾
+    let insert_after = after_active.unwrap_or(false);
     // 隐私防护：新建标签前清洗跨站追踪参数（只影响 http/https，内部页面不受影响）
     let url = clean_tracking_params(&url);
     log::info!("[tabs] create_tab: url={}", crate::redact_url(&url));
@@ -70,11 +73,28 @@ pub async fn create_tab(
         let mut order = state.order.lock().unwrap_or_else(|e| e.into_inner());
         let mut active = state.active_id.lock().unwrap_or_else(|e| e.into_inner());
 
+        let prev = (*active).clone();
         for t in tabs.values_mut() {
             t.is_active = false;
         }
         tabs.insert(id.clone(), tab.clone());
-        order.push(id.clone());
+        // 插入位置：after_active=true 时插到旧活动标签之后（无活动标签则追加末尾）
+        let pos = if insert_after {
+            prev.as_ref()
+                .and_then(|p| order.iter().position(|x| x == p))
+                .map(|p| p + 1)
+                .unwrap_or(order.len())
+        } else {
+            order.len()
+        };
+        if insert_after {
+            log::info!(
+                "[tabs] create_tab: 插到活动标签之后 pos={}/{}",
+                pos,
+                order.len()
+            );
+        }
+        order.insert(pos, id.clone());
         active.replace(id.clone())
     };
 

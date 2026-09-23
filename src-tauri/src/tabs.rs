@@ -352,7 +352,7 @@ impl TabManager {
             let app = app_handle.clone();
             tauri::async_runtime::spawn(async move {
               let state = app.state::<TabManager>();
-              if let Ok(tab) = commands::create_tab(app.clone(), state, url_str, None).await {
+              if let Ok(tab) = commands::create_tab(app.clone(), state, url_str, None, None).await {
                 log::info!("[tabs] on_new_window: 新标签创建成功 id={}", tab.id);
                 // 页面内 window.open 建的新标签，前端不知情 → 通知同步
                 let _ = app.emit("tabs-updated", ());

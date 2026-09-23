@@ -26,6 +26,8 @@ pub const STATUS_BAR_HEIGHT: f64 = 22.0;
 pub const AI_PANEL_WIDTH: f64 = 380.0;
 /// 垂直标签栏占用的左侧宽度：垂直标签模式下内容区让出该宽度（阶段 3.1）
 pub const VERTICAL_TAB_BAR_WIDTH: f64 = 220.0;
+/// 分屏左栏占比：左窄右宽（资讯分屏左边看列表、右边看原文；1/4 左、3/4 右）
+pub const SPLIT_LEFT_RATIO: f64 = 0.25;
 /// 内容区顶部偏移（含书签栏）
 pub const CONTENT_TOP_OFFSET: f64 = TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT + BOOKMARKS_BAR_HEIGHT;
 /// 内容区顶部偏移（不含书签栏）
@@ -61,19 +63,19 @@ impl ContentGeometry {
         Self::from_size(inner.width as f64 / scale, inner.height as f64 / scale, top, ai_active, vertical)
     }
 
-    /// 分屏：把当前内容区左右对半，返回 (左半, 右半)。
-    /// 左半承载活动标签，右半承载分屏标签（阶段 3.1 分屏浏览）。
+    /// 分屏：把内容区左右分栏，返回 (左栏, 右栏)。
+    /// 左栏承载活动标签（窄——列表/导航），右栏承载分屏标签（宽——正文阅读）。
     pub fn split(self) -> (ContentGeometry, ContentGeometry) {
-        let half = self.width / 2;
+        let left_w = (self.width as f64 * SPLIT_LEFT_RATIO).round() as i32;
         let left = ContentGeometry {
             left: self.left,
-            width: half,
+            width: left_w,
             height: self.height,
             top: self.top,
         };
         let right = ContentGeometry {
-            left: self.left + half,
-            width: self.width - half,
+            left: self.left + left_w,
+            width: self.width - left_w,
             height: self.height,
             top: self.top,
         };
@@ -277,13 +279,15 @@ mod tests {
     }
 
     #[test]
-    fn geometry_split_halves_side_by_side() {
+    fn geometry_split_left_narrow_right_wide() {
         let g = ContentGeometry::from_size(1280.0, 800.0, CONTENT_TOP_OFFSET, false, false);
         let (l, r) = g.split();
         assert_eq!(l.left, 0);
-        assert_eq!(l.width, 640);
-        assert_eq!(r.left, 640);
-        assert_eq!(r.width, 640);
+        // 左栏 1/4、右栏 3/4（左窄右宽）
+        assert_eq!(l.width, (1280.0 * SPLIT_LEFT_RATIO) as i32);
+        assert_eq!(l.width, 320);
+        assert_eq!(r.left, 320);
+        assert_eq!(r.width, 960);
         assert_eq!(l.top, r.top);
         assert_eq!(l.height, r.height);
         // 两块拼起来等于原内容区（无缝隙、无重叠）

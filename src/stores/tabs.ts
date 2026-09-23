@@ -254,6 +254,7 @@ export const useTabsStore = defineStore('tabs', {
       groupId?: number | null,
       skipAutoGroup = false,
       isPrivate = false,
+      afterActive = false,
     ): Promise<Tab | null> {
       // 参与 _opSeq：防止 create_tab 在途时 syncTabs（轮询）用旧快照整体覆盖，把刚建的标签顶掉
       const my = ++this._opSeq
@@ -270,11 +271,20 @@ export const useTabsStore = defineStore('tabs', {
         }
       }
       try {
-        const tab = await invoke<Tab>('create_tab', { url: target, private: isPrivate })
+        const tab = await invoke<Tab>('create_tab', {
+          url: target,
+          private: isPrivate,
+          afterActive,
+        })
         // push 前去重：syncTabs 轮询可能已把该 id 带进列表（并发窗口），直接 push 会重复
         const dup = this.tabs.findIndex((t) => t.id === tab.id)
         if (dup !== -1) this.tabs[dup] = tab
-        else this.tabs.push(tab)
+        else if (afterActive) {
+          // 插到当前活动标签之后（"在列表页右边打开"），与 Rust order 保持一致
+          const ai = this.tabs.findIndex((t) => t.id === this.activeTabId)
+          if (ai !== -1) this.tabs.splice(ai + 1, 0, tab)
+          else this.tabs.push(tab)
+        } else this.tabs.push(tab)
         // 归组（可选）：createTab(url, groupId) 语义 —— 新建即归入给定分组。
         // groupId 是前端运行时概念（Rust Tab 无此字段，参见 54 行注释），
         // 所以通过现有 assignTabToGroup 幂等归组，不依赖后端回传。
