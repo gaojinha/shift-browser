@@ -9,6 +9,7 @@ import { listen } from '@tauri-apps/api/event'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { useTabsStore } from '../stores/tabs'
 import { useSettingsStore } from '../stores/settings'
+import { EVENTS } from '../constants'
 
 const tabsStore = useTabsStore()
 const settingsStore = useSettingsStore()
@@ -130,14 +131,14 @@ let unlistenLoadFailed: (() => void) | null = null
 
 onMounted(async () => {
   try {
-    unlistenNet = await listen<NetStatus>('net-status-updated', (e) => {
+    unlistenNet = await listen<NetStatus>(EVENTS.NET_STATUS_UPDATED, (e) => {
       net.value = e.payload
     })
   } catch (e) {
     console.error('[status] 监听网络状态失败:', e)
   }
   try {
-    unlistenLoadFailed = await listen<{ tabId: string; uri: string }>('page-load-failed', (e) => {
+    unlistenLoadFailed = await listen<{ tabId: string; uri: string }>(EVENTS.PAGE_LOAD_FAILED, (e) => {
       loadFailed.value = true
       loadFailedUri.value = e.payload.uri
       setTimeout(() => {
@@ -148,7 +149,7 @@ onMounted(async () => {
     console.error('[status] 监听页面加载失败失败:', e)
   }
   try {
-    unlistenDownloads = await listen('downloads-updated', () => {
+    unlistenDownloads = await listen(EVENTS.DOWNLOADS_UPDATED, () => {
       refreshActiveDownloads()
     })
   } catch (e) {

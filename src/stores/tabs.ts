@@ -7,7 +7,7 @@ import type { Tab } from '../types/tab'
 import type { Session, SessionTab } from '../types/session'
 import { useGroupsStore } from './groups'
 // 分组配色池（单一来源）
-import { UI } from '../constants'
+import { EVENTS, UI } from '../constants'
 import { useSettingsStore } from './settings'
 import { useToastStore } from './toast'
 
@@ -649,7 +649,7 @@ export const useTabsStore = defineStore('tabs', {
       let hibernateTick = 0
       // 性能 P2：nav_state 兜底轮询计数（每 3 轮 ≈24s 一次）
       let navTick = 0
-      listen('tabs-updated', () => {
+      listen(EVENTS.TABS_UPDATED, () => {
         this.syncTabs()
         // 页面加载完成/标题变化时同步真实导航状态（修复前进/后退按钮卡住 · 2026-09-22）
         this.syncNavState()

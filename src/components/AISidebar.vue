@@ -9,7 +9,7 @@ import { useTabsStore } from '../stores/tabs'
 import { useSettingsStore } from '../stores/settings'
 import { renderMarkdown, copyText } from '../utils/markdown'
 // 布局常量单一来源（build.rs 由 src-tauri/src/constants.rs 生成）
-import { LAYOUT } from '../constants'
+import { EVENTS, LAYOUT } from '../constants'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -148,8 +148,8 @@ async function onAgentMultiStepRequest(e: { payload: MultiStepPlan }) {
 
 let unlistenAction: (() => void) | null = null
 onMounted(async () => {
-  unlistenAction = await listen<AgentActionRequest>('agent-action-request', onAgentActionRequest)
-  await listen<MultiStepPlan>('agent-multi-step-request', onAgentMultiStepRequest)
+  unlistenAction = await listen<AgentActionRequest>(EVENTS.AGENT_ACTION_REQUEST, onAgentActionRequest)
+  await listen<MultiStepPlan>(EVENTS.AGENT_MULTI_STEP_REQUEST, onAgentMultiStepRequest)
 })
 onUnmounted(() => {
   unlistenAction?.()

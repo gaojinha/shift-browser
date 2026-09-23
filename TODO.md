@@ -162,11 +162,12 @@
   - [x] **事件名 + 内部 URL 契约（✅ 生成完成，前端迁移待做）**
     `contracts.rs::events`（18 个 IPC 事件名）+ `contracts.rs::urls`（shift:// 路由）→
     `build.rs` 生成 `EVENTS` / `URLS`
-  - [ ] **前端 listen 迁移到 `EVENTS.XXX`（🔴 下一步）**
-    分布：`App.vue`(12) / `StatusBar.vue`(10) / `stores/tabs.ts`(8) /
-    `AISidebar.vue`(5) / `TranslateProgress.vue`(4) / `DownloadsDialog.vue`(4)
-  - [ ] **后端 emit 迁移到 `contracts::events::XXX`**（11 处）
-  - [ ] **内部 URL 迁移**：`shift://newtab`×3、`/newtab/`×4、`shift://worldnav`×2 → `contracts::urls`
+  - [x] **前端 listen + 后端 emit 迁移（✅ 2026-09-23）**
+    前端 19 处 `listen('xxx')` → `listen(EVENTS.XXX)`（App.vue/StatusBar/AISidebar/
+    TranslateProgress/DownloadsDialog/tabs.ts 共 6 文件）；
+    后端 11 处 `emit("xxx")` → `crate::contracts::events::XXX`（9 个 rs 文件）。
+    事件名不再是裸字符串，拼错类型检查/编译期即暴露
+  - [ ] **内部 URL 迁移**：`shift://newtab`×3、`/newtab/`×4、`shift://worldnav`×2 → `contracts::urls`（🔴 下一步）
   - [ ] **超时/间隔契约**：Rust 21 处 + 前端 10 处裸数字 → `contracts::timeout`（语义命名）
   - [ ] **快捷键表**：前端 keydown ↔ Rust GTK 兜底（F12/Ctrl+Shift+I 两处各写一遍）
     → `contracts::SHORTCUTS` 单一来源

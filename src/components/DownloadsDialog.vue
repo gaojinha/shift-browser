@@ -8,6 +8,7 @@ import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener'
 import { setWebviewVisible } from '../utils/webview'
 import { useDownloadsStore } from '../stores/downloads'
 import { useToastStore } from '../stores/toast'
+import { EVENTS } from '../constants'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -17,7 +18,7 @@ const downloadsStore = useDownloadsStore()
 // 监听 Rust 侧下载事件（下载开始/进度/完成/失败），弹窗打开时实时刷新
 let unlisten: (() => void) | null = null
 onMounted(async () => {
-  unlisten = await listen('downloads-updated', () => {
+  unlisten = await listen(EVENTS.DOWNLOADS_UPDATED, () => {
     if (props.show) {
       downloadsStore.loadDownloads().catch((e) => {
         console.error('[downloads] 事件刷新失败:', e)

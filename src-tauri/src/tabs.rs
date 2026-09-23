@@ -355,7 +355,7 @@ impl TabManager {
               if let Ok(tab) = commands::create_tab(app.clone(), state, url_str, None, None).await {
                 log::info!("[tabs] on_new_window: 新标签创建成功 id={}", tab.id);
                 // 页面内 window.open 建的新标签，前端不知情 → 通知同步
-                let _ = app.emit("tabs-updated", ());
+                let _ = app.emit(crate::contracts::events::TABS_UPDATED, ());
               }
             });
             tauri::webview::NewWindowResponse::Deny
@@ -429,7 +429,7 @@ impl TabManager {
                         };
                         // favicon 更新 → 通知前端同步
                         if updated {
-                          let _ = app_fav.emit("tabs-updated", ());
+                          let _ = app_fav.emit(crate::contracts::events::TABS_UPDATED, ());
                         }
                       }
                     }
@@ -457,7 +457,7 @@ impl TabManager {
                 }
               }
               // 页面加载完成（URL/标题变化）→ 通知前端同步（替代 2s 轮询）
-              let _ = app_handle2.emit("tabs-updated", ());
+              let _ = app_handle2.emit(crate::contracts::events::TABS_UPDATED, ());
 
               tauri::async_runtime::spawn(async move {
                 let db = app3.state::<Db>();
@@ -524,7 +524,7 @@ impl TabManager {
                     );
                     // 阻止 WebKit 默认错误页显示（返回 true = 阻止默认行为）
                     let _ = app_fail.emit(
-                        "page-load-failed",
+                        crate::contracts::events::PAGE_LOAD_FAILED,
                         (tab_id_fail.clone(), failing_uri.to_string()),
                     );
                     true
@@ -571,7 +571,7 @@ impl TabManager {
                     };
                     use tauri::Emitter;
                     let _ = app_crash.emit(
-                        "web-process-crashed",
+                        crate::contracts::events::WEB_PROCESS_CRASHED,
                         serde_json::json!({
                             "tabId": tab_id_crash,
                             "reason": format!("{:?}", reason),
@@ -614,7 +614,7 @@ impl TabManager {
                             }
                         };
                         if changed {
-                            let _ = app2.emit("tabs-updated", ());
+                            let _ = app2.emit(crate::contracts::events::TABS_UPDATED, ());
                         }
                     }
                 });
@@ -803,7 +803,7 @@ impl TabManager {
                   if let Ok(id) = res {
                     *id_state0.lock().unwrap_or_else(|e| e.into_inner()) = Some(id);
                     log::info!("[downloads] 记录 id={} filename={} total={}", id, filename_db, total);
-                    let _ = app0.emit("downloads-updated", ());
+                    let _ = app0.emit(crate::contracts::events::DOWNLOADS_UPDATED, ());
                   } else {
                     log::error!("[downloads] 记录插入失败");
                   }
@@ -848,7 +848,7 @@ impl TabManager {
                     };
                     if let Some(id) = id {
                       let _ = downloads::update_download_bytes(&pool3, id, received, Some(total_now)).await;
-                      let _ = app3.emit("downloads-updated", ());
+                      let _ = app3.emit(crate::contracts::events::DOWNLOADS_UPDATED, ());
                     }
                   });
                 });
@@ -870,7 +870,7 @@ impl TabManager {
                     };
                     if let Some(id) = id {
                       let _ = downloads::update_download_state(&pool5, id, "completed", Some(received)).await;
-                      let _ = app5.emit("downloads-updated", ());
+                      let _ = app5.emit(crate::contracts::events::DOWNLOADS_UPDATED, ());
                     }
                   });
                 });
@@ -892,7 +892,7 @@ impl TabManager {
                     };
                     if let Some(id) = id {
                       let _ = downloads::update_download_state(&pool7, id, "failed", None).await;
-                      let _ = app7.emit("downloads-updated", ());
+                      let _ = app7.emit(crate::contracts::events::DOWNLOADS_UPDATED, ());
                     }
                   });
                 });
@@ -1192,7 +1192,7 @@ pub fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
                     };
                     if let Some(action) = action {
                         log::debug!("[tabs] GTK 层转发快捷键: {}", action);
-                        let _ = app_handle.emit("global-shortcut", action);
+                        let _ = app_handle.emit(crate::contracts::events::GLOBAL_SHORTCUT, action);
                         return gtk::glib::Propagation::Stop;
                     }
                 }

@@ -455,7 +455,7 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                   "eta": num("eta"),
                   "fails": num("fails"),
                 });
-                let _ = app_p.emit("translate-progress", payload);
+                let _ = app_p.emit(crate::contracts::events::TRANSLATE_PROGRESS, payload);
             });
         }
         _ => log::warn!("[translate-native] 未知路径: {}", path),
@@ -987,7 +987,7 @@ pub fn run() {
                 "eta": num("eta"),
                 "fails": num("fails"),
               });
-              let _ = app_p.emit("translate-progress", payload);
+              let _ = app_p.emit(crate::contracts::events::TRANSLATE_PROGRESS, payload);
             });
           }
           "/whole-page" => {
@@ -1514,7 +1514,7 @@ pub fn run() {
       // 锁屏解锁过 → 通知前端重试初始化（锁屏期间 Db/TabManager 未就绪，
       // 主窗口 Vue 的 onMounted 初始化全部失败，解锁后必须重跑 loadTabs/createTab）
       if unlocked_after_lock {
-        let _ = app.emit("app-unlocked", ());
+        let _ = app.emit(crate::contracts::events::APP_UNLOCKED, ());
         log::info!("[ShiftBrowser] 已发出 app-unlocked，前端将重试初始化");
       }
 
@@ -1576,10 +1576,10 @@ pub fn run() {
                 }
               }
               tray::TrayAction::OpenDownloads => {
-                let _ = app_tray.emit("tray-open-downloads", ());
+                let _ = app_tray.emit(crate::contracts::events::TRAY_OPEN_DOWNLOADS, ());
               }
               tray::TrayAction::OpenPasswords => {
-                let _ = app_tray.emit("tray-open-passwords", ());
+                let _ = app_tray.emit(crate::contracts::events::TRAY_OPEN_PASSWORDS, ());
               }
               tray::TrayAction::Quit => {
                 tray::REAL_QUIT.store(true, Ordering::SeqCst);

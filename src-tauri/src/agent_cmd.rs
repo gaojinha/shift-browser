@@ -35,7 +35,7 @@ pub async fn request_agent_action(
 
     // 通知前端弹确认卡片
     let _ = app.emit(
-        "agent-action-request",
+        crate::contracts::events::AGENT_ACTION_REQUEST,
         serde_json::json!({
             "requestId": request_id,
             "description": description,
@@ -83,7 +83,7 @@ pub async fn request_multi_step_action(
     pending().lock().unwrap().insert(request_id.clone(), tx);
 
     let _ = app.emit(
-        "agent-multi-step-request",
+        crate::contracts::events::AGENT_MULTI_STEP_REQUEST,
         serde_json::json!({
             "requestId": request_id,
             "description": description,

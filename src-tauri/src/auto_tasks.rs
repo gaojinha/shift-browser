@@ -55,7 +55,7 @@ pub fn spawn(app: AppHandle) {
                         if let Ok(Some(prompt)) = read_setting(&db.pool, "auto_agent_prompt").await {
                             let p = prompt.trim().to_string();
                             if !p.is_empty() {
-                                let _ = app.emit("auto-agent", p);
+                                let _ = app.emit(crate::contracts::events::AUTO_AGENT, p);
                                 log::info!("[auto] 触发 Agent 提示词（每 {} 分钟）", mins);
                             }
                         }

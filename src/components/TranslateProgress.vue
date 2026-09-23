@@ -3,6 +3,7 @@
 // 数据来源：整页翻译脚本 → shift://__translate__/progress → Rust emit "translate-progress"
 import { onMounted, onUnmounted, ref } from 'vue'
 import { listen } from '@tauri-apps/api/event'
+import { EVENTS } from '../constants'
 
 interface ProgressPayload {
   state: 'start' | 'update' | 'done' | 'hide'
@@ -38,7 +39,7 @@ function dismiss() {
 
 onMounted(async () => {
   try {
-    unlisten = await listen<ProgressPayload>('translate-progress', (e) => {
+    unlisten = await listen<ProgressPayload>(EVENTS.TRANSLATE_PROGRESS, (e) => {
       const p = e.payload
       if (p.state === 'hide') {
         dismiss()

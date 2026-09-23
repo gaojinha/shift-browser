@@ -343,7 +343,7 @@ pub async fn hibernate_idle_tabs(
         }
     }
     if count > 0 {
-        let _ = app.emit("tabs-updated", ());
+        let _ = app.emit(crate::contracts::events::TABS_UPDATED, ());
         log::info!("[perf] 本轮共休眠 {} 个空闲标签", count);
     }
     Ok(count)

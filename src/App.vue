@@ -31,7 +31,7 @@ import { useWorkspacesStore } from './stores/workspaces'
 import { useAIStore } from './stores/ai'
 import { useToastStore } from './stores/toast'
 // 布局常量单一来源（build.rs 由 src-tauri/src/constants.rs 生成）→ 注入 CSS 变量
-import { LAYOUT } from './constants'
+import { EVENTS, LAYOUT } from './constants'
 
 const tabsStore = useTabsStore()
 const groupsStore = useGroupsStore()
@@ -462,7 +462,7 @@ onMounted(async () => {
   if (locked) {
     // ② 锁屏中：await 注册 app-unlocked（确保注册完成，避免"解锁事件早于注册"丢失）
     try {
-      await listen('app-unlocked', () => {
+      await listen(EVENTS.APP_UNLOCKED, () => {
         frontLog('收到 app-unlocked 事件')
         onReady(true)
       })
@@ -492,14 +492,14 @@ onMounted(async () => {
   }
 
   // 启动页右侧栏按钮 → 打开主界面组件（newtab webview 通过 IPC 触发）
-  listen('open-ai-from-newtab', () => {
+  listen(EVENTS.OPEN_AI_FROM_NEWTAB, () => {
     showAI.value = true
   }).catch(() => {})
-  listen('open-settings-from-newtab', () => {
+  listen(EVENTS.OPEN_SETTINGS_FROM_NEWTAB, () => {
     showSettings.value = true
   }).catch(() => {})
   // 启动页资讯点击 → 左窗格保持列表页，右窗格分屏打开资讯原文（占满右半区域）
-  listen<string>('open-url-from-newtab', async (e) => {
+  listen<string>(EVENTS.OPEN_URL_FROM_NEWTAB, async (e) => {
     if (!e.payload) return
     // 已有分屏：右窗格直接换内容（"点一条看一条"，不重复开标签）
     const existing = tabsStore.splitTabId
@@ -516,25 +516,25 @@ onMounted(async () => {
   }).catch(() => {})
 
   // 系统托盘菜单 → 打开面板（Rust 侧 emit，见 tray.rs）
-  listen('tray-open-downloads', () => {
+  listen(EVENTS.TRAY_OPEN_DOWNLOADS, () => {
     openPanel('downloads')
   }).catch(() => {})
-  listen('tray-open-passwords', () => {
+  listen(EVENTS.TRAY_OPEN_PASSWORDS, () => {
     openPanel('passwords')
   }).catch(() => {})
 
   // 证书错误（P2 · Rust 侧 on_tls_error emit）→ 弹"危险站点"拦截页
-  listen<TlsErrorInfo>('tls-error', (ev) => {
+  listen<TlsErrorInfo>(EVENTS.TLS_ERROR, (ev) => {
     tlsError.value = ev.payload
   }).catch(() => {})
 
   // 权限请求（安全 #2 · Rust 侧 perms::attach emit）→ 弹权限提示
-  listen<PermissionRequest>('permission-request', (ev) => {
+  listen<PermissionRequest>(EVENTS.PERMISSION_REQUEST, (ev) => {
     permReq.value = ev.payload
   }).catch(() => {})
 
   // Web 进程崩溃（视频崩溃修复 · Rust 侧 connect_web_process_terminated emit）→ 提示
-  listen<WebProcessCrash>('web-process-crashed', (ev) => {
+  listen<WebProcessCrash>(EVENTS.WEB_PROCESS_CRASHED, (ev) => {
     const p = ev.payload ?? {}
     const reason = p.reason === 'ExceededMemoryLimit' ? '内存超限' : '进程崩溃'
     useToastStore().show(
@@ -546,12 +546,12 @@ onMounted(async () => {
 
   // GTK 窗口层转发的全局快捷键：页面（child webview）持焦时，前端 keydown 收不到按键，
   // 由 Rust 在 GTK 顶层窗口拦截后发事件过来（见 tabs.rs 的 UI_FOCUSED 焦点跟踪）。
-  listen<string>('global-shortcut', (ev) => {
+  listen<string>(EVENTS.GLOBAL_SHORTCUT, (ev) => {
     handleGlobalAction(ev.payload)
   }).catch(() => {})
 
   // 定时 Agent 提示词（阶段3 Agent 编排）：调度器到点发事件 → 打开 AI 侧栏并发送
-  listen<string>('auto-agent', (ev) => {
+  listen<string>(EVENTS.AUTO_AGENT, (ev) => {
     const prompt = ev.payload
     if (!prompt) return
     openPanel('ai')

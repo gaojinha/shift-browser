@@ -88,7 +88,7 @@ pub fn start_network_monitor(app: AppHandle) {
                     ((cur.rx.saturating_sub(last.rx)) as f64 / 1024.0 / dt).max(0.0) as u32;
                 let up_kb = ((cur.tx.saturating_sub(last.tx)) as f64 / 1024.0 / dt).max(0.0) as u32;
                 let _ = app.emit(
-                    "net-status-updated",
+                    crate::contracts::events::NET_STATUS_UPDATED,
                     NetStatus {
                         down_kb,
                         up_kb,

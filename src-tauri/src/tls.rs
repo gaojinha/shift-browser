@@ -169,7 +169,7 @@ pub fn on_tls_error(
     log::warn!("[cert] TLS 错误 host={} flags={:?}", host, names);
     use tauri::Emitter;
     let _ = app.emit(
-        "tls-error",
+        crate::contracts::events::TLS_ERROR,
         serde_json::json!({
             "tabId": tab_id,
             "host": host,

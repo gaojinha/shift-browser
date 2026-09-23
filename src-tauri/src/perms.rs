@@ -120,7 +120,7 @@ pub fn attach(app: tauri::AppHandle, tab_id: String, wv: &WebView) {
         });
         use tauri::Emitter;
         let _ = app.emit(
-            "permission-request",
+            crate::contracts::events::PERMISSION_REQUEST,
             serde_json::json!({
                 "id": id,
                 "tabId": tab_id,

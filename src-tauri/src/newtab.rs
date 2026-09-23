@@ -427,13 +427,13 @@ pub async fn get_newtab_url(app: AppHandle) -> Result<String, String> {
 /// 启动页右侧栏按钮：通知主界面打开 AI 助手侧栏
 #[tauri::command]
 pub fn open_ai_from_newtab(app: AppHandle) {
-    let _ = app.emit("open-ai-from-newtab", ());
+    let _ = app.emit(crate::contracts::events::OPEN_AI_FROM_NEWTAB, ());
 }
 
 /// 启动页右侧栏按钮：通知主界面打开设置弹窗
 #[tauri::command]
 pub fn open_settings_from_newtab(app: AppHandle) {
-    let _ = app.emit("open-settings-from-newtab", ());
+    let _ = app.emit(crate::contracts::events::OPEN_SETTINGS_FROM_NEWTAB, ());
 }
 
 /// 启动页资讯点击：通知主界面在**当前标签右侧**新开标签打开该 URL（列表页保留）。
@@ -441,7 +441,7 @@ pub fn open_settings_from_newtab(app: AppHandle) {
 #[tauri::command]
 pub fn open_url_from_newtab(app: AppHandle, url: String) {
     log::info!("[newtab] 资讯点击 → 右侧新标签: {}", crate::redact_url(&url));
-    let _ = app.emit("open-url-from-newtab", url);
+    let _ = app.emit(crate::contracts::events::OPEN_URL_FROM_NEWTAB, url);
 }
 
 /// 待办清单存储键（settings 表）
