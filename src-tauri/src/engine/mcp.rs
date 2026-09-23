@@ -260,7 +260,7 @@ async fn connect(_pool: &SqlitePool, row: &McpServerRow) -> Result<Arc<tokio::sy
             json!({
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": { "name": "shift-browser", "version": "5.6.0" },
+                "clientInfo": { "name": "shift-browser", "version": env!("CARGO_PKG_VERSION") },
             }),
         )
         .await?;
