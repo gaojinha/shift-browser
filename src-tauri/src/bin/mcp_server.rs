@@ -155,66 +155,14 @@ fn handle(msg: &Value) -> Option<Value> {
     }
 }
 
-/// 执行一个工具调用（校验必填参数 → 转发浏览器）
+/// 执行一个工具调用：**直通转发**给浏览器 API。
+///
+/// 参数校验与默认值都在浏览器侧 API（唯一实现）——例如 `history` 的 limit 默认 50、
+/// `search_history` 缺 query 报错，都由 `api.rs` 负责。
+/// 工具名合法性由 `tools/list`（来自浏览器 `capabilities/list`）保证。
+/// 这样本进程不再维护工具名清单：新增能力只需改 `capabilities.rs` + `api.rs`。
 fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
-    let missing = |required: &[&str]| -> Result<(), String> {
-        for k in required {
-            let ok = args
-                .get(*k)
-                .and_then(|v| v.as_str())
-                .map(|s| !s.trim().is_empty())
-                .unwrap_or(false);
-            if !ok {
-                return Err(format!("缺少必填参数: {}", k));
-            }
-        }
-        Ok(())
-    };
-    match name {
-        // 读类
-        "status" | "list_tabs" | "active_tab" | "bookmarks" | "list_downloads"
-        | "list_sessions" | "list_groups" | "list_spaces" | "list_userscripts"
-        | "list_settings" | "new_tab" | "minimize_window" | "maximize_window"
-        | "screenshot" => call_browser(name, args),
-        "history" => {
-            let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(50);
-            call_browser(name, &json!({ "limit": limit }))
-        }
-        "search_history" => {
-            missing(&["query"])?;
-            let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(50);
-            let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-            call_browser(name, &json!({ "query": query, "limit": limit }))
-        }
-        "get_setting" => {
-            missing(&["key"])?;
-            let key = args.get("key").and_then(|v| v.as_str()).unwrap_or("");
-            call_browser(name, &json!({ "key": key }))
-        }
-        // 写类
-        "open_url" => {
-            missing(&["url"])?;
-            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
-            call_browser(name, &json!({ "url": url }))
-        }
-        "search" => {
-            missing(&["query"])?;
-            let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-            call_browser(name, &json!({ "query": query }))
-        }
-        "close_tab" | "switch_tab" | "reload_tab" | "pin_tab" | "mute_tab" => {
-            missing(&["id"])?;
-            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            call_browser(name, &json!({ "id": id }))
-        }
-        "navigate" => {
-            missing(&["id", "url"])?;
-            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
-            call_browser(name, &json!({ "id": id, "url": url }))
-        }
-        _ => Err(format!("未知工具: {}", name)),
-    }
+    call_browser(name, args)
 }
 
 fn main() {

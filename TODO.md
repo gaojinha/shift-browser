@@ -202,7 +202,12 @@
   - [x] MCP Server（独立 bin）删除手写 `tool_defs()`（**约 200 行 schema**），
     `tools/list` 改为向浏览器拉 `capabilities/list` 动态构建；拉取失败打印原因（不再静默空表）
     → **实测通过**：MCP `tools/list` 返回 25 工具；API `capabilities/list` 返回 count=25
-  - [ ] API `match cmd` / Agent 动作表改为从 registry 派生（含 `Risk` 分级接入）
+  - [x] **MCP `call_tool` 简化为直通转发（✅ 2026-09-23）**
+    删除第三处工具名清单（~60 行 match：工具名 + 参数处理）→ 直通 `call_browser`；
+    参数校验与默认值统一由浏览器 API 侧负责（唯一实现）。
+    **实测**：`tools/list` 25 工具；`tools/call status` → `{tabs:2,version:5.7.0}`；
+    `history`（缺 limit）→ 走 API 默认 50 并返回数据
+  - [ ] Agent 动作表接入 registry（`Risk::Agent` 分级 + 动作校验）
   - 验收：MCP `tools/list` 数量不变（25）；API 行为不变（基线样本回放）
 - [ ] **P3b · 写类能力迁移（12 个）+ `capabilities/list` + MCP 动态拉取**
   - MCP Server（独立二进制）启动时向浏览器请求 `capabilities/list`，动态构建 `tools/list`
