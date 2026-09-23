@@ -35,12 +35,40 @@ use tabs::TabManager;
 use tauri::Emitter;
 use tauri::Manager;
 
-/// shift:// 自定义协议页面的 CSP（主窗口/新标签页/世界导航页统一）
+/// shift:// 自定义协议页面的 CSP 模板（主窗口/新标签页/世界导航页统一）
 /// 注意：Tauri 的 security.csp 只注入 tauri:// 与 http://asset.localhost，
 /// 自定义协议（shift://）不走注入，必须在这里手动加响应头。
-/// script-src 允许 'unsafe-inline'：newtab/world-nav 是本地生成的可信内联脚本；
-/// object-src 'none' + base-uri 'self' + connect-src 收紧 防注入面。
+/// release 构建在响应期把 script-src 的 'unsafe-inline' 替换为 per-request
+/// 'nonce-xxx'（见 inject_script_nonce），内联脚本须带同一 nonce 才执行——
+/// HTML 注入型 XSS 拿不到响应 nonce，其注入脚本被 WebKit 拒绝。
+/// style-src 保留 'unsafe-inline'（大量内联样式/属性，脚本 nonce 是本次收面目标）；
+/// object-src 'none' + base-uri 'self' + connect-src 白名单 收紧注入面。
 const SHIFT_CSP: &str = "default-src 'self' shift: data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' ipc: http://ipc.localhost https://wttr.in https://api.open-meteo.com https://ipinfo.io; font-src 'self' data:; media-src 'self' https: http:; frame-src 'self' https: http:; object-src 'none'; base-uri 'self'";
+
+/// 生成一次响应专用的 CSP nonce（128bit 随机，标准 base64；字符集不含引号/尖括号）
+fn fresh_script_nonce() -> String {
+  use base64::Engine;
+  let raw: [u8; 16] = rand::random();
+  base64::engine::general_purpose::STANDARD.encode(raw)
+}
+
+/// 把 nonce 注入文档内可信内联脚本起始标签。
+///
+/// 只匹配精确 `<script>`：外部脚本（`<script type="module" src=...>`）由
+/// script-src 'self' 授权，无需 nonce。shift:// 三页（main/newtab/worldnav）
+/// 的内联脚本起始标签均为无属性 `<script>`，且模板内 JS 不出现该字面量。
+fn inject_script_nonce(html: &str, nonce: &str) -> String {
+  html.replace("<script>", &format!("<script nonce=\"{nonce}\">"))
+}
+
+/// 用 per-response nonce 替换 CSP 模板 script-src 里的 'unsafe-inline'；
+/// style-src 的 'unsafe-inline' 保持不动（只替换 script-src 前缀）。
+fn csp_with_script_nonce(nonce: &str) -> String {
+  SHIFT_CSP.replace(
+    "script-src 'self' 'unsafe-inline'",
+    &format!("script-src 'self' 'nonce-{nonce}'"),
+  )
+}
 
 
 
@@ -925,10 +953,18 @@ pub fn run() {
           if rel == "index.html" {
             // 替换 IPC 桥里的 invoke_key 占位符（Tauri 校验 invoke_key）
             let html = String::from_utf8_lossy(&bytes);
-            let html = html.replace("__INVOKE_KEY_PLACEHOLDER__", app.invoke_key());
+            let mut html = html.replace("__INVOKE_KEY_PLACEHOLDER__", app.invoke_key());
+            let mut csp = SHIFT_CSP.to_string();
+            // release：内联 IPC 桥改 per-request nonce 授权，CSP 去掉 'unsafe-inline'；
+            // debug（tauri dev）：Vite HMR/eval 依赖宽松 script-src，保持模板原样
+            if !cfg!(debug_assertions) {
+              let nonce = fresh_script_nonce();
+              html = inject_script_nonce(&html, &nonce);
+              csp = csp_with_script_nonce(&nonce);
+            }
             return tauri::http::Response::builder()
               .header(tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
-              .header(tauri::http::header::CONTENT_SECURITY_POLICY, SHIFT_CSP)
+              .header(tauri::http::header::CONTENT_SECURITY_POLICY, csp)
               .body(html.into_bytes())
               .unwrap();
           }
@@ -1220,14 +1256,21 @@ pub fn run() {
       if let Ok(data) = std::fs::read(&file_path) {
         // 把 IPC 桥里的 invoke_key 占位符替换成运行时真实 key（Tauri 校验 invoke_key）
         let html = String::from_utf8_lossy(&data);
-        let html = html.replace("__INVOKE_KEY_PLACEHOLDER__", app.invoke_key());
+        let mut html = html.replace("__INVOKE_KEY_PLACEHOLDER__", app.invoke_key());
+        let mut csp = SHIFT_CSP.to_string();
+        // release：newtab/worldnav 内联脚本改 per-request nonce 授权（同上，dev 保持原样）
+        if !cfg!(debug_assertions) {
+          let nonce = fresh_script_nonce();
+          html = inject_script_nonce(&html, &nonce);
+          csp = csp_with_script_nonce(&nonce);
+        }
         tauri::http::Response::builder()
           .header(tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
           // 2026-09-19：WebKit 对自定义协议默认缓存（刷新走缓存不重新请求），
           // 导致改启动页后高哥刷新看不到变化——强制 no-store，每次加载都读最新文件
           .header(tauri::http::header::CACHE_CONTROL, "no-store, no-cache, must-revalidate")
           .header(tauri::http::header::PRAGMA, "no-cache")
-          .header(tauri::http::header::CONTENT_SECURITY_POLICY, SHIFT_CSP)
+          .header(tauri::http::header::CONTENT_SECURITY_POLICY, csp)
           .body(html.into_bytes())
           .unwrap()
       } else {
@@ -1861,6 +1904,69 @@ mod tests {
         assert!(!valid_callback("cb-1"));
         assert!(!valid_callback("cb.1"));
         assert!(!valid_callback("中文"));
+    }
+
+    #[test]
+    fn nonce_injected_only_into_plain_inline_script_tags() {
+        // 精确匹配 <script>：内联脚本拿 nonce；外部 module 脚本由 'self' 授权不动；
+        // 闭合标签不得被改
+        let html = "<head><script>var a=1;</script>\
+<script type=\"module\" crossorigin src=\"/assets/x.js\"></script></head>";
+        let out = inject_script_nonce(html, "abc123");
+        assert!(out.contains("<script nonce=\"abc123\">var a=1;</script>"));
+        assert!(out.contains(
+            "<script type=\"module\" crossorigin src=\"/assets/x.js\"></script>"
+        ));
+        // 只注入一次（闭合标签未被误匹配）
+        assert_eq!(out.matches("nonce=\"abc123\"").count(), 1);
+    }
+
+    #[test]
+    fn newtab_style_two_inline_scripts_both_get_nonce() {
+        // newtab 渲染后：IPC 桥 + 业务脚本两个无属性 <script>
+        let html = "<script>(function(){})();</script><div>x</div><script>boot();</script>";
+        let out = inject_script_nonce(html, "n2");
+        assert_eq!(out.matches("<script nonce=\"n2\">").count(), 2);
+    }
+
+    #[test]
+    fn csp_nonce_replaces_only_script_src_unsafe_inline() {
+        let csp = csp_with_script_nonce("Zm9vYmFy");
+        assert!(
+            csp.contains("script-src 'self' 'nonce-Zm9vYmFy'"),
+            "script-src 应带 nonce: {csp}"
+        );
+        assert!(
+            !csp.contains("script-src 'self' 'unsafe-inline'"),
+            "script-src 不得再留 unsafe-inline"
+        );
+        // style-src 维持内联（本次收面只针对脚本）
+        assert!(csp.contains("style-src 'self' 'unsafe-inline'"));
+        // 其余指令不丢
+        for directive in [
+            "object-src 'none'",
+            "base-uri 'self'",
+            "connect-src 'self'",
+            "default-src 'self'",
+        ] {
+            assert!(csp.contains(directive), "CSP 丢指令 {directive}: {csp}");
+        }
+    }
+
+    #[test]
+    fn fresh_nonce_is_random_attribute_safe_base64() {
+        let a = fresh_script_nonce();
+        let b = fresh_script_nonce();
+        // 16 字节 → 标准 base64（24 字符含填充），字符集不含引号/尖括号/空白，
+        // 可安全放进 HTML 属性与 CSP 令牌
+        assert_eq!(a.len(), 24);
+        for s in [&a, &b] {
+            assert!(s
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '='));
+            assert!(!s.contains(['"', '\'', '<', '>', ' ']));
+        }
+        assert_ne!(a, b, "nonce 不可重复");
     }
 }
 

@@ -373,8 +373,6 @@
   // 注意：单引号必须转义——feed URL 来自远端 RSS，clean_text 会把 &quot;/&#39; 等
   // 实体解码成裸引号，esc 不转义 ' 则 href="...' 类注入仍可逃逸。
   function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/\\/g,'&#92;'); }
-  // JS 字符串转义（单引号字符串内联场景，如 onclick="showInlineReader('...')"）
-  function escJs(s) { return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n').replace(/\r/g,'\\r'); }
   // 动态背景（Bing 每日壁纸，Ken Burns 缓慢缩放；预加载成功才换图，失败保持渐变）
   var BING_WALLPAPERS = {{wallpapers_json}};
   function loadBg() {
@@ -775,7 +773,7 @@
       return '<a class=\"item fs-item' + (isRead ? ' read' : '') + '\" href=\"' + esc(f[1]) + '\" data-url=\"' + esc(f[1]) + '\">' +
         '<span class=\"it-title\">' + esc(f[0]) + '</span>' +
         '<span class=\"it-url\">' + esc(f[2]) + (f[3] ? ' · ' + timeAgo(f[3]) : '') + '</span>' +
-        '<span class=\"fs-read\" data-url=\"' + esc(f[1]) + '\" title=\"📖 大字阅读（提取正文，面板内就地看\" onclick=\"event.preventDefault();event.stopPropagation();return showInlineReader(\'' + escJs(f[1]) + '\'),false;\">📖</span></a>';
+        '<span class=\"fs-read\" data-url=\"' + esc(f[1]) + '\" title=\"📖 大字阅读（提取正文，面板内就地看）\">📖</span></a>';
     }).join('');
     return h;
   }
@@ -793,7 +791,7 @@
         el.classList.add('read');
       });
       // 点资讯标题 → 左窗格保持列表页/面板，右窗格分屏打开资讯原文（占满右半）；
-      // 📖 按钮走原有内嵌大字阅读（stopPropagation 已隔开）
+      // 📖 按钮走内嵌大字阅读（自己的 click 监听里 stopPropagation 隔开）
       el.addEventListener('click', function(e) {
         e.preventDefault();
         var url = el.dataset.url;
@@ -804,6 +802,16 @@
         } else {
           window.open(url, '_blank');
         }
+      });
+    });
+    // 📖 大字阅读（CSP nonce 后内联 onclick 不再可用，改显式监听）：
+    // 阻止冒泡到 .fs-item 的打开原文逻辑，按 data-url 找 FEED_DATA 条目就地渲染
+    panelBody.querySelectorAll('.fs-read').forEach(function(el) {
+      el.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var f = FEED_DATA.find(function(x) { return x[1] === el.dataset.url; });
+        if (f) showInlineReader(f);
       });
     });
   }
