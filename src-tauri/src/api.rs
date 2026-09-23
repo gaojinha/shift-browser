@@ -463,6 +463,9 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
         }
     }
     match cmd {
+        // 能力清单（单一来源：capabilities.rs）——MCP Server 启动时拉取，
+        // 避免其内部再手写一份 schema（历史问题：25 工具曾三处各写一遍）
+        "capabilities/list" => json!({ "ok": true, "data": crate::capabilities::list_json() }),
         "status" => {
             let tabs = app
                 .try_state::<crate::tabs::TabManager>()

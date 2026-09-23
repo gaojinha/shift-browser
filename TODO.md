@@ -198,8 +198,10 @@
   - [x] `src-tauri/src/capabilities.rs`：25 个工具（读 13 + 写 12）schema 从 MCP 迁入主 crate，
     提供 `ids()`（供 API 校验 / Agent 白名单）与 `list_json()`（`capabilities/list` 响应）
   - [x] 测试：`tool_defs_wellformed`（25 个 + schema 结构校验）+ `ids_unique`
-  - [ ] API 新增 `capabilities/list` 命令
-  - [ ] MCP Server（独立 bin）删除手写 `tool_defs()`，改为启动时向浏览器拉 `capabilities/list`
+  - [x] API 新增 `capabilities/list` 命令（返回 `capabilities::list_json()`）
+  - [x] MCP Server（独立 bin）删除手写 `tool_defs()`（**约 200 行 schema**），
+    `tools/list` 改为向浏览器拉 `capabilities/list` 动态构建；拉取失败打印原因（不再静默空表）
+    → **实测通过**：MCP `tools/list` 返回 25 工具；API `capabilities/list` 返回 count=25
   - [ ] API `match cmd` / Agent 动作表改为从 registry 派生（含 `Risk` 分级接入）
   - 验收：MCP `tools/list` 数量不变（25）；API 行为不变（基线样本回放）
 - [ ] **P3b · 写类能力迁移（12 个）+ `capabilities/list` + MCP 动态拉取**
