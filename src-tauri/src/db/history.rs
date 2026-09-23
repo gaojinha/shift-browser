@@ -6,9 +6,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize, Clone, TS)]
 #[ts(export, export_to = "../../src/types/generated/")]
 pub struct HistoryEntry {
+    #[ts(type = "number")]
     pub id: i64,
     pub url: String,
     pub title: Option<String>,
+    #[ts(type = "number")]
     pub visit_count: i64,
     pub last_visit_at: String,
 }

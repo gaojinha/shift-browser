@@ -7,10 +7,13 @@ use tauri::Manager;
 #[derive(Debug, Serialize, Deserialize, Clone, TS)]
 #[ts(export, export_to = "../../src/types/generated/")]
 pub struct Bookmark {
+    #[ts(type = "number")]
     pub id: i64,
     pub title: String,
     pub url: String,
+    #[ts(type = "number | null")]
     pub folder_id: Option<i64>,
+    #[ts(type = "number")]
     pub sort_order: i64,
     pub created_at: String,
 }

@@ -193,7 +193,9 @@
   - `ts_export_tests::export_bindings`（`cargo test --lib ts_export`）生成到 `src/types/generated/`
   - 前端 `types/tab.ts` 改为「生成物为基 + 前端附加运行时字段 `groupId`」——
     **发现真实漂移**：手写 `hibernated?`/`private?` 可选标记与 Rust 必填不一致
-- [ ] Bookmark / HistoryEntry 的前端类型同样改造（各自处理差异，如前端附加字段）
+- [x] **Bookmark / HistoryEntry 前端类型接入生成物（✅ 2026-09-23）**
+  修正 ts-rs 的 i64 映射（`#[ts(type = "number")]`；`Option<i64>` 用 `"number | null"`）；
+  前端 `bookmark.ts`/`history.ts` 改为 re-export 生成物，手写 interface 全部消除
 - [ ] 其余 `src/types/*.ts`（session/download/extension/password/content）评估是否纳入生成
   - 验收：字段/可选性与 Rust 一致；vue-tsc 干净
 

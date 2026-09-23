@@ -1,8 +1,3 @@
-// 历史记录类型（对应 Rust 侧 db/history.rs）
-export interface HistoryEntry {
-  id: number
-  url: string
-  title: string | null
-  visit_count: number
-  last_visit_at: string
-}
+// 历史记录类型：由 ts-rs 从 Rust `db::history::HistoryEntry` 生成（唯一来源，勿手改）。
+// 生成命令：cd src-tauri && cargo test --lib ts_export
+export type { HistoryEntry } from './generated/HistoryEntry'

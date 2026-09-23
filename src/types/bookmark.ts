@@ -1,9 +1,3 @@
-// 书签类型（对应 Rust 侧 db/bookmarks.rs）
-export interface Bookmark {
-  id: number
-  title: string
-  url: string
-  folder_id: number | null
-  sort_order: number
-  created_at: string
-}
+// 书签类型：由 ts-rs 从 Rust `db::bookmarks::Bookmark` 生成（唯一来源，勿手改）。
+// 生成命令：cd src-tauri && cargo test --lib ts_export
+export type { Bookmark } from './generated/Bookmark'
