@@ -4,6 +4,7 @@
 // 管理标签元数据 + 嵌入式 webview 生命周期
 // 与 Electron 版 electron/tabManager.ts 对应（v4.5.0）
 
+use ts_rs::TS;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -52,7 +53,8 @@ static WEB_CRASH_COOLDOWN: std::sync::OnceLock<std::sync::Mutex<std::collections
 
 
 /// 标签页元数据（运行时状态，不持久化；会话保存走 sessions 表）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct Tab {
     pub id: String,
     pub url: String,

@@ -188,8 +188,13 @@
 
 ### P2 · 类型契约生成
 
-- [ ] 引入 `ts-rs` 或 `typeshare`：`Tab`/`Bookmark`/`HistoryEntry` 等 Rust struct → TS interface
-  - 前端 `src/types/*.ts`（8 个文件）逐步替换为生成物（保留手写 interface 过渡）
+- [x] **ts-rs 生成管线 + Tab 改造（✅ 2026-09-23）**
+  - 加 `ts-rs 10.1` 依赖；`Tab`/`Bookmark`/`HistoryEntry` 加 `#[derive(TS)]` + `#[ts(export)]`
+  - `ts_export_tests::export_bindings`（`cargo test --lib ts_export`）生成到 `src/types/generated/`
+  - 前端 `types/tab.ts` 改为「生成物为基 + 前端附加运行时字段 `groupId`」——
+    **发现真实漂移**：手写 `hibernated?`/`private?` 可选标记与 Rust 必填不一致
+- [ ] Bookmark / HistoryEntry 的前端类型同样改造（各自处理差异，如前端附加字段）
+- [ ] 其余 `src/types/*.ts`（session/download/extension/password/content）评估是否纳入生成
   - 验收：字段/可选性与 Rust 一致；vue-tsc 干净
 
 ### P3 · 工具注册表（MCP / API / Agent 三源合一）

@@ -1751,3 +1751,18 @@ mod tests {
         assert!(!valid_callback("中文"));
     }
 }
+
+/// TS 类型契约导出（P2）：把 Rust struct 导出为 TS interface，
+/// 消除前端 `src/types/*.ts` 手写与本端 struct 的漂移。
+/// 生成物落在 `src/types/generated/`（由 cargo test 触发）。
+#[cfg(test)]
+mod ts_export_tests {
+    use ts_rs::TS;
+
+    #[test]
+    fn export_bindings() {
+        crate::tabs::Tab::export().expect("导出 Tab 失败");
+        crate::db::bookmarks::Bookmark::export().expect("导出 Bookmark 失败");
+        crate::db::history::HistoryEntry::export().expect("导出 HistoryEntry 失败");
+    }
+}

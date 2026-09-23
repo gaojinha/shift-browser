@@ -1,8 +1,10 @@
 // 历史记录管理
+use ts_rs::TS;
 use crate::db::{Db, DbResult};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct HistoryEntry {
     pub id: i64,
     pub url: String,

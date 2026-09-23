@@ -1,9 +1,11 @@
 // 书签管理
+use ts_rs::TS;
 use crate::db::{Db, DbResult};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct Bookmark {
     pub id: i64,
     pub title: String,
