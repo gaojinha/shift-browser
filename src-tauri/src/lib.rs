@@ -466,16 +466,21 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 pub fn run() {
-    // ===== 画面闪烁修复：禁用 WebKitGTK 的 DMA-BUF 渲染器 =====
-    // WebKitGTK 2.42+ 默认走 DMA-BUF 渲染路径，在部分核显（本机 Intel HD 630 / i915）
-    // 上与驱动配合不良，表现为**网页/视频画面闪烁**（社区公认问题）。禁用后回退到
-    // 共享内存渲染路径。必须在 WebKit 初始化（建 webview）之前设置。
-    // 用户可用环境变量覆盖（若某机器上 DMA-BUF 正常，可设 0 保留更优性能）。
-    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-    }
+    // ===== DMA-BUF 渲染器：不再默认禁用（2026-09-23 回退）=====
+    // 【原方案】禁用它（WEBKIT_DISABLE_DMABUF_RENDERER=1）可修 Intel HD 630 上的
+    // 网页/视频闪烁（WebKitGTK 2.42+ 默认走 DMA-BUF 路径，与 i915 配合不良）。
+    //
+    // 【为何回退】core dump 定位到崩溃在 WebKit 自身的
+    //   AcceleratedBackingStore::update()（AcceleratedBackingStore.cpp:808）
+    //   ← enterAcceleratedCompositingMode ← IPC EnterAcceleratedCompositingMode
+    // 即「网页请求进入加速合成模式」时，m_legacyMainFrameProcess 已失效仍被解引用
+    // （WebKit 生命周期竞态 bug，rdi=0）。而**禁用 DMA-BUF 会让加速合成走
+    // SHM/EGLImage 兜底路径**，更容易踩中该竞态 → 网页删文件等操作触发 SIGSEGV。
+    //
+    // 结论：不禁用 = 走 WebKit 默认 DMA-BUF 路径，绕开该竞态。
+    // 若视频闪烁复现，可显式设 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 启动（二者取舍）。
     log::info!(
-        "[ShiftBrowser] WEBKIT_DISABLE_DMABUF_RENDERER={:?}（视频闪烁修复）",
+        "[ShiftBrowser] WEBKIT_DISABLE_DMABUF_RENDERER={:?}（未设置=走默认 DMA-BUF 渲染）",
         std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER")
     );
 
