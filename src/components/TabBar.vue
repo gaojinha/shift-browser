@@ -342,6 +342,9 @@ onMounted(() => {
   window.addEventListener('mouseup', onWindowMouseUp)
   window.addEventListener('mousemove', onMenuMouseMove)
   window.addEventListener('mouseup', onMenuMouseUp)
+  // 标签栏空白延迟拖动（拖动判定 + 双击取消）
+  window.addEventListener('mousemove', onTabBarWindowMouseMove)
+  window.addEventListener('mouseup', onTabBarWindowMouseUp)
   // 点击菜单外部任意处关闭右键菜单（菜单内 @click.stop 阻止冒泡）
   window.addEventListener('click', onGlobalClick)
 })
@@ -350,6 +353,8 @@ onUnmounted(() => {
   window.removeEventListener('mouseup', onWindowMouseUp)
   window.removeEventListener('mousemove', onMenuMouseMove)
   window.removeEventListener('mouseup', onMenuMouseUp)
+  window.removeEventListener('mousemove', onTabBarWindowMouseMove)
+  window.removeEventListener('mouseup', onTabBarWindowMouseUp)
   window.removeEventListener('click', onGlobalClick)
 })
 
@@ -376,7 +381,15 @@ function onClose() {
   invoke('close_window').catch(() => {})
 }
 
-/** 标签栏空白处按住拖动窗口（标签/分组头/按钮上有自己的交互，不触发） */
+/** 标签栏空白处按住拖动窗口（标签/分组头/按钮上有自己的交互，不触发）
+ *  延迟 200ms 再进入原生拖动：立即 start_dragging 会吞掉第二次 mousedown，
+ *  导致双击最大化（dblclick）永远不触发。延迟期内 mouseup（单击/双击）取消拖动，
+ *  移动超阈值则立即进入拖动——Chrome 式行为。 */
+let tabBarDragTimer: number | null = null
+let tabBarDragStartX = 0
+let tabBarDragStartY = 0
+let tabBarDragPending = false
+
 function onTabBarMouseDown(e: MouseEvent) {
   if (e.button !== 0) return
   const t = e.target as HTMLElement
@@ -388,7 +401,40 @@ function onTabBarMouseDown(e: MouseEvent) {
     t.closest('.context-menu')
   )
     return
-  invoke('start_drag_window').catch(() => {})
+  tabBarDragStartX = e.clientX
+  tabBarDragStartY = e.clientY
+  tabBarDragPending = true
+  if (tabBarDragTimer) window.clearTimeout(tabBarDragTimer)
+  tabBarDragTimer = window.setTimeout(() => {
+    tabBarDragTimer = null
+    if (!tabBarDragPending) return
+    tabBarDragPending = false
+    invoke('start_drag_window').catch(() => {})
+  }, 200)
+}
+
+/** 延迟期内移动超阈值：立即进入窗口拖动（不等 200ms 到期） */
+function onTabBarWindowMouseMove(e: MouseEvent) {
+  if (!tabBarDragPending) return
+  const dx = e.clientX - tabBarDragStartX
+  const dy = e.clientY - tabBarDragStartY
+  if (Math.abs(dx) + Math.abs(dy) > 3) {
+    tabBarDragPending = false
+    if (tabBarDragTimer) {
+      window.clearTimeout(tabBarDragTimer)
+      tabBarDragTimer = null
+    }
+    invoke('start_drag_window').catch(() => {})
+  }
+}
+
+/** 延迟期内松开：单击/双击，取消延迟拖动（让 dblclick 正常触发最大化） */
+function onTabBarWindowMouseUp() {
+  tabBarDragPending = false
+  if (tabBarDragTimer) {
+    window.clearTimeout(tabBarDragTimer)
+    tabBarDragTimer = null
+  }
 }
 
 // ---- 分组操作 ----
@@ -541,7 +587,7 @@ function onFaviconError(e: Event) {
 .tab-bar {
   display: flex;
   align-items: center;
-  height: 44px;
+  height: 38px;
   background: var(--bg-primary);
   padding: 0 8px;
   flex-shrink: 0;
@@ -551,7 +597,9 @@ function onFaviconError(e: Event) {
 
 .tab-scroll {
   display: flex;
-  align-items: center;
+  /* 标签贴底：Chrome 式标签是"顶部圆角、底部直角"，底部应直连地址栏，
+     align-items:center 会让标签底部留空隙，看起来和地址栏"隔了一截" */
+  align-items: flex-end;
   flex: 1;
   overflow-x: auto;
   height: 100%;

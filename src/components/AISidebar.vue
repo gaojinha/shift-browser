@@ -19,10 +19,10 @@ const input = ref('')
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const listRef = ref<HTMLElement | null>(null)
 
-// 内容区顶部偏移（标签栏 44 + 地址栏 42 + 书签栏 30 可显隐），与后端 CONTENT_TOP_OFFSET 一致
+// 内容区顶部偏移（标签栏 38 + 地址栏 36 + 书签栏 26 可显隐），与后端 CONTENT_TOP_OFFSET 一致
 const topOffset = computed(() => {
-  const bookmarkH = settingsStore.showBookmarksBar ? 30 : 0
-  return 44 + 42 + bookmarkH
+  const bookmarkH = settingsStore.showBookmarksBar ? 26 : 0
+  return 38 + 36 + bookmarkH
 })
 
 // 打开/关闭：分屏模式——不隐藏 webview，而是让 webview 让出右侧 AI_PANEL_WIDTH，
@@ -151,11 +151,18 @@ onMounted(async () => {
 onUnmounted(() => {
   unlistenAction?.()
 })
+
+function onAiClose() {
+  emit('close')
+}
+function onOverlaySelf() {
+  emit('close')
+}
 </script>
 
 <template>
   <Transition name="slide">
-  <div v-if="props.show" class="ai-overlay" @click.self="emit('close')">
+  <div v-if="props.show" class="ai-overlay" @click.self="onOverlaySelf">
     <div
       class="ai-sidebar"
       :style="{ top: topOffset + 'px', height: `calc(100vh - ${topOffset}px - 22px)` }"
@@ -163,7 +170,7 @@ onUnmounted(() => {
       <!-- 头部 -->
       <div class="ai-header">
         <span class="ai-title">🤖 AI 助手</span>
-        <button class="ai-close" title="关闭" aria-label="关闭" @click="emit('close')">✕</button>
+        <button class="ai-close" title="关闭" aria-label="关闭" @click="onAiClose">✕</button>
       </div>
 
       <!-- 快捷操作 -->

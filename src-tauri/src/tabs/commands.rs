@@ -504,7 +504,6 @@ pub async fn set_webview_visible(
         .cloned()
         .collect();
     let mut count = 0usize;
-    let ids_for_geometry = ids.clone();
     for id in ids {
         let label = format!("tab-{}", id);
         if let Some(wv) = window.get_webview(&label) {
@@ -523,21 +522,12 @@ pub async fn set_webview_visible(
         }
     }
     // 恢复显示后重新应用几何：隐藏期间（弹窗打开时）可能改过书签栏显隐/AI 分屏/窗口尺寸，
-    // 不重设会导致 webview 尺寸或位置滞后，WebKit 输入窗口不跟随 → 页面点不动
+    // 不重设会导致 webview 尺寸或位置滞后，WebKit 输入窗口不跟随 → 页面点不动。
+    // 注意：必须走 apply_split_layout（先全部隐藏、再只显示活动标签）——
+    // 若直接对全部 webview show+apply，非活动标签会叠在活动标签上面（z-order），
+    // 把点击事件吃掉 → 表现"设置弹窗关闭后页面按钮点不动"。
     if visible {
-        if state.split_tab().is_some() {
-            // 分屏中：按窗格显示（否则"恢复全部"会把分屏覆盖成全部重叠——右键菜单/弹窗关闭时触发）
-            apply_split_layout(&app, &state)?;
-        } else {
-            let top = state.top_offset();
-            let ai_active = *state
-                .ai_panel_active
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            for id in &ids_for_geometry {
-                apply_tab_geometry(&window, id, top, ai_active);
-            }
-        }
+        apply_split_layout(&app, &state)?;
     }
     log::info!(
         "[tabs] set_webview_visible: visible={} count={} source={:?}",
@@ -567,22 +557,19 @@ pub async fn set_webview_ai_panel(
     let top = state.top_offset();
     let vertical = state.vertical_tabs();
     let geo = crate::engine::layout::ContentGeometry::compute(&window, top, active, vertical);
-    let ids: Vec<String> = state
-        .tabs
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .keys()
-        .cloned()
-        .collect();
-    for id in ids {
-        crate::engine::layout::apply_to_webview(&window, &id, geo);
-    }
     log::info!(
         "[tabs] set_webview_ai_panel: active={} content={}x{}",
         active,
         geo.width,
         geo.height
     );
+    // 关键：不能只对每个 webview apply_to_webview 改尺寸——WebKit 输入窗口
+    // 不跟随 widget 尺寸变化（已知问题，见 apply_to_webview 注释），AI 面板打开时
+    // 右侧 380px 仍是旧输入窗口的命中区，点击被 webview 吞掉 → ✕ 点不动。
+    // 统一走 apply_split_layout（先全部隐藏、再按活动标签/分屏重新应用几何并显示），
+    // hide→show 强制 GTK 重新分配，输入窗口跟随新尺寸，右侧让给 HTML 层 AI 面板；
+    // 关闭时同理：hide→show 让 webview 输入窗口恢复全宽（避免关面板后点不动）。
+    apply_split_layout(&app, &state)?;
     // 焦点切换：AI 面板打开时把 GTK 键盘焦点交给主 webview（HTML 层），
     // 否则焦点留在 child webview（页面）上，AI 输入框收不到键盘事件。
     // 关闭时把焦点还给当前活动标签的 webview。

@@ -10,7 +10,7 @@ import { useExtensionsStore } from '../stores/extensions'
 import { useToastStore } from '../stores/toast'
 import type { Extension } from '../types/extension'
 
-const props = defineProps<{ show: boolean }>()
+const props = defineProps<{ show: boolean; initialSection?: string }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'openCerts'): void }>()
 
 const settingsStore = useSettingsStore()
@@ -18,6 +18,15 @@ const extensionsStore = useExtensionsStore()
 
 // 侧边导航：当前激活区块
 const activeSection = ref('general')
+// 外部指定初始选项卡（状态栏隐私战绩点击 → 跳隐私防护；打开后消费一次并复位）
+watch(
+  () => props.show,
+  (v) => {
+    if (v && props.initialSection) {
+      activeSection.value = props.initialSection
+    }
+  },
+)
 const SECTIONS = [
   { id: 'general', icon: 'house', label: '通用' },
   { id: 'appearance', icon: 'palette', label: '外观' },
@@ -88,6 +97,7 @@ interface AboutInfo {
   dataDir: string
   repoUrl: string
   profile: string
+  iconDataUrl: string
 }
 const aboutInfo = ref<AboutInfo | null>(null)
 async function loadAbout() {
@@ -1972,7 +1982,15 @@ async function onRemoveKeyword(k: string) {
           <!-- 关于 -->
           <div v-if="activeSection === 'about'" class="settings-scroll">
             <div class="card about-hero">
-              <div class="about-logo"><AppIcon name="shield" :size="30" /></div>
+              <div class="about-logo">
+                <img
+                  v-if="aboutInfo?.iconDataUrl"
+                  :src="aboutInfo.iconDataUrl"
+                  alt="Shift Browser"
+                  class="about-logo-img"
+                />
+                <AppIcon v-else name="shield" :size="30" />
+              </div>
               <div class="about-name">{{ aboutInfo?.appName || 'Shift Browser' }}</div>
               <div class="about-version">
                 v{{ aboutInfo?.version || '—' }}
@@ -2910,6 +2928,13 @@ async function onRemoveKeyword(k: string) {
   justify-content: center;
   box-shadow: var(--shadow-md);
   margin-bottom: 4px;
+  overflow: hidden;
+}
+.about-logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .about-name {
   font-size: 18px;

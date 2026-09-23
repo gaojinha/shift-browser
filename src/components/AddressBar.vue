@@ -306,9 +306,9 @@ async function onReader() {
 .address-bar {
   display: flex;
   align-items: center;
-  height: 42px;
+  height: 36px;
   background: var(--bg-primary);
-  padding: 0 8px 4px;
+  padding: 0 8px;
   gap: 4px;
   flex-shrink: 0;
   user-select: none;
@@ -336,7 +336,7 @@ async function onReader() {
 .reader-tip {
   position: absolute;
   right: 8px;
-  top: 42px;
+  top: 36px;
   font-size: 11px;
   color: #ff9b9b;
   max-width: 220px;
@@ -447,7 +447,7 @@ async function onReader() {
   position: absolute;
   left: 0;
   right: 0;
-  top: 34px;
+  top: 32px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 8px;

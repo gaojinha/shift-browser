@@ -15,11 +15,11 @@
 //! ```
 
 /// 标签栏高度（与前端 CSS 保持一致）
-pub const TAB_BAR_HEIGHT: f64 = 44.0;
+pub const TAB_BAR_HEIGHT: f64 = 38.0;
 /// 地址栏高度
-pub const ADDRESS_BAR_HEIGHT: f64 = 42.0;
+pub const ADDRESS_BAR_HEIGHT: f64 = 36.0;
 /// 书签栏高度（可显隐）
-pub const BOOKMARKS_BAR_HEIGHT: f64 = 30.0;
+pub const BOOKMARKS_BAR_HEIGHT: f64 = 26.0;
 /// 底部状态栏高度
 pub const STATUS_BAR_HEIGHT: f64 = 22.0;
 /// AI 侧边栏占用的右侧宽度：AI 面板打开时内容区让出该宽度
@@ -120,6 +120,10 @@ pub fn apply_to_webview(window: &tauri::Window, tab_id: &str, geo: ContentGeomet
     let Some(wv) = window.get_webview(&label) else {
         return;
     };
+    // 窗口逻辑宽度（供 margin_end 计算，闭包外提取避免借用逃逸）
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let w_physical = window.inner_size().map(|s| s.width as f64).unwrap_or(1280.0);
+    let w_logical = (w_physical / scale) as i32;
     let _ = wv.with_webview(move |pwv| {
         let gtk_wv = pwv.inner();
         if let Some(fixed) = gtk_wv
@@ -133,6 +137,25 @@ pub fn apply_to_webview(window: &tauri::Window, tab_id: &str, geo: ContentGeomet
             fixed.set_margin_start(0);
             fixed.move_(&gtk_wv, geo.left, 0);
             fixed.set_size_request(geo.left + geo.width, geo.height);
+            // 修复（2026-09-23）：GtkOverlay 对 halign=Start 的子件按 natural size
+            // 分配；而 Fixed 的 natural size 被 webview 的渲染宽度（WebKit 进程
+            // 滞后更新，实测 40 秒+）撑大，导致 AI 分屏时 Fixed 保持全宽、右侧
+            // 380px 覆盖并吞掉鼠标事件（表现为"AI 面板点不动/反应慢"）。
+            // 对策：改为 halign=Fill + margin_end 控制宽度——GtkOverlay 对 Fill
+            // 子件按"overlay 全宽减 margin"分配，不依赖 natural size。
+            // margin_end = 窗口宽 - 内容区左偏移 - 内容区宽（即右侧留白）。
+            fixed.set_halign(gtk::Align::Fill);
+            fixed.set_valign(gtk::Align::Start);
+            let margin_right = (w_logical - geo.left - geo.width).max(0);
+            fixed.set_margin_end(margin_right);
+            fixed.set_margin_bottom(0);
+            // 强制重新分配：Fixed 的 margin/size_request 变化后，GtkOverlay 需
+            // 重新分配子件；向上 queue_resize 至窗口确保下一帧布局循环执行。
+            let mut parent_opt = fixed.parent();
+            while let Some(p) = parent_opt {
+                p.queue_resize();
+                parent_opt = p.parent();
+            }
         }
         gtk_wv.set_size_request(geo.width, geo.height);
         gtk_wv.queue_resize();
@@ -206,8 +229,8 @@ mod tests {
 
     #[test]
     fn top_offsets_match_component_heights() {
-        assert_eq!(CONTENT_TOP_OFFSET, 44.0 + 42.0 + 30.0);
-        assert_eq!(CONTENT_TOP_OFFSET_NO_BOOKMARKS, 44.0 + 42.0);
+        assert_eq!(CONTENT_TOP_OFFSET, 38.0 + 36.0 + 26.0);
+        assert_eq!(CONTENT_TOP_OFFSET_NO_BOOKMARKS, 38.0 + 36.0);
         assert_eq!(
             CONTENT_TOP_OFFSET - CONTENT_TOP_OFFSET_NO_BOOKMARKS,
             BOOKMARKS_BAR_HEIGHT

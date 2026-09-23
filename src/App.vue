@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 浏览器主窗口布局
-// 结构：TabBar(40) + AddressBar(42) + BookmarksBar(30) + 内容区(webview) + StatusBar(22)
+// 结构：TabBar(38) + AddressBar(36) + BookmarksBar(26) + 内容区(webview) + StatusBar(22)
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -65,6 +65,12 @@ const showPasswords = ref(false)
 const showGroups = ref(false)
 const showDownloads = ref(false)
 const showSettings = ref(false)
+// 打开设置时指定初始选项卡（默认通用；状态栏隐私战绩点击 → 隐私防护）
+const settingsInitialSection = ref<string | undefined>(undefined)
+function openSettings(section?: string) {
+  settingsInitialSection.value = section
+  showSettings.value = true
+}
 const showAI = ref(false)
 // 证书中心（P1/P3）+ 证书错误拦截页（P2）
 const showCerts = ref(false)
@@ -567,14 +573,20 @@ watch(
         <div class="content-area" id="contentArea"></div>
         <StatusBar
           @open-downloads="showDownloads = true"
-          @open-settings="showSettings = true"
+          @open-settings="openSettings()"
+          @open-privacy="openSettings('privacy')"
         />
       </div>
     </div>
     <PasswordsDialog :show="showPasswords" @close="showPasswords = false" />
     <GroupsDialog :show="showGroups" @close="showGroups = false" />
     <DownloadsDialog :show="showDownloads" @close="showDownloads = false" />
-    <SettingsDialog :show="showSettings" @close="showSettings = false" @open-certs="showCerts = true" />
+    <SettingsDialog
+      :show="showSettings"
+      :initial-section="settingsInitialSection"
+      @close="showSettings = false"
+      @open-certs="showCerts = true"
+    />
     <AISidebar :show="showAI" @close="showAI = false" />
     <TranslatePanel :show="showTranslate" @close="showTranslate = false" />
     <HistoryDialog :show="showHistory" @close="showHistory = false" />

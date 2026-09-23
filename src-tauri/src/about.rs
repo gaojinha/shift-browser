@@ -1,7 +1,11 @@
 //! 「关于」页数据：版本 / 运行时 / 环境 / 项目信息（只读，打开即显示，不依赖自检）
 
+use base64::Engine as _;
 use serde::Serialize;
 use tauri::Manager;
+
+/// 应用图标（编译期嵌入 128x128，与托盘/窗口图标同源同图；base64 data URL 供前端直接显示）
+const APP_ICON_PNG: &[u8] = include_bytes!("../icons/128x128.png");
 
 /// 关于页展示信息
 #[derive(Debug, Clone, Serialize)]
@@ -21,6 +25,8 @@ pub struct AboutInfo {
     pub repo_url: String,
     /// 构建类型：debug / release
     pub profile: String,
+    /// 应用图标 data URL（data:image/png;base64,...）
+    pub icon_data_url: String,
 }
 
 /// 读取关于页信息（纯只读，失败时字段给占位值，不抛错）
@@ -51,5 +57,9 @@ pub fn collect(app: &tauri::AppHandle) -> AboutInfo {
         data_dir,
         repo_url: "https://gitcode.com/gaojinha/shiftbrowser-tauri".to_string(),
         profile,
+        icon_data_url: format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(APP_ICON_PNG)
+        ),
     }
 }

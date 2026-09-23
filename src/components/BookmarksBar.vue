@@ -298,7 +298,7 @@ async function onSaveEdit() {
 .bookmarks-bar {
   display: flex;
   align-items: center;
-  height: 30px;
+  height: 26px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-subtle);
   padding: 0 8px;
