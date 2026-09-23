@@ -431,6 +431,7 @@ fn is_write_cmd(cmd: &str) -> bool {
             | "search"
             | "new_tab"
             | "eval"
+            | "plugins/set_enabled"
             | "tool_call"
             | "pin_tab"
             | "mute_tab"
@@ -522,6 +523,45 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
 
             let count = list.len();
             json!({ "ok": true, "data": { "plugins": list, "count": count } })
+        }
+
+        // 插件启停（四形态统一入口；Web 扩展为编译期加载，不可运行时启停）
+        "plugins/set_enabled" => {
+            let kind = req.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+            let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let enabled = req.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+            let db = app.state::<crate::db::Db>();
+            let flag: i64 = if enabled { 1 } else { 0 };
+            let num_id: i64 = id.parse().unwrap_or(-1);
+            let res = match kind {
+                "userscript" => sqlx::query("UPDATE userscripts SET enabled = ? WHERE id = ?")
+                    .bind(flag)
+                    .bind(num_id)
+                    .execute(&db.pool)
+                    .await,
+                "mcp_server" => sqlx::query("UPDATE mcp_servers SET enabled = ? WHERE id = ?")
+                    .bind(flag)
+                    .bind(num_id)
+                    .execute(&db.pool)
+                    .await,
+                "content_filter" => sqlx::query(
+                    "INSERT INTO settings (key, value) VALUES ('adblock_enabled', ?)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                )
+                .bind(if enabled { "true" } else { "false" })
+                .execute(&db.pool)
+                .await,
+                "web_extension" => {
+                    return json!({ "ok": false, "error": "Web 扩展为编译期加载，不支持运行时启停" })
+                }
+                other => return json!({ "ok": false, "error": format!("未知插件形态: {}", other) }),
+            };
+            match res {
+                Ok(r) => json!({ "ok": true, "data": {
+                    "kind": kind, "id": id, "enabled": enabled, "affected": r.rows_affected()
+                }}),
+                Err(e) => json!({ "ok": false, "error": format!("启停失败: {}", e) }),
+            }
         }
         "status" => {
             let tabs = app
