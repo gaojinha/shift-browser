@@ -174,8 +174,13 @@
     `contracts.rs::timeout`（14 项语义命名）→ 生成 `TIMEOUT`；
     超时裸数字替换：mcp(30s)/feed(15s)/content_cmd+agent_cmd(6s)/agent_cmd(120s)/
     translate(120s)/db(10s)/sync(20s)
-  - [ ] **快捷键表契约**：前端 keydown ↔ Rust GTK 兜底（F12/Ctrl+Shift+I 两处各写一遍）
-    → `contracts::SHORTCUTS` 单一来源（🔴 下一步）
+  - [x] **快捷键表契约定义（✅ 2026-09-23）**
+    `contracts.rs::shortcuts`（12 条：id / key / 修饰键 / GDK keyval / 兜底标记 / 描述）
+    → 生成前端 `SHORTCUTS`（组合键字符串）
+  - [ ] **快捷键迁移（🔴 下一步）**
+    Rust GTK 兜底表（`tabs.rs` 裸 keycode 0xFFC9/0x69 等）→ 改用 `contracts::shortcuts`；
+    前端 `App.vue` 的 `onGlobalKeydown` 硬编码判断 → 数据驱动遍历 `SHORTCUTS`
+    （需加 `matchShortcut(e, 'ctrl+shift+t')` 辅助函数）
   - [x] **验收（✅ 2026-09-23）**
     设置页各项显示正常（17 个补齐键不再空串失真）；事件链路（托盘菜单/启动页按钮/
     资讯分屏/状态栏网络状态）实测正常

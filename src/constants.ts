@@ -123,3 +123,19 @@ export const TIMEOUT = {
   DEFAULT_BROWSER_WAIT_MS: 2000,
   TAB_POLL_MS: 8000,
 } as const
+
+// 组合键字符串，形如 'ctrl+shift+t'（与前端 matchShortcut 约定一致）
+export const SHORTCUTS = {
+  DEVTOOLS: 'f12',
+  DEVTOOLS_ALT: 'ctrl+shift+i',
+  NEXT_TAB: 'ctrl+tab',
+  PREV_TAB: 'ctrl+shift+tab',
+  NEW_TAB: 'ctrl+t',
+  TRANSLATE_PANEL: 'ctrl+shift+t',
+  CLOSE_TAB: 'ctrl+w',
+  RELOAD: 'ctrl+r',
+  FOCUS_ADDRESS: 'ctrl+l',
+  HISTORY: 'ctrl+h',
+  COMMAND_PALETTE: 'ctrl+k',
+  SESSIONS: 'ctrl+shift+s',
+} as const

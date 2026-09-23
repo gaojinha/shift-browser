@@ -97,6 +97,14 @@ fn generate_ts_constants() {
     for (name, value) in timeout::ALL {
         s.push_str(&format!("  {name}: {value},\n"));
     }
+    s.push_str("} as const\n\n");
+
+    // ---- 快捷键（前端 keydown 匹配用；Rust GTK 兜底表同源）----
+    s.push_str("// 组合键字符串，形如 'ctrl+shift+t'（与前端 matchShortcut 约定一致）\n");
+    s.push_str("export const SHORTCUTS = {\n");
+    for (name, value) in shortcuts::ALL {
+        s.push_str(&format!("  {name}: '{value}',\n"));
+    }
     s.push_str("} as const\n");
 
     let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/constants.ts");

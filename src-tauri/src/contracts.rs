@@ -231,3 +231,66 @@ pub mod timeout {
         ("TAB_POLL_MS", TAB_POLL_MS),
     ];
 }
+
+/// 快捷键（单一来源：前端 keydown 匹配 与 Rust GTK 层兜底共用同一张表）
+pub mod shortcuts {
+    /// GDK 键值常量（直接比对，避免 gdk 版本间 keys 常量路径差异）
+    pub const GDK_F12: u32 = 0xFFC9;
+    pub const GDK_TAB: u32 = 0xFF09;
+
+    /// 一个快捷键定义
+    pub struct Shortcut {
+        /// 动作 id（前端 `handleGlobalAction` / Rust GTK 分发共用）
+        pub id: &'static str,
+        /// 前端匹配用小写键名（`t` / `f12` / `tab` / `i`）
+        pub key: &'static str,
+        pub ctrl: bool,
+        pub shift: bool,
+        /// Rust GTK 层比对用 GDK keyval（小写字母 / 功能键）
+        pub gdk_keyval: u32,
+        /// 大写形式 keyval（字母键大小写不同，功能键与 gdk_keyval 相同）
+        pub gdk_keyval_shift: u32,
+        /// 是否在「页面持焦」时由 GTK 层兜底（UI 持焦时前端已处理，兜底防重复触发）
+        pub gtk_fallback: bool,
+        /// 是否 GTK 层「无条件」响应（如 F12：不论焦点在哪都开）
+        pub gtk_always: bool,
+        pub desc: &'static str,
+    }
+
+    /// 全部快捷键（**唯一来源**）
+    pub const SHORTCUTS: &[Shortcut] = &[
+        Shortcut { id: "devtools", key: "f12", ctrl: false, shift: false, gdk_keyval: GDK_F12, gdk_keyval_shift: GDK_F12, gtk_fallback: true, gtk_always: true, desc: "开发者工具" },
+        Shortcut { id: "devtools", key: "i", ctrl: true, shift: true, gdk_keyval: 0x69, gdk_keyval_shift: 0x49, gtk_fallback: true, gtk_always: true, desc: "开发者工具（备用）" },
+        Shortcut { id: "next-tab", key: "tab", ctrl: true, shift: false, gdk_keyval: GDK_TAB, gdk_keyval_shift: GDK_TAB, gtk_fallback: false, gtk_always: false, desc: "下一个标签" },
+        Shortcut { id: "prev-tab", key: "tab", ctrl: true, shift: true, gdk_keyval: GDK_TAB, gdk_keyval_shift: GDK_TAB, gtk_fallback: false, gtk_always: false, desc: "上一个标签" },
+        Shortcut { id: "new-tab", key: "t", ctrl: true, shift: false, gdk_keyval: 0x74, gdk_keyval_shift: 0x54, gtk_fallback: true, gtk_always: false, desc: "新建标签" },
+        Shortcut { id: "translate-panel", key: "t", ctrl: true, shift: true, gdk_keyval: 0x74, gdk_keyval_shift: 0x54, gtk_fallback: true, gtk_always: false, desc: "翻译面板" },
+        Shortcut { id: "close-tab", key: "w", ctrl: true, shift: false, gdk_keyval: 0x77, gdk_keyval_shift: 0x57, gtk_fallback: true, gtk_always: false, desc: "关闭标签" },
+        Shortcut { id: "reload", key: "r", ctrl: true, shift: false, gdk_keyval: 0x72, gdk_keyval_shift: 0x52, gtk_fallback: true, gtk_always: false, desc: "刷新" },
+        Shortcut { id: "focus-address", key: "l", ctrl: true, shift: false, gdk_keyval: 0x6C, gdk_keyval_shift: 0x4C, gtk_fallback: true, gtk_always: false, desc: "聚焦地址栏" },
+        Shortcut { id: "history", key: "h", ctrl: true, shift: false, gdk_keyval: 0x48, gdk_keyval_shift: 0x68, gtk_fallback: true, gtk_always: false, desc: "历史记录" },
+        Shortcut { id: "command-palette", key: "k", ctrl: true, shift: false, gdk_keyval: 0x4B, gdk_keyval_shift: 0x6B, gtk_fallback: false, gtk_always: false, desc: "命令栏" },
+        Shortcut { id: "sessions", key: "s", ctrl: true, shift: true, gdk_keyval: 0x73, gdk_keyval_shift: 0x53, gtk_fallback: false, gtk_always: false, desc: "会话管理" },
+    ];
+
+    /// 按 id 查找（取第一个匹配；同 id 多条为同一动作的不同按键）
+    pub fn find_by_id(id: &str) -> Option<&'static Shortcut> {
+        SHORTCUTS.iter().find(|s| s.id == id)
+    }
+
+    /// (前端常量名, 值) —— 供 build.rs 生成前端 `SHORTCUTS`
+    pub const ALL: &[(&str, &str)] = &[
+        ("DEVTOOLS", "f12"),
+        ("DEVTOOLS_ALT", "ctrl+shift+i"),
+        ("NEXT_TAB", "ctrl+tab"),
+        ("PREV_TAB", "ctrl+shift+tab"),
+        ("NEW_TAB", "ctrl+t"),
+        ("TRANSLATE_PANEL", "ctrl+shift+t"),
+        ("CLOSE_TAB", "ctrl+w"),
+        ("RELOAD", "ctrl+r"),
+        ("FOCUS_ADDRESS", "ctrl+l"),
+        ("HISTORY", "ctrl+h"),
+        ("COMMAND_PALETTE", "ctrl+k"),
+        ("SESSIONS", "ctrl+shift+s"),
+    ];
+}
