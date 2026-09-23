@@ -194,9 +194,13 @@
 
 ### P3 · 工具注册表（MCP / API / Agent 三源合一）
 
-- [ ] **P3a · 读类能力迁移（约 13 个）**
-  - 新建 `capabilities/registry.rs`（`id` / `desc` / `params` schema / `risk` / `handler` 单一声明）
-  - MCP `tool_defs()`、API `match cmd`、Agent 动作表改为**从 registry 派生**
+- [x] **P3a · 能力注册表骨架（🟡 部分完成 2026-09-23）**
+  - [x] `src-tauri/src/capabilities.rs`：25 个工具（读 13 + 写 12）schema 从 MCP 迁入主 crate，
+    提供 `ids()`（供 API 校验 / Agent 白名单）与 `list_json()`（`capabilities/list` 响应）
+  - [x] 测试：`tool_defs_wellformed`（25 个 + schema 结构校验）+ `ids_unique`
+  - [ ] API 新增 `capabilities/list` 命令
+  - [ ] MCP Server（独立 bin）删除手写 `tool_defs()`，改为启动时向浏览器拉 `capabilities/list`
+  - [ ] API `match cmd` / Agent 动作表改为从 registry 派生（含 `Risk` 分级接入）
   - 验收：MCP `tools/list` 数量不变（25）；API 行为不变（基线样本回放）
 - [ ] **P3b · 写类能力迁移（12 个）+ `capabilities/list` + MCP 动态拉取**
   - MCP Server（独立二进制）启动时向浏览器请求 `capabilities/list`，动态构建 `tools/list`
