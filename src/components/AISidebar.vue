@@ -9,7 +9,7 @@ import { useTabsStore } from '../stores/tabs'
 import { useSettingsStore } from '../stores/settings'
 import { renderMarkdown, copyText } from '../utils/markdown'
 // 布局常量单一来源（build.rs 由 src-tauri/src/constants.rs 生成）
-import { EVENTS, LAYOUT } from '../constants'
+import { EVENTS, LAYOUT, SKILLS } from '../constants'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -155,6 +155,17 @@ onUnmounted(() => {
   unlistenAction?.()
 })
 
+/** 技能分发：技能清单来自 constants.ts（源：contracts::skills），按钮由数据驱动 */
+function runSkill(id: string) {
+  const handlers: Record<string, () => void> = {
+    summarize_page: () => aiStore.summarizePage(),
+    translate_page: () => aiStore.translatePage(),
+    explain_page: () => aiStore.explainPage(),
+    page_qa: () => inputRef.value?.focus(),
+  }
+  handlers[id]?.()
+}
+
 function onAiClose() {
   emit('close')
 }
@@ -178,9 +189,9 @@ function onOverlaySelf() {
 
       <!-- 快捷操作 -->
       <div class="ai-actions">
-        <button class="ai-action" @click="aiStore.summarizePage()">📄 总结当前页</button>
-        <button class="ai-action" @click="aiStore.translatePage()">🌐 翻译当前页</button>
-        <button class="ai-action" @click="aiStore.explainPage()">💡 解释当前页</button>
+        <button v-for="s in SKILLS" :key="s.id" class="ai-action" :title="s.desc" @click="runSkill(s.id)">
+          {{ s.icon }} {{ s.name }}
+        </button>
       </div>
 
       <!-- 对话区 -->

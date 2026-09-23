@@ -105,7 +105,16 @@ fn generate_ts_constants() {
     for (name, value) in shortcuts::ALL {
         s.push_str(&format!("  {name}: '{value}',\n"));
     }
-    s.push_str("} as const\n");
+    s.push_str("} as const\n\n");
+
+    // ---- AI 技能（前端快捷入口数据驱动）----
+    s.push_str("export const SKILLS = [\n");
+    for (id, name, icon, desc) in skills::ALL {
+        s.push_str(&format!(
+            "  {{ id: '{id}', name: '{name}', icon: '{icon}', desc: '{desc}' }},\n"
+        ));
+    }
+    s.push_str("] as const\n");
 
     let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/constants.ts");
     std::fs::write(&out, s).expect("生成 src/constants.ts 失败");

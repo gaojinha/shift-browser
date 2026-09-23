@@ -139,3 +139,10 @@ export const SHORTCUTS = {
   COMMAND_PALETTE: 'ctrl+k',
   SESSIONS: 'ctrl+shift+s',
 } as const
+
+export const SKILLS = [
+  { id: 'summarize_page', name: '总结当前页', icon: '📄', desc: '提炼页面要点，长文 30 秒看懂' },
+  { id: 'translate_page', name: '翻译当前页', icon: '🌐', desc: '整页翻译为中文' },
+  { id: 'explain_page', name: '解释当前页', icon: '💡', desc: '用大白话讲解专业内容' },
+  { id: 'page_qa', name: '页面问答', icon: '💬', desc: '基于当前页内容提问' },
+] as const

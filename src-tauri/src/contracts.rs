@@ -294,3 +294,37 @@ pub mod shortcuts {
         ("SESSIONS", "ctrl+shift+s"),
     ];
 }
+
+/// AI 技能（面向用户与 AI 的"能力叙事"：前端快捷入口 + AI 能力自述的单一来源）
+pub mod skills {
+    /// 一个技能
+    pub struct Skill {
+        pub id: &'static str,
+        pub name: &'static str,
+        /// 展示图标（emoji）
+        pub icon: &'static str,
+        pub desc: &'static str,
+        /// 依赖的能力 id
+        pub uses: &'static [&'static str],
+    }
+
+    pub const SKILLS: &[Skill] = &[
+        Skill { id: "summarize_page", name: "总结当前页", icon: "\u{1F4C4}", desc: "提炼页面要点，长文 30 秒看懂", uses: &["active_tab"] },
+        Skill { id: "translate_page", name: "翻译当前页", icon: "\u{1F310}", desc: "整页翻译为中文", uses: &["active_tab"] },
+        Skill { id: "explain_page", name: "解释当前页", icon: "\u{1F4A1}", desc: "用大白话讲解专业内容", uses: &["active_tab"] },
+        Skill { id: "page_qa", name: "页面问答", icon: "\u{1F4AC}", desc: "基于当前页内容提问", uses: &["active_tab"] },
+    ];
+
+    /// (id, name, icon, desc) —— 供 build.rs 生成前端 `SKILLS`
+    pub const ALL: &[(&str, &str, &str, &str)] = &[
+        ("summarize_page", "总结当前页", "\u{1F4C4}", "提炼页面要点，长文 30 秒看懂"),
+        ("translate_page", "翻译当前页", "\u{1F310}", "整页翻译为中文"),
+        ("explain_page", "解释当前页", "\u{1F4A1}", "用大白话讲解专业内容"),
+        ("page_qa", "页面问答", "\u{1F4AC}", "基于当前页内容提问"),
+    ];
+
+    /// 技能 id 列表（供 AI prompt 能力自述 / 文档）
+    pub fn ids() -> Vec<&'static str> {
+        SKILLS.iter().map(|s| s.id).collect()
+    }
+}
