@@ -9,6 +9,8 @@ import { useSettingsStore } from '../stores/settings'
 import { useExtensionsStore } from '../stores/extensions'
 import { useToastStore } from '../stores/toast'
 import type { Extension } from '../types/extension'
+import SelfCheckSection from './settings/SelfCheckSection.vue'
+import AboutSection from './settings/AboutSection.vue'
 // 搜索引擎清单（单一来源，与地址栏/新标签页/开放 API 同源）
 import { SEARCH_ENGINES } from '../constants'
 
@@ -42,99 +44,7 @@ const SECTIONS = [
   { id: 'about', icon: 'info', label: '关于' },
 ]
 
-// ---- 系统自检（可观测性）：一键汇总版本/存储/运行时/能力状态 ----
-interface CheckItem {
-  name: string
-  ok: boolean
-  detail: string
-}
-interface SelfCheckReport {
-  healthy: boolean
-  timestamp: number
-  versions: CheckItem[]
-  storage: CheckItem[]
-  runtime: CheckItem[]
-  capabilities: CheckItem[]
-}
-const selfCheckReport = ref<SelfCheckReport | null>(null)
-const selfCheckLoading = ref(false)
-const selfCheckError = ref('')
-
-async function runSelfCheck() {
-  if (selfCheckLoading.value) return
-  selfCheckLoading.value = true
-  selfCheckError.value = ''
-  try {
-    selfCheckReport.value = await invoke<SelfCheckReport>('selfcheck_cmd')
-  } catch (e) {
-    selfCheckError.value = String(e)
-  } finally {
-    selfCheckLoading.value = false
-  }
-}
-
-/** 自检项分组（模板里遍历用） */
-const selfCheckGroups = computed(() => {
-  const r = selfCheckReport.value
-  if (!r) return []
-  return [
-    { title: '版本与环境', items: r.versions },
-    { title: '数据存储', items: r.storage },
-    { title: '运行时', items: r.runtime },
-    { title: '能力状态', items: r.capabilities },
-  ]
-})
-
-/** 打开自检分区时自动跑一次 */
-watch(activeSection, (v) => {
-  if (v === 'selfcheck' && !selfCheckReport.value) runSelfCheck()
-})
-
-/** 「关于」页信息（只读，打开即显示） */
-interface AboutInfo {
-  appName: string
-  version: string
-  webkitVersion: string
-  osArch: string
-  dataDir: string
-  repoUrl: string
-  profile: string
-  iconDataUrl: string
-}
-const aboutInfo = ref<AboutInfo | null>(null)
-async function loadAbout() {
-  try {
-    aboutInfo.value = await invoke<AboutInfo>('app_about_cmd')
-  } catch (e) {
-    console.error('[settings] 读取关于信息失败:', e)
-  }
-}
-/** 打开项目主页（外部浏览器） */
-async function openRepo() {
-  if (!aboutInfo.value?.repoUrl) return
-  try {
-    await openUrl(aboutInfo.value.repoUrl)
-  } catch (e) {
-    console.error('[settings] 打开项目主页失败:', e)
-    useToastStore().error('打开项目主页失败')
-  }
-}
-/** 打开数据目录（文件管理器） */
-async function openDataDir() {
-  if (!aboutInfo.value?.dataDir) return
-  try {
-    await openUrl(aboutInfo.value.dataDir)
-  } catch (e) {
-    console.error('[settings] 打开数据目录失败:', e)
-    useToastStore().error('打开数据目录失败')
-  }
-}
-watch(activeSection, (v) => {
-  if (v === 'about' && !aboutInfo.value) loadAbout()
-})
-
-// AI Key 输入框：不回显掩码（get_all_settings 返回前4后4掩码），
-// 留空 = 保持原值；输入新值才保存。hasAiKey 判断是否已配置（掩码非空即已配置）
+// SelfCheck / About 逻辑已移至 settings/SelfCheckSection.vue、AboutSection.vue
 const aiKeyInput = ref('')
 const hasAiKey = () => {
   const v = settingsStore.get('ai_api_key')
@@ -2075,87 +1985,8 @@ async function onRemoveKeyword(k: string) {
             </div>
           </div>
           <!-- 自检 -->
-          <div v-if="activeSection === 'selfcheck'" class="settings-scroll">
-            <div class="card">
-              <div class="card-title">
-                <AppIcon name="activity" :size="14" /> 系统自检
-                <button class="selfcheck-btn" :disabled="selfCheckLoading" @click="runSelfCheck">
-                  {{ selfCheckLoading ? '检查中…' : '重新检查' }}
-                </button>
-              </div>
-              <div v-if="selfCheckError" class="selfcheck-error">{{ selfCheckError }}</div>
-              <div v-else-if="!selfCheckReport" class="selfcheck-hint">点击「重新检查」开始体检</div>
-              <template v-else>
-                <div class="selfcheck-summary" :class="selfCheckReport.healthy ? 'ok' : 'bad'">
-                  {{ selfCheckReport.healthy ? '✅ 一切正常' : '⚠️ 发现异常项' }}
-                </div>
-                <div v-for="g in selfCheckGroups" :key="g.title" class="selfcheck-group">
-                  <div class="selfcheck-group-title">{{ g.title }}</div>
-                  <div v-for="it in g.items" :key="g.title + it.name" class="selfcheck-row">
-                    <span class="selfcheck-mark">{{ it.ok ? '✅' : '❌' }}</span>
-                    <span class="selfcheck-name">{{ it.name }}</span>
-                    <span class="selfcheck-detail">{{ it.detail }}</span>
-                  </div>
-                </div>
-              </template>
-            </div>
-          </div>
-
-          <!-- 关于 -->
-          <div v-if="activeSection === 'about'" class="settings-scroll">
-            <div class="card about-hero">
-              <div class="about-logo">
-                <img
-                  v-if="aboutInfo?.iconDataUrl"
-                  :src="aboutInfo.iconDataUrl"
-                  alt="Shift Browser"
-                  class="about-logo-img"
-                />
-                <AppIcon v-else name="shield" :size="30" />
-              </div>
-              <div class="about-name">{{ aboutInfo?.appName || 'Shift Browser' }}</div>
-              <div class="about-version">
-                v{{ aboutInfo?.version || '—' }}
-                <span class="about-badge">{{ aboutInfo?.profile === 'debug' ? '调试版' : '正式版' }}</span>
-              </div>
-              <div class="about-tagline">本地优先的隐私浏览器，数据主权在你手里。</div>
-              <div class="about-env">
-                <span class="about-env-item"><AppIcon name="monitor" :size="12" /> WebKitGTK {{ aboutInfo?.webkitVersion || '—' }}</span>
-                <span class="about-env-item"><AppIcon name="gear" :size="12" /> {{ aboutInfo?.osArch || '—' }}</span>
-              </div>
-            </div>
-
-            <div class="card">
-              <div class="card-title"><AppIcon name="sparkles" :size="14" /> 核心能力</div>
-              <div class="about-feature"><span class="about-feature-icon">🛡</span><div><b>隐私防护 2.0</b><div class="about-feature-desc">反指纹加噪 / 统一化、追踪参数清洗、GPC 隐私信号</div></div></div>
-              <div class="about-feature"><span class="about-feature-icon">🔒</span><div><b>数据主权</b><div class="about-feature-desc">主密码加密密码库、E2E 上云同步（服务器零知识）</div></div></div>
-              <div class="about-feature"><span class="about-feature-icon">🔌</span><div><b>开放 API + MCP 工具</b><div class="about-feature-desc">本机脚本与智能体可安全调用浏览器能力</div></div></div>
-              <div class="about-feature"><span class="about-feature-icon">📰</span><div><b>RSS 订阅 · 阅读模式 · AI 助手</b><div class="about-feature-desc">信息聚合与智能辅助一站完成</div></div></div>
-            </div>
-
-            <div class="card">
-              <div class="card-title"><AppIcon name="lock" :size="14" /> 数据与隐私承诺</div>
-              <div class="about-feature"><span class="about-feature-icon">📍</span><div><b>本地优先</b><div class="about-feature-desc">历史、书签、密码库全部存在本机</div></div></div>
-              <div class="about-feature"><span class="about-feature-icon">📡</span><div><b>零遥测</b><div class="about-feature-desc">默认不收集任何数据，外联审计可随时验证</div></div></div>
-              <div class="about-feature"><span class="about-feature-icon">🔓</span><div><b>开源透明</b><div class="about-feature-desc">代码仓库公开，可审计</div></div></div>
-            </div>
-
-            <div class="card">
-              <div class="card-title"><AppIcon name="info" :size="14" /> 项目与致谢</div>
-              <div class="about-link-row">
-                <span class="about-link-label">项目主页</span>
-                <button class="mini-btn" @click="openRepo">打开仓库</button>
-              </div>
-              <div class="about-link-row">
-                <span class="about-link-label">数据目录</span>
-                <button class="mini-btn" @click="openDataDir">打开文件夹</button>
-              </div>
-              <div class="field-hint" style="margin-top: 8px">
-                技术栈：Tauri 2 · Rust · WebKitGTK · Vue 3<br />
-                致谢：Lucide 图标（ISC）、Nextcloud（WebDAV 同步）、W3C GPC 规范
-              </div>
-            </div>
-          </div>
+          <SelfCheckSection v-if="activeSection === 'selfcheck'" />
+          <AboutSection v-if="activeSection === 'about'" />
         </div>
       </div>
     </div>
@@ -2305,57 +2136,6 @@ async function onRemoveKeyword(k: string) {
   text-overflow: ellipsis;
   white-space: nowrap;
   user-select: all;
-}
-.selfcheck-summary {
-  margin: 8px 0 12px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-}
-.selfcheck-summary.ok {
-  background: rgba(46, 160, 67, 0.15);
-  color: #3fb950;
-}
-.selfcheck-summary.bad {
-  background: rgba(229, 57, 53, 0.12);
-  color: #e53935;
-}
-.selfcheck-hint {
-  color: var(--text-muted);
-  font-size: 13px;
-  padding: 12px 0;
-}
-.selfcheck-error {
-  color: #e53935;
-  font-size: 12px;
-  padding: 8px 0;
-}
-.selfcheck-group {
-  margin-bottom: 12px;
-}
-.selfcheck-group-title {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-}
-.selfcheck-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 3px 0;
-  font-size: 13px;
-}
-.selfcheck-mark {
-  flex-shrink: 0;
-}
-.selfcheck-name {
-  flex-shrink: 0;
-  min-width: 96px;
-  color: var(--text-primary);
-}
-.selfcheck-detail {
-  color: var(--text-muted);
-  word-break: break-all;
 }
 .card-title {
   display: flex;
