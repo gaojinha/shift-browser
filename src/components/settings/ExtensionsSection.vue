@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useExtensionsStore } from '../../stores/extensions'
 import { useToastStore } from '../../stores/toast'
 import type { Extension } from '../../types/extension'
