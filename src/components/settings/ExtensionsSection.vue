@@ -49,7 +49,12 @@ async function onDeleteExtension(id: number) {
   }
 }
 
-/** 隐私防护档位（off / standard / strict），默认标准档 */
+// 列表在分区挂载时加载（R2-1d：原由 SettingsDialog 的 show watch 统一预加载）
+onMounted(() => {
+  extensionsStore.loadExtensions().catch((e) => {
+    console.error('[settings] 加载扩展失败:', e)
+  })
+})
 </script>
 
 <template>
