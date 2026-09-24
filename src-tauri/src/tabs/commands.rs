@@ -933,6 +933,7 @@ pub async fn start_drag_window(app: AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tabs::util::sanitize_filename;
 
     #[test]
     fn internal_newtab_url_detection() {

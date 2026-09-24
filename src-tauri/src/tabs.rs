@@ -18,7 +18,7 @@ use tauri::AppHandle;
 // P1-1 拆分（2026-09-22）：工具函数独立成子模块
 #[path = "tabs/util.rs"]
 pub mod util;
-pub(crate) use util::{clean_tracking_params, sanitize_filename};
+pub(crate) use util::clean_tracking_params;
 
 // R2-1 拆分（2026-09-24）：纯数据状态机独立成子模块
 #[path = "tabs/model.rs"]
@@ -30,8 +30,5 @@ pub(crate) use model::now_ts;
 #[path = "tabs/backend.rs"]
 pub mod backend;
 pub(crate) use backend::*;
-
-// UI 布局常量：统一由引擎层提供（唯一事实来源，见 engine/layout.rs）
-pub use crate::engine::layout::CONTENT_TOP_OFFSET;
 
 pub mod commands;

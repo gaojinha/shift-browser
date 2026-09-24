@@ -12,8 +12,8 @@ use tauri::{
 
 use crate::db::{downloads, history, Db};
 
-use super::model::{now_ts, Tab, TabManager};
-use super::util::{clean_tracking_params, sanitize_filename};
+use super::model::{now_ts, TabManager};
+use super::util::sanitize_filename;
 use crate::engine::layout::{CONTENT_TOP_OFFSET, VERTICAL_TAB_BAR_WIDTH};
 
 use gtk::glib::translate::ToGlibPtr;
