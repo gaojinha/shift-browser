@@ -368,7 +368,7 @@ pub async fn translate_current_page(
     let wv = app
         .get_webview(&label)
         .ok_or_else(|| "活动标签的 webview 不存在".to_string())?;
-    wv.eval(crate::WHOLE_PAGE_TRANSLATE_JS)
+    wv.eval(crate::proto_shift::WHOLE_PAGE_TRANSLATE_JS)
         .map_err(|e| format!("注入整页翻译脚本失败: {}", e))?;
     log::info!("[translate] 已对标签 {} 注入整页翻译脚本", id);
     Ok(())

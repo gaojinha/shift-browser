@@ -160,7 +160,7 @@ fn inject_extensions(
                             move |_mgr, res| {
                                 if let Some(v) = res.js_value() {
                                     let raw = v.to_string();
-                                    crate::native_translate_handle(&app_msg, &label_msg, &raw);
+                                    crate::proto_shift::native_translate_handle(&app_msg, &label_msg, &raw);
                                 }
                             },
                         );
