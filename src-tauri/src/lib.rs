@@ -663,7 +663,11 @@ mod tests {
             include_str!("db/tab_groups.rs"),
             include_str!("db/downloads.rs"),
             include_str!("db/userscripts.rs"),
-            include_str!("db/users.rs"),
+            include_str!("db/users/mod.rs"),
+            include_str!("db/users/session.rs"),
+            include_str!("db/users/profile.rs"),
+            include_str!("db/users/import_export.rs"),
+            include_str!("db/users/security.rs"),
             include_str!("engine/llmstxt.rs"),
         ];
         let mut defined: std::collections::HashSet<String> = std::collections::HashSet::new();
