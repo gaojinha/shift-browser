@@ -25,6 +25,11 @@ path = "src/bin/mcp_server.rs"
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
 
+[features]
+# 模糊测试支撑（HANDOFF P2-5）：仅暴露手写解析器的跨 crate 驱动入口给 fuzz/ crate，
+# 生产构建不启用。解析器本体保持私有，见 api::fuzz_helpers
+fuzz = []
+
 [dependencies]
 async-trait = "0.1"
 serde_json = "1.0"

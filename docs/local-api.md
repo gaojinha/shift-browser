@@ -27,7 +27,7 @@ Cursor / 自研 agent）配一条 command 即可驱动浏览器——不用自�
 - **二进制**：`~/.local/bin/shift-browser-mcp`（`cargo build --release --bin shift-browser-mcp` 编译）
 - **协议**：MCP 2025-03-26，stdio 传输（newline-delimited JSON-RPC）
 - **转发**：直连浏览器 Unix socket（api.sock，0600 权限鉴权）——**零额外依赖、不经网络**
-- **工具**：25 个 = 13 读 + 12 写（与 API 命令同名同参；写类受 `api_readonly` 只读闸门约束）
+- **工具**：26 个 = 15 读 + 11 写（与 API 命令同名同参；写类受 `api_readonly` 只读闸门约束）
 - **不暴露**：`eval`（执行任意 JS）与 `tool_call`（嵌套 MCP）——风险高，需要时走浏览器 API 直连（有显式闸门）
 
 配置示例（opencode / Claude Desktop 的 `mcpServers`）：
@@ -47,8 +47,8 @@ Cursor / 自研 agent）配一条 command 即可驱动浏览器——不用自�
 
 | 类别 | 工具 |
 |---|---|
-| 读 | `status` · `list_tabs` · `active_tab` · `history` · `bookmarks` · `search_history` · `list_downloads` · `list_sessions` · `list_groups` · `list_spaces` · `list_userscripts` · `get_setting` · `list_settings` |
-| 写 | `open_url` · `new_tab` · `close_tab` · `switch_tab` · `reload_tab` · `navigate` · `search` · `pin_tab` · `mute_tab` · `minimize_window` · `maximize_window` · `screenshot` |
+| 读 | `status` · `list_tabs` · `active_tab` · `history` · `bookmarks` · `search_history` · `list_downloads` · `list_sessions` · `list_groups` · `list_spaces` · `list_userscripts` · `get_setting` · `list_settings` · `screenshot` · `read_page` |
+| 写 | `open_url` · `new_tab` · `close_tab` · `switch_tab` · `reload_tab` · `navigate` · `search` · `pin_tab` · `mute_tab` · `minimize_window` · `maximize_window` |
 
 手动测试（三行握手 + 调工具）：
 
@@ -121,7 +121,8 @@ curl -s -X POST http://127.0.0.1:19701/v1/chat/completions \
 | `{"cmd":"new_tab"}` | `{"ok":true,"data":Tab}` | 打开内置新标签页 |
 | `{"cmd":"history","limit":50}` | `{"ok":true,"data":[{url,title,visit_count,last_visit_at}…]}` | 读最近历史（limit ≤500） |
 | `{"cmd":"bookmarks"}` | `{"ok":true,"data":[{title,url,folder,sort_order}…]}` | 读书签（含文件夹名） |
-| `{"cmd":"screenshot"}` | `{"ok":true,"data":{"path":"…/screenshots/shot-*.png"}}` | 截当前活动标签可见区 → PNG 落盘 |
+| `{"cmd":"screenshot","id":"…"}` | `{"ok":true,"data":{"path":"…/screenshots/shot-*.png"}}` | 截标签可见区 → PNG 落盘（`id` 可选，缺省当前活动标签） |
+| `{"cmd":"read_page","mode":"text"}` | `{"ok":true,"data":{mode,url,title,truncated,total,…}}` | 读活动标签页面内容，8 模式：`text`/`elements`/`links`/`images`/`tables`/`forms`/`article`/`html`（参数：`mode` 默认 text、`selector` CSS 范围、`max_chars` 默认 200K 硬顶 2M、`max_items` 默认 500 硬顶 5000；固定采集脚本非任意 JS，password/hidden 的 value 一律不返回） |
 | `{"cmd":"eval","code":"…"}` | `{"ok":true,"data":{"result":"…"}}` | 在活动标签执行 JS（**默认关**，见下） |
 | `{"cmd":"tools"}` | `{"ok":true,"data":[{name,server_name,description,input_schema}…]}` | 列出可用 MCP 工具（工具网关） |
 | `{"cmd":"tool_call","name":"…","arguments":{…}}` | `{"ok":true,"data":{"result":"…"}}` | 调用一个 MCP 工具（受 server 白名单约束） |
@@ -212,4 +213,4 @@ ls -la ~/.local/share/com.shiftbrowser.app/api.sock   # 应为 srw-------
   如仍需要，可再加速率限制 / 命令级权限表。
 - HTTP 形态已支持（`127.0.0.1:<port>` + token，端口可配、可绑局域网 + IP 白名单）。
 - MCP Server（已完成 · 第八十七章）：`shift-browser-mcp` 二进制，标准 MCP stdio 协议，
-  25 个工具（13 读 + 12 写），任何 MCP 客户端可驱动浏览器；eval/tool_call 不暴露。
+  26 个工具（15 读 + 11 写），任何 MCP 客户端可驱动浏览器；eval/tool_call 不暴露。

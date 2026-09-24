@@ -253,8 +253,24 @@ fn registry() -> Vec<ToolDef> {
         // 截图只采集页面像素、不改变任何状态——按 Read 管理（与历史只读闸门行为一致）
         t(
             "screenshot",
-            "截取当前活动标签页可见区域，PNG 落盘，返回文件路径。无参数。",
-            json!({}),
+            "截取标签页可见区域，PNG 落盘，返回文件路径。可选 id（标签 id）；缺省为活动标签。",
+            json!({
+                "id": { "type": "string", "description": "标签 id（可选；缺省为活动标签，先 list_tabs 获取）" }
+            }),
+            vec![],
+            Risk::Read,
+        ),
+        // 页面读取：固定采集脚本（非任意 JS），8 种模式读活 DOM，不改变浏览器状态——按 Read 管理。
+        // 脱敏规则见 page_read.js（password/hidden value 不返回、非 http(s) 图片 URL 只留前缀、html 模式去注释/script/style）
+        t(
+            "read_page",
+            "读取活动标签页内容（8 种模式：text 可读文本 / elements 结构化元素 / links 链接 / images 图片 / tables 表格 / forms 表单控件（不含 value）/ article 正文 / html 脱敏后 HTML）。返回统一带 url/title/truncated/total 元信息。",
+            json!({
+                "mode": { "type": "string", "enum": ["text", "elements", "links", "images", "tables", "forms", "article", "html"], "description": "读取模式（默认 text）" },
+                "selector": { "type": "string", "description": "CSS 选择器限定范围（可选；非法选择器返回错误；≤1024 字符）" },
+                "max_chars": { "type": "integer", "description": "文本/HTML 字符上限（默认 200000，硬顶 2000000）" },
+                "max_items": { "type": "integer", "description": "列表类模式条数上限（默认 500，硬顶 5000）" }
+            }),
             vec![],
             Risk::Read,
         ),
@@ -324,8 +340,8 @@ mod tests {
         let defs = tool_defs();
         assert_eq!(
             defs.len(),
-            25,
-            "工具数应为 25（读 14 含 screenshot + 写 11）"
+            26,
+            "工具数应为 26（读 15 含 screenshot/read_page + 写 11）"
         );
         for d in &defs {
             assert!(d.get("name").and_then(|v| v.as_str()).is_some(), "缺 name");
@@ -395,6 +411,7 @@ mod tests {
             !is_write("screenshot"),
             "screenshot 历史行为为只读，不得收紧"
         );
+        assert!(!is_write("read_page"), "read_page 是只读采集，不得收紧为写命令");
         assert!(!is_write("status"));
     }
 }

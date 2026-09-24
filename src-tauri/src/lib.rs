@@ -16,6 +16,11 @@ mod feed;
 mod gpc;
 mod auto_tasks;
 mod api;
+// P2-5：仅 fuzz feature 下把手写解析器驱动入口暴露给 fuzz/ crate；生产构建不可见
+#[cfg(feature = "fuzz")]
+pub mod fuzz_bridge {
+    pub use crate::api::fuzz_helpers;
+}
 mod mcp_cmd;
 mod netmon;
 mod newtab;

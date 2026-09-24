@@ -47,6 +47,14 @@ fn url_encode(s: &str) -> String {
     out
 }
 
+/// 最小 JS 字符串转义（嵌入单引号 JS 字面量用；与 extensions/adblock.rs 先例一致）
+fn js_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+}
+
 /// 起 API 服务（lib.rs setup 调用）
 pub fn spawn(app: AppHandle) {
     let Some(path) = socket_path(&app) else {
@@ -869,7 +877,7 @@ async fn dashboard_html(app: &AppHandle) -> String {
                 list_downloads · list_sessions · list_groups · list_spaces · list_userscripts · \
                 get_setting · list_settings · open_url · close_tab · switch_tab · reload_tab · \
                 navigate · search · new_tab · screenshot · pin_tab · mute_tab · \
-                minimize_window · maximize_window · eval（默认关）· tools · tool_call";
+                minimize_window · maximize_window · read_page · eval（默认关）· tools · tool_call";
     format!(
         r#"<!doctype html><meta charset=utf-8><title>ShiftBrowser 状态</title>
 <style>body{{font:14px/1.6 system-ui,sans-serif;max-width:760px;margin:32px auto;padding:0 16px;color:#222}}
@@ -1337,16 +1345,22 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
             json!({"ok": true, "data": items})
         }
         "screenshot" => {
-            // 截图当前活动标签（webkit snapshot → PNG），返回落盘路径
+            // 截图指定标签（缺省 = 当前活动标签；webkit snapshot → PNG），返回落盘路径
             let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
                 return json!({"ok": false, "error": "标签管理器不可用"});
             };
-            let Some(active) = state.all_tabs().into_iter().find(|t| t.is_active) else {
-                return json!({"ok": false, "error": "没有活动标签"});
+            let all = state.all_tabs();
+            let target: Option<&crate::tabs::Tab> = req
+                .get("id")
+                .and_then(|v| v.as_str())
+                .map(|id| all.iter().find(|t| t.id == id))
+                .unwrap_or_else(|| all.iter().find(|t| t.is_active));
+            let Some(target) = target else {
+                return json!({"ok": false, "error": "指定标签不存在（先 list_tabs 取 id；缺省为活动标签）"});
             };
-            let label = format!("tab-{}", active.id);
+            let label = format!("tab-{}", target.id);
             let Some(wv) = app.get_webview(&label) else {
-                return json!({"ok": false, "error": "找不到活动标签 webview"});
+                return json!({"ok": false, "error": "找不到标签 webview"});
             };
             let out_path = {
                 let db = app.state::<crate::db::Db>();
@@ -1449,6 +1463,144 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
                 Ok(Err(e)) => json!({"ok": false, "error": e}),
                 Err(_) => json!({"ok": false, "error": "执行结果丢失"}),
             }
+        }
+        "read_page" => {
+            // 页面读取（固定采集脚本，非任意 JS；方案见 docs/read_page-命令方案_2026-09-24.md）
+            // 脱敏与截断在 page_read.js 内完成；Rust 侧做参数硬顶、超时、4MB 尺寸兜底
+            let mode = req
+                .get("mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("text");
+            if !matches!(mode, "text" | "elements" | "links" | "images" | "tables" | "forms" | "article" | "html") {
+                return json!({"ok": false, "error": format!("未知模式: {mode}（可选 text/elements/links/images/tables/forms/article/html）")});
+            }
+            let selector = req
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if selector.chars().count() > 1024 {
+                return json!({"ok": false, "error": "selector 过长（>1024 字符）"});
+            }
+            let max_chars = req
+                .get("max_chars")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(200_000)
+                .min(2_000_000);
+            let max_items = req
+                .get("max_items")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(500)
+                .min(5000);
+            let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+                return json!({"ok": false, "error": "标签管理器不可用"});
+            };
+            let Some(active) = state.all_tabs().into_iter().find(|t| t.is_active) else {
+                return json!({"ok": false, "error": "没有活动标签（read_page 一期只支持活动标签）"});
+            };
+            if let Some(tid) = req.get("tab_id").and_then(|v| v.as_str()) {
+                if !tid.is_empty() {
+                    return json!({"ok": false, "error": "tab_id 暂不支持：read_page 一期只读活动标签（先 switch_tab）"});
+                }
+            }
+            let label = format!("tab-{}", active.id);
+            let Some(wv) = app.get_webview(&label) else {
+                return json!({"ok": false, "error": "找不到活动标签 webview"});
+            };
+            // 固定脚本 + 占位符注入（selector 经 js_escape；mode 已白名单校验，无注入面）
+            let script = include_str!("page_read.js")
+                .replace("__MODE__", mode)
+                .replace("__SELECTOR__", &js_escape(&selector))
+                .replace("__MAX_CHARS__", &max_chars.to_string())
+                .replace("__MAX_ITEMS__", &max_items.to_string());
+            let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
+            let dispatched = wv.with_webview(move |pwv| {
+                crate::engine::webview::eval_js_with(&pwv.inner(), &script, move |res| {
+                    let _ = tx.send(res);
+                });
+            });
+            if dispatched.is_err() {
+                return json!({"ok": false, "error": "采集调度失败"});
+            }
+            let raw = match tokio::time::timeout(
+                std::time::Duration::from_secs(crate::contracts::timeout::READ_PAGE_SECS),
+                rx,
+            )
+            .await
+            {
+                Ok(Ok(Ok(v))) => v,
+                Ok(Ok(Err(e))) => return json!({"ok": false, "error": format!("采集脚本执行失败: {e}")}),
+                Ok(Err(_)) => return json!({"ok": false, "error": "采集结果丢失"}),
+                Err(_) => return json!({"ok": false, "error": format!("采集超时（{} 秒），页面可能过大或卡死", crate::contracts::timeout::READ_PAGE_SECS)}),
+            };
+            let v: Value = match serde_json::from_str(&raw) {
+                Ok(v) => v,
+                Err(e) => return json!({"ok": false, "error": format!("采集结果解析失败: {e}")}),
+            };
+            if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+                return json!({"ok": false, "error": err});
+            }
+            // article：JS 侧只回传 HTML，readability 正文提取在 Rust 侧 spawn_blocking 执行
+            // （CPU 密集，参照 reader.rs::fetch_and_extract；不能跑在 async 线程上）
+            if mode == "article" {
+                let Some(h) = v.get("html").and_then(|h| h.as_str()) else {
+                    return json!({"ok": false, "error": "获取页面 HTML 失败"});
+                };
+                let page_url = v
+                    .get("url")
+                    .and_then(|u| u.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let url_obj = match url::Url::parse(&page_url) {
+                    Ok(u) => u,
+                    Err(_) => return json!({"ok": false, "error": "页面 URL 不合法"}),
+                };
+                let html_bytes = h.as_bytes().to_vec();
+                let extract = tokio::task::spawn_blocking(move || {
+                    let mut buf = html_bytes.as_slice();
+                    readability::extractor::extract(&mut buf, &url_obj)
+                });
+                let product = match tokio::time::timeout(
+                    std::time::Duration::from_secs(crate::contracts::timeout::READ_PAGE_SECS),
+                    extract,
+                )
+                .await
+                {
+                    Ok(Ok(Ok(p))) => p,
+                    Ok(Ok(Err(e))) => return json!({"ok": false, "error": format!("正文提取失败: {e}")}),
+                    Ok(Err(_)) => return json!({"ok": false, "error": "正文提取线程异常"}),
+                    Err(_) => return json!({"ok": false, "error": "正文提取超时"}),
+                };
+                if product.text.is_empty() && product.content.is_empty() {
+                    return json!({"ok": false, "error": "未提取到正文，页面可能不是文章页"});
+                }
+                let text = product.text.chars().take(max_chars as usize).collect::<String>();
+                let content = product.content.chars().take(max_chars as usize).collect::<String>();
+                let data = json!({
+                    "mode": "article",
+                    "url": page_url,
+                    "title": product.title,
+                    "text": text,
+                    "content": content,
+                    "truncated": product.text.len() > text.len() || product.content.len() > content.len(),
+                });
+                let resp = serde_json::to_vec(&json!({"ok": true, "data": data})).unwrap_or_default();
+                if resp.len() > 4_000_000 {
+                    return json!({"ok": false, "error": "内容过大（>4MB），请调小 max_chars"});
+                }
+                return json!({"ok": true, "data": data});
+            }
+            if let Some(h) = v.get("html").and_then(|h| h.as_str()) {
+                if h.len() > 4_000_000 {
+                    return json!({"ok": false, "error": "内容过大（>4MB），请缩小 selector 范围"});
+                }
+            }
+            let resp = serde_json::to_vec(&json!({"ok": true, "data": v})).unwrap_or_default();
+            if resp.len() > 4_000_000 {
+                // 行式协议中间截断会产生非法 JSON——放弃响应体，返回干净错误
+                return json!({"ok": false, "error": "内容过大（>4MB），请缩小 selector 或调小 max_chars"});
+            }
+            json!({"ok": true, "data": v})
         }
         "tools" => {
             // 工具网关（阶段4 自托管套件）：列出可用 MCP 工具
@@ -1610,6 +1762,109 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
             json!({"ok": true, "data": active})
         }
         _ => json!({"ok": false, "error": format!("未知命令: {}", cmd)}),
+    }
+}
+
+/// 模糊测试支撑（HANDOFF P2-5）
+///
+/// `fuzz/` 是独立 crate，无法访问本模块私有解析器；此 shim 仅在 `fuzz` feature
+/// （或 lib 单测）下编译，对外签名只用基本类型，把任意字节/字符串喂入手写解析面。
+/// 约定：**任何输入都不得 panic / 死循环**，只能返回结果码。
+#[cfg(any(test, feature = "fuzz"))]
+pub mod fuzz_helpers {
+    use super::*;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use tokio::io::{AsyncRead, ReadBuf};
+
+    /// 按给定绝对切点把 data 拆成任意大小的 read 返回，切点用尽后 EOF。
+    /// 模拟 TCP 任意拆包/粘包；构造时自动排序去重并补齐末尾，永不产生 0 字节"假 EOF"
+    pub(crate) struct ChaosReader {
+        data: Vec<u8>,
+        cuts: Vec<usize>,
+        cut_idx: usize,
+        pos: usize,
+    }
+
+    impl ChaosReader {
+        pub(crate) fn new(data: Vec<u8>, mut cuts: Vec<usize>) -> Self {
+            cuts.retain(|&c| c > 0 && c < data.len());
+            cuts.sort_unstable();
+            cuts.dedup();
+            cuts.push(data.len());
+            Self {
+                data,
+                cuts,
+                cut_idx: 0,
+                pos: 0,
+            }
+        }
+    }
+
+    impl AsyncRead for ChaosReader {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            let this = self.get_mut();
+            loop {
+                if this.cut_idx >= this.cuts.len() {
+                    return Poll::Ready(Ok(())); // 真 EOF
+                }
+                let end = this.cuts[this.cut_idx].min(this.data.len());
+                let n = end.saturating_sub(this.pos).min(buf.remaining());
+                this.cut_idx += 1;
+                if n == 0 {
+                    continue; // 跳过落在当前位置之前的切点，不发 0 字节读
+                }
+                buf.put_slice(&this.data[this.pos..this.pos + n]);
+                this.pos += n;
+                return Poll::Ready(Ok(()));
+            }
+        }
+    }
+
+    /// 驱动 HTTP/1.1 解析器。返回：0=Complete，1=TooLarge，2=Bad
+    pub async fn parse_http(data: Vec<u8>, cuts: Vec<usize>) -> u8 {
+        let mut r = ChaosReader::new(data, cuts);
+        match read_http_request(&mut r).await {
+            HttpReq::Complete(..) => 0,
+            HttpReq::TooLarge => 1,
+            HttpReq::Bad => 2,
+        }
+    }
+
+    /// percent 解码（任意输入不得 panic）
+    pub fn url_decode(s: &str) -> String {
+        super::url_decode(s)
+    }
+
+    /// form-urlencoded 取值
+    pub fn kv_value(encoded: &str, key: &str) -> Option<String> {
+        super::kv_value(encoded, key)
+    }
+
+    /// Content-Length 解析
+    pub fn content_length(head: &str) -> Option<usize> {
+        super::content_length_of(head)
+    }
+
+    /// Transfer-Encoding: chunked 识别
+    pub fn is_chunked(head: &str) -> bool {
+        super::is_chunked(head)
+    }
+
+    /// CIDR 匹配。返回：1=true，0=false，-1=非法 CIDR，-2=非法 IP
+    pub fn cidr_contains(ip: &str, cidr: &str) -> i8 {
+        match ip.parse::<IpAddr>() {
+            Ok(ip) => match super::cidr_contains(ip, cidr) {
+                Some(true) => 1,
+                Some(false) => 0,
+                None => -1,
+            },
+            Err(_) => -2,
+        }
     }
 }
 
@@ -1891,5 +2146,235 @@ mod http_req_tests {
             "secret123"
         ));
         assert!(!bearer_token_ok("POST /api HTTP/1.1\r\nX-A: 1\r\n", "secret123"));
+    }
+
+    // ── 确定性模糊测试（HANDOFF P2-5）──────────────────────────────────────
+    // 固定种子 xorshift，不引第三方依赖，CI 每次跑同一序列；
+    // 覆盖引导深挖由 fuzz/ 下 cargo-fuzz 目标承担（每周 CI），二者互补。
+    // 核心安全性质：任意输入 + 任意 TCP 拆包，解析器**不得 panic / 死循环**。
+    struct Rng {
+        state: u64,
+    }
+
+    impl Rng {
+        fn new(seed: u64) -> Self {
+            Self { state: seed | 1 }
+        }
+        fn next_u64(&mut self) -> u64 {
+            let mut x = self.state;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.state = x;
+            x
+        }
+        fn below(&mut self, n: usize) -> usize {
+            (self.next_u64() % n as u64) as usize
+        }
+        fn byte(&mut self) -> u8 {
+            (self.next_u64() & 0xff) as u8
+        }
+        fn percent(&mut self, p: usize) -> bool {
+            self.below(100) < p
+        }
+    }
+
+    /// 偏向解析器分支的字节字母表（CR/LF/冒号/数字/chunked 关键字等）
+    const FUZZ_ALPHABET: &[u8] =
+        b"\r\n\r\n :0123456789Content-LengthTransfer-EncodingchunkedPOST/%.\t-";
+
+    fn fuzz_byte(rng: &mut Rng) -> u8 {
+        if rng.percent(55) {
+            FUZZ_ALPHABET[rng.below(FUZZ_ALPHABET.len())]
+        } else {
+            rng.byte()
+        }
+    }
+
+    /// 对种子做随机替换/插入/删除
+    fn mutate(rng: &mut Rng, bytes: &mut Vec<u8>) {
+        for _ in 0..rng.below(10) {
+            if bytes.is_empty() {
+                if rng.percent(50) {
+                    bytes.push(fuzz_byte(rng));
+                }
+                continue;
+            }
+            match rng.below(3) {
+                0 => {
+                    let i = rng.below(bytes.len());
+                    bytes[i] = fuzz_byte(rng);
+                }
+                1 => {
+                    let i = rng.below(bytes.len() + 1);
+                    bytes.insert(i, fuzz_byte(rng));
+                }
+                _ => {
+                    let i = rng.below(bytes.len());
+                    bytes.remove(i);
+                }
+            }
+        }
+    }
+
+    /// 生成 0..4 个随机绝对切点（ChaosReader 自行排序/去重/补末尾）
+    fn random_cuts(rng: &mut Rng, len: usize) -> Vec<usize> {
+        let mut cuts = Vec::new();
+        for _ in 0..rng.below(5) {
+            cuts.push(rng.below(len + 1));
+        }
+        cuts
+    }
+
+    #[tokio::test]
+    async fn fuzz_http_parser_arbitrary_streams() {
+        let mut rng = Rng::new(0x5f3a_2026_0924);
+        for iter in 0..20_000 {
+            let mut data = if rng.percent(65) {
+                // 结构化种子：合法 POST 模板 + 各类边界 Content-Length
+                let body_len = rng.below(40);
+                let body: Vec<u8> = (0..body_len).map(|_| rng.byte()).collect();
+                let cl = match rng.below(7) {
+                    0 => "0".to_string(),
+                    1 => body_len.to_string(),
+                    2 => body_len
+                        .saturating_add(rng.below(5))
+                        .saturating_add(1)
+                        .to_string(), // 声明比实际长 → 提前 EOF
+                    3 => (8 * 1024 * 1024 + 1).to_string(), // 超 8MB 上限
+                    4 => format!("{}abc", rng.below(100)),  // 含非数字
+                    5 => "-1".to_string(),                  // 负数
+                    _ => format!(" {}", body_len),          // 前导空格
+                };
+                let mut seed = String::from("POST /api HTTP/1.1\r\nHost: x\r\n");
+                if rng.percent(30) {
+                    seed.push_str("Transfer-Encoding: chunked\r\n");
+                }
+                seed.push_str(&format!("Content-Length: {cl}\r\n\r\n"));
+                let mut bytes = seed.into_bytes();
+                bytes.extend_from_slice(&body);
+                mutate(&mut rng, &mut bytes);
+                // 随机截断
+                bytes.truncate(rng.below(bytes.len() + 1));
+                // 20% 概率追加垃圾尾巴
+                if rng.percent(20) {
+                    let n = rng.below(30);
+                    bytes.extend((0..n).map(|_| fuzz_byte(&mut rng)));
+                }
+                bytes
+            } else {
+                // 纯随机字节流
+                (0..rng.below(300)).map(|_| fuzz_byte(&mut rng)).collect()
+            };
+            // 每 500 次造一个 >64KB 无终止头，钉死头部上限分支
+            if iter % 500 == 0 {
+                data.extend(std::iter::repeat(b'a').take(70_000));
+            }
+
+            let cuts = random_cuts(&mut rng, data.len());
+            // 与 cargo-fuzz 目标走同一个 shim 入口，只校验结果码
+            let code = super::fuzz_helpers::parse_http(data.clone(), cuts.clone()).await;
+            assert!(code <= 2, "shim 返回非法结果码: {code}");
+            // 再直接驱动私有解析器拿 head/body 做弱不变量校验
+            let mut reader = super::fuzz_helpers::ChaosReader::new(data, cuts);
+            match read_http_request(&mut reader).await {
+                HttpReq::Complete(head, body) => {
+                    // 弱不变量：声明了合法 CL 时，body 不会膨胀超 CL 的 3 倍（lossy 替换上限）
+                    if let Some(cl) = content_length_of(&head) {
+                        assert!(
+                            body.is_empty() || body.len() <= cl.saturating_mul(3),
+                            "body 超长 cl={cl} body_len={}",
+                            body.len()
+                        );
+                    }
+                }
+                HttpReq::TooLarge | HttpReq::Bad => {}
+            }
+        }
+    }
+
+    #[test]
+    fn fuzz_codec_arbitrary_inputs() {
+        let mut rng = Rng::new(0xc0de_2026_0924);
+        for _ in 0..30_000 {
+            // 任意字符串（含残缺 %XX、+、非 ASCII）不得 panic
+            let raw: String = (0..rng.below(40))
+                .map(|_| {
+                    let b = fuzz_byte(&mut rng);
+                    // 映射成合法 char：保留可打印 ASCII 与少量多字节范围
+                    char::from_u32(if rng.percent(80) {
+                        (b % 95 + 32) as u32
+                    } else {
+                        0x4e00 + (b as u32)
+                    })
+                    .unwrap_or('?')
+                })
+                .collect();
+            // 与 cargo-fuzz codec 目标走同一 shim
+            let _ = super::fuzz_helpers::url_decode(&raw);
+            let _ = super::fuzz_helpers::kv_value(&raw, "token");
+            let _ = super::fuzz_helpers::content_length(&raw);
+            let _ = super::fuzz_helpers::is_chunked(&raw);
+        }
+
+        // 性质 1：unreserved 字符经 encode→decode 往返不变
+        let unreserved = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~";
+        for _ in 0..5_000 {
+            let s: String = (0..rng.below(30) + 1)
+                .map(|_| unreserved[rng.below(unreserved.len())] as char)
+                .collect();
+            assert_eq!(
+                super::fuzz_helpers::url_decode(&url_encode(&s)),
+                s,
+                "unreserved 往返失败: {s}"
+            );
+        }
+
+        // 性质 2：任意可打印 ASCII（除 & 分隔符）编码后都能从 form 中精确取回
+        for _ in 0..5_000 {
+            let v: String = (0..rng.below(20) + 1)
+                .map(|_| {
+                    let mut b = (rng.below(0x5f) + 0x20) as u8; // 空格(0x20)~~(0x7e)
+                    if b == b'&' {
+                        b = b'x';
+                    }
+                    b as char
+                })
+                .collect();
+            let form = format!("token={}", url_encode(&v));
+            assert_eq!(
+                super::fuzz_helpers::kv_value(&form, "token"),
+                Some(v),
+                "form 往返失败"
+            );
+        }
+    }
+
+    #[test]
+    fn fuzz_cidr_arbitrary_inputs() {
+        let mut rng = Rng::new(0xc1d4_2026_0924);
+        // 任意字符串不得 panic
+        for _ in 0..10_000 {
+            let ip: String = (0..rng.below(40))
+                .map(|_| (rng.below(95) + 32) as u8 as char)
+                .collect();
+            let cidr: String = (0..rng.below(40))
+                .map(|_| (rng.below(95) + 32) as u8 as char)
+                .collect();
+            let code = super::fuzz_helpers::cidr_contains(&ip, &cidr);
+            assert!((-2..=1).contains(&code));
+        }
+        // 确定性性质
+        let cidr = |ip: &str, c: &str| super::fuzz_helpers::cidr_contains(ip, c);
+        assert_eq!(cidr("8.8.8.8", "0.0.0.0/0"), 1);
+        assert_eq!(cidr("2001:db8::1", "::/0"), 1);
+        assert_eq!(cidr("192.168.1.5", "192.168.1.5/32"), 1);
+        assert_eq!(cidr("192.168.1.6", "192.168.1.5/32"), 0);
+        assert_eq!(cidr("192.168.1.5", "192.168.0.0/16"), 1);
+        assert_eq!(cidr("10.0.0.1", "192.168.0.0/16"), 0);
+        assert_eq!(cidr("::1", "127.0.0.0/8"), 0, "v6/v4 族不匹配");
+        assert_eq!(cidr("1.2.3.4", "1.2.3.4/99"), -1, "/99 非法前缀");
+        assert_eq!(cidr("1.2.3.4", "not-a-cidr"), -1);
+        assert_eq!(cidr("999.1.1.1", "0.0.0.0/0"), -2, "非法 IP");
     }
 }

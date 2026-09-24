@@ -1,0 +1,58 @@
+# 覆盖引导模糊测试（HANDOFF P2-5）
+#
+# 运行（在 src-tauri/ 下，需 nightly + cargo-fuzz；手工种子见 seed-corpus/<目标>/）：
+#   mkdir -p fuzz/corpus/{http_parse,codec,cidr}
+#   cargo +nightly fuzz run http_parse fuzz/corpus/http_parse fuzz/seed-corpus/http_parse
+#   cargo +nightly fuzz run codec     fuzz/corpus/codec     fuzz/seed-corpus/codec
+#   cargo +nightly fuzz run cidr      fuzz/corpus/cidr      fuzz/seed-corpus/cidr
+# （fuzz/corpus/ 是 fuzzer 可写工作语料，不入库；崩溃样本落在 fuzz/artifacts/）
+#
+# fuzz/ 是独立 workspace（见末尾空 [workspace]），不影响主 crate 的正常构建；
+# 通过 shift_browser_lib 的 fuzz feature 访问 api::fuzz_helpers 解析器驱动入口。
+# 稳定工具链下的持续回归由 src/api.rs 里固定种子的 fuzz_* 单测承担（cargo test）。
+[package]
+name = "shift-browser-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# package 名是 shift-browser，lib target 名（extern crate）是 shift_browser_lib
+shift_browser_lib = { package = "shift-browser", path = "..", features = ["fuzz"] }
+tokio = { version = "1", features = ["rt"] }
+
+[[bin]]
+name = "http_parse"
+path = "fuzz_targets/http_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "codec"
+path = "fuzz_targets/codec.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cidr"
+path = "fuzz_targets/cidr.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = false
+# 必需：tauri generate_context! 的 ACL 代码在 host 侧（proc-macro）按 debug_assertions
+# 决定是否生成 referenced_by 字段，而 target 侧 tauri-utils 该字段同样 cfg-gated；
+# cargo-fuzz 用 -Cdebug-assertions 只影响 target，host/target 不一致会 E0063
+debug-assertions = true
+overflow-checks = true
+opt-level = 3
+
+[workspace]

@@ -206,6 +206,8 @@ pub mod timeout {
     pub const SYNC_REQUEST_SECS: u64 = 20;
     /// 翻译请求
     pub const TRANSLATE_SECS: u64 = 120;
+    /// 开放 API read_page 页面采集（DOM 全量遍历可能比 WEBVIEW_IPC_SECS 慢）
+    pub const READ_PAGE_SECS: u64 = 10;
     /// 数据库 busy 等待
     pub const DB_BUSY_SECS: u64 = 10;
     /// 单实例 URL 转发等待（毫秒）

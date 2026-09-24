@@ -18,3 +18,5 @@ src-tauri/resources/libshift_web_extension.so
 *.db
 *.db-wal
 *.db-shm
+# AtomCode local-scope configs (machine-specific)
+.atomcode/local/

@@ -1,0 +1,65 @@
+# 覆盖引导模糊测试（HANDOFF P2-5）
+# 每周日 UTC 18:00（北京时间周一凌晨）跑一轮；也可在 Actions 手动触发
+# 崩溃时作业失败并保留 artifacts（cargo-fuzz 输出到 fuzz/artifacts/<target>/）
+name: Fuzz
+
+on:
+  schedule:
+    - cron: "0 18 * * 0"
+  workflow_dispatch:
+    inputs:
+      max_time:
+        description: "每个目标的模糊时长（秒）"
+        required: false
+        default: "180"
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  fuzz:
+    name: cargo-fuzz（手写解析面）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # libfuzzer-sys 需要 nightly；主仓 rust-toolchain.toml 固定 1.97.1，
+      # 用 +nightly 显式覆盖。日期固定在本地验证可构建 tauri codegen 的版本，
+      # 升级时同步 bump（最新 nightly 偶发 proc-macro/debug_assertions 不兼容）
+      - uses: dtolnay/rust-toolchain@nightly-2026-09-22
+      - name: 安装 cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: 安装 Tauri 系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+      # 位置参数：可写工作语料（须预建）+ 入库的手工种子（只读）
+      - name: 准备工作语料目录
+        working-directory: src-tauri
+        run: mkdir -p fuzz/corpus/http_parse fuzz/corpus/codec fuzz/corpus/cidr
+      - name: 模糊 http_parse（HTTP/1.1 请求解析）
+        working-directory: src-tauri
+        run: >
+          cargo +nightly fuzz run http_parse
+          fuzz/corpus/http_parse fuzz/seed-corpus/http_parse
+          -- -max_total_time=${{ github.event.inputs.max_time || '180' }}
+      - name: 模糊 codec（percent/form/Content-Length/chunked）
+        working-directory: src-tauri
+        run: >
+          cargo +nightly fuzz run codec
+          fuzz/corpus/codec fuzz/seed-corpus/codec
+          -- -max_total_time=${{ github.event.inputs.max_time || '180' }}
+      - name: 模糊 cidr（CIDR 白名单解析）
+        working-directory: src-tauri
+        run: >
+          cargo +nightly fuzz run cidr
+          fuzz/corpus/cidr fuzz/seed-corpus/cidr
+          -- -max_total_time=${{ github.event.inputs.max_time || '180' }}
+      - name: 上传崩溃样本
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash
+          path: src-tauri/fuzz/artifacts
+          if-no-files-found: ignore

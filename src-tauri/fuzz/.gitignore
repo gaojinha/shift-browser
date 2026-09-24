@@ -1,0 +1,5 @@
+target
+artifacts
+coverage
+# 运行期工作语料（fuzzer 自动最小化生成）；手工种子在 seed-corpus/ 入库
+corpus
