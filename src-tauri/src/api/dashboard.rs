@@ -6,7 +6,7 @@
 use serde_json::json;
 use tauri::{AppHandle, Manager};
 
-use super::{atomic_write_token, generate_token, ApiTokenShared, DashboardTickets};
+use super::auth::{atomic_write_token, generate_token, ApiTokenShared, DashboardTickets};
 
 /// 状态面板登录页（无脚本、严格 CSP；长期 token 只接受 POST 表单）
 pub(crate) fn dashboard_login_html(error: Option<&str>, retry_after: u64) -> String {
