@@ -20,3 +20,6 @@ src-tauri/resources/libshift_web_extension.so
 *.db-shm
 # AtomCode local-scope configs (machine-specific)
 .atomcode/local/
+# AtomCode 安装状态（机器特定，不入库）
+.atomcode/.setup.lock
+.atomcode/setup-state.json
