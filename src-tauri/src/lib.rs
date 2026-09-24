@@ -32,6 +32,9 @@ mod tls;
 mod useragent;
 mod translate;
 mod tray;
+// R2-1b 拆分（2026-09-24）：锁屏对话框独立成子模块
+#[path = "ui/lock_dialog.rs"]
+mod lock_dialog;
 
 use db::{
     bookmarks, downloads, history, passwords, sessions, settings, tab_groups, users, workspaces, Db,
@@ -130,12 +133,6 @@ pub fn harden_sensitive_files(dir: &std::path::Path) {
     }
 }
 
-/// 启动锁屏中标志：setup 弹出 GTK 密码对话框期间为 true。
-/// 前端 onMounted 在锁屏期间调用 Db/TabManager 命令会全部失败并弹"创建/加载标签页失败"
-/// toast（反复重试），必须能查询到锁屏状态并静默等待 app-unlocked。
-/// 用原子变量而非 Db/State：锁屏期间 Db 尚未 manage，命令参数不能依赖 State。
-static LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 /// translate-progress 事件节流器：同一 webview 至少间隔 300ms 才转发一次，
 /// 防止整页翻译高频上报刷爆 UI 事件通道（2026-09-19 安全修复）
 static PROGRESS_THROTTLE: std::sync::OnceLock<
@@ -178,7 +175,7 @@ fn translate_rate_limited(label: &str) -> bool {
 /// 查询是否处于启动锁屏状态（前端初始化前调用，不依赖 Db）
 #[tauri::command]
 fn is_locked() -> bool {
-    LOCKED.load(std::sync::atomic::Ordering::SeqCst)
+    crate::lock_dialog::is_locked()
 }
 
 /// 前端日志桥：把前端关键节点的执行情况写进 Rust 日志，
@@ -1330,7 +1327,7 @@ pub fn run() {
 
       // 锁屏是否启用过（解锁后通知前端重试初始化——锁屏期间 Db/TabManager 未就绪，
       // 主窗口 Vue 的 onMounted 命令调用全部失败，必须等 setup 完成后重试）
-      let mut unlocked_after_lock = false;
+      // R2-1b：由 lock_dialog::show_startup_lock 返回（锁屏逻辑已迁至 ui/lock_dialog.rs）
 
       // 2026-09-19：GNOME 49 对无装饰窗口强制四角圆角，但 Tauri/wry 只把 WebView
       // 背景设为透明，GTK 窗口本身没设透明——圆角外露出黑色窗口背景（四个黑角）。
@@ -1435,113 +1432,9 @@ pub fn run() {
       // 启动锁屏：设置启用后，在创建任何 webview 之前弹 GTK 原生密码对话框。
       // 注意：必须在 GTK 层面实现——Vue 锁屏覆盖层只能盖住 Vue 自己的 DOM，
       // 盖不住另一个独立的 GTK webview（标签页）。
-      #[cfg(target_os = "linux")]
-      {
-        use gtk::prelude::*;
-        let db_state = app.state::<Db>();
-        let lock_enabled: bool = {
-          let row = tauri::async_runtime::block_on(
-            sqlx::query_as::<_, (String,)>(
-              "SELECT value FROM settings WHERE key = 'lock_enabled'",
-            )
-            .fetch_optional(&db_state.pool),
-          )
-          .ok()
-          .flatten();
-          row.map(|r| r.0 == "true").unwrap_or(false)
-        };
-
-        if lock_enabled {
-          log::info!("[ShiftBrowser] 启动锁屏已启用，弹出 GTK 密码对话框");
-          unlocked_after_lock = true;
-          // 标记锁屏中：前端 is_locked 查到 true 后静默等待 app-unlocked，
-          // 不再反复重试建标签（否则弹"创建标签页失败"toast）
-          LOCKED.store(true, std::sync::atomic::Ordering::SeqCst);
-          let parent_win = app
-            .get_window("main")
-            .and_then(|w| w.gtk_window().ok());
-
-          loop {
-            let dialog = gtk::Dialog::builder()
-              .title("Shift Browser 已锁定")
-              .modal(true)
-              .resizable(false)
-              .default_width(340)
-              .default_height(160)
-              .build();
-
-            if let Some(ref pw) = parent_win {
-              dialog.set_transient_for(Some(pw));
-            }
-
-            let content = dialog.content_area();
-            content.set_spacing(8);
-            content.set_margin(12);
-
-            let label = gtk::Label::new(Some("输入账号密码解锁浏览器"));
-            content.add(&label);
-
-            let user_entry = gtk::Entry::new();
-            user_entry.set_placeholder_text(Some("用户名"));
-            content.add(&user_entry);
-
-            let pass_entry = gtk::Entry::new();
-            pass_entry.set_visibility(false);
-            pass_entry.set_placeholder_text(Some("密码"));
-            pass_entry.set_activates_default(true);
-            content.add(&pass_entry);
-
-            dialog.add_button("退出", gtk::ResponseType::Cancel);
-            dialog.add_button("解锁", gtk::ResponseType::Ok);
-
-            dialog.show_all();
-            pass_entry.grab_focus();
-
-            let response = dialog.run();
-
-            let username = user_entry.text().to_string();
-            let password = pass_entry.text().to_string();
-
-            dialog.close();
-
-            if response != gtk::ResponseType::Ok {
-              log::info!("[ShiftBrowser] 启动锁屏取消，退出应用");
-              std::process::exit(0);
-            }
-
-            match tauri::async_runtime::block_on(users::verify_password(
-              &db_state, &username, &password,
-            )) {
-              Ok(true) => {
-                log::info!("[ShiftBrowser] 启动锁屏验证通过: {}", username);
-                // 验证通过后清除会话：启动锁屏只验证身份，不自动登录个人中心
-                if let Err(e) = tauri::async_runtime::block_on(users::clear_session(&db_state)) {
-                  log::warn!("[ShiftBrowser] 启动锁屏验证通过但会话清除失败: {}", e);
-                }
-                // 显式 destroy 锁屏 dialog，避免 close 后残留；forget 阻止 drop 再次释放
-                unsafe {
-                  dialog.destroy();
-                }
-                std::mem::forget(dialog);
-                // 立即恢复主窗口前台/焦点——否则用户必须点一下窗体才能交互
-                // （modal dialog 关闭后焦点不自动回到父窗口）
-                if let Some(ref pw) = parent_win {
-                  pw.present();
-                }
-                // 解锁完成：清除锁屏标志（前端收到 app-unlocked 后开始初始化）
-                LOCKED.store(false, std::sync::atomic::Ordering::SeqCst);
-                break;
-              }
-              Ok(false) => {
-                log::warn!("[ShiftBrowser] 启动锁屏密码错误，重新输入");
-              }
-              Err(e) => {
-                log::error!("[ShiftBrowser] 启动锁屏验证出错: {}", e);
-              }
-            }
-          }
-        }
-      }
+      // R2-1b：实现已迁至 ui/lock_dialog.rs（含 LOCKED 状态与 GTK 对话框）
+      let unlocked_after_lock =
+        lock_dialog::show_startup_lock(app, app.state::<Db>().inner());
 
       // 初始化标签管理器
       app.manage(tabs::TabManager::new());
