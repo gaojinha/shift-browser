@@ -5,6 +5,9 @@
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
 
 use super::*;
+// R2-1a 拆分后 tabs.rs 壳不再导入 Manager/Emitter，本模块经 super::* 带不到
+// 这两个 trait（get_window/get_webview/emit 都来自它们），需显式导入
+use tauri::{Emitter, Manager};
 
 /// 创建新标签页
 #[tauri::command]
