@@ -3,11 +3,10 @@
 // 标签页管理器
 // 管理标签元数据 + 嵌入式 webview 生命周期
 // 与 Electron 版 electron/tabManager.ts 对应（v4.5.0）
+//
+// R2-1 拆分（2026-09-24）：纯数据状态机（Tab/TabManager/NavState）已抽到
+// tabs/model.rs；本文件保留全部 GTK/webview 相关实现。
 
-use ts_rs::TS;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl,
@@ -21,6 +20,12 @@ use crate::db::{downloads, history, Db};
 pub mod util;
 use util::{clean_tracking_params, sanitize_filename};
 
+// R2-1 拆分（2026-09-24）：纯数据状态机独立成子模块
+#[path = "tabs/model.rs"]
+pub mod model;
+pub use model::{NavState, Tab, TabManager};
+pub(crate) use model::now_ts;
+
 use gtk::glib::translate::ToGlibPtr;
 use gtk::prelude::*;
 #[cfg(target_os = "linux")]
@@ -32,9 +37,7 @@ use crate::engine::webview::WebViewBackend;
 
 // UI 布局常量：统一由引擎层提供（唯一事实来源，见 engine/layout.rs）
 pub use crate::engine::layout::CONTENT_TOP_OFFSET;
-use crate::engine::layout::{
-    BOOKMARKS_BAR_HEIGHT, CONTENT_TOP_OFFSET_NO_BOOKMARKS, TAB_BAR_HEIGHT, VERTICAL_TAB_BAR_WIDTH,
-};
+use crate::engine::layout::VERTICAL_TAB_BAR_WIDTH;
 
 /// 键盘焦点是否在 UI 层（主 webview，跑 Vue 界面）。
 /// 前端快捷键监听的是 HTML 层的 keydown，只在主 webview 持焦时触发；
@@ -50,178 +53,7 @@ static UI_OVERLAY_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 static WEB_CRASH_COOLDOWN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, i64>>> =
     std::sync::OnceLock::new();
 
-
-
-/// 标签页元数据（运行时状态，不持久化；会话保存走 sessions 表）
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../src/types/generated/")]
-pub struct Tab {
-    pub id: String,
-    pub url: String,
-    pub title: String,
-    pub favicon: String,
-    pub is_active: bool,
-    pub is_pinned: bool,
-    pub is_muted: bool,
-    /// 是否已休眠（webview 已销毁以释放内存；点击标签时按 url 重建）
-    #[serde(default)]
-    pub hibernated: bool,
-    /// 无痕标签（2026-09-22）：incognito → ephemeral WebContext，
-    /// Cookie/缓存/存储不落盘、与常规标签隔离；不计历史
-    #[serde(default)]
-    pub private: bool,
-}
-
-/// 标签管理器（Tauri State）
-pub struct TabManager {
-    tabs: Mutex<HashMap<String, Tab>>,
-    order: Mutex<Vec<String>>,
-    active_id: Mutex<Option<String>>,
-    /// 书签栏是否显示（影响 child webview 的 top 偏移：112 vs 82）
-    show_bookmarks_bar: Mutex<bool>,
-    /// set_webview_visible 已应用的最近 seq（P1-9：丢弃并发乱序的过期指令）
-    webview_visible_seq: Mutex<u64>,
-    /// AI 面板是否占用右侧（child webview 宽度让出 AI_PANEL_WIDTH，方便边看页面边对话）
-    ai_panel_active: Mutex<bool>,
-    /// 垂直标签模式（true 时左侧让出 VERTICAL_TAB_BAR_WIDTH，顶部不再含标签栏）
-    vertical_tabs: Mutex<bool>,
-    /// 分屏：右侧窗格承载的标签 id（None = 未分屏；左侧窗格始终是活动标签）
-    split_tab: Mutex<Option<String>>,
-    /// 每个标签最后一次激活时间（Unix 秒），用于"空闲休眠"判定
-    last_active: Mutex<HashMap<String, i64>>,
-}
-
-/// 当前 Unix 时间戳（秒）
-fn now_ts() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 impl TabManager {
-    pub fn new() -> Self {
-        Self {
-            tabs: Mutex::new(HashMap::new()),
-            order: Mutex::new(Vec::new()),
-            active_id: Mutex::new(None),
-            show_bookmarks_bar: Mutex::new(true),
-            webview_visible_seq: Mutex::new(0),
-            ai_panel_active: Mutex::new(false),
-            vertical_tabs: Mutex::new(false),
-            split_tab: Mutex::new(None),
-            last_active: Mutex::new(HashMap::new()),
-        }
-    }
-
-    /// 记录标签激活时间（休眠判定的输入）
-    #[allow(clippy::unwrap_used, clippy::expect_used)]
-    pub fn touch_active(&self, id: &str) {
-        self.last_active
-            .lock()
-            .unwrap()
-            .insert(id.to_string(), now_ts());
-    }
-
-    pub fn set_show_bookmarks_bar(&self, visible: bool) -> f64 {
-        *self
-            .show_bookmarks_bar
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = visible;
-        self.top_offset()
-    }
-
-    /// 当前内容区顶部偏移（随书签栏显隐变化）
-    /// 运行时快照（自检/可观测性用）：标签数、活动标签、AI 分屏状态
-    pub fn runtime_snapshot(&self) -> (usize, Option<String>, bool) {
-        let count = self.tabs.lock().unwrap_or_else(|e| e.into_inner()).len();
-        let active = self
-            .active_id
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        let ai = *self
-            .ai_panel_active
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        (count, active, ai)
-    }
-
-    /// 活动标签的 URL（GPC 站点声明检测等用）
-    pub fn active_url(&self) -> Option<String> {
-        let id = self
-            .active_id
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()?;
-        let tabs = self.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        tabs.get(&id).map(|t| t.url.clone())
-    }
-
-    /// 是否垂直标签模式（阶段 3.1）
-    pub fn vertical_tabs(&self) -> bool {
-        *self
-            .vertical_tabs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-    }
-
-    /// 设置垂直标签模式
-    pub fn set_vertical_tabs(&self, on: bool) {
-        *self
-            .vertical_tabs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = on;
-    }
-
-    /// 分屏：右侧窗格承载的标签 id（None = 未分屏）
-    pub fn split_tab(&self) -> Option<String> {
-        self.split_tab
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-    }
-
-    /// 设置/清除分屏标签
-    pub fn set_split_tab(&self, id: Option<String>) {
-        *self
-            .split_tab
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = id;
-    }
-
-    /// 当前内容区顶部偏移（随书签栏显隐 + 垂直标签模式变化）
-    pub fn top_offset(&self) -> f64 {
-        let bookmarks = *self
-            .show_bookmarks_bar
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        // 基准：标签栏 + 地址栏
-        let mut t = CONTENT_TOP_OFFSET_NO_BOOKMARKS;
-        if self.vertical_tabs() {
-            // 垂直标签：标签栏移到左侧，顶部不再占标签栏高度
-            t -= TAB_BAR_HEIGHT;
-        }
-        if bookmarks {
-            t += BOOKMARKS_BAR_HEIGHT;
-        }
-        t
-    }
-
-    /// 生成 UUID v4（真随机，crypto 级）
-    fn uuid() -> String {
-        uuid::Uuid::new_v4().to_string()
-    }
-
-    pub fn all_tabs(&self) -> Vec<Tab> {
-        let tabs = self.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        let order = self.order.lock().unwrap_or_else(|e| e.into_inner());
-        order
-            .iter()
-            .filter_map(|id| tabs.get(id).cloned())
-            .collect()
-    }
-
     /// 根据窗口尺寸计算内容区域大小（逻辑像素）；top 随书签栏显隐变化
     /// 实现已收敛到引擎层（engine/layout.rs），避免公式散落多处导致布局漂移
     fn content_size(
@@ -1320,15 +1152,6 @@ fn is_internal_newtab_url(url: &str) -> bool {
         },
         Err(_) => false,
     }
-}
-/// 查询活动标签的真实导航状态（修复 2026-09-22：前端 canGoBack/canGoForward
-/// 原为本地猜测，切标签后不更新 → 前进/后退按钮 disabled 卡住、点了没反应）
-#[derive(serde::Serialize)]
-pub struct NavState {
-    #[serde(rename = "canGoBack")]
-    pub can_go_back: bool,
-    #[serde(rename = "canGoForward")]
-    pub can_go_forward: bool,
 }
 
 // P1-1：命令门面独立成子模块
