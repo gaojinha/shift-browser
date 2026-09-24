@@ -629,7 +629,9 @@ mod tests {
         let sources = [
             include_str!("lib.rs"),
             include_str!("tabs.rs"),
-            include_str!("tabs/commands.rs"),
+            include_str!("tabs/commands/mod.rs"),
+            include_str!("tabs/commands/tabs_cmds.rs"),
+            include_str!("tabs/commands/ui_cmds.rs"),
             include_str!("tls.rs"),
             include_str!("perms.rs"),
             include_str!("useragent.rs"),
