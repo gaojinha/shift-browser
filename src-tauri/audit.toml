@@ -1,0 +1,34 @@
+# cargo-audit 配置（HANDOFF P2-4 供应链审计）
+#
+# 策略：新公告默认告警/失败（CI 跑 `cargo audit`，退出码非 0 即红灯）；
+# 下列条目经逐条评审后显式忽略，**每次 tauri/gtk-rs 升级必须重新复核**，
+# 上游一旦提供修复版本就删除对应 ignore 并升级。
+#
+# 复核命令：
+#   cargo tree -i <crate>   # 看引入链是否已断
+#   cargo audit             # 看是否仍被点名
+
+[advisories]
+ignore = [
+    # ── gtk-rs 0.18 平台栈（webkit2gtk 4.1 绑定，Tauri 2 Linux 后端固定此大版本）──
+    # proc-macro 构建期依赖，不进运行时；unmaintained 无 CVE。
+    # 脱离路径：webkit2gtk-rs 发布绑定 gtk-rs 0.19+ 的版本后整体升级
+    "RUSTSEC-2024-0370", # proc-macro-error 1.0.4 unmaintained（glib-macros/gtk3-macros）
+    # unsound 点在 glib::VariantStrIter 的两个迭代器 impl，本仓不使用 GVariant
+    # 字符串迭代（grep VariantStrIter 零命中）；无内存安全问题触达面
+    "RUSTSEC-2024-0429", # glib 0.18.5 VariantStrIter unsound
+
+    # ── tauri → tauri-runtime-wry 传递依赖（unic-* 文本分段库，已归档无 fork 接管）──
+    # 纯文本属性/区间数据查询，无网络/反序列化面；Tauri 升级前无独立升级路径
+    "RUSTSEC-2025-0075", # unic-char-range 0.9.0 unmaintained
+    "RUSTSEC-2025-0080", # unic-common 0.9.0 unmaintained
+    "RUSTSEC-2025-0081", # unic-char-property 0.9.0 unmaintained
+    "RUSTSEC-2025-0098", # unic-ucd-version 0.9.0 unmaintained
+    "RUSTSEC-2025-0100", # unic-ucd-ident 0.9.0 unmaintained
+]
+
+# 评审日期：2026-09-24（R1 供应链加固）
+# 评审时已清零的真实 CVE（勿再加回）：
+#   RUSTSEC-2026-0258 h2 0.3   —— 关 readability 默认 reqwest feature，reqwest 0.11 整链移除
+#   RUSTSEC-2026-0285 rustls    —— cargo update -p rustls → 0.23.45
+#   RUSTSEC-2023-0071 rsa 0.9  —— sqlx 关 default-features，mysql/postgres+TLS 栈移除

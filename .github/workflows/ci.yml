@@ -19,6 +19,9 @@ jobs:
         run: npm ci
       - name: ESLint
         run: npm run lint
+      # P2-4 供应链：npm 依赖漏洞扫描（high+ 即失败）
+      - name: npm audit
+        run: npm audit --audit-level=high
       - name: 类型检查 + 构建
         run: npm run build
 
@@ -54,3 +57,18 @@ jobs:
       - name: cargo test
         working-directory: src-tauri
         run: cargo test
+
+  security:
+    name: 供应链审计（cargo-audit）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # P2-4：RustSec 公告扫描。忽略清单与评审理由在 src-tauri/audit.toml，
+      # 新公告默认使本步失败；升级 tauri/gtk-rs 后须复核忽略项
+      - name: 安装 cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: cargo audit
+        working-directory: src-tauri
+        run: cargo audit --color never
