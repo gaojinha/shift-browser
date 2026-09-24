@@ -3,14 +3,16 @@
 // 设置项存 settings 表（key-value），保存即生效
 import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import { setWebviewVisible } from '../utils/webview'
 import { useSettingsStore } from '../stores/settings'
+import { useSettingsSet } from '../composables/useSettingsSet'
 import { useExtensionsStore } from '../stores/extensions'
 import { useToastStore } from '../stores/toast'
-import type { Extension } from '../types/extension'
 import SelfCheckSection from './settings/SelfCheckSection.vue'
 import AboutSection from './settings/AboutSection.vue'
+import AiSection from './settings/AiSection.vue'
+import ExtensionsSection from './settings/ExtensionsSection.vue'
+import ApiSection from './settings/ApiSection.vue'
 // 搜索引擎清单（单一来源，与地址栏/新标签页/开放 API 同源）
 import { SEARCH_ENGINES } from '../constants'
 
@@ -43,36 +45,6 @@ const SECTIONS = [
   { id: 'selfcheck', icon: 'activity', label: '自检' },
   { id: 'about', icon: 'info', label: '关于' },
 ]
-
-// SelfCheck / About 逻辑已移至 settings/SelfCheckSection.vue、AboutSection.vue
-const aiKeyInput = ref('')
-const hasAiKey = () => {
-  const v = settingsStore.get('ai_api_key')
-  return v !== '' && v !== undefined
-}
-async function onAiKeyChange() {
-  const v = aiKeyInput.value.trim()
-  if (v) {
-    await settingsStore.set('ai_api_key', v)
-  }
-  aiKeyInput.value = ''
-}
-
-// AI Provider 列表（阶段 1.2：多 provider 抽象，设置页可配）
-const aiProviders = ref<Array<{ id: string; name: string; configured: boolean; description: string }>>([])
-async function loadAiProviders() {
-  try {
-    aiProviders.value = await invoke('ai_list_providers')
-  } catch (e) {
-    console.error('[settings] 加载 provider 列表失败:', e)
-  }
-}
-watch(
-  () => props.show,
-  (v) => {
-    if (v) loadAiProviders()
-  },
-)
 
 // ---- MCP 工具层（阶段 1.3）：server 配置 + 工具列表 + 手动调用 + 审计 ----
 interface McpServer {
@@ -229,10 +201,6 @@ watch(
         loadVaultStatus()
         // 上云 E2E 加密同步状态（第 45 章）
         loadSyncStatus()
-        // WebMCP polyfill 试验开关（阶段 1.5）
-        loadWebmcpPolyfill()
-        // 打开时清空 AI Key 输入框：不回显掩码，避免用户无意把掩码写回库
-        aiKeyInput.value = ''
         // 默认浏览器状态（通用分区）
         loadDefaultBrowser()
         // MCP 工具配置（阶段 1.3）
@@ -385,98 +353,8 @@ async function onClearBrowsingData() {
 }
 
 // 扩展管理：加载路径输入
-const extPath = ref('')
-const extError = ref('')
-const extLoading = ref(false)
 
-// 开放 API：一次性门票打开状态面板 / token 热轮换
-const dashboardOpening = ref(false)
-const rotatingToken = ref(false)
-const rotatedToken = ref('')
-
-async function openDashboard() {
-  if (dashboardOpening.value) return
-  dashboardOpening.value = true
-  try {
-    const port = settingsStore.get('api_http_port') || '19701'
-    const ticket = await invoke<string>('create_dashboard_ticket')
-    await openUrl(`http://127.0.0.1:${port}/?ticket=${encodeURIComponent(ticket)}`)
-    useToastStore().success('状态面板已在浏览器打开（门票 5 分钟内一次有效）')
-  } catch (e) {
-    console.error('[settings] 打开状态面板失败:', e)
-    useToastStore().error('打开状态面板失败')
-  } finally {
-    dashboardOpening.value = false
-  }
-}
-
-async function rotateApiToken() {
-  if (rotatingToken.value) return
-  if (
-    !window.confirm('轮换后旧 token 立即失效，正在调用 API 的程序需换成新 token。确定轮换？')
-  ) {
-    return
-  }
-  rotatingToken.value = true
-  try {
-    rotatedToken.value = await invoke<string>('rotate_api_token')
-    useToastStore().success('API token 已轮换，请立即复制保存')
-  } catch (e) {
-    console.error('[settings] 轮换 API token 失败:', e)
-    useToastStore().error('轮换 API token 失败')
-  } finally {
-    rotatingToken.value = false
-  }
-}
-
-async function copyRotatedToken() {
-  try {
-    await navigator.clipboard.writeText(rotatedToken.value)
-    useToastStore().success('新 token 已复制')
-  } catch (e) {
-    console.error('[settings] 复制 token 失败:', e)
-    useToastStore().error('复制失败，请手动选择文本复制')
-  }
-}
-
-async function onSet(key: string, value: string) {
-  await settingsStore.set(key, value)
-  // 书签栏显隐切换需同步通知 Rust 侧重算 top_offset
-  if (key === 'show_bookmarks_bar') {
-    try {
-      await invoke('set_bookmarks_bar_visible', { visible: value === 'true' })
-    } catch (e) {
-      console.error('[settings] 书签栏显隐同步失败:', e)
-      useToastStore().error('书签栏切换失败')
-    }
-  }
-  // 垂直标签切换：通知 Rust 重算内容区几何（top 与 left 都变）
-  if (key === 'vertical_tabs') {
-    try {
-      await invoke('set_vertical_tabs', { active: value === 'true' })
-    } catch (e) {
-      console.error('[settings] 标签栏方向同步失败:', e)
-      useToastStore().error('标签栏方向切换失败')
-    }
-  }
-  // 网络层拦截规则 / 自定义请求头 / GPC 开关：落盘到扩展文件（阶段3.2；热更新，约 2 秒生效）
-  if (key === 'net_block_rules' || key === 'net_headers' || key === 'gpc_header') {
-    try {
-      await invoke('sync_ext_rules')
-    } catch (e) {
-      console.error('[settings] 写扩展规则/请求头文件失败:', e)
-      useToastStore().error('保存网络层配置失败')
-    }
-  }
-  // 启动页相关设置：保存后重新生成新标签页 HTML
-  if (key === 'show_bg' || key === 'font_size' || key === 'search_engine') {
-    try {
-      await invoke('refresh_newtab')
-    } catch (e) {
-      console.error('[settings] 启动页刷新失败:', e)
-    }
-  }
-}
+const { onSet } = useSettingsSet()
 
 async function onClearHistory() {
   await settingsStore.clearHistory()
@@ -484,46 +362,6 @@ async function onClearHistory() {
   setTimeout(() => (clearedMsg.value = ''), 2000)
 }
 
-/** 加载扩展（目录或 manifest.json 路径） */
-async function onLoadExtension() {
-  const path = extPath.value.trim()
-  if (!path) {
-    extError.value = '请输入扩展目录或 manifest.json 路径'
-    return
-  }
-  extLoading.value = true
-  extError.value = ''
-  try {
-    await extensionsStore.loadExtension(path)
-    extPath.value = ''
-  } catch (e) {
-    extError.value = String(e)
-  } finally {
-    extLoading.value = false
-  }
-}
-
-/** 切换启用状态 */
-async function onToggleExtension(e: Extension) {
-  try {
-    await extensionsStore.setEnabled(e.id, !e.enabled)
-  } catch (err) {
-    console.error('[settings] 切换扩展状态失败:', err)
-    useToastStore().error('切换扩展状态失败')
-  }
-}
-
-/** 删除扩展 */
-async function onDeleteExtension(id: number) {
-  try {
-    await extensionsStore.deleteExtension(id)
-  } catch (err) {
-    console.error('[settings] 删除扩展失败:', err)
-    useToastStore().error('删除扩展失败')
-  }
-}
-
-/** 隐私防护档位（off / standard / strict），默认标准档 */
 const privacyLevel = computed(() => {
   const l = settingsStore.get('privacy_shield_level')
   if (l === 'off' || l === 'standard' || l === 'strict') return l
@@ -896,28 +734,6 @@ async function onToggleAdblock() {
   }
 }
 
-/** WebMCP polyfill 试验开关（阶段 1.5，默认关）：捕获页面暴露的 WebMCP 工具声明 */
-const webmcpPolyfill = ref(false)
-async function loadWebmcpPolyfill() {
-  try {
-    webmcpPolyfill.value = await invoke<boolean>('get_webmcp_polyfill')
-  } catch (e) {
-    console.error('[settings] 读取 WebMCP polyfill 开关失败:', e)
-  }
-}
-async function onToggleWebmcpPolyfill() {
-  const next = !webmcpPolyfill.value
-  webmcpPolyfill.value = next
-  try {
-    await invoke('set_webmcp_polyfill', { enabled: next })
-    useToastStore().success(next ? 'WebMCP polyfill 已开启（刷新页面后生效）' : 'WebMCP polyfill 已关闭')
-  } catch (e) {
-    webmcpPolyfill.value = !next
-    console.error('[settings] WebMCP polyfill 切换失败:', e)
-    useToastStore().error('WebMCP polyfill 切换失败')
-  }
-}
-
 /** 用户自定义广告关键词 */
 const customKeywords = ref<string[]>([])
 const newKeyword = ref('')
@@ -1232,62 +1048,7 @@ async function onRemoveKeyword(k: string) {
           </div>
 
           <!-- AI 助手 -->
-          <div v-if="activeSection === 'ai'" class="settings-scroll">
-            <div class="card">
-              <div class="card-title"><AppIcon name="sparkles" :size="14" /> AI 助手</div>
-              <div class="field">
-                <label>推理服务（Provider）</label>
-                <select
-                  :value="settingsStore.get('ai_provider') || 'agnes'"
-                  @change="onSet('ai_provider', ($event.target as HTMLSelectElement).value)"
-                >
-                  <option
-                    v-for="p in aiProviders"
-                    :key="p.id"
-                    :value="p.id"
-                    :disabled="p.id === 'local'"
-                  >
-                    {{ p.name }}{{ p.id === 'local' ? '（暂缓）' : '' }}
-                  </option>
-                  <option v-if="aiProviders.length === 0" value="agnes">AGNES 云端</option>
-                </select>
-                <div class="field-hint" v-if="settingsStore.get('ai_provider') === 'local'">
-                  本地模型集成暂缓（2026-09-19 决策），请选择 AGNES 云端。
-                </div>
-              </div>
-              <div class="field">
-                <label>模型</label>
-                <select
-                  :value="settingsStore.get('ai_model')"
-                  @change="onSet('ai_model', ($event.target as HTMLSelectElement).value)"
-                >
-                  <option value="agnes-2.0-flash">agnes-2.0-flash（推荐）</option>
-                  <option value="agnes-2.5-pro">agnes-2.5-pro</option>
-                  <option value="agnes-2.5-flash">agnes-2.5-flash（可能超时）</option>
-                </select>
-              </div>
-              <div class="field">
-                <label>API 地址</label>
-                <input
-                  type="text"
-                  :value="settingsStore.get('ai_base_url')"
-                  placeholder="https://apihub.agnes-ai.com/v1"
-                  spellcheck="false"
-                  @change="onSet('ai_base_url', ($event.target as HTMLInputElement).value.trim())"
-                />
-              </div>
-              <div class="field">
-                <label>API Key</label>
-                <input
-                  type="password"
-                  v-model="aiKeyInput"
-                  :placeholder="hasAiKey() ? '已配置（不回显），留空保持不变' : '留空使用环境变量 AGNES_API_KEY'"
-                  spellcheck="false"
-                  @change="onAiKeyChange"
-                />
-              </div>
-            </div>
-          </div>
+          <AiSection v-if="activeSection === 'ai'" />
 
           <!-- MCP 工具（阶段 1.3：AI 面板可调用外部工具） -->
           <div v-if="activeSection === 'mcp'" class="settings-scroll">
@@ -1364,45 +1125,7 @@ async function onRemoveKeyword(k: string) {
           </div>
 
           <!-- 扩展 -->
-          <div v-if="activeSection === 'extensions'" class="settings-scroll">
-            <div class="card">
-              <div class="card-title"><AppIcon name="puzzle" :size="14" /> 扩展</div>
-              <div class="ext-load-row">
-                <input
-                  v-model="extPath"
-                  type="text"
-                  placeholder="扩展目录或 manifest.json 路径"
-                  spellcheck="false"
-                  @keyup.enter="onLoadExtension"
-                />
-                <button class="mini-btn primary" :disabled="extLoading" @click="onLoadExtension">
-                  {{ extLoading ? '加载中…' : '加载' }}
-                </button>
-              </div>
-              <div v-if="extError" class="ext-error">{{ extError }}</div>
-              <div class="ext-list" v-if="extensionsStore.list.length > 0">
-                <div v-for="e in extensionsStore.list" :key="e.id" class="ext-item">
-                  <div class="ext-info">
-                    <span class="ext-name">{{ e.name }}</span>
-                    <span class="ext-desc">
-                      {{ e.version ? 'v' + e.version : '' }}
-                      {{ e.description ? '· ' + e.description : '' }}
-                    </span>
-                  </div>
-                  <div class="ext-actions">
-                    <span v-if="e.js_count" class="ext-badge">JS</span>
-                    <span v-if="e.css_count" class="ext-badge">CSS</span>
-                    <label class="switch">
-                      <input type="checkbox" :checked="e.enabled" @change="onToggleExtension(e)" />
-                      <span class="slider"></span>
-                    </label>
-                    <button class="mini-btn danger" @click="onDeleteExtension(e.id)">删除</button>
-                  </div>
-                </div>
-              </div>
-              <div v-else class="ext-empty">还没有扩展，输入路径加载一个试试</div>
-            </div>
-          </div>
+          <ExtensionsSection v-if="activeSection === 'extensions'" />
 
           <!-- 隐私防护 -->
           <div v-if="activeSection === 'privacy'" class="settings-scroll">
@@ -1864,126 +1587,7 @@ async function onRemoveKeyword(k: string) {
             </div>
           </div>
           <!-- 开放 API -->
-          <div v-if="activeSection === 'api'" class="settings-scroll">
-
-            <!-- ⑤ 开放 API（高级） -->
-            <div class="card">
-              <div class="card-title"><AppIcon name="plug" :size="14" /> 开放 API（高级）</div>
-              <div class="field">
-                <label>允许 API 执行 JS（危险）</label>
-                <span class="field-desc">
-                  开放 API 的 eval 命令；默认关。开启后本机脚本/持 token 者可执行任意 JS
-                </span>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('api_allow_eval') === 'true'"
-                    @change="onSet('api_allow_eval', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-                  />
-                  <span class="slider"></span>
-                </label>
-              </div>
-              <div class="field">
-                <label>开放 API 端口</label>
-                <input
-                  class="task-num"
-                  type="number"
-                  min="1024"
-                  max="65535"
-                  :value="settingsStore.get('api_http_port') || '19701'"
-                  @change="onSet('api_http_port', ($event.target as HTMLInputElement).value)"
-                />
-                <span class="field-desc">默认 19701；改完重启生效</span>
-              </div>
-              <div class="field">
-                <label>开放 API 绑局域网（危险）</label>
-                <span class="field-desc">
-                  默认只绑 127.0.0.1；开启后局域网可达（务必保管 token）；改完重启生效
-                </span>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('api_bind_lan') === 'true'"
-                    @change="onSet('api_bind_lan', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-                  />
-                  <span class="slider"></span>
-                </label>
-              </div>
-              <div class="field">
-                <label>API IP 白名单</label>
-                <input
-                  class="task-num api-allowlist-input"
-                  type="text"
-                  placeholder="192.168.1.0/24, 10.0.0.5"
-                  :value="settingsStore.get('api_allowed_ips')"
-                  @change="onSet('api_allowed_ips', ($event.target as HTMLInputElement).value)"
-                />
-                <span class="field-desc">
-                  绑局域网时必填；逗号分隔精确 IP 或 CIDR（如 192.168.1.0/24）；改完重启生效
-                </span>
-              </div>
-              <div class="field">
-                <label>允许模型网关（消耗额度）</label>
-                <span class="field-desc">
-                  POST /v1/chat/completions → 转发到 AI provider，其它程序可用同一模型（耗你的额度）
-                </span>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('api_model_gateway') === 'true'"
-                    @change="onSet('api_model_gateway', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-                  />
-                  <span class="slider"></span>
-                </label>
-              </div>
-              <div class="field">
-                <label>状态面板与 token</label>
-                <div class="api-actions">
-                  <button
-                    class="selfcheck-btn"
-                    :disabled="dashboardOpening"
-                    @click="openDashboard"
-                  >
-                    {{ dashboardOpening ? '打开中…' : '在浏览器打开状态面板' }}
-                  </button>
-                  <button
-                    class="selfcheck-btn"
-                    :disabled="rotatingToken"
-                    @click="rotateApiToken"
-                  >
-                    {{ rotatingToken ? '轮换中…' : '轮换 API token' }}
-                  </button>
-                </div>
-                <span class="field-desc">
-                  打开面板走一次性门票（5 分钟有效、用后即焚），token 不会出现在网址里；
-                  轮换后旧 token 立即失效，使用 API 的程序需更新
-                </span>
-                <div v-if="rotatedToken" class="api-token-result">
-                  <code>{{ rotatedToken }}</code>
-                  <button class="selfcheck-btn" @click="copyRotatedToken">复制新 token</button>
-                </div>
-              </div>
-              <div class="field webmcp-field" :class="{ 'experiment-tag': webmcpPolyfill }">
-                <label>
-                  WebMCP polyfill <span class="exp-badge" v-if="webmcpPolyfill">试验中</span>
-                </label>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="webmcpPolyfill"
-                    @change="onToggleWebmcpPolyfill"
-                  />
-                  <span class="slider"></span>
-                </label>
-                <div class="kw-hint webmcp-hint">
-                  试验特性（阶段 1.5）· 默认关。开启后向页面注入
-                  <code>navigator.modelContext.registerTool</code> polyfill，捕获网站声明的 WebMCP
-                  工具，让 AI 助手能感知「网站为智能体暴露了哪些工具」。仅捕获声明、不伪造执行
-                  能力，试验完不留痕，可随时关闭。
-                </div>
-              </div>
-            </div>
-          </div>
+          <ApiSection v-if="activeSection === 'api'" />
           <!-- 自检 -->
           <SelfCheckSection v-if="activeSection === 'selfcheck'" />
           <AboutSection v-if="activeSection === 'about'" />
@@ -2102,41 +1706,7 @@ async function onRemoveKeyword(k: string) {
   opacity: 0.5;
   cursor: default;
 }
-.api-allowlist-input {
-  width: 100%;
-  box-sizing: border-box;
-}
-.api-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 6px 0 2px;
-}
 .api-actions .selfcheck-btn,
-.api-token-result .selfcheck-btn {
-  float: none;
-  flex-shrink: 0;
-  padding: 5px 12px;
-}
-.api-token-result {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
-.api-token-result code {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 8px;
-  font-size: 12px;
-  background: var(--bg-secondary, #f5f5f5);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  user-select: all;
-}
 .card-title {
   display: flex;
   align-items: center;
