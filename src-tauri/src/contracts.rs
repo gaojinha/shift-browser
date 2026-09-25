@@ -55,7 +55,7 @@ pub mod settings {
         SettingDef { key: "record_history", default: "false", kind: Kind::Bool, sensitive: false, desc: "记录浏览历史（隐私优先默认关）" },
         SettingDef { key: "font_size", default: "16", kind: Kind::Int, sensitive: false, desc: "启动页字号" },
         SettingDef { key: "show_bg", default: "true", kind: Kind::Bool, sensitive: false, desc: "启动页显示壁纸" },
-        SettingDef { key: "render_disable_dmabuf", default: "true", kind: Kind::Bool, sensitive: false, desc: "禁用 DMA-BUF 渲染（修视频闪烁，默认开；改后需重启）" },
+        SettingDef { key: "render_disable_dmabuf", default: "false", kind: Kind::Bool, sensitive: false, desc: "禁用 DMA-BUF 渲染（修视频闪烁，但禁用会导致微博等重合成站点崩溃，默认关；改后需重启）" },
         SettingDef { key: "show_lunar", default: "true", kind: Kind::Bool, sensitive: false, desc: "启动页显示农历" },
         SettingDef { key: "show_quote", default: "true", kind: Kind::Bool, sensitive: false, desc: "启动页显示每日一句" },
         SettingDef { key: "show_weather", default: "true", kind: Kind::Bool, sensitive: false, desc: "启动页显示天气" },

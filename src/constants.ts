@@ -41,7 +41,7 @@ export const SETTINGS_SCHEMA = {
   record_history: { default: 'false', kind: 'bool', sensitive: false, desc: '记录浏览历史（隐私优先默认关）' },
   font_size: { default: '16', kind: 'int', sensitive: false, desc: '启动页字号' },
   show_bg: { default: 'true', kind: 'bool', sensitive: false, desc: '启动页显示壁纸' },
-  render_disable_dmabuf: { default: 'true', kind: 'bool', sensitive: false, desc: '禁用 DMA-BUF 渲染（修视频闪烁，默认开；改后需重启）' },
+  render_disable_dmabuf: { default: 'false', kind: 'bool', sensitive: false, desc: '禁用 DMA-BUF 渲染（修视频闪烁，但禁用会导致微博等重合成站点崩溃，默认关；改后需重启）' },
   show_lunar: { default: 'true', kind: 'bool', sensitive: false, desc: '启动页显示农历' },
   show_quote: { default: 'true', kind: 'bool', sensitive: false, desc: '启动页显示每日一句' },
   show_weather: { default: 'true', kind: 'bool', sensitive: false, desc: '启动页显示天气' },

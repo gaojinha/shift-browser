@@ -58,22 +58,23 @@ pub(crate) fn apply() {
         log::info!("[ShiftBrowser] 已注入 WEBKIT_DMABUF_RENDERER_BUFFER_FORMAT=XR24:0（启动入口兜底，可被环境变量覆盖）");
     }
 
-    // ===== DMA-BUF 渲染器：**由设置控制**（2026-09-25）=====
-    // 设置项 `render_disable_dmabuf`（默认 true）。历史与实测见下：
-    // 【历史】2026-09-23 曾回退为"不禁用"：当时定位到 core dump 在 WebKit 自身的
-    //   AcceleratedBackingStore::update()（生命周期竞态），而禁用 DMA-BUF 会走
-    //   SHM/EGLImage 兜底路径，**理论上**更容易踩中该竞态。
+    // ===== DMA-BUF 渲染器：**由设置控制**，默认不禁用（2026-09-26 反转）=====
+    // 【2026-09-26 崩溃根因定论】WEBKIT_DISABLE_DMABUF_RENDERER=1 会使
+    //   rendererBufferTransportMode() 为空 → AcceleratedBackingStore::create()
+    //   返回 nullptr；微博等站点触发 enterAcceleratedCompositingMode 时，
+    //   WebKitWebViewBase.cpp:2904 对空 backingStore 调 update()（release 无 ASSERT）
+    //   → UI 主进程 SIGSEGV，整个浏览器退出（微博 100% 复现；不禁用则存活）。
+    //   MiniBrowser 带同变量不崩仅因其测试页未进入合成模式。
     //
-    // 【2026-09-25 实测反转】Intel HD Graphics 630 上对照测试：
-    //   - 不禁用 DMA-BUF：视频**闪烁**，视频进程 CPU **111%** / 内存 1172MB
-    //   - 禁用 DMA-BUF：  **不闪**，     视频进程 CPU **79%**  / 内存 1006MB
-    //   即禁用后**既修闪烁、又降 CPU 29% / 内存 166MB**。实测无崩溃。
+    // 【历史】2026-09-25 曾实测禁用 DMA-BUF 修复视频闪烁 + CPU 降 29%——
+    //   但代价是加速合成路径空指针崩溃。**崩溃（P0）优先于闪烁（P2）**，
+    //   故默认改回不禁用；用户仍可在「设置 → 高级 → 兼容性」手动开启
+    //   （开启即接受微博类重合成站点崩溃风险）。
     //
-    // 结论：默认禁用；用户可在「设置 → 外观」关闭（若遇崩溃可回退默认路径）。
     // 环境变量优先（用户显式设置则不覆盖）。
     #[cfg(target_os = "linux")]
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        let disable = read_setting_bool("render_disable_dmabuf", true);
+        let disable = read_setting_bool("render_disable_dmabuf", false);
         if disable {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
