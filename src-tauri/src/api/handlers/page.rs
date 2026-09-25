@@ -630,7 +630,10 @@ pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
 
     // 2b) O1 重定向逐跳/最终 URL 复核：加载后的真实 URL 再跑一遍 SSRF 守卫。
     //     公开页跳转到内网（重定向绕过入口校验）→ 读取前拦截并回收，绝不让内网内容外流。
-    if final_url != url {
+    //     注意：仅当 final_url 是 http/https 且与入口不同才复核——新标签未加载完时为
+    //     `about:blank`（非 http），不应触发拦截（修复 2026-09-25：曾误伤所有读取）。
+    let final_is_http = final_url.starts_with("http://") || final_url.starts_with("https://");
+    if final_is_http && final_url != url {
         if let Err(resp) = guard_url(app, &final_url).await {
             // 复核失败：回收刚开的标签（复用标签不关，避免误关用户标签）
             if !reused {
@@ -670,10 +673,23 @@ pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
         }
     }
 
+    // final_url：优先用 read_page 采集到的真实 URL（探测时可能还是 about:blank）
+    let final_url_resp = {
+        let from_read = read_resp
+            .get("data")
+            .and_then(|d| d.get("url"))
+            .and_then(|u| u.as_str())
+            .unwrap_or("");
+        if from_read.starts_with("http") {
+            from_read.to_string()
+        } else {
+            final_url.clone()
+        }
+    };
     let data = json!({
         "tab_id": tab_id,
         "url": url,
-        "final_url": final_url,
+        "final_url": final_url_resp,
         "title": read_resp.get("data").and_then(|d| d.get("title")).cloned().unwrap_or(json!("")),
         "ready_state": ready_state,
         "closed": close_after,
