@@ -30,6 +30,7 @@ pub mod fuzz_bridge {
 }
 mod mcp_cmd;
 mod netmon;
+mod net_guard;
 mod newtab;
 mod perms;
 mod reader;

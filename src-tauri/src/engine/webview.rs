@@ -145,6 +145,8 @@ pub trait WebViewBackend {
     fn enable_console_output(&self);
     /// 挂载下载策略（不可显示 MIME → 下载）
     fn attach_download_policy(&self);
+    /// O1-b：挂载逐跳导航 SSRF 守卫（仅约束 AI 标签 origin=ai）
+    fn attach_navigation_guard(&self, app: tauri::AppHandle, tab_id: String);
 }
 
 /// WebKitGTK 后端的 trait 实现（唯一出现 WebKitGTK 类型的地方）
@@ -191,6 +193,9 @@ impl WebViewBackend for WebView {
     fn attach_download_policy(&self) {
         attach_download_policy(self);
     }
+    fn attach_navigation_guard(&self, app: tauri::AppHandle, tab_id: String) {
+        attach_navigation_guard(self, app, tab_id);
+    }
 }
 
 
@@ -210,6 +215,60 @@ pub fn attach_download_policy(wv: &WebView) {
                     return true;
                 }
             }
+        }
+        false
+    });
+}
+
+/// O1-b：AI 标签（origin=ai）逐跳导航 SSRF 守卫。
+///
+/// 每次导航（含重定向的**每一跳**）若目标为内网 / 私有地址且未进 `api_allowed_ips` 白名单，
+/// 直接拒绝（`decision.ignore`）。仅约束 AI 标签；用户标签不受影响（用户可正常访问内网服务）。
+/// 白名单取进程内缓存（`net_guard::set_allowlist`，由 `open_and_read` 每次查库刷新）。
+pub fn attach_navigation_guard(wv: &WebView, app: tauri::AppHandle, tab_id: String) {
+    use gtk::glib::prelude::Cast;
+    use webkit2gtk::{
+        NavigationPolicyDecision, NavigationPolicyDecisionExt, PolicyDecisionExt,
+        PolicyDecisionType, URIRequestExt,
+    };
+    use tauri::Manager;
+    wv.connect_decide_policy(move |_wv, decision, decision_type| {
+        if decision_type != PolicyDecisionType::NavigationAction {
+            return false;
+        }
+        let Some(nav) = decision.downcast_ref::<NavigationPolicyDecision>() else {
+            return false;
+        };
+        let Some(action) = nav.navigation_action() else {
+            return false;
+        };
+        let Some(req) = action.request() else {
+            return false;
+        };
+        let Some(uri) = req.uri().map(|g| g.to_string()) else {
+            return false;
+        };
+        // 只约束 AI 标签（origin=ai）；用户标签放行
+        let is_ai = app
+            .try_state::<crate::tabs::TabManager>()
+            .map(|s| {
+                s.all_tabs()
+                    .iter()
+                    .any(|t| t.id == tab_id && t.origin == "ai")
+            })
+            .unwrap_or(false);
+        if !is_ai {
+            return false;
+        }
+        // host_permitted：公网恒 true；私有需白名单覆盖 → false 即拦截
+        let host = crate::net_guard::url_host(&uri).unwrap_or_default();
+        if !host.is_empty() && !crate::net_guard::host_permitted(&host) {
+            log::warn!(
+                "[ssrf] AI 标签导航到内网被拦截（逐跳）: {}",
+                crate::redact_url(&uri)
+            );
+            decision.ignore();
+            return true;
         }
         false
     });

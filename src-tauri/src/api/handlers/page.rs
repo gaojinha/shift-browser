@@ -394,45 +394,6 @@ pub(super) async fn read_status(app: &AppHandle, req: &Value) -> Value {
     }})
 }
 
-/// 内网 / 私有地址判定（open_and_read SSRF 第一层：IP 字面量 + localhost）。
-///
-/// 方案：docs/开放API-页面读取能力完善方案_2026-09-25.md（M 类内网 URL 策略 / O6）。
-/// 域名解析到内网的情形（DNS rebinding）留待 O1 后续用解析后 IP 复核。
-pub(super) fn host_is_private(host: &str) -> bool {
-    let h = host
-        .trim()
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .to_ascii_lowercase();
-    if h == "localhost" || h.ends_with(".localhost") {
-        return true;
-    }
-    match h.parse::<std::net::IpAddr>() {
-        Ok(ip) => ip_is_private(ip),
-        Err(_) => false,
-    }
-}
-
-fn ip_is_private(ip: std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(v4) => {
-            v4.is_private()
-                || v4.is_loopback()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || v4.is_documentation()
-                || v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64 // 100.64.0.0/10 CGNAT
-        }
-        std::net::IpAddr::V6(v6) => {
-            v6.is_loopback()
-                || v6.is_unspecified()
-                || (v6.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 ULA
-                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
-        }
-    }
-}
-
 /// open_and_read 的内网 SSRF 守卫（入口 + 最终 URL 复核共用）。
 ///
 /// 返回 `Ok(())` 放行；`Err(响应)` 为拒绝（非 http/https、或内网地址且未进白名单）。
@@ -450,10 +411,7 @@ async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
     let Some(host) = parsed.host_str().map(|h| h.to_string()) else {
         return Err(AppError::validation("URL 缺少主机名").error_json());
     };
-    if !host_is_private(&host) {
-        return Ok(());
-    }
-    // 内网地址：仅当用户显式配置了非空 api_allowed_ips 且覆盖该地址时放行（信任面内）
+    // 内网 / 私有地址：查库取白名单（同时刷新进程内缓存，供 GTK 导航守卫同步读取）
     let allowlist: String = {
         let db = app.state::<crate::db::Db>();
         sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = 'api_allowed_ips'")
@@ -463,8 +421,8 @@ async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
             .flatten()
             .unwrap_or_default()
     };
-    let covered = !allowlist.trim().is_empty() && crate::api::auth::ip_allowed(&host, &allowlist);
-    if covered {
+    crate::net_guard::set_allowlist(&allowlist);
+    if crate::net_guard::host_permitted(&host) {
         Ok(())
     } else {
         Err(AppError::permission(format!(
@@ -709,47 +667,6 @@ fn prune_screenshots(dir: &std::path::Path, keep: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// SSRF 守卫（open_and_read · M 类内网 URL 策略）：私有/内网地址必须被识别。
-    #[test]
-    fn host_is_private_detects_internal_targets() {
-        // 必须判定为内网（拒绝）
-        for h in [
-            "localhost",
-            "app.localhost",
-            "127.0.0.1",
-            "127.1.2.3",
-            "10.0.0.5",
-            "172.16.0.1",
-            "172.31.255.255",
-            "192.168.1.100",
-            "169.254.1.1",
-            "0.0.0.0",
-            "100.64.0.1",
-            "[::1]",
-            "::1",
-            "fc00::1",
-            "fe80::1",
-        ] {
-            assert!(host_is_private(h), "{h} 应判定为内网/私有");
-        }
-    }
-
-    /// 公网地址必须放行（不得误杀）。
-    #[test]
-    fn host_is_private_allows_public_targets() {
-        for h in [
-            "example.com",
-            "www.baidu.com",
-            "8.8.8.8",
-            "1.1.1.1",
-            "172.32.0.1",  // 172.16/12 之外
-            "192.169.1.1", // 192.168/16 之外
-            "2001:4860:4860::8888",
-        ] {
-            assert!(!host_is_private(h), "{h} 不应判定为内网");
-        }
-    }
 
     /// 截图治理（O2）：超出 keep 张时按时间淘汰最旧，非 shot-*.png 不受影响。
     #[test]

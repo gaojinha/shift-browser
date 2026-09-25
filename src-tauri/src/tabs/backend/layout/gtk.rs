@@ -33,6 +33,8 @@ impl TabManager {
   ) -> Result<(), String> {
     let (tx, rx) = std::sync::mpsc::channel();
     let child = child.clone();
+    // O1-b：逐跳 SSRF 守卫需按标签来源（origin=ai）判定，先取本 webview 的标签 id
+    let guard_tab_id = child.label().trim_start_matches("tab-").to_string();
 
     child
       .with_webview(move |pwv| {
@@ -67,6 +69,8 @@ impl TabManager {
           // 这里接 decide-policy：对不支持的 MIME 调 decision.download()，
           // 触发 WebContext 的 download-started（已注册，落 ~/Downloads + 记录 downloads 表）。
           child_gtk.attach_download_policy();
+          // O1-b：AI 标签（origin=ai）逐跳导航 SSRF 守卫（内网地址未进白名单则拒绝）
+          child_gtk.attach_navigation_guard(app.clone(), guard_tab_id.clone());
           // 监听 child webview 的鼠标点击事件
           child_gtk.connect_button_press_event(|wv, event| {
               let (x, y) = (event.position().0, event.position().1);
