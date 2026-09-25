@@ -70,19 +70,10 @@ impl TabManager {
           .incognito(private)
           // Linux：显式指定 web extensions 目录，否则 Tauri 的 IPC 桥依赖的 WebKit
           // web extension 不会加载，__TAURI_INTERNALS__ 注入失败。
-          // 修复（2026-09-25）：优先用**资源目录**（打包安装后 .so 在 /usr/lib/…/resources，
-          // exe 目录 /usr/bin 只读且无 .so，会导致无痕等 ephemeral context 建不出来）；
-          // 回退 exe 目录（开发运行场景 .so 就在 target/release 旁）。
+          // 修复（2026-09-25）：Tauri 在 Linux 用 Cargo 包名拼资源路径，与 deb 的
+          // productName 目录不一致 → 多候选探测含 .so 的目录（详见 platform::linux）。
           .extensions_path(
-            app.path()
-              .resource_dir()
-              .ok()
-              .filter(|d| d.join("libshift_web_extension.so").exists())
-              .or_else(|| {
-                std::env::current_exe()
-                  .ok()
-                  .and_then(|e| e.parent().map(|p| p.to_path_buf()))
-              })
+            crate::engine::platform::web_extensions_dir(app.path().resource_dir().ok())
               .unwrap_or_default(),
           )
           // target=_blank / window.open 新窗口请求：统一创建新标签页打开链接

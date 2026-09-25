@@ -83,28 +83,68 @@ pub fn download_dir() -> Option<std::path::PathBuf> {
     gtk::glib::user_special_dir(gtk::glib::UserDirectory::Downloads)
 }
 
+/// 定位 web extension `.so` 所在目录。
+///
+/// 修复（2026-09-25）：Tauri 在 Linux 上用 Cargo 包名（`shift-browser`）拼资源路径，
+/// 而 deb 实际安装到 `productName`（`Shift Browser`）目录 → `resource_dir()` 对不上，
+/// 导致无痕（incognito/ephemeral context）建不出来。这里改为**多候选探测**：
+///
+/// 1. Tauri resource_dir（开发运行 / 命名一致时可用）
+/// 2. `/usr/lib/<productName>`（deb/rpm 安装，productName = "Shift Browser"）
+/// 3. exe 同目录（开发运行，.so 在 target/release 旁）
+///
+/// 返回第一个含 `libshift_web_extension.so` 的目录。
+fn find_web_extensions_dir(resource_dir: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    let so = "libshift_web_extension.so";
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(res) = resource_dir {
+        candidates.push(res);
+    }
+    // deb/rpm 安装：/usr/lib/<productName>/resources
+    candidates.push(std::path::PathBuf::from("/usr/lib/Shift Browser/resources"));
+    candidates.push(std::path::PathBuf::from("/usr/lib/Shift Browser"));
+    // 开发运行：exe 同目录
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.to_path_buf());
+        }
+    }
+    candidates.into_iter().find(|d| d.join(so).exists())
+}
+
+/// 公开探测：返回含 `libshift_web_extension.so` 的目录（供 create_webview 复用）。
+pub fn web_extensions_dir(
+    resource_dir: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    find_web_extensions_dir(resource_dir)
+}
+
 /// 设置 WebKit web extensions 目录（tauri://localhost 协议依赖 web extension）
 /// 修复（2026-09-25）：打包安装后 exe 在 /usr/bin（只读、无 .so），资源 .so 在
-/// /usr/lib/…/resources。原实现"把 .so 复制到 exe 目录"在只读目录下必然失败
-/// （表现为无痕等 ephemeral context 建不出来）。改为**优先直接指向资源目录**，
-/// 仅当资源目录无 .so 时才回退 exe 目录（开发运行场景）。
+/// /usr/lib/Shift Browser/resources。原实现"把 .so 复制到 exe 目录"在只读目录下必然失败
+/// （表现为无痕等 ephemeral context 建不出来）。改为**多候选探测到含 .so 的目录**。
 /// 从 lib.rs 下沉（P0-2 补完 · 2026-09-22）。
 pub fn setup_web_extensions_dir(resource_dir: Option<std::path::PathBuf>) {
     use webkit2gtk::{WebContext, WebContextExt};
     let Some(context) = WebContext::default() else { return };
-    // 优先资源目录（打包安装场景：.so 在 resources/，exe 目录只读）
-    if let Some(res) = resource_dir.as_ref() {
-        if res.join("libshift_web_extension.so").exists() {
-            context.set_web_extensions_directory(&res.display().to_string());
-            log::info!("[ShiftBrowser] web extensions 目录（资源）: {}", res.display());
-            return;
+    match find_web_extensions_dir(resource_dir) {
+        Some(dir) => {
+            context.set_web_extensions_directory(&dir.display().to_string());
+            log::info!("[ShiftBrowser] web extensions 目录: {}", dir.display());
+        }
+        None => {
+            // 兜底：仍指 exe 目录（至少不会 panic；扩展加载失败会记 warn）
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(dir) = exe.parent() {
+                    context.set_web_extensions_directory(&dir.display().to_string());
+                    log::warn!(
+                        "[ShiftBrowser] 未找到 libshift_web_extension.so，回退 exe 目录: {}",
+                        dir.display()
+                    );
+                }
+            }
         }
     }
-    // 回退 exe 目录（开发运行场景：.so 就在 target/release 旁）
-    let Ok(exe) = std::env::current_exe() else { return };
-    let Some(dir) = exe.parent() else { return };
-    context.set_web_extensions_directory(&dir.display().to_string());
-    log::info!("[ShiftBrowser] web extensions 目录（exe）: {}", dir.display());
 }
 
 /// 第三方 Cookie 阻断策略（仅"严格档"启用）

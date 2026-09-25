@@ -16,4 +16,11 @@ pub fn download_dir() -> Option<std::path::PathBuf> {
 
 pub fn setup_web_extensions_dir(_resource_dir: Option<std::path::PathBuf>) {}
 
+/// 非 Linux 无 WebKit web extension 机制，恒 None。
+pub fn web_extensions_dir(
+    _resource_dir: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    None
+}
+
 pub fn apply_cookie_policy(_strict: bool) {}
