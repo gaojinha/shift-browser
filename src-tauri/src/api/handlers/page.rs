@@ -502,6 +502,7 @@ pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
                 url.clone(),
                 None,
                 None,
+                Some(true), // J6：AI 标签后台打开，不抢用户焦点
             )
             .await
             {

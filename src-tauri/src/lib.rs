@@ -109,7 +109,7 @@ pub fn run() {
           tokio::time::sleep(std::time::Duration::from_millis(300)).await;
           for url in urls {
             if let Some(state) = app_handle.try_state::<TabManager>() {
-              match crate::tabs::commands::create_tab(app_handle.clone(), state, url.clone(), None, None).await {
+              match crate::tabs::commands::create_tab(app_handle.clone(), state, url.clone(), None, None, None).await {
                 Ok(tab) => log::info!("[single-instance] 外部链接已打开: {}", tab.id),
                 Err(e) => log::warn!("[single-instance] 外部链接打开失败: {} ({})", redact_url(&url), e),
               }

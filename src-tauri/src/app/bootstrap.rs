@@ -262,7 +262,7 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
                 tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
                 for url in urls {
                     let state = app_handle.state::<crate::tabs::TabManager>();
-                    match crate::tabs::commands::create_tab(app_handle.clone(), state, url.clone(), None, None).await {
+                    match crate::tabs::commands::create_tab(app_handle.clone(), state, url.clone(), None, None, None).await {
                         Ok(tab) => log::info!("[default-browser] 外部链接已打开: {}", tab.id),
                         Err(e) => log::warn!("[default-browser] 外部链接打开失败: {} ({})", crate::redact_url(&url), e),
                     }

@@ -13,10 +13,13 @@ pub async fn create_tab(
     url: String,
     private: Option<bool>,
     after_active: Option<bool>,
+    // J6：后台打开（true = 不抢焦点，保持当前活动标签；默认 false = 现行为）
+    background: Option<bool>,
 ) -> CommandResult<Tab> {
     let is_private = private.unwrap_or(false);
     // 新标签插入位置：true = 插到当前活动标签之后（"在列表页右边打开"）；默认追加末尾
     let insert_after = after_active.unwrap_or(false);
+    let background = background.unwrap_or(false);
     // 隐私防护：新建标签前清洗跨站追踪参数（只影响 http/https，内部页面不受影响）
     let url = clean_tracking_params(&url);
     log::info!("[tabs] create_tab: url={}", crate::redact_url(&url));
@@ -60,7 +63,7 @@ pub async fn create_tab(
         url,
         title,
         favicon: String::new(),
-        is_active: true,
+        is_active: !background,
         is_pinned: false,
         is_muted: false,
         hibernated: false,
@@ -69,15 +72,17 @@ pub async fn create_tab(
     };
     state.touch_active(&id);
 
-    // 更新状态：新标签激活，旧标签取消激活
+    // 更新状态：新标签激活，旧标签取消激活（background 时保持当前活动标签不变）
     let old_active = {
         let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
         let mut order = state.order.lock().unwrap_or_else(|e| e.into_inner());
         let mut active = state.active_id.lock().unwrap_or_else(|e| e.into_inner());
 
         let prev = (*active).clone();
-        for t in tabs.values_mut() {
-            t.is_active = false;
+        if !background {
+            for t in tabs.values_mut() {
+                t.is_active = false;
+            }
         }
         tabs.insert(id.clone(), tab.clone());
         // 插入位置：after_active=true 时插到旧活动标签之后（无活动标签则追加末尾）
@@ -97,11 +102,18 @@ pub async fn create_tab(
             );
         }
         order.insert(pos, id.clone());
-        active.replace(id.clone())
+        if background {
+            prev
+        } else {
+            active.replace(id.clone())
+        }
     };
 
-    // 新建标签页：立即切换可见性（show 新、hide 旧），避免新 webview 透明期透出旧页面
-    if let Some(old) = old_active {
+    // 新建标签页可见性：前台标签立即切换（show 新、hide 旧），避免新 webview 透明期透出旧页面；
+    // 后台标签（J6）保持隐藏，用户当前页面继续显示，webview 仍在后台加载。
+    if background {
+        let _ = TabManager::set_webview_visible(&app, &id, false);
+    } else if let Some(old) = old_active {
         let _ = TabManager::switch_visibility(&app, &id, Some(&old));
     } else {
         let _ = TabManager::set_webview_visible(&app, &id, true);
