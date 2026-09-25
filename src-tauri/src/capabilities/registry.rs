@@ -206,6 +206,45 @@ fn registry() -> Vec<ToolDef> {
       vec![],
       Risk::Read,
     ),
+    // ===== 内容处理（P1a）：均不改变浏览器状态，按 Read 管理 =====
+    t(
+      "extract",
+      "按 CSS 选择器做结构化提取（固定模板，非任意 JS）。参数：selector（必填）、fields（默认 [\"text\"]，可选 text/href/src/alt/title/data-*）、tab_id（可选，缺省活动标签）、limit（默认 500，硬顶 5000）。返回匹配元素列表 + total/truncated。",
+      json!({
+        "selector": { "type": "string", "description": "CSS 选择器（必填，querySelectorAll）" },
+        "fields": { "type": "array", "items": { "type": "string" }, "description": "要提取的字段白名单（默认 [\"text\"]）" },
+        "tab_id": { "type": "string", "description": "目标标签 id（可选，缺省活动标签）" },
+        "limit": { "type": "integer", "description": "最多返回条数（默认 500，硬顶 5000）" }
+      }),
+      vec!["selector"],
+      Risk::Read,
+    ),
+    t(
+      "reader/extract",
+      "给 URL 抓取并净化正文（阅读模式提取，readability）。参数：url（必填）。与 open_and_read 的 article 模式区别：本命令独立于标签，直接给 URL 出正文。",
+      json!({
+        "url": { "type": "string", "description": "文章 URL（必填，http/https）" }
+      }),
+      vec!["url"],
+      Risk::Read,
+    ),
+    t(
+      "translate",
+      "翻译文本（复用本地翻译链路）。参数：text（必填）、target（可选，默认 zh-CN）。",
+      json!({
+        "text": { "type": "string", "description": "待翻译文本（必填）" },
+        "target": { "type": "string", "description": "目标语言（可选，默认 zh-CN）" }
+      }),
+      vec!["text"],
+      Risk::Read,
+    ),
+    t(
+      "content/snapshot",
+      "读取活动标签的语义快照（标题/表单/链接等结构化摘要；本地执行、不出网）。无参数。",
+      json!({}),
+      vec![],
+      Risk::Read,
+    ),
     t(
       "switch_tab",
       "切换活动标签页（窗口前置）。",
