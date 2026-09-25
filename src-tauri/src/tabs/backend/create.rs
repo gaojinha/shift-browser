@@ -24,7 +24,7 @@ impl TabManager {
             .get_window("main")
             .ok_or_else(|| "主窗口不存在".to_string())?;
 
-        let webview_url = url::resolve_webview_url(app, url)?;
+        let webview_url = url::resolve_webview_url(app, url, private)?;
 
         let top = {
             if let Some(state) = app.try_state::<TabManager>() {
