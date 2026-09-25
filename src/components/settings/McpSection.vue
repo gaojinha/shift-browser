@@ -208,6 +208,18 @@ onMounted(loadMcp)
 </template>
 
 <style scoped>
+.settings-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+}
+.settings-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.settings-scroll::-webkit-scrollbar-thumb {
+  background: var(--bg-active);
+  border-radius: 3px;
+}
 .card {
   margin-bottom: 12px;
 }
