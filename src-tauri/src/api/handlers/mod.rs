@@ -18,7 +18,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use serde_json::Value;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 
@@ -72,15 +72,42 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     ("search_history", |a, r| Box::pin(data::search_history(a, r))),
     ("get_setting", |a, r| Box::pin(data::get_setting(a, r))),
     ("list_settings", |a, r| Box::pin(data::list_settings(a, r))),
+    // 审计（K/O3）：AI 操作记录查询
+    ("audit/reads", |a, r| Box::pin(data::audit_reads(a, r))),
 ];
 
 /// 命令分发：解析后的请求 JSON + cmd 字符串 → 响应 JSON。
 /// （api.rs 的 handle() 负责 JSON 解析与只读模式闸门，这里只查表分发）
+///
+/// 附带中央审计（K 类 / O3 持久化）：所有 API 命令执行后记一条到 `ai_audit`，
+/// 使"AI 看了什么"可追溯。只记 命令/url/tab_id/结果码，**不记内容**（N5）。
 pub(crate) async fn dispatch(app: &AppHandle, req: &Value, cmd: &str) -> Value {
-    match HANDLERS.iter().find(|(name, _)| *name == cmd) {
+    let resp = match HANDLERS.iter().find(|(name, _)| *name == cmd) {
         Some((_, handler)) => handler(app, req).await,
         None => AppError::validation(format!("未知命令: {}", cmd)).error_json(),
+    };
+    record_audit(app, req, cmd, &resp).await;
+    resp
+}
+
+/// 中央审计（尽力而为）：跳过高频元命令与审计查询自身，避免噪声/自指。
+async fn record_audit(app: &AppHandle, req: &Value, cmd: &str, resp: &Value) {
+    const SKIP: &[&str] = &["capabilities/list", "skills/list", "tools", "audit/reads"];
+    if SKIP.contains(&cmd) {
+        return;
     }
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return;
+    };
+    let url = req.get("url").and_then(|v| v.as_str()).unwrap_or("");
+    let tab_id = req
+        .get("tab_id")
+        .and_then(|v| v.as_str())
+        .or_else(|| req.get("id").and_then(|v| v.as_str()))
+        .unwrap_or("");
+    let ok = resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    let error_code = resp.get("code").and_then(|v| v.as_str()).unwrap_or("");
+    crate::db::ai_audit::record(&db.pool, cmd, url, tab_id, ok, error_code).await;
 }
 
 #[cfg(test)]

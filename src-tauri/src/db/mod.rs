@@ -1,4 +1,5 @@
 // 数据库连接与迁移管理
+pub mod ai_audit;
 pub mod bookmarks;
 pub mod certificates;
 pub mod downloads;
@@ -215,6 +216,11 @@ impl Db {
                 15,
                 "feed_url_index",
                 include_str!("../../migrations/20260922000001_feed_url_index.sql"),
+            ),
+            (
+                16,
+                "ai_audit",
+                include_str!("../../migrations/20260925000000_ai_audit.sql"),
             ),
         ];
 

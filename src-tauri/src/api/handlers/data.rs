@@ -129,3 +129,18 @@ pub(super) async fn list_settings(app: &AppHandle, _req: &Value) -> Value {
         Err(e) => AppError::db(e.to_string()).error_json(),
     }
 }
+
+/// AI 读取审计查询（K 类 / O3 持久化）：返回最近 N 条 AI 操作记录。
+/// 只记 命令/url/tab_id/结果码，**不含页面内容**（N5）。Read，只读模式下放行。
+pub(super) async fn audit_reads(app: &AppHandle, req: &Value) -> Value {
+    let limit = req
+        .get("limit")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(50)
+        .clamp(1, 500);
+    let db = app.state::<crate::db::Db>();
+    match crate::db::ai_audit::recent(&db.pool, limit).await {
+        Ok(items) => json!({"ok": true, "data": items}),
+        Err(e) => AppError::db(format!("查询审计失败: {e}")).error_json(),
+    }
+}

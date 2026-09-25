@@ -188,6 +188,16 @@ fn registry() -> Vec<ToolDef> {
       vec![],
       Risk::Write,
     ),
+    // 审计查询（K/O3）：读 AI 操作记录（只含 url/命令/结果码，无内容）。Read。
+    t(
+      "audit/reads",
+      "查询最近 AI 读取/操作审计（命令 + url + 结果码，不含页面内容）。参数：limit（默认 50，硬顶 500）。只读模式下放行。",
+      json!({
+        "limit": { "type": "integer", "description": "返回条数（默认 50，硬顶 500）" }
+      }),
+      vec![],
+      Risk::Read,
+    ),
     t(
       "switch_tab",
       "切换活动标签页（窗口前置）。",
