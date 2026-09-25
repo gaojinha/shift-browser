@@ -197,6 +197,62 @@ fn registry() -> Vec<ToolDef> {
       vec![],
       Risk::Write,
     ),
+    // ===== 页面交互（P2）：受 api_agent_actions 开关约束（默认关）=====
+    t(
+      "action/wait_for",
+      "等待条件满足（元素出现/消失、页面加载完成）。参数：condition（appear/gone/load）、selector（appear/gone 必填）、tab_id（可选）、timeout（毫秒，默认 10000，硬顶 60000）。超时返回 met:false。",
+      json!({
+        "condition": { "type": "string", "enum": ["appear", "gone", "load"], "description": "等待条件（默认 appear）" },
+        "selector": { "type": "string", "description": "CSS 选择器（appear/gone 必填）" },
+        "tab_id": { "type": "string", "description": "目标标签 id（可选）" },
+        "timeout": { "type": "integer", "description": "超时毫秒（默认 10000，硬顶 60000）" }
+      }),
+      vec![],
+      Risk::Read,
+    ),
+    t(
+      "action/scroll",
+      "滚动页面。参数：direction（up/down/top/bottom，默认 down）、amount（像素，默认 600）、tab_id（可选）。受 api_agent_actions 开关约束。",
+      json!({
+        "direction": { "type": "string", "enum": ["up", "down", "top", "bottom"], "description": "方向（默认 down）" },
+        "amount": { "type": "integer", "description": "滚动像素（默认 600）" },
+        "tab_id": { "type": "string", "description": "目标标签 id（可选）" }
+      }),
+      vec![],
+      Risk::Write,
+    ),
+    t(
+      "action/click",
+      "点击元素（预检 not_found/not_visible/disabled 后 click）。参数：selector（必填）、index（默认 0）、tab_id（可选）。返回 navigated/url_after。受 api_agent_actions 开关约束。",
+      json!({
+        "selector": { "type": "string", "description": "CSS 选择器（必填）" },
+        "index": { "type": "integer", "description": "第几个匹配元素（默认 0）" },
+        "tab_id": { "type": "string", "description": "目标标签 id（可选）" }
+      }),
+      vec!["selector"],
+      Risk::Write,
+    ),
+    t(
+      "action/fill",
+      "填写表单（预检后设 value 并触发 input/change；值只落字符串、不执行）。参数：selector（必填）、value、index（默认 0）、tab_id（可选）。受 api_agent_actions 开关约束。",
+      json!({
+        "selector": { "type": "string", "description": "CSS 选择器（必填）" },
+        "value": { "type": "string", "description": "填入的字符串（不执行）" },
+        "index": { "type": "integer", "description": "第几个匹配元素（默认 0）" },
+        "tab_id": { "type": "string", "description": "目标标签 id（可选）" }
+      }),
+      vec!["selector"],
+      Risk::Write,
+    ),
+    t(
+      "action/back",
+      "浏览器后退（history.back）。参数：tab_id（可选）。受 api_agent_actions 开关约束。",
+      json!({
+        "tab_id": { "type": "string", "description": "目标标签 id（可选）" }
+      }),
+      vec![],
+      Risk::Write,
+    ),
     // 审计查询（K/O3）：读 AI 操作记录（只含 url/命令/结果码，无内容）。Read。
     t(
       "audit/reads",

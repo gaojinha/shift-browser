@@ -7,6 +7,7 @@
 //! 2. 在下方 [`HANDLERS`] 表登记，并在 `capabilities.rs` 登记风险等级
 //!    （否则本模块防漂移测试失败——只读闸门风险分类与命令表同源）。
 
+mod actions;
 mod content;
 mod data;
 mod page;
@@ -65,6 +66,12 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     ("translate", |a, r| Box::pin(content::translate(a, r))),
     ("content/snapshot", |a, r| Box::pin(content::snapshot(a, r))),
     ("action/dismiss", |a, r| Box::pin(page::dismiss(a, r))),
+    // 页面交互（P2）：受 api_agent_actions 开关约束（默认关）
+    ("action/wait_for", |a, r| Box::pin(actions::wait_for(a, r))),
+    ("action/scroll", |a, r| Box::pin(actions::scroll(a, r))),
+    ("action/click", |a, r| Box::pin(actions::click(a, r))),
+    ("action/fill", |a, r| Box::pin(actions::fill(a, r))),
+    ("action/back", |a, r| Box::pin(actions::back(a, r))),
     // MCP 工具网关
     ("tools", |a, r| Box::pin(tools::list_tools(a, r))),
     ("tool_call", |a, r| Box::pin(tools::call_tool(a, r))),

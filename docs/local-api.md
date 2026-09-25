@@ -47,8 +47,10 @@ Cursor / 自研 agent）配一条 command 即可驱动浏览器——不用自�
 
 | 类别 | 工具 |
 |---|---|
-| 读 | `status` · `list_tabs` · `active_tab` · `history` · `bookmarks` · `search_history` · `list_downloads` · `list_sessions` · `list_groups` · `list_spaces` · `list_userscripts` · `get_setting` · `list_settings` · `screenshot` · `read_page` · `read_status` · `open_and_read` · `extract` · `reader/extract` · `translate` · `content/snapshot` · `audit/reads` · `audit/egress` |
-| 写 | `open_url` · `new_tab` · `close_tab` · `switch_tab` · `reload_tab` · `navigate` · `search` · `pin_tab` · `mute_tab` · `minimize_window` · `maximize_window` · `tabs/close_ai` · `action/dismiss` |
+| 读 | `status` · `list_tabs` · `active_tab` · `history` · `bookmarks` · `search_history` · `list_downloads` · `list_sessions` · `list_groups` · `list_spaces` · `list_userscripts` · `get_setting` · `list_settings` · `screenshot` · `read_page` · `read_status` · `open_and_read` · `extract` · `reader/extract` · `translate` · `content/snapshot` · `audit/reads` · `audit/egress` · `action/wait_for` |
+| 写 | `open_url` · `new_tab` · `close_tab` · `switch_tab` · `reload_tab` · `navigate` · `search` · `pin_tab` · `mute_tab` · `minimize_window` · `maximize_window` · `tabs/close_ai` · `action/dismiss` · `action/scroll` · `action/click` · `action/fill` · `action/back` |
+
+> 交互类（`action/*`）额外受独立开关 `api_agent_actions` 约束（**默认关**）；写类另受 `api_readonly` 约束。
 
 手动测试（三行握手 + 调工具）：
 
@@ -131,6 +133,11 @@ curl -s -X POST http://127.0.0.1:19701/v1/chat/completions \
 | `{"cmd":"screenshot","id":"…"}` | `{"ok":true,"data":{"path":"…/screenshots/shot-*.png"}}` | 截标签可见区 → PNG 落盘（`id` 可选，缺省当前活动标签） |
 | `{"cmd":"read_page","mode":"text"}` | `{"ok":true,"data":{mode,url,title,meta,hints,ts,truncated,total,…}}` | 读页面内容（缺省活动标签，可用 `tab_id` 指定），8 模式：`text`/`elements`/`links`/`images`/`tables`/`forms`/`article`/`html`。参数：`mode`、`selector`、`tab_id`、`max_chars`、`max_items`，另 P1b：`expand`(展开 details)、`shadow`(穿透 shadow root)、`iframe`(并入同源 iframe)。固定采集脚本非任意 JS，password/hidden 的 value 一律不返回；tables 带 `merged` 标记 |
 | `{"cmd":"action/dismiss","tab_id":"…"}` | `{"ok":true,"data":{dismissed:true,by:"text",text:"同意"}}` | 关闭常见弹窗（Cookie 同意/遮罩浮层）。保守识别，识别不了返回 `{dismissed:false,hint}`，**绝不盲点**。写类，受只读闸门约束 |
+| `{"cmd":"action/wait_for","condition":"appear","selector":".list"}` | `{"ok":true,"data":{met:true,waited_ms:820,detail:{…}}}` | 等待条件（`appear`/`gone`/`load`），超时返回 `met:false`。受 `api_agent_actions` 约束 |
+| `{"cmd":"action/scroll","direction":"bottom"}` | `{"ok":true,"data":{ok_action:"scroll",scrollY:4200,height:4200}}` | 滚动（`up`/`down`/`top`/`bottom`）。受 `api_agent_actions` 约束 |
+| `{"cmd":"action/click","selector":".next","index":0}` | `{"ok":true,"data":{ok_action:"click",navigated:true,url_after:"…"}}` | 点击元素（先预检；失败返回 `action_error`：not_found/not_visible/disabled/bad_selector） |
+| `{"cmd":"action/fill","selector":"#q","value":"关键词"}` | `{"ok":true,"data":{ok_action:"fill",tag:"input"}}` | 填表单（值只落字符串、不执行；触发 input/change） |
+| `{"cmd":"action/back"}` | `{"ok":true,"data":{ok_action:"back"}}` | 浏览器后退 |
 | `{"cmd":"read_status","id":"…"}` | `{"ok":true,"data":{tab_id,url,title,status,ready_state,has_body,hints,counts}}` | 读标签状态与元信息（纯读、不返回内容；`id` 可选，缺省活动标签）。只读模式（`api_readonly=true`）下放行 |
 | `{"cmd":"open_and_read","url":"…","mode":"text","close":false,"reuse":false,"ua":"desktop"}` | `{"ok":true,"data":{tab_id,url,final_url,title,ready_state,content_type,reused,ua,read,…}}` | **一次完成「开标签→等加载→读取」**。参数：`url`（必填，仅 http/https）、`mode`/`selector`/`max_chars`/`max_items`（同 read_page）、`close`（读完是否关闭，默认 false）、`reuse`（复用同 URL 的 AI 标签，默认 false）、`ua`（`desktop`/`mobile`，mobile 切移动版 UA 读移动版内容）。内网/私有地址默认拒绝（`api_allowed_ips` 白名单可放行）。语义是读 → 只读模式下放行 |
 | `{"cmd":"eval","code":"…"}` | `{"ok":true,"data":{"result":"…"}}` | 在活动标签执行 JS（**默认关**，见下） |
