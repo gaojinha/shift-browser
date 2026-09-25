@@ -28,6 +28,8 @@
       title: doc.title || '',
       url: location.href || '',
       has_body: !!body,
+      // 文本长度：供 open_and_read 判断"内容是否稳定"（SPA 的 complete ≠ 渲染完）
+      text_len: body ? ((body.innerText != null ? body.innerText : (body.textContent || '')).length) : 0,
       hints: hints,
       counts: counts
     });

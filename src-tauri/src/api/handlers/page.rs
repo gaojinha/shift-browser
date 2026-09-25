@@ -607,10 +607,13 @@ pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
             }
         }
     } else {
-        // 等就绪：必须**同时**满足 ① URL 已是 http/https（排除新标签初始的 about:blank）
-        // 与 ② readyState === complete。修复 2026-09-25：此前只看 readyState，
-        // about:blank 本身就是 complete → 立刻退出 → 读到空页面。
-        for _ in 0..50 {
+        // 等就绪：需满足 ① URL 已是 http/https（排除初始 about:blank）
+        // ② readyState === complete ③ **文本长度连续两次稳定**（SPA 的 complete ≠ 渲染完；
+        //    gitee/36kr 等客户端渲染站点在 complete 时内容还是空的）。
+        // 修复 2026-09-25：批量测试暴露 SPA 读到空/骨架。
+        let mut prev_len: i64 = -1;
+        let mut stable_hits = 0;
+        for _ in 0..60 {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             if let Some(p) = probe_page(app, &tab_id).await {
                 let rs = p
@@ -624,10 +627,20 @@ pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
                     }
                 }
                 ready_state = rs.clone();
+                let len = p.get("text_len").and_then(|n| n.as_i64()).unwrap_or(-1);
                 let url_is_http =
                     final_url.starts_with("http://") || final_url.starts_with("https://");
                 if url_is_http && rs == "complete" {
-                    break;
+                    if len > 0 && len == prev_len {
+                        stable_hits += 1;
+                        // 连续两次长度一致 → 认为内容已稳定（约 400ms 无变化）
+                        if stable_hits >= 2 {
+                            break;
+                        }
+                    } else {
+                        stable_hits = 0;
+                    }
+                    prev_len = len;
                 }
             }
         }
