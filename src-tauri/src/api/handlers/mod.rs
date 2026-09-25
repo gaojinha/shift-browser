@@ -55,6 +55,8 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     ("screenshot", |a, r| Box::pin(page::screenshot(a, r))),
     ("eval", |a, r| Box::pin(page::eval(a, r))),
     ("read_page", |a, r| Box::pin(page::read_page(a, r))),
+    ("read_status", |a, r| Box::pin(page::read_status(a, r))),
+    ("open_and_read", |a, r| Box::pin(page::open_and_read(a, r))),
     // MCP 工具网关
     ("tools", |a, r| Box::pin(tools::list_tools(a, r))),
     ("tool_call", |a, r| Box::pin(tools::call_tool(a, r))),

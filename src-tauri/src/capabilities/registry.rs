@@ -260,6 +260,34 @@ fn registry() -> Vec<ToolDef> {
       vec![],
       Risk::Read,
     ),
+    // 页面读取状态：读活动标签的 url/title/加载态/脱敏元信息（复用 page_read.js 骨架采集，
+    // 不碰 DOM 值、不返回内容），纯读——按 Read 管理；api_readonly 下天然放行（P2 只读语义落地）。
+    t(
+      "read_status",
+      "读取活动标签页状态与元信息（url/title/最终 URL/加载态/脱敏提示 hints）。纯读、不返回页面内容，只读模式（api_readonly=true）下放行。",
+      json!({
+        "id": { "type": "string", "description": "标签 id（可选；缺省为活动标签）" }
+      }),
+      vec![],
+      Risk::Read,
+    ),
+    // 打开并读取（P0 杀招命令）：一次完成「开标签 → 等加载 → 读页面」。
+    // 语义是"看页面"（白名单 scheme + 内网 SSRF 守卫 + 固定采集脚本），登记 Read——
+    // api_readonly 下放行（P2 核心拍板：「能看不能动」，拒绝的是写/交互/清理，不是看）。
+    t(
+      "open_and_read",
+      "打开 URL 并读取页面（一次完成 开标签→等加载→读取）。参数：url（必填，http/https）、mode/selector/max_chars/max_items（同 read_page）、close（读完是否关闭新标签，默认 false）。返回 tab_id/final_url/title/ready_state/content_type/read。内网/私有地址默认拒绝（api_allowed_ips 白名单可放行）。",
+      json!({
+        "url": { "type": "string", "description": "目标网址（必填，仅 http/https）" },
+        "mode": { "type": "string", "enum": ["text", "elements", "links", "images", "tables", "forms", "article", "html"], "description": "读取模式（默认 text）" },
+        "selector": { "type": "string", "description": "CSS 选择器限定范围（可选）" },
+        "max_chars": { "type": "integer", "description": "文本/HTML 字符上限（默认 200000，硬顶 2000000）" },
+        "max_items": { "type": "integer", "description": "列表类模式条数上限（默认 500，硬顶 5000）" },
+        "close": { "type": "boolean", "description": "读完是否关闭新标签（默认 false）" }
+      }),
+      vec!["url"],
+      Risk::Read,
+    ),
     // 页面读取：固定采集脚本（非任意 JS），8 种模式读活 DOM，不改变浏览器状态——按 Read 管理。
     // 脱敏规则见 page_read.js（password/hidden value 不返回、非 http(s) 图片 URL 只留前缀、html 模式去注释/script/style）
     t(
@@ -268,6 +296,7 @@ fn registry() -> Vec<ToolDef> {
       json!({
         "mode": { "type": "string", "enum": ["text", "elements", "links", "images", "tables", "forms", "article", "html"], "description": "读取模式（默认 text）" },
         "selector": { "type": "string", "description": "CSS 选择器限定范围（可选；非法选择器返回错误；≤1024 字符）" },
+        "tab_id": { "type": "string", "description": "目标标签 id（可选；缺省活动标签。open_and_read 返回的 tab_id 可直接复用，无需先切标签）" },
         "max_chars": { "type": "integer", "description": "文本/HTML 字符上限（默认 200000，硬顶 2000000）" },
         "max_items": { "type": "integer", "description": "列表类模式条数上限（默认 500，硬顶 5000）" }
       }),

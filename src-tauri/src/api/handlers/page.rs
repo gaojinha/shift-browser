@@ -70,7 +70,13 @@ pub(super) async fn screenshot(app: &AppHandle, req: &Value) -> Value {
         return AppError::internal("截图调度失败").error_json();
     }
     match rx.await {
-        Ok(Ok(path)) => json!({"ok": true, "data": {"path": path}}),
+        Ok(Ok(path)) => {
+            // 截图治理（O2）：目录只保留最近 N 张，防止 AI 大量截图堆爆磁盘
+            if let Some(dir) = out_path.parent() {
+                prune_screenshots(dir, SCREENSHOT_KEEP);
+            }
+            json!({"ok": true, "data": {"path": path}})
+        }
         Ok(Err(e)) => AppError::internal(e).error_json(),
         Err(_) => AppError::internal("截图结果丢失").error_json(),
     }
@@ -163,20 +169,26 @@ pub(super) async fn read_page(app: &AppHandle, req: &Value) -> Value {
     let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
         return AppError::internal("标签管理器不可用").error_json();
     };
-    let Some(active) = state.all_tabs().into_iter().find(|t| t.is_active) else {
-        return AppError::validation("没有活动标签（read_page 一期只支持活动标签）").error_json();
+    let all = state.all_tabs();
+    // 目标标签：优先 tab_id（open_and_read 返回的 id 可直接复用），缺省活动标签
+    let target = match req.get("tab_id").and_then(|v| v.as_str()) {
+        Some(tid) if !tid.is_empty() => match all.iter().find(|t| t.id == tid) {
+            Some(t) => t,
+            None => {
+                return AppError::validation(format!("标签不存在: {tid}（先 list_tabs 取 id）"))
+                    .error_json()
+            }
+        },
+        _ => match all.iter().find(|t| t.is_active) {
+            Some(t) => t,
+            None => {
+                return AppError::validation("没有活动标签（可传 tab_id 指定标签）").error_json()
+            }
+        },
     };
-    if let Some(tid) = req.get("tab_id").and_then(|v| v.as_str()) {
-        if !tid.is_empty() {
-            return AppError::validation(
-                "tab_id 暂不支持：read_page 一期只读活动标签（先 switch_tab）",
-            )
-            .error_json();
-        }
-    }
-    let label = format!("tab-{}", active.id);
+    let label = format!("tab-{}", target.id);
     let Some(wv) = app.get_webview(&label) else {
-        return AppError::internal("找不到活动标签 webview").error_json();
+        return AppError::internal("找不到标签 webview").error_json();
     };
     // 固定脚本 + 占位符注入（selector 经 js_escape；mode 已白名单校验，无注入面）
     let script = include_str!("../../page_read.js")
@@ -287,4 +299,390 @@ pub(super) async fn read_page(app: &AppHandle, req: &Value) -> Value {
             .error_json();
     }
     json!({"ok": true, "data": v})
+}
+
+/// 读取标签页状态与脱敏元信息（纯读，不返回页面内容）。
+///
+/// 方案：docs/开放API-页面读取能力完善方案_2026-09-25.md（P0 · read_status）
+/// - 语义：给调用方判断"页面是否就绪、加载到哪一步"，是 open_and_read 等加载的依赖部件；
+/// - 固定脚本（page_status.js）只取就绪态/结构提示，不读任何 DOM 值；
+/// - `Risk::Read`（registry 已登记）→ api_readonly 下天然放行（P2 只读语义落地）。
+pub(super) async fn read_status(app: &AppHandle, req: &Value) -> Value {
+    let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+        return AppError::internal("标签管理器不可用").error_json();
+    };
+    let all = state.all_tabs();
+    let target: Option<&crate::tabs::Tab> = req
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(|id| all.iter().find(|t| t.id == id))
+        .unwrap_or_else(|| all.iter().find(|t| t.is_active));
+    let Some(target) = target else {
+        return AppError::validation("指定标签不存在（先 list_tabs 取 id；缺省为活动标签）")
+            .error_json();
+    };
+    let tab_id = target.id.clone();
+    let url = target.url.clone();
+    let title = target.title.clone();
+    let is_active = target.is_active;
+    let hibernated = target.hibernated;
+    let private = target.private;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+
+    // 休眠标签无 webview：直接返回元信息，不做采集
+    if hibernated {
+        return json!({"ok": true, "data": {
+            "tab_id": tab_id, "url": url, "title": title,
+            "is_active": is_active, "private": private, "hibernated": true,
+            "ts": ts, "ready_state": "hibernated", "status": "hibernated",
+            "hints": ["标签已休眠，webview 已销毁（切换标签可重建）"], "counts": {}
+        }});
+    }
+
+    let label = format!("tab-{}", tab_id);
+    let Some(wv) = app.get_webview(&label) else {
+        return AppError::internal("找不到标签 webview").error_json();
+    };
+    // 固定状态采集脚本（非任意 JS）：只取就绪态/结构提示，不读任何 DOM 值
+    let script = include_str!("../../page_status.js");
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
+    let dispatched = wv.with_webview(move |pwv| {
+        crate::engine::webview::eval_js_with(&pwv.inner(), script, move |res| {
+            let _ = tx.send(res);
+        });
+    });
+    if dispatched.is_err() {
+        return AppError::internal("状态采集调度失败").error_json();
+    }
+    let raw = match tokio::time::timeout(std::time::Duration::from_secs(2), rx).await {
+        Ok(Ok(Ok(v))) => v,
+        Ok(Ok(Err(e))) => {
+            return AppError::internal(format!("状态采集脚本执行失败: {e}")).error_json()
+        }
+        Ok(Err(_)) => return AppError::internal("状态采集结果丢失").error_json(),
+        Err(_) => return AppError::timeout("状态采集超时（2 秒）").error_json(),
+    };
+    let probe: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
+    if let Some(err) = probe.get("error").and_then(|e| e.as_str()) {
+        return AppError::validation(err).error_json();
+    }
+    let ready_state = probe
+        .get("ready_state")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let status = if ready_state == "complete" {
+        "loaded"
+    } else {
+        "loading"
+    };
+    json!({"ok": true, "data": {
+        "tab_id": tab_id, "url": url, "title": title,
+        "is_active": is_active, "private": private, "hibernated": false,
+        "ts": ts,
+        "ready_state": ready_state,
+        "status": status,
+        "has_body": probe.get("has_body").cloned().unwrap_or(json!(false)),
+        "hints": probe.get("hints").cloned().unwrap_or(json!([])),
+        "counts": probe.get("counts").cloned().unwrap_or(json!({})),
+    }})
+}
+
+/// 内网 / 私有地址判定（open_and_read SSRF 第一层：IP 字面量 + localhost）。
+///
+/// 方案：docs/开放API-页面读取能力完善方案_2026-09-25.md（M 类内网 URL 策略 / O6）。
+/// 域名解析到内网的情形（DNS rebinding）留待 O1 后续用解析后 IP 复核。
+pub(super) fn host_is_private(host: &str) -> bool {
+    let h = host
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
+    if h == "localhost" || h.ends_with(".localhost") {
+        return true;
+    }
+    match h.parse::<std::net::IpAddr>() {
+        Ok(ip) => ip_is_private(ip),
+        Err(_) => false,
+    }
+}
+
+fn ip_is_private(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64 // 100.64.0.0/10 CGNAT
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 ULA
+                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
+        }
+    }
+}
+
+/// 打开 URL 并读取页面（open_and_read 的 SSRF 守卫）。
+///
+/// 返回 `Ok(())` 放行；`Err(响应)` 为拒绝（内网地址且未进白名单）。
+async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
+    let Ok(parsed) = tauri::Url::parse(url) else {
+        return Err(AppError::validation("URL 解析失败").error_json());
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(AppError::permission(format!(
+            "open_and_read 只接受 http/https（收到 {}）",
+            parsed.scheme()
+        ))
+        .error_json());
+    }
+    let Some(host) = parsed.host_str().map(|h| h.to_string()) else {
+        return Err(AppError::validation("URL 缺少主机名").error_json());
+    };
+    if !host_is_private(&host) {
+        return Ok(());
+    }
+    // 内网地址：仅当用户显式配置了非空 api_allowed_ips 且覆盖该地址时放行（信任面内）
+    let allowlist: String = {
+        let db = app.state::<crate::db::Db>();
+        sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = 'api_allowed_ips'")
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    };
+    let covered = !allowlist.trim().is_empty()
+        && crate::api::auth::ip_allowed(&host, &allowlist);
+    if covered {
+        Ok(())
+    } else {
+        Err(AppError::permission(format!(
+            "内网 / 私有地址默认拒绝：{host}（如确需读取，请在 api_allowed_ips 白名单中显式放行）"
+        ))
+        .error_json())
+    }
+}
+
+/// 单次探测标签就绪态（open_and_read 等加载用）。
+async fn probe_ready_state(app: &AppHandle, tab_id: &str) -> Option<String> {
+    let wv = app.get_webview(&format!("tab-{}", tab_id))?;
+    let script = include_str!("../../page_status.js");
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
+    let dispatched = wv.with_webview(move |pwv| {
+        crate::engine::webview::eval_js_with(&pwv.inner(), script, move |res| {
+            let _ = tx.send(res);
+        });
+    });
+    if dispatched.is_err() {
+        return None;
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(2), rx).await {
+        Ok(Ok(Ok(raw))) => serde_json::from_str::<Value>(&raw)
+            .ok()
+            .and_then(|v| v.get("ready_state").and_then(|s| s.as_str()).map(String::from)),
+        _ => None,
+    }
+}
+
+/// 打开 URL 并读取页面（P0 杀招命令 · 方案 §4.1）。
+///
+/// 一次调用完成「开标签 → 等加载 → 读页面」，返回统一结构（tab_id/final_url/meta/read）。
+/// 登记 `Risk::Read`（语义读）→ api_readonly 下放行（P2 核心拍板：能看不能动）。
+/// 一期实现：SSRF 内网守卫 + 等就绪 + 读取 + 可选关闭；`reuse`/`ua` 留待后续切片。
+pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
+    let url = req
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if url.is_empty() {
+        return AppError::validation("缺少 url").error_json();
+    }
+    if let Err(resp) = guard_url(app, &url).await {
+        return resp;
+    }
+    let close_after = req.get("close").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // 1) 开标签（复用 create_tab；scheme 白名单/追踪参数清洗在其中）
+    let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+        return AppError::internal("标签管理器不可用").error_json();
+    };
+    let tab = match crate::tabs::commands::create_tab(app.clone(), state, url.clone(), None, None)
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => return AppError::from(e).error_json(),
+    };
+    let tab_id = tab.id.clone();
+
+    // 2) 等加载就绪（轮询 readyState，最多 ~8s）
+    let mut ready_state = "unknown".to_string();
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        if let Some(rs) = probe_ready_state(app, &tab_id).await {
+            ready_state = rs.clone();
+            if rs == "complete" {
+                break;
+            }
+        }
+    }
+
+    // 3) 读取（复用 read_page，显式指定刚开的 tab_id，避免活动标签漂移读错）
+    let mut read_req = json!({
+        "mode": req.get("mode").cloned().unwrap_or(json!("text")),
+        "selector": req.get("selector").cloned().unwrap_or(json!("")),
+        "tab_id": tab_id.clone(),
+        "max_chars": req.get("max_chars").cloned().unwrap_or(json!(200000)),
+        "max_items": req.get("max_items").cloned().unwrap_or(json!(500)),
+    });
+    if let Some(obj) = read_req.as_object_mut() {
+        obj.insert("cmd".to_string(), json!("read_page"));
+    }
+    let read_resp = read_page(app, &read_req).await;
+    let read_ok = read_resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // 4) 可选关闭
+    if close_after {
+        if let Some(st) = app.try_state::<crate::tabs::TabManager>() {
+            let _ = crate::tabs::commands::close_tab(app.clone(), st, tab_id.clone()).await;
+        }
+    }
+
+    let data = json!({
+        "tab_id": tab_id,
+        "url": url,
+        "final_url": read_resp.get("data").and_then(|d| d.get("url")).cloned().unwrap_or(json!(url)),
+        "title": read_resp.get("data").and_then(|d| d.get("title")).cloned().unwrap_or(json!("")),
+        "ready_state": ready_state,
+        "closed": close_after,
+        "read_ok": read_ok,
+        "content_type": "page",
+        "read": if read_ok { read_resp.get("data").cloned().unwrap_or(Value::Null) } else { Value::Null },
+        "read_error": if read_ok { Value::Null } else { read_resp.get("error").cloned().unwrap_or(Value::Null) },
+    });
+    json!({"ok": true, "data": data})
+}
+
+/// 截图保留上限（O2）：超过则按时间淘汰最旧。
+const SCREENSHOT_KEEP: usize = 100;
+
+/// 截图文件筛选：只认 `shot-<定长毫秒时间戳>.png`（字典序 = 时间序）。
+fn is_screenshot_name(name: &str) -> bool {
+    name.starts_with("shot-") && name.ends_with(".png")
+}
+
+/// 截图治理（O2）：目录内只保留最近 `keep` 张 `shot-*.png`，多余按文件名（= 时间戳）淘汰最旧。
+/// 失败静默（治理是尽力而为，不影响截图主流程）。
+fn prune_screenshots(dir: &std::path::Path, keep: usize) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut shots: Vec<std::path::PathBuf> = rd
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(is_screenshot_name)
+                .unwrap_or(false)
+        })
+        .collect();
+    if shots.len() <= keep {
+        return;
+    }
+    shots.sort();
+    let remove_n = shots.len() - keep;
+    for p in shots.into_iter().take(remove_n) {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// SSRF 守卫（open_and_read · M 类内网 URL 策略）：私有/内网地址必须被识别。
+    #[test]
+    fn host_is_private_detects_internal_targets() {
+        // 必须判定为内网（拒绝）
+        for h in [
+            "localhost",
+            "app.localhost",
+            "127.0.0.1",
+            "127.1.2.3",
+            "10.0.0.5",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.168.1.100",
+            "169.254.1.1",
+            "0.0.0.0",
+            "100.64.0.1",
+            "[::1]",
+            "::1",
+            "fc00::1",
+            "fe80::1",
+        ] {
+            assert!(host_is_private(h), "{h} 应判定为内网/私有");
+        }
+    }
+
+    /// 公网地址必须放行（不得误杀）。
+    #[test]
+    fn host_is_private_allows_public_targets() {
+        for h in [
+            "example.com",
+            "www.baidu.com",
+            "8.8.8.8",
+            "1.1.1.1",
+            "172.32.0.1",  // 172.16/12 之外
+            "192.169.1.1", // 192.168/16 之外
+            "2001:4860:4860::8888",
+        ] {
+            assert!(!host_is_private(h), "{h} 不应判定为内网");
+        }
+    }
+
+    /// 截图治理（O2）：超出 keep 张时按时间淘汰最旧，非 shot-*.png 不受影响。
+    #[test]
+    fn prune_screenshots_keeps_newest() {
+        let dir = std::env::temp_dir().join(format!("shift-shot-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // 造 5 张截图（时间戳递增）+ 1 个无关文件
+        for ts in [1000u128, 2000, 3000, 4000, 5000] {
+            std::fs::write(dir.join(format!("shot-{ts}.png")), b"x").unwrap();
+        }
+        std::fs::write(dir.join("keep.txt"), b"x").unwrap();
+        // 只留最近 3 张
+        prune_screenshots(&dir, 3);
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["keep.txt", "shot-3000.png", "shot-4000.png", "shot-5000.png"],
+            "应淘汰最旧两张、保留无关文件"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn is_screenshot_name_filters_non_shots() {
+        assert!(is_screenshot_name("shot-1727000000000.png"));
+        assert!(!is_screenshot_name("keep.txt"));
+        assert!(!is_screenshot_name("shot-1.jpg"));
+        assert!(!is_screenshot_name("readme.md"));
+    }
 }

@@ -47,7 +47,7 @@ Cursor / 自研 agent）配一条 command 即可驱动浏览器——不用自�
 
 | 类别 | 工具 |
 |---|---|
-| 读 | `status` · `list_tabs` · `active_tab` · `history` · `bookmarks` · `search_history` · `list_downloads` · `list_sessions` · `list_groups` · `list_spaces` · `list_userscripts` · `get_setting` · `list_settings` · `screenshot` · `read_page` |
+| 读 | `status` · `list_tabs` · `active_tab` · `history` · `bookmarks` · `search_history` · `list_downloads` · `list_sessions` · `list_groups` · `list_spaces` · `list_userscripts` · `get_setting` · `list_settings` · `screenshot` · `read_page` · `read_status` · `open_and_read` |
 | 写 | `open_url` · `new_tab` · `close_tab` · `switch_tab` · `reload_tab` · `navigate` · `search` · `pin_tab` · `mute_tab` · `minimize_window` · `maximize_window` |
 
 手动测试（三行握手 + 调工具）：
@@ -122,7 +122,9 @@ curl -s -X POST http://127.0.0.1:19701/v1/chat/completions \
 | `{"cmd":"history","limit":50}` | `{"ok":true,"data":[{url,title,visit_count,last_visit_at}…]}` | 读最近历史（limit ≤500） |
 | `{"cmd":"bookmarks"}` | `{"ok":true,"data":[{title,url,folder,sort_order}…]}` | 读书签（含文件夹名） |
 | `{"cmd":"screenshot","id":"…"}` | `{"ok":true,"data":{"path":"…/screenshots/shot-*.png"}}` | 截标签可见区 → PNG 落盘（`id` 可选，缺省当前活动标签） |
-| `{"cmd":"read_page","mode":"text"}` | `{"ok":true,"data":{mode,url,title,truncated,total,…}}` | 读活动标签页面内容，8 模式：`text`/`elements`/`links`/`images`/`tables`/`forms`/`article`/`html`（参数：`mode` 默认 text、`selector` CSS 范围、`max_chars` 默认 200K 硬顶 2M、`max_items` 默认 500 硬顶 5000；固定采集脚本非任意 JS，password/hidden 的 value 一律不返回） |
+| `{"cmd":"read_page","mode":"text"}` | `{"ok":true,"data":{mode,url,title,truncated,total,…}}` | 读页面内容（缺省活动标签，可用 `tab_id` 指定），8 模式：`text`/`elements`/`links`/`images`/`tables`/`forms`/`article`/`html`（参数：`mode` 默认 text、`selector` CSS 范围、`tab_id` 指定标签、`max_chars` 默认 200K 硬顶 2M、`max_items` 默认 500 硬顶 5000；固定采集脚本非任意 JS，password/hidden 的 value 一律不返回） |
+| `{"cmd":"read_status","id":"…"}` | `{"ok":true,"data":{tab_id,url,title,status,ready_state,has_body,hints,counts}}` | 读标签状态与元信息（纯读、不返回内容；`id` 可选，缺省活动标签）。只读模式（`api_readonly=true`）下放行 |
+| `{"cmd":"open_and_read","url":"…","mode":"text","close":false}` | `{"ok":true,"data":{tab_id,url,final_url,title,ready_state,content_type,read,…}}` | **一次完成「开标签→等加载→读取」**。参数：`url`（必填，仅 http/https）、`mode`/`selector`/`max_chars`/`max_items`（同 read_page）、`close`（读完是否关闭，默认 false）。内网/私有地址默认拒绝（`api_allowed_ips` 白名单可放行）。语义是读 → 只读模式下放行 |
 | `{"cmd":"eval","code":"…"}` | `{"ok":true,"data":{"result":"…"}}` | 在活动标签执行 JS（**默认关**，见下） |
 | `{"cmd":"tools"}` | `{"ok":true,"data":[{name,server_name,description,input_schema}…]}` | 列出可用 MCP 工具（工具网关） |
 | `{"cmd":"tool_call","name":"…","arguments":{…}}` | `{"ok":true,"data":{"result":"…"}}` | 调用一个 MCP 工具（受 server 白名单约束） |
