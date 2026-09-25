@@ -33,6 +33,7 @@ async fn eval_action(
     direction: &str,
     amount: u64,
     condition: &str,
+    key: &str,
     timeout_secs: u64,
 ) -> Result<Value, Value> {
     let label = super::page::target_label(app, req)?;
@@ -46,7 +47,8 @@ async fn eval_action(
         .replace("__VALUE__", &crate::api::js_escape(value))
         .replace("__DIRECTION__", direction)
         .replace("__AMOUNT__", &amount.to_string())
-        .replace("__CONDITION__", condition);
+        .replace("__CONDITION__", condition)
+        .replace("__KEY__", &crate::api::js_escape(key));
     let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
     let dispatched = wv.with_webview(move |pwv| {
         crate::engine::webview::eval_js_with(&pwv.inner(), &script, move |res| {
@@ -124,7 +126,7 @@ pub(super) async fn wait_for(app: &AppHandle, req: &Value) -> Value {
         .min(60_000);
     let start = std::time::Instant::now();
     loop {
-        match eval_action(app, req, "check", &selector, 0, "", "down", 0, condition, 5).await {
+        match eval_action(app, req, "check", &selector, 0, "", "down", 0, condition, "", 5).await {
             Ok(v) => {
                 if v.get("met").and_then(|b| b.as_bool()).unwrap_or(false) {
                     return json!({"ok": true, "data": {
@@ -163,7 +165,7 @@ pub(super) async fn scroll(app: &AppHandle, req: &Value) -> Value {
         .and_then(|v| v.as_u64())
         .unwrap_or(600)
         .min(20_000);
-    match eval_action(app, req, "scroll", "", 0, "", direction, amount, "", 5).await {
+    match eval_action(app, req, "scroll", "", 0, "", direction, amount, "", "", 5).await {
         Ok(v) => wrap(v),
         Err(resp) => resp,
     }
@@ -179,7 +181,7 @@ pub(super) async fn click(app: &AppHandle, req: &Value) -> Value {
         Err(resp) => return resp,
     };
     let index = req.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
-    match eval_action(app, req, "click", &selector, index, "", "down", 0, "", 10).await {
+    match eval_action(app, req, "click", &selector, index, "", "down", 0, "", "", 10).await {
         Ok(v) => wrap(v),
         Err(resp) => resp,
     }
@@ -196,7 +198,7 @@ pub(super) async fn fill(app: &AppHandle, req: &Value) -> Value {
     };
     let value = req.get("value").and_then(|v| v.as_str()).unwrap_or("");
     let index = req.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
-    match eval_action(app, req, "fill", &selector, index, value, "down", 0, "", 10).await {
+    match eval_action(app, req, "fill", &selector, index, value, "down", 0, "", "", 10).await {
         Ok(v) => wrap(v),
         Err(resp) => resp,
     }
@@ -207,7 +209,53 @@ pub(super) async fn back(app: &AppHandle, req: &Value) -> Value {
     if !agent_actions_enabled(app).await {
         return gated();
     }
-    match eval_action(app, req, "back", "", 0, "", "down", 0, "", 5).await {
+    match eval_action(app, req, "back", "", 0, "", "down", 0, "", "", 5).await {
+        Ok(v) => wrap(v),
+        Err(resp) => resp,
+    }
+}
+
+/// `action/hover`：悬停（派发 mouseover/mouseenter/mousemove）——用于 hover 展开的菜单。
+pub(super) async fn hover(app: &AppHandle, req: &Value) -> Value {
+    if !agent_actions_enabled(app).await {
+        return gated();
+    }
+    let selector = match required_selector(req) {
+        Ok(s) => s,
+        Err(resp) => return resp,
+    };
+    let index = req.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
+    match eval_action(app, req, "hover", &selector, index, "", "down", 0, "", "", 10).await {
+        Ok(v) => wrap(v),
+        Err(resp) => resp,
+    }
+}
+
+/// `action/key`：键盘事件（Enter/Escape/Tab/ArrowDown 等）。可选先聚焦 selector 命中元素。
+pub(super) async fn key(app: &AppHandle, req: &Value) -> Value {
+    if !agent_actions_enabled(app).await {
+        return gated();
+    }
+    let k = req
+        .get("key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if k.is_empty() {
+        return AppError::validation("缺少 key（如 Enter/Escape/Tab/ArrowDown）").error_json();
+    }
+    if k.chars().count() > 32 {
+        return AppError::validation("key 过长（>32 字符）").error_json();
+    }
+    let selector = req
+        .get("selector")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let index = req.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
+    match eval_action(app, req, "key", &selector, index, "", "down", 0, "", &k, 5).await {
         Ok(v) => wrap(v),
         Err(resp) => resp,
     }

@@ -72,6 +72,8 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     ("action/click", |a, r| Box::pin(actions::click(a, r))),
     ("action/fill", |a, r| Box::pin(actions::fill(a, r))),
     ("action/back", |a, r| Box::pin(actions::back(a, r))),
+    ("action/hover", |a, r| Box::pin(actions::hover(a, r))),
+    ("action/key", |a, r| Box::pin(actions::key(a, r))),
     // MCP 工具网关
     ("tools", |a, r| Box::pin(tools::list_tools(a, r))),
     ("tool_call", |a, r| Box::pin(tools::call_tool(a, r))),

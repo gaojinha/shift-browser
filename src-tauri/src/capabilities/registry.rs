@@ -253,6 +253,29 @@ fn registry() -> Vec<ToolDef> {
       vec![],
       Risk::Write,
     ),
+    t(
+      "action/hover",
+      "悬停元素（派发 mouseover/mouseenter/mousemove）——用于 hover 展开的菜单。参数：selector（必填）、index（默认 0）、tab_id（可选）。受 api_agent_actions 开关约束。",
+      json!({
+        "selector": { "type": "string", "description": "CSS 选择器（必填）" },
+        "index": { "type": "integer", "description": "第几个匹配元素（默认 0）" },
+        "tab_id": { "type": "string", "description": "目标标签 id（可选）" }
+      }),
+      vec!["selector"],
+      Risk::Write,
+    ),
+    t(
+      "action/key",
+      "派发键盘事件（如 Enter/Escape/Tab/ArrowDown）。参数：key（必填）、selector（可选，先聚焦命中元素，缺省作用于当前焦点）、index、tab_id（可选）。受 api_agent_actions 开关约束。",
+      json!({
+        "key": { "type": "string", "description": "键名（如 Enter/Escape/Tab/ArrowDown）" },
+        "selector": { "type": "string", "description": "先聚焦的元素（可选）" },
+        "index": { "type": "integer", "description": "第几个匹配元素（默认 0）" },
+        "tab_id": { "type": "string", "description": "目标标签 id（可选）" }
+      }),
+      vec!["key"],
+      Risk::Write,
+    ),
     // 审计查询（K/O3）：读 AI 操作记录（只含 url/命令/结果码，无内容）。Read。
     t(
       "audit/reads",
@@ -431,6 +454,7 @@ fn registry() -> Vec<ToolDef> {
         "expand": { "type": "boolean", "description": "读前展开原生 <details>（默认 false）" },
         "shadow": { "type": "boolean", "description": "尽力穿透开放 shadow root（默认 false）" },
         "iframe": { "type": "boolean", "description": "并入同源 iframe 文本、跨源给提示（默认 false）" },
+        "lazy": { "type": "boolean", "description": "读前先滚动到底触发懒加载（默认 false）" },
         "max_chars": { "type": "integer", "description": "文本/HTML 字符上限（默认 200000，硬顶 2000000）" },
         "max_items": { "type": "integer", "description": "列表类模式条数上限（默认 500，硬顶 5000）" }
       }),

@@ -182,6 +182,25 @@ pub(super) async fn read_page(app: &AppHandle, req: &Value) -> Value {
     let expand = bool_arg(req, "expand");
     let shadow = bool_arg(req, "shadow");
     let iframe = bool_arg(req, "iframe");
+    // B1 懒加载：读前先分步滚到底，触发懒加载（最多 8 步，每步 300ms）
+    if bool_arg(req, "lazy") {
+        let scroll_js = "(function(){var d=document.documentElement;var h=d?d.scrollHeight:0;\
+            var y=window.scrollY+window.innerHeight;window.scrollTo(0,Math.min(h,y));\
+            return JSON.stringify({y:Math.round(window.scrollY),h:h});})()";
+        for _ in 0..8 {
+            match eval_value(&wv, scroll_js, 3).await {
+                Some(v) => {
+                    let y = v.get("y").and_then(|n| n.as_i64()).unwrap_or(0);
+                    let h = v.get("h").and_then(|n| n.as_i64()).unwrap_or(0);
+                    if h > 0 && y + 5 >= h {
+                        break;
+                    }
+                }
+                None => break,
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
+    }
     let script = include_str!("../../page_read.js")
         .replace("__MODE__", mode)
         .replace("__SELECTOR__", &crate::api::js_escape(&selector))
@@ -448,6 +467,24 @@ async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
             "内网 / 私有地址默认拒绝：{host}（如确需读取，请在 api_allowed_ips 白名单中显式放行）"
         ))
         .error_json())
+    }
+}
+
+/// 在给定 webview 上执行脚本并取回解析后的 JSON（lazy 滚动扫掠用）。
+async fn eval_value(wv: &tauri::Webview, script: &str, timeout_secs: u64) -> Option<Value> {
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
+    let s = script.to_string();
+    let dispatched = wv.with_webview(move |pwv| {
+        crate::engine::webview::eval_js_with(&pwv.inner(), &s, move |res| {
+            let _ = tx.send(res);
+        });
+    });
+    if dispatched.is_err() {
+        return None;
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx).await {
+        Ok(Ok(Ok(raw))) => serde_json::from_str::<Value>(&raw).ok(),
+        _ => None,
     }
 }
 

@@ -14,6 +14,7 @@
   var DIRECTION = '__DIRECTION__';
   var AMOUNT = __AMOUNT__;
   var CONDITION = '__CONDITION__';
+  var KEY = '__KEY__';
 
   var _docQsa = Document.prototype.querySelectorAll;
   var _gcs = window.getComputedStyle;
@@ -62,6 +63,26 @@
     } catch (e) { return actFail('page_changed', e.message); }
   }
 
+  // action/key（I8）：派发键盘事件（可选先聚焦 selector 命中元素，否则作用于当前焦点）
+  if (ACTION === 'key') {
+    if (!KEY) return actFail('bad_action', '缺少 key');
+    try {
+      var targetEl = null;
+      if (SELECTOR) {
+        var ks = _docQsa.call(document, SELECTOR);
+        if (!ks || ks.length === 0) return actFail('not_found', '未找到元素: ' + SELECTOR);
+        targetEl = ks[INDEX < 0 ? 0 : INDEX];
+        if (targetEl.focus) targetEl.focus();
+      }
+      var el2 = targetEl || document.activeElement || document.body;
+      var opts = { key: KEY, bubbles: true, cancelable: true };
+      el2.dispatchEvent(new KeyboardEvent('keydown', opts));
+      el2.dispatchEvent(new KeyboardEvent('keypress', opts));
+      el2.dispatchEvent(new KeyboardEvent('keyup', opts));
+      return finish({ ok_action: 'key', key: KEY, tag: el2.tagName ? el2.tagName.toLowerCase() : '' });
+    } catch (e) { return actFail('page_changed', e.message); }
+  }
+
   // 交互预检（I2）
   var els;
   try { els = _docQsa.call(document, SELECTOR); }
@@ -91,6 +112,15 @@
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return finish({ ok_action: 'fill', tag: el.tagName.toLowerCase() });
+    } catch (e) { return actFail('page_changed', e.message); }
+  }
+
+  if (ACTION === 'hover') {
+    try {
+      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
+      el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      return finish({ ok_action: 'hover', tag: el.tagName.toLowerCase() });
     } catch (e) { return actFail('page_changed', e.message); }
   }
 
