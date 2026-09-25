@@ -7,6 +7,9 @@ import { useSettingsStore } from '../../stores/settings'
 import { useSettingsSet } from '../../composables/useSettingsSet'
 import { usePrivacyAudit } from '../../composables/usePrivacyAudit'
 import { useToastStore } from '../../stores/toast'
+import PrivacyDataCard from './PrivacyDataCard.vue'
+
+const emit = defineEmits<{ (e: 'openCerts'): void }>()
 
 const settingsStore = useSettingsStore()
 const { onSet } = useSettingsSet()
@@ -143,9 +146,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="settings-scroll">
+  <div class="section-stack">
     <!-- ① 浏览防护 -->
-    <div class="card">
+    <div class="card" data-anchor="shield">
       <div class="card-title"><AppIcon name="shield" :size="14" /> 浏览防护</div>
       <div class="field">
         <label>隐私防护</label>
@@ -237,7 +240,7 @@ onMounted(() => {
     </div>
 
     <!-- ② 网络与追踪 -->
-    <div class="card">
+    <div class="card" data-anchor="tracking">
       <div class="card-title"><AppIcon name="globe" :size="14" /> 网络与追踪</div>
       <div class="field">
         <label>GPC 请求头（Sec-GPC: 1）</label>
@@ -372,6 +375,9 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- ③ 身份与传输 / ④ 历史与清理（IA 重组自原 DataSection） -->
+    <PrivacyDataCard @open-certs="emit('openCerts')" />
   </div>
 </template>
 

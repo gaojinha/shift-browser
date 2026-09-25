@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { invokeOk } from '../../utils/invoke'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { useSettingsStore } from '../../stores/settings'
 import { useSettingsSet } from '../../composables/useSettingsSet'
@@ -10,30 +9,7 @@ import { useToastStore } from '../../stores/toast'
 const settingsStore = useSettingsStore()
 const { onSet } = useSettingsSet()
 
-const webmcpPolyfill = ref(false)
-async function loadWebmcpPolyfill() {
-  try {
-    webmcpPolyfill.value = await invokeOk<boolean>('get_webmcp_polyfill')
-  } catch (e) {
-    console.error('[settings] 读取 WebMCP polyfill 开关失败:', e)
-  }
-}
-async function onToggleWebmcpPolyfill() {
-  const next = !webmcpPolyfill.value
-  webmcpPolyfill.value = next
-  try {
-    await invokeOk('set_webmcp_polyfill', { enabled: next })
-    useToastStore().success(next ? 'WebMCP polyfill 已开启（刷新页面后生效）' : 'WebMCP polyfill 已关闭')
-  } catch (e) {
-    webmcpPolyfill.value = !next
-    console.error('[settings] WebMCP polyfill 切换失败:', e)
-    useToastStore().error('WebMCP polyfill 切换失败')
-  }
-}
-
-onMounted(() => {
-  loadWebmcpPolyfill()
-})
+// IA 重组（2026-09）：WebMCP polyfill 已移至「AI 助手 → 试验特性」WebmcpCard.vue
 
 // 开放 API：一次性门票打开状态面板 / token 热轮换
 const dashboardOpening = ref(false)
@@ -88,10 +64,10 @@ async function copyRotatedToken() {
 </script>
 
 <template>
-  <div class="settings-scroll">
+  <div class="section-stack">
 
             <!-- ⑤ 开放 API（高级） -->
-            <div class="card">
+            <div class="card" data-anchor="api">
               <div class="card-title"><AppIcon name="plug" :size="14" /> 开放 API（高级）</div>
               <div class="field">
                 <label>允许 API 执行 JS（危险）</label>
@@ -103,6 +79,34 @@ async function copyRotatedToken() {
                     type="checkbox"
                     :checked="settingsStore.get('api_allow_eval') === 'true'"
                     @change="onSet('api_allow_eval', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>API 只读模式</label>
+                <span class="field-desc">
+                  开启后拒绝一切写命令（打开页面/填表/点击/导航变更等全部拒绝），只允许读取类命令；适合只做监控/采集的调用方。即时生效
+                </span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('api_readonly') === 'true'"
+                    @change="onSet('api_readonly', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>允许 API 页面交互（危险）</label>
+                <span class="field-desc">
+                  允许 click / fill / scroll / dismiss 等页面交互命令；默认关。即使开启，写类动作在只读模式下仍被拒绝。即时生效
+                </span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('api_agent_actions') === 'true'"
+                    @change="onSet('api_agent_actions', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
                   />
                   <span class="slider"></span>
                 </label>
@@ -187,25 +191,7 @@ async function copyRotatedToken() {
                   <button class="selfcheck-btn" @click="copyRotatedToken">复制新 token</button>
                 </div>
               </div>
-              <div class="field webmcp-field" :class="{ 'experiment-tag': webmcpPolyfill }">
-                <label>
-                  WebMCP polyfill <span class="exp-badge" v-if="webmcpPolyfill">试验中</span>
-                </label>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="webmcpPolyfill"
-                    @change="onToggleWebmcpPolyfill"
-                  />
-                  <span class="slider"></span>
-                </label>
-                <div class="kw-hint webmcp-hint">
-                  试验特性（阶段 1.5）· 默认关。开启后向页面注入
-                  <code>navigator.modelContext.registerTool</code> polyfill，捕获网站声明的 WebMCP
-                  工具，让 AI 助手能感知「网站为智能体暴露了哪些工具」。仅捕获声明、不伪造执行
-                  能力，试验完不留痕，可随时关闭。
-                </div>
-              </div>
+              <!-- IA 重组：WebMCP polyfill 已移至「AI 助手 → 试验特性」 -->
             </div>
   </div>
 </template>
@@ -356,27 +342,5 @@ async function copyRotatedToken() {
 .switch input:checked + .slider::before {
   transform: translateX(16px);
   background: #fff;
-}
-.exp-badge {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 1px 7px;
-  font-size: 10px;
-  font-weight: 600;
-  color: #ffb454;
-  background: rgba(255, 180, 84, 0.14);
-  border: 1px solid rgba(255, 180, 84, 0.35);
-  border-radius: 999px;
-  vertical-align: 1px;
-}
-.webmcp-hint {
-  width: 100%;
-  margin-top: 8px;
-}
-.kw-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-bottom: 8px;
-  line-height: 1.4;
 }
 </style>

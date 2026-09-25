@@ -53,7 +53,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="settings-scroll">
+  <div class="section-stack">
             <div class="card about-hero">
               <div class="about-logo">
                 <img

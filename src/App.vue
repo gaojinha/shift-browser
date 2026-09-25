@@ -655,7 +655,7 @@ watch(
         <StatusBar
           @open-downloads="showDownloads = true"
           @open-settings="openSettings()"
-          @open-privacy="openSettings('privacy')"
+          @open-privacy="openSettings('privacy#shield')"
         />
       </div>
     </div>
@@ -667,6 +667,7 @@ watch(
       :initial-section="settingsInitialSection"
       @close="showSettings = false"
       @open-certs="showCerts = true"
+      @open-userscripts="openPanel('userscripts')"
     />
     <AISidebar :show="showAI" @close="showAI = false" />
     <TranslatePanel :show="showTranslate" @close="showTranslate = false" />

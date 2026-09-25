@@ -7,7 +7,7 @@ const { onSet } = useSettingsSet()
 </script>
 
 <template>
-  <div class="settings-scroll">
+  <div class="section-stack">
             <div class="card">
               <div class="card-title"><AppIcon name="palette" :size="14" /> 外观</div>
               <div class="field">
@@ -42,21 +42,8 @@ const { onSet } = useSettingsSet()
                   <span class="slider"></span>
                 </label>
               </div>
-              <div class="field">
-                <label>禁用 DMA-BUF 渲染</label>
-                <span class="field-desc">
-                  修复视频播放闪烁（Intel HD 630 实测：禁用后不闪且更省资源）。<b>改后需重启生效</b>；若遇崩溃可关闭回退。
-                </span>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('render_disable_dmabuf') !== 'false'"
-                    @change="onSet('render_disable_dmabuf', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-                  />
-                  <span class="slider"></span>
-                </label>
-              </div>
-              <div class="card-title" style="margin-top: 16px"><AppIcon name="house" :size="14" /> 启动页</div>
+              <!-- IA 重组（2026-09）：DMA-BUF 开关已移至「高级 → 兼容性」CompatCard.vue -->
+              <div class="card-title" style="margin-top: 16px" data-anchor="newtab"><AppIcon name="house" :size="14" /> 启动页</div>
               <div class="field">
                 <label>动态背景</label>
                 <span class="field-desc">Bing 每日高清壁纸 + 缓慢缩放动画</span>
@@ -83,6 +70,78 @@ const { onSet } = useSettingsSet()
                   <option value="18">18px</option>
                   <option value="20">20px（特大）</option>
                 </select>
+              </div>
+              <div class="field">
+                <label>主题色</label>
+                <div class="color-row">
+                  <input
+                    type="color"
+                    class="color-pick"
+                    :value="settingsStore.get('theme_color') || '#4a9eff'"
+                    @change="onSet('theme_color', ($event.target as HTMLInputElement).value)"
+                  />
+                  <button class="mini-btn" @click="onSet('theme_color', '')">恢复默认</button>
+                </div>
+                <span class="field-desc">启动页强调色；留空使用默认蓝</span>
+              </div>
+              <div class="field">
+                <label>自定义壁纸 URL</label>
+                <input
+                  type="text"
+                  :value="settingsStore.get('wallpaper')"
+                  placeholder="留空 = Bing 每日高清图"
+                  spellcheck="false"
+                  @change="onSet('wallpaper', ($event.target as HTMLInputElement).value.trim())"
+                />
+              </div>
+              <div class="field">
+                <label>显示农历</label>
+                <span class="field-desc">启动页时钟下方显示农历日期</span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('show_lunar') !== 'false'"
+                    @change="onSet('show_lunar', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>显示每日一句</label>
+                <span class="field-desc">启动页展示一句英文金句</span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('show_quote') !== 'false'"
+                    @change="onSet('show_quote', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>显示天气</label>
+                <span class="field-desc">启动页展示天气卡片</span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('show_weather') !== 'false'"
+                    @change="onSet('show_weather', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>天气城市</label>
+                <input
+                  type="text"
+                  :value="settingsStore.get('weather_city')"
+                  placeholder="留空 = 自动定位"
+                  spellcheck="false"
+                  @change="onSet('weather_city', ($event.target as HTMLInputElement).value.trim())"
+                />
+              </div>
+              <div class="kw-hint">
+                以上启动页偏好保存后<strong>重新打开启动页生效</strong>；登录本地账号后，这些偏好随账号保存并以账号设置为准。
               </div>
             </div>
   </div>
@@ -241,5 +300,44 @@ const { onSet } = useSettingsSet()
 .switch input:checked + .slider::before {
   transform: translateX(16px);
   background: #fff;
+}
+.color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  max-width: 300px;
+}
+.color-pick {
+  width: 42px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-primary);
+  cursor: pointer;
+}
+.mini-btn {
+  background: var(--bg-active);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.mini-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.kw-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  line-height: 1.5;
 }
 </style>

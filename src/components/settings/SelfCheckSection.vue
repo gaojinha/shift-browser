@@ -53,8 +53,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="settings-scroll">
-            <div class="card">
+  <div class="section-stack">
+            <div class="card" data-anchor="selfcheck">
               <div class="card-title">
                 <AppIcon name="activity" :size="14" /> 系统自检
                 <button class="selfcheck-btn" :disabled="selfCheckLoading" @click="runSelfCheck">

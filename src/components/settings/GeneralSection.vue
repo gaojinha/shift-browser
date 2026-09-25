@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 设置弹窗 · 通用分区（R2-1d 拆分：原 SettingsDialog.vue 内联节抽出）
-// 默认浏览器 / 主页 / 搜索引擎 / 标签休眠 / 垂直标签栏 / 定时任务 / 翻译
+// 默认浏览器 / 主页 / 搜索引擎 / 标签休眠 / 垂直标签栏 / 翻译
+// IA 重组（2026-09）：定时任务三块已移至「扩展与自动化」AutomationCard.vue
 import { onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useSettingsStore } from '../../stores/settings'
@@ -70,15 +71,11 @@ async function setAsDefaultBrowser() {
   }
 }
 
-onMounted(() => {
-  loadDefaultBrowser()
-})
-
 onMounted(loadDefaultBrowser)
 </script>
 
 <template>
-  <div class="settings-scroll">
+  <div class="section-stack">
     <div class="card">
       <div class="card-title"><AppIcon name="monitor" :size="14" /> 通用</div>
       <div class="field">
@@ -147,6 +144,19 @@ onMounted(loadDefaultBrowser)
         240-500MB），点击该标签时按原网址重新加载。标签开得多、内存吃紧时特别有用。
       </div>
       <div class="field">
+        <label>休眠标签数阈值</label>
+        <input
+          class="task-num hibernate-count"
+          type="number"
+          min="0"
+          :value="settingsStore.get('tab_hibernate_count') || '0'"
+          @change="onSet('tab_hibernate_count', ($event.target as HTMLInputElement).value)"
+        />
+        <span class="field-desc">
+          个（0=只按上方时长休眠；打开的标签超过该数量时，切走的后台标签立即休眠）
+        </span>
+      </div>
+      <div class="field">
         <label>垂直标签栏</label>
         <span class="field-desc">标签栏移到左侧竖排，适合多标签</span>
         <label class="switch">
@@ -157,52 +167,6 @@ onMounted(loadDefaultBrowser)
           />
           <span class="slider"></span>
         </label>
-      </div>
-      <div class="field">
-        <label>定时清理历史</label>
-        <input
-          class="task-num"
-          type="number"
-          min="0"
-          :value="settingsStore.get('auto_clear_history_days') || '0'"
-          @change="onSet('auto_clear_history_days', ($event.target as HTMLInputElement).value)"
-        />
-        <span class="field-desc">天（0=关闭；每天自动删更早的历史）</span>
-      </div>
-      <div class="field">
-        <label>定时刷新订阅</label>
-        <input
-          class="task-num"
-          type="number"
-          min="0"
-          :value="settingsStore.get('auto_refresh_feeds_minutes') || '0'"
-          @change="onSet('auto_refresh_feeds_minutes', ($event.target as HTMLInputElement).value)"
-        />
-        <span class="field-desc">分钟（0=关闭）</span>
-      </div>
-      <div class="field">
-        <label>定时跑 Agent</label>
-        <input
-          class="task-num"
-          type="number"
-          min="0"
-          :value="settingsStore.get('auto_agent_minutes') || '0'"
-          @change="onSet('auto_agent_minutes', ($event.target as HTMLInputElement).value)"
-        />
-        <span class="field-desc">分钟（0=关闭；到点打开 AI 侧栏并发送下面的提示词）</span>
-      </div>
-      <div class="kw-block">
-        <div class="kw-hint">
-          <b>Agent 定时提示词</b>（阶段3 编排）：到点自动发给 AI；AI 的多步动作仍走原有确认流程。
-        </div>
-        <textarea
-          class="net-rules"
-          :value="settingsStore.get('auto_agent_prompt')"
-          placeholder="例如：看看当前页面讲了啥，总结三条要点"
-          spellcheck="false"
-          rows="3"
-          @change="onSet('auto_agent_prompt', ($event.target as HTMLTextAreaElement).value)"
-        ></textarea>
       </div>
       <div class="field">
         <label>翻译源</label>

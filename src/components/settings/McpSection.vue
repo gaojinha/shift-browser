@@ -133,7 +133,7 @@ onMounted(loadMcp)
 </script>
 
 <template>
-  <div class="settings-scroll">
+  <div class="section-stack">
             <div class="card">
               <div class="card-title"><AppIcon name="plug" :size="14" /> MCP 工具</div>
               <div class="field-hint">

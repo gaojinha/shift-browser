@@ -58,8 +58,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="settings-scroll">
-            <div class="card">
+  <div class="section-stack">
+            <div class="card" data-anchor="extensions">
               <div class="card-title"><AppIcon name="puzzle" :size="14" /> 扩展</div>
               <div class="ext-load-row">
                 <input
