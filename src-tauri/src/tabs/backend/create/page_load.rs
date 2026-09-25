@@ -96,6 +96,9 @@ pub(super) fn handle_page_load(
         let url_str = url.to_string();
         let title_opt = Some(title.clone());
 
+        // 无痕标签 / AI 标签一律不记历史（N1：AI 读 100 页不污染用户浏览历史；无痕 2026-09-22）。
+        // 用标志位而非提前 return，保证前端同步事件照常发出（AI 标签也要显示在标签栏）。
+        let mut skip_history = false;
         if let Some(state) = app.try_state::<TabManager>() {
             let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(tab) = tabs.get_mut(tab_id) {
@@ -105,15 +108,17 @@ pub(super) fn handle_page_load(
                     tab.title = title;
                 }
             }
-            // 无痕标签一律不记历史
-            if tabs.get(tab_id).map(|t| t.private).unwrap_or(false) {
-                return;
+            if let Some(t) = tabs.get(tab_id) {
+                skip_history = t.private || t.origin == "ai";
             }
         }
         // 页面加载完成（URL/标题变化）→ 通知前端同步（替代 2s 轮询）
         let _ = app.emit(crate::contracts::events::TABS_UPDATED, ());
 
         tauri::async_runtime::spawn(async move {
+            if skip_history {
+                return;
+            }
             let db = app3.state::<Db>();
             // 性能 P0：走 settings 缓存（原每次页面加载都查库）
             let enabled = crate::db::settings_cache::get(&db.pool, "record_history").await;

@@ -43,6 +43,7 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     ("open_url", |a, r| Box::pin(tabs::open_url(a, r))),
     ("new_tab", |a, r| Box::pin(tabs::new_tab(a, r))),
     ("close_tab", |a, r| Box::pin(tabs::close_tab(a, r))),
+    ("tabs/close_ai", |a, r| Box::pin(tabs::close_ai(a, r))),
     ("switch_tab", |a, r| Box::pin(tabs::switch_tab(a, r))),
     ("reload_tab", |a, r| Box::pin(tabs::reload_tab(a, r))),
     ("navigate", |a, r| Box::pin(tabs::navigate(a, r))),

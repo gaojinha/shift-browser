@@ -65,6 +65,7 @@ pub async fn create_tab(
         is_muted: false,
         hibernated: false,
         private: is_private,
+        origin: "user".to_string(),
     };
     state.touch_active(&id);
 

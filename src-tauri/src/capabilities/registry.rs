@@ -182,6 +182,13 @@ fn registry() -> Vec<ToolDef> {
       Risk::Write,
     ),
     t(
+      "tabs/close_ai",
+      "关闭所有 AI 标签（origin=ai）——只回收开放 API 打开的标签，绝不碰用户标签。AI 读完后清理现场用。",
+      json!({}),
+      vec![],
+      Risk::Write,
+    ),
+    t(
       "switch_tab",
       "切换活动标签页（窗口前置）。",
       json!({

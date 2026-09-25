@@ -516,6 +516,14 @@ pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
     let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
         return AppError::internal("标签管理器不可用").error_json();
     };
+    // AI 标签上限（J 类）：默认 10，超限拒绝（提示先 tabs/close_ai 回收），防标签堆爆
+    const AI_TAB_LIMIT: usize = 10;
+    if state.ai_tab_count() >= AI_TAB_LIMIT {
+        return AppError::permission(format!(
+            "AI 标签已达上限 {AI_TAB_LIMIT}（先调用 tabs/close_ai 回收再试）"
+        ))
+        .error_json();
+    }
     let tab = match crate::tabs::commands::create_tab(app.clone(), state, url.clone(), None, None)
         .await
     {
@@ -523,6 +531,9 @@ pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
         Err(e) => return AppError::from(e).error_json(),
     };
     let tab_id = tab.id.clone();
+    // 标记 AI 来源（J 类）：供 tabs/close_ai 回收、AI 上限计数、看板区分
+    app.state::<crate::tabs::TabManager>()
+        .set_origin(&tab_id, "ai");
 
     // 2) 等加载就绪（轮询 readyState，最多 ~8s）
     let mut ready_state = "unknown".to_string();

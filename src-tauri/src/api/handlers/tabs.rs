@@ -111,6 +111,27 @@ pub(super) async fn close_tab(app: &AppHandle, req: &Value) -> Value {
     .await
 }
 
+/// 关闭所有 AI 标签（J 类治理）：只关 `origin=="ai"` 的标签，**绝不碰用户标签**。
+/// AI 读完后回收自己开的标签，避免堆积污染用户标签栏。
+pub(super) async fn close_ai(app: &AppHandle, _req: &Value) -> Value {
+    let Ok(state) = manager(app) else {
+        return AppError::internal("标签管理器不可用").error_json();
+    };
+    let ids = state.ai_tab_ids();
+    let mut closed: Vec<String> = Vec::new();
+    for id in ids {
+        if let Ok(st) = manager(app) {
+            if crate::tabs::commands::close_tab(app.clone(), st, id.clone())
+                .await
+                .is_ok()
+            {
+                closed.push(id);
+            }
+        }
+    }
+    json!({"ok": true, "data": {"closed": closed, "count": closed.len()}})
+}
+
 pub(super) async fn switch_tab(app: &AppHandle, req: &Value) -> Value {
     with_id(app, req, |a, s, id| {
         Box::pin(crate::tabs::commands::switch_tab(a.clone(), s, id))

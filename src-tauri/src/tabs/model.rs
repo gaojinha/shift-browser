@@ -37,6 +37,15 @@ pub struct Tab {
     /// Cookie/缓存/存储不落盘、与常规标签隔离；不计历史
     #[serde(default)]
     pub private: bool,
+    /// 标签来源（J 类治理）：`user` 用户自开 / `ai` 经开放 API 打开。
+    /// AI 标签不写浏览历史、可被 `tabs/close_ai` 批量回收、受 AI 标签上限约束。
+    #[serde(default = "default_origin")]
+    pub origin: String,
+}
+
+/// Tab.origin 缺省值（旧数据/旧构造点为 user）
+fn default_origin() -> String {
+    "user".to_string()
 }
 
 /// 标签管理器（Tauri State）
@@ -187,6 +196,29 @@ impl TabManager {
             .filter_map(|id| tabs.get(id).cloned())
             .collect()
     }
+
+    /// 设置标签来源（J 类治理）：`user` / `ai`。标签不存在时静默。
+    pub(crate) fn set_origin(&self, id: &str, origin: &str) {
+        let mut tabs = self.tabs.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(t) = tabs.get_mut(id) {
+            t.origin = origin.to_string();
+        }
+    }
+
+    /// AI 打开且仍在的标签 id 列表（按 order 顺序）
+    pub(crate) fn ai_tab_ids(&self) -> Vec<String> {
+        self.all_tabs()
+            .into_iter()
+            .filter(|t| t.origin == "ai")
+            .map(|t| t.id)
+            .collect()
+    }
+
+    /// 当前 AI 标签数量（受 `open_and_read` 上限约束）
+    pub(crate) fn ai_tab_count(&self) -> usize {
+        let tabs = self.tabs.lock().unwrap_or_else(|e| e.into_inner());
+        tabs.values().filter(|t| t.origin == "ai").count()
+    }
 }
 
 /// 查询活动标签的真实导航状态（修复 2026-09-22：前端 canGoBack/canGoForward
@@ -225,6 +257,45 @@ mod tests {
         assert!(vertical < with_bookmarks);
     }
 
+    /// J 类治理：origin 标记 + AI 标签计数/列举（close_ai 依赖）。
+    #[test]
+    fn ai_tab_origin_tracking() {
+        let m = TabManager::new();
+        let mk = |id: &str| Tab {
+            id: id.to_string(),
+            url: format!("https://{id}.example"),
+            title: id.to_string(),
+            favicon: String::new(),
+            is_active: false,
+            is_pinned: false,
+            is_muted: false,
+            hibernated: false,
+            private: false,
+            origin: "user".to_string(),
+        };
+        {
+            let mut tabs = m.tabs.lock().unwrap();
+            let mut order = m.order.lock().unwrap();
+            tabs.insert("u1".into(), mk("u1"));
+            tabs.insert("a1".into(), mk("a1"));
+            tabs.insert("a2".into(), mk("a2"));
+            order.extend(["u1".into(), "a1".into(), "a2".into()]);
+        }
+        assert_eq!(m.ai_tab_count(), 0, "默认全为 user");
+        m.set_origin("a1", "ai");
+        m.set_origin("a2", "ai");
+        assert_eq!(m.ai_tab_count(), 2);
+        assert_eq!(m.ai_tab_ids(), vec!["a1".to_string(), "a2".to_string()]);
+        // 用户标签不受影响
+        assert!(m
+            .all_tabs()
+            .iter()
+            .any(|t| t.id == "u1" && t.origin == "user"));
+        // 不存在的 id 静默
+        m.set_origin("nope", "ai");
+        assert_eq!(m.ai_tab_count(), 2);
+    }
+
     #[test]
     fn split_tab_roundtrip() {
         let m = TabManager::new();
@@ -253,6 +324,7 @@ mod tests {
                 is_muted: false,
                 hibernated: false,
                 private: false,
+                origin: "user".to_string(),
             },
         );
         tabs.insert(
@@ -267,6 +339,7 @@ mod tests {
                 is_muted: false,
                 hibernated: false,
                 private: false,
+                origin: "user".to_string(),
             },
         );
         order.push("b".to_string());

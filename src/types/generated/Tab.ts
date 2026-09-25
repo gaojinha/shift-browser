@@ -12,4 +12,9 @@ hibernated: boolean,
  * 无痕标签（2026-09-22）：incognito → ephemeral WebContext，
  * Cookie/缓存/存储不落盘、与常规标签隔离；不计历史
  */
-private: boolean, };
+private: boolean, 
+/**
+ * 标签来源（J 类治理）：`user` 用户自开 / `ai` 经开放 API 打开。
+ * AI 标签不写浏览历史、可被 `tabs/close_ai` 批量回收、受 AI 标签上限约束。
+ */
+origin: string, };
