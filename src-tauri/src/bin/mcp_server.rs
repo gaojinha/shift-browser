@@ -66,11 +66,25 @@ fn call_browser(cmd: &str, params: &Value) -> Result<Value, String> {
     if resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
         Ok(resp.get("data").cloned().unwrap_or(Value::Null))
     } else {
-        Err(resp
+        // 失败：保留结构化错误（code + error + data），便于 AI 调用方按 code 分类决策
+        // （如 action_error: not_found / not_visible / disabled）。修复 2026-09-25：
+        // 原实现只取 error 文本，丢失 code 分类。
+        let code = resp.get("code").and_then(|v| v.as_str()).unwrap_or("");
+        let msg = resp
             .get("error")
             .and_then(|v| v.as_str())
-            .unwrap_or("未知错误")
-            .to_string())
+            .unwrap_or("未知错误");
+        if code.is_empty() {
+            Err(msg.to_string())
+        } else {
+            let mut obj = serde_json::Map::new();
+            obj.insert("code".into(), Value::String(code.to_string()));
+            obj.insert("error".into(), Value::String(msg.to_string()));
+            if let Some(d) = resp.get("data") {
+                obj.insert("data".into(), d.clone());
+            }
+            Err(Value::Object(obj).to_string())
+        }
     }
 }
 
