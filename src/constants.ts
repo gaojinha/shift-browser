@@ -71,6 +71,7 @@ export const SETTINGS_SCHEMA = {
   api_bind_lan: { default: 'false', kind: 'bool', sensitive: false, desc: 'API 绑局域网（0.0.0.0）' },
   api_model_gateway: { default: 'false', kind: 'bool', sensitive: false, desc: '模型网关' },
   api_readonly: { default: 'false', kind: 'bool', sensitive: false, desc: 'API 只读模式（禁写命令）' },
+  api_agent_actions: { default: 'false', kind: 'bool', sensitive: false, desc: '允许 API 页面交互（click/fill/scroll/dismiss 等，默认关）' },
   api_allowed_ips: { default: '', kind: 'str', sensitive: false, desc: 'API IP 白名单（逗号分隔 IP/CIDR，如 192.168.1.0/24）' },
 } as const
 
