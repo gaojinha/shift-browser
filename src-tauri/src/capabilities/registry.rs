@@ -290,7 +290,9 @@ fn registry() -> Vec<ToolDef> {
         "selector": { "type": "string", "description": "CSS 选择器限定范围（可选）" },
         "max_chars": { "type": "integer", "description": "文本/HTML 字符上限（默认 200000，硬顶 2000000）" },
         "max_items": { "type": "integer", "description": "列表类模式条数上限（默认 500，硬顶 5000）" },
-        "close": { "type": "boolean", "description": "读完是否关闭新标签（默认 false）" }
+        "close": { "type": "boolean", "description": "读完是否关闭新标签（默认 false）" },
+        "reuse": { "type": "boolean", "description": "复用同 URL 的已有 AI 标签（不新开，默认 false）" },
+        "ua": { "type": "string", "enum": ["desktop", "mobile"], "description": "读取 UA：mobile 切移动版 UA（默认 desktop）" }
       }),
       vec!["url"],
       Risk::Read,

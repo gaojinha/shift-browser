@@ -5,6 +5,10 @@ use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 
+/// 移动版 UA（M 类响应式读取）：`open_and_read` 传 `ua:"mobile"` 时启用，
+/// 便于读取移动版更简洁的页面（闲鱼/淘宝等）。版本与默认 UA 对齐。
+const MOBILE_UA: &str = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36";
+
 pub(super) async fn screenshot(app: &AppHandle, req: &Value) -> Value {
     // 截图指定标签（缺省 = 当前活动标签；webkit snapshot → PNG），返回落盘路径
     let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
@@ -496,7 +500,7 @@ async fn probe_ready_state(app: &AppHandle, tab_id: &str) -> Option<String> {
 ///
 /// 一次调用完成「开标签 → 等加载 → 读页面」，返回统一结构（tab_id/final_url/meta/read）。
 /// 登记 `Risk::Read`（语义读）→ api_readonly 下放行（P2 核心拍板：能看不能动）。
-/// 一期实现：SSRF 内网守卫 + 等就绪 + 读取 + 可选关闭；`reuse`/`ua` 留待后续切片。
+/// 一期实现：SSRF 内网守卫 + 等就绪 + 读取 + `close` + `reuse`；`ua` / 重定向逐跳校验留待后续切片。
 pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
     let url = req
         .get("url")
@@ -511,38 +515,83 @@ pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
         return resp;
     }
     let close_after = req.get("close").and_then(|v| v.as_bool()).unwrap_or(false);
+    let reuse = req.get("reuse").and_then(|v| v.as_bool()).unwrap_or(false);
 
-    // 1) 开标签（复用 create_tab；scheme 白名单/追踪参数清洗在其中）
+    // 1) 决定目标标签：reuse 命中已有同 URL 的 AI 标签 → 直接复用；否则开新标签
     let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
         return AppError::internal("标签管理器不可用").error_json();
     };
-    // AI 标签上限（J 类）：默认 10，超限拒绝（提示先 tabs/close_ai 回收），防标签堆爆
-    const AI_TAB_LIMIT: usize = 10;
-    if state.ai_tab_count() >= AI_TAB_LIMIT {
-        return AppError::permission(format!(
-            "AI 标签已达上限 {AI_TAB_LIMIT}（先调用 tabs/close_ai 回收再试）"
-        ))
-        .error_json();
-    }
-    let tab = match crate::tabs::commands::create_tab(app.clone(), state, url.clone(), None, None)
-        .await
-    {
-        Ok(t) => t,
-        Err(e) => return AppError::from(e).error_json(),
+    let reused_id = if reuse {
+        state
+            .all_tabs()
+            .into_iter()
+            .find(|t| t.origin == "ai" && t.url == url)
+            .map(|t| t.id)
+    } else {
+        None
     };
-    let tab_id = tab.id.clone();
-    // 标记 AI 来源（J 类）：供 tabs/close_ai 回收、AI 上限计数、看板区分
-    app.state::<crate::tabs::TabManager>()
-        .set_origin(&tab_id, "ai");
+    let (tab_id, reused) = match reused_id {
+        Some(id) => (id, true),
+        None => {
+            // AI 标签上限（J 类）：默认 10，超限拒绝（提示先 tabs/close_ai 回收），防标签堆爆
+            const AI_TAB_LIMIT: usize = 10;
+            if state.ai_tab_count() >= AI_TAB_LIMIT {
+                return AppError::permission(format!(
+                    "AI 标签已达上限 {AI_TAB_LIMIT}（先调用 tabs/close_ai 回收再试）"
+                ))
+                .error_json();
+            }
+            let tab = match crate::tabs::commands::create_tab(
+                app.clone(),
+                state,
+                url.clone(),
+                None,
+                None,
+            )
+            .await
+            {
+                Ok(t) => t,
+                Err(e) => return AppError::from(e).error_json(),
+            };
+            let id = tab.id.clone();
+            // 标记 AI 来源（J 类）：供 tabs/close_ai 回收、AI 上限计数、看板区分
+            app.state::<crate::tabs::TabManager>().set_origin(&id, "ai");
+            (id, false)
+        }
+    };
 
-    // 2) 等加载就绪（轮询 readyState，最多 ~8s）
+    // ua 覆盖（M 类响应式）：mobile 时切移动版 UA 并重载，读移动版（闲鱼/淘宝类更简洁）
+    let ua_mode = req.get("ua").and_then(|v| v.as_str()).unwrap_or("desktop");
+    let ua_mobile = ua_mode == "mobile";
+    if ua_mobile {
+        if let Some(wv) = app.get_webview(&format!("tab-{}", tab_id)) {
+            let ua = MOBILE_UA.to_string();
+            let _ = wv.with_webview(move |pwv| {
+                use webkit2gtk::{SettingsExt, WebViewExt};
+                if let Some(settings) = pwv.inner().settings() {
+                    settings.set_user_agent(Some(&ua));
+                }
+            });
+            if let Some(st) = app.try_state::<crate::tabs::TabManager>() {
+                let _ = crate::tabs::commands::reload_tab(app.clone(), st, tab_id.clone()).await;
+            }
+        }
+    }
+
+    // 2) 等加载就绪：复用标签视为已就绪（探测一次）；新开标签轮询 readyState（最多 ~8s）
     let mut ready_state = "unknown".to_string();
-    for _ in 0..40 {
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    if reused {
         if let Some(rs) = probe_ready_state(app, &tab_id).await {
-            ready_state = rs.clone();
-            if rs == "complete" {
-                break;
+            ready_state = rs;
+        }
+    } else {
+        for _ in 0..40 {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            if let Some(rs) = probe_ready_state(app, &tab_id).await {
+                ready_state = rs.clone();
+                if rs == "complete" {
+                    break;
+                }
             }
         }
     }
@@ -575,6 +624,8 @@ pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
         "title": read_resp.get("data").and_then(|d| d.get("title")).cloned().unwrap_or(json!("")),
         "ready_state": ready_state,
         "closed": close_after,
+        "reused": reused,
+        "ua": if ua_mobile { "mobile" } else { "desktop" },
         "read_ok": read_ok,
         "content_type": "page",
         "read": if read_ok { read_resp.get("data").cloned().unwrap_or(Value::Null) } else { Value::Null },
