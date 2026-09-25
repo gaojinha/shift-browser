@@ -170,27 +170,10 @@ pub(super) async fn read_page(app: &AppHandle, req: &Value) -> Value {
         .and_then(|v| v.as_u64())
         .unwrap_or(500)
         .min(5000);
-    let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
-        return AppError::internal("标签管理器不可用").error_json();
+    let label = match target_label(app, req) {
+        Ok(l) => l,
+        Err(resp) => return resp,
     };
-    let all = state.all_tabs();
-    // 目标标签：优先 tab_id（open_and_read 返回的 id 可直接复用），缺省活动标签
-    let target = match req.get("tab_id").and_then(|v| v.as_str()) {
-        Some(tid) if !tid.is_empty() => match all.iter().find(|t| t.id == tid) {
-            Some(t) => t,
-            None => {
-                return AppError::validation(format!("标签不存在: {tid}（先 list_tabs 取 id）"))
-                    .error_json()
-            }
-        },
-        _ => match all.iter().find(|t| t.is_active) {
-            Some(t) => t,
-            None => {
-                return AppError::validation("没有活动标签（可传 tab_id 指定标签）").error_json()
-            }
-        },
-    };
-    let label = format!("tab-{}", target.id);
     let Some(wv) = app.get_webview(&label) else {
         return AppError::internal("找不到标签 webview").error_json();
     };
@@ -392,6 +375,25 @@ pub(super) async fn read_status(app: &AppHandle, req: &Value) -> Value {
         "hints": probe.get("hints").cloned().unwrap_or(json!([])),
         "counts": probe.get("counts").cloned().unwrap_or(json!({})),
     }})
+}
+
+/// 解析目标标签的 webview label（`tab_id` 优先，缺省活动标签）。
+/// 供 read_page / extract 等按标签读取的命令复用。
+pub(super) fn target_label(app: &AppHandle, req: &Value) -> Result<String, Value> {
+    let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+        return Err(AppError::internal("标签管理器不可用").error_json());
+    };
+    let all = state.all_tabs();
+    let target = match req.get("tab_id").and_then(|v| v.as_str()) {
+        Some(tid) if !tid.is_empty() => all.iter().find(|t| t.id == tid).ok_or_else(|| {
+            AppError::validation(format!("标签不存在: {tid}（先 list_tabs 取 id）")).error_json()
+        })?,
+        _ => all
+            .iter()
+            .find(|t| t.is_active)
+            .ok_or_else(|| AppError::validation("没有活动标签（可传 tab_id 指定标签）").error_json())?,
+    };
+    Ok(format!("tab-{}", target.id))
 }
 
 /// open_and_read 的内网 SSRF 守卫（入口 + 最终 URL 复核共用）。

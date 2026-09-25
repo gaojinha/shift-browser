@@ -18,25 +18,23 @@
   function finish(v) { return JSON.stringify(v); }
   function fail(m) { return JSON.stringify({ error: m }); }
 
+  // F4：保存原生 DOM API 引用，防页面 monkey-patch 干扰（页面可改写原型方法）
+  var _docQs = Document.prototype.querySelector;
+  var _docQsa = Document.prototype.querySelectorAll;
+  var _elQs = Element.prototype.querySelector;
+  var _elQsa = Element.prototype.querySelectorAll;
+  var _gcs = window.getComputedStyle;
+  function qs(rootEl, sel) {
+    try { return (rootEl.nodeType === 9 ? _docQs : _elQs).call(rootEl, sel); }
+    catch (e) { return null; }
+  }
+  function qsa(rootEl, sel) {
+    return (rootEl.nodeType === 9 ? _docQsa : _elQsa).call(rootEl, sel);
+  }
+
   var doc = document;
   var base = { mode: MODE, url: location.href || '', title: doc.title || '' };
-
-  var root = doc.body || doc.documentElement;
-  if (!root) return fail('页面无 body');
-  if (SELECTOR) {
-    try {
-      root = doc.querySelector(SELECTOR) || root;
-    } catch (e) {
-      return fail('选择器非法: ' + e.message);
-    }
-  }
-
-  function visible(el) {
-    try {
-      var cs = window.getComputedStyle(el);
-      return cs.display !== 'none' && cs.visibility !== 'hidden';
-    } catch (e) { return true; }
-  }
+  base.ts = Date.now();
 
   // 非 http(s) URL（data: / blob: 等）只留 scheme + 字节长度，不返回主体
   function safeUrl(u) {
@@ -44,6 +42,79 @@
     if (/^https?:/i.test(u)) return u;
     var m = u.match(/^([a-z][a-z0-9+.-]*):/i);
     return (m ? m[1] : 'data') + ':' + u.length;
+  }
+
+  // C6：页面元信息（title / description / og / lang）
+  function collectMeta() {
+    function content(sel) {
+      var e = qs(doc, sel);
+      return e ? (e.getAttribute('content') || '') : '';
+    }
+    return {
+      title: doc.title || '',
+      description: content('meta[name="description"]'),
+      lang: doc.documentElement ? (doc.documentElement.getAttribute('lang') || '') : '',
+      og: {
+        title: content('meta[property="og:title"]'),
+        description: content('meta[property="og:description"]'),
+        image: safeUrl(content('meta[property="og:image"]')),
+        url: content('meta[property="og:url"]'),
+        site_name: content('meta[property="og:site_name"]'),
+        type: content('meta[property="og:type"]'),
+      },
+    };
+  }
+  base.meta = collectMeta();
+
+  var root = doc.body || doc.documentElement;
+  if (!root) return fail('页面无 body');
+  if (SELECTOR) {
+    try {
+      var picked = qs(root, SELECTOR);
+      if (picked) root = picked;
+    } catch (e) {
+      return fail('选择器非法: ' + e.message);
+    }
+  }
+
+  // B6/B9/B10：读不全的提示（canvas/svg 图形 / 登录框 / 验证码），供调用方决定是否截图或交互
+  function collectHints(rootEl) {
+    var hints = [];
+    try {
+      if (qsa(rootEl, 'canvas, svg').length > 0) {
+        hints.push('页面含 canvas/svg 图形，文本可能读不全，建议截图');
+      }
+    } catch (e) { /* 忽略 */ }
+    try {
+      if (qsa(rootEl, 'input[type="password"]').length > 0) {
+        hints.push('页面含密码输入框，可能需登录');
+      }
+    } catch (e) { /* 忽略 */ }
+    try {
+      if (qsa(rootEl, '[class*="captcha" i], [id*="captcha" i], iframe[src*="captcha" i]').length > 0) {
+        hints.push('页面可能含验证码 / 人机验证');
+      }
+    } catch (e) { /* 忽略 */ }
+    return hints;
+  }
+  base.hints = collectHints(root);
+
+  // B7：图片真实地址（懒加载占位 src 优先让位于 currentSrc / data-src / data-original）
+  function imgUrl(im) {
+    return safeUrl(
+      im.currentSrc ||
+      im.getAttribute('data-src') ||
+      im.getAttribute('data-original') ||
+      im.src ||
+      ''
+    );
+  }
+
+  function visible(el) {
+    try {
+      var cs = _gcs.call(window, el);
+      return cs.display !== 'none' && cs.visibility !== 'hidden';
+    } catch (e) { return true; }
   }
 
   function rawText(el) {
@@ -83,13 +154,14 @@
     base.total = rawText(root).length;
     base.returned = t.length;
     base.truncated = tTrunc;
+    base.empty = t.length === 0;
     return finish(base);
   }
 
   if (MODE === 'elements') {
     var sel = 'a, img, button, input, select, textarea, label, h1, h2, h3, h4, h5, h6, table, form, ' +
               '[role="button"], [role="link"], [role="tab"], [role="menuitem"]';
-    var els = root.querySelectorAll(sel);
+    var els = qsa(root, sel);
     var eItems = [];
     for (var i = 0; i < els.length && eItems.length < MAX_ITEMS; i++) {
       var el = els[i];
@@ -102,7 +174,7 @@
       if (el.tagName === 'A') {
         it.href = el.href || '';
       } else if (el.tagName === 'IMG') {
-        it.src = safeUrl(el.currentSrc || el.src || '');
+        it.src = imgUrl(el);
         it.alt = el.alt || '';
       } else if (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') {
         it.type = el.tagName === 'INPUT'
@@ -123,7 +195,7 @@
   }
 
   if (MODE === 'links') {
-    var as = root.querySelectorAll('a[href]');
+    var as = qsa(root, 'a[href]');
     var lItems = [];
     for (var i = 0; i < as.length && lItems.length < MAX_ITEMS; i++) {
       var a = as[i];
@@ -134,13 +206,13 @@
   }
 
   if (MODE === 'images') {
-    var imgs = root.querySelectorAll('img');
+    var imgs = qsa(root, 'img');
     var iItems = [];
     for (var i = 0; i < imgs.length && iItems.length < MAX_ITEMS; i++) {
       var im = imgs[i];
       if (!visible(im)) continue;
       iItems.push({
-        src: safeUrl(im.currentSrc || im.src || ''),
+        src: imgUrl(im),
         alt: im.alt || '',
         w: im.naturalWidth || 0,
         h: im.naturalHeight || 0,
@@ -150,7 +222,7 @@
   }
 
   if (MODE === 'tables') {
-    var tables = root.querySelectorAll('table');
+    var tables = qsa(root, 'table');
     var tItems = [];
     // 表格本身限 50 张（单表行数再限 100），max_items 取两者较小
     var tableCap = Math.min(MAX_ITEMS, 50);
@@ -158,11 +230,11 @@
       var tb = tables[ti];
       if (!visible(tb)) continue;
       var rows = [];
-      var trs = tb.querySelectorAll('tr');
+      var trs = qsa(tb, 'tr');
       var rowCap = Math.min(trs.length, 100);
       for (var r = 0; r < rowCap; r++) {
         var cells = [];
-        var tds = trs[r].querySelectorAll('th, td');
+        var tds = qsa(trs[r], 'th, td');
         for (var c = 0; c < tds.length; c++) {
           cells.push(clip(rawText(tds[c]), 200));
         }
@@ -174,7 +246,7 @@
   }
 
   if (MODE === 'forms') {
-    var fs = root.querySelectorAll('input, select, textarea');
+    var fs = qsa(root, 'input, select, textarea');
     var fItems = [];
     for (var fi = 0; fi < fs.length && fItems.length < MAX_ITEMS; fi++) {
       var el = fs[fi];
@@ -191,7 +263,7 @@
       var label = '';
       if (el.id) {
         try {
-          var l = doc.querySelector('label[for="' + el.id.replace(/"/g, '') + '"]');
+          var l = qs(doc, 'label[for="' + el.id.replace(/"/g, '') + '"]');
           if (l) label = clip(rawText(l), 100);
         } catch (e) { /* 忽略 */ }
       }
