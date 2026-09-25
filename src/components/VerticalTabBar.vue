@@ -2,7 +2,7 @@
 // 垂直标签栏（阶段 3.1）：标签栏移到左侧竖排，适配多标签重度使用。
 // 开启后 Rust 侧让出左侧 VERTICAL_TAB_BAR_WIDTH，webview 右移（见 engine/layout.rs）。
 import { computed } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { invokeOk } from '../utils/invoke'
 import { useTabsStore } from '../stores/tabs'
 import type { Tab } from '../types/tab'
 import AppIcon from './AppIcon.vue'
@@ -39,13 +39,13 @@ function onNew() {
 }
 // 窗口按钮（垂直模式下 TabBar 被隐藏，窗口控制移到这里）
 function minimize() {
-  invoke('minimize_window').catch(() => {})
+  invokeOk('minimize_window').catch(() => {})
 }
 function maximize() {
-  invoke('toggle_maximize').catch(() => {})
+  invokeOk('toggle_maximize').catch(() => {})
 }
 function closeWin() {
-  invoke('close_window').catch(() => {})
+  invokeOk('close_window').catch(() => {})
 }
 </script>
 

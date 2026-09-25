@@ -25,7 +25,7 @@ pub(crate) mod auth;
 // R2-1c 拆分（2026-09-24）：HTTP 服务器（状态面板/模型网关/命令端点）独立成子模块
 pub(crate) mod http;
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
@@ -126,7 +126,10 @@ pub fn spawn(app: AppHandle) {
 async fn handle(app: &AppHandle, line: &str) -> Value {
     let req: Value = match serde_json::from_str(line) {
         Ok(v) => v,
-        Err(e) => return json!({"ok": false, "error": format!("请求 JSON 非法: {}", e)}),
+        Err(e) => {
+            return crate::error::AppError::validation(format!("请求 JSON 非法: {}", e))
+                .error_json()
+        }
     };
     let cmd = req.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
     // 只读模式（api_readonly=true）：拒绝一切写命令。
@@ -144,7 +147,11 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
         .map(|v| v == "true")
         .unwrap_or(false);
         if ro {
-            return json!({"ok": false, "error": format!("只读模式已开启，写命令 {} 被拒绝", cmd)});
+            return crate::error::AppError::permission(format!(
+                "只读模式已开启，写命令 {} 被拒绝",
+                cmd
+            ))
+            .error_json();
         }
     }
     // R2-1c（2026-09-24）：命令分发已拆到 api/handlers.rs
@@ -158,7 +165,7 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
 /// 约定：**任何输入都不得 panic / 死循环**，只能返回结果码。
 #[cfg(any(test, feature = "fuzz"))]
 pub mod fuzz_helpers {
-    use super::*;
+    
     use std::net::IpAddr;
     use std::pin::Pin;
     use std::task::{Context, Poll};

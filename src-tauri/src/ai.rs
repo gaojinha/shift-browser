@@ -2,7 +2,7 @@
 
 // AI 侧边栏：对接 AGNES AI（OpenAI 兼容 API）
 // baseURL: https://apihub.agnes-ai.com/v1（从环境变量 AGNES_API_KEY 读 key）
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -12,6 +12,10 @@ use tauri::{ipc::Channel, Manager};
 #[path = "ai/ssrf.rs"]
 pub(crate) mod ssrf;
 pub(crate) use ssrf::{check_resolved_ips, is_private_ip, resolve_pin_for_https, validate_base_url};
+// R1 拆分（2026-09-25）：AGNES 非流式/SSE 两条 HTTP 管线实现
+#[path = "ai/agnes.rs"]
+mod agnes;
+use agnes::{agnes_chat_impl, agnes_chat_stream_impl};
 
 // P0-2 补完（2026-09-22）：ChatMessage 下沉到 engine::types 以打破
 // ai ↔ ai_provider 循环依赖。此处 re-export 保持既有引用路径不变。
@@ -32,27 +36,8 @@ impl ChatMessage {
 
 // P0-2 补完（2026-09-22）：ToolCall/ToolCallFunction 下沉到 engine::types，
 // 与 ChatMessage 一同断开 engine→ai 反向依赖。此处 re-export 保持路径不变。
-pub use crate::engine::types::{ToolCall, ToolCallFunction};
 
-#[derive(Debug, Serialize, Deserialize)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<ChatMessage>,
-    stream: bool,
-    /// function calling 工具定义（OpenAI 格式）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<serde_json::Value>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatResponse {
-    choices: Vec<ChatChoice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatChoice {
-    message: ChatMessage,
-}
+// ChatRequest/ChatResponse/ChatChoice 等 AGNES 线协议结构随实现住在 agnes.rs
 
 /// 流式响应的事件（经 tauri Channel 推给前端）
 #[derive(Debug, Clone, Serialize)]
@@ -66,21 +51,7 @@ pub enum StreamEvent {
     Error { message: String },
 }
 
-/// SSE 流式响应解析结构（OpenAI 兼容）
-#[derive(Debug, Deserialize)]
-struct ChatStreamResponse {
-    choices: Vec<ChatStreamChoice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatStreamChoice {
-    delta: Option<ChatStreamDelta>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatStreamDelta {
-    content: Option<String>,
-}
+// SSE 流式解析结构（ChatStreamResponse/ChatStreamChoice/ChatStreamDelta）同住 agnes.rs
 
 /// 取消注册表：request_id -> 取消标志。前端点"停止"时置 true，流式循环检测后退出。
 static CANCEL_FLAGS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
@@ -103,6 +74,9 @@ pub fn ai_cancel_stream(request_id: String) {
 /// AI 对话（经 Provider 抽象路由，默认 AGNES 云端）
 /// provider：provider id（"agnes" 默认 / "local" 预留）
 /// model / base_url / api_key：透传给 provider（缺省用 AGNES 默认值）
+/// R1 错误类型化试点：命令返回 CommandError（{code,message}），
+/// 分类规则：provider 解析失败按其 AppError（缺 key=E_AUTH/未知 provider=E_VALIDATION）；
+/// 上游 HTTP/网络与模型异常行为 = E_NET；主窗口/状态缺失等内部异常 = E_INTERNAL。
 #[tauri::command]
 pub async fn ai_chat(
     app: tauri::AppHandle,
@@ -112,7 +86,7 @@ pub async fn ai_chat(
     model: Option<String>,
     base_url: Option<String>,
     api_key: Option<String>,
-) -> Result<String, String> {
+) -> crate::error::CommandResult<String> {
     let provider_id = provider.unwrap_or_default();
     let provider = crate::engine::ai_provider::resolve_provider(&provider_id, base_url, api_key)?;
     let model = model.unwrap_or_else(|| "agnes-2.0-flash".to_string());
@@ -138,7 +112,10 @@ pub async fn ai_chat(
             stream: false,
             tools: tools.clone(),
         };
-        let reply = provider.chat(&req).await?;
+        let reply = provider
+            .chat(&req)
+            .await
+            .map_err(crate::error::AppError::net)?;
 
         // 模型请求调用工具
         if let Some(calls) = reply.tool_calls.clone() {
@@ -226,77 +203,7 @@ pub async fn ai_chat(
         );
         return Ok(reply.content);
     }
-    Err("AI 工具调用超过 6 轮上限，已终止".to_string())
-}
-
-/// AGNES 非流式对话实现（provider 内部调用，含 SSRF 校验）
-pub async fn agnes_chat_impl(
-    base_url: &str,
-    api_key: &str,
-    req: &crate::engine::ai_provider::ProviderRequest,
-) -> Result<ChatMessage, String> {
-    let base_url = validate_base_url(base_url)?;
-    // P0-6：解析一次并 pin 死公网地址，reqwest 建连不再二次解析（防 DNS rebinding）
-    let (resolve_key, pinned) = resolve_pin_for_https(&base_url).await?;
-    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-
-    let mut builder = reqwest::Client::builder()
-      .timeout(std::time::Duration::from_secs(90));
-    if let Some(addrs) = &pinned {
-      builder = builder.resolve_to_addrs(&resolve_key, addrs);
-    }
-    let client = builder
-      .build()
-      .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
-    let req_body = ChatRequest {
-        model: req.model.clone(),
-        messages: req.messages.clone(),
-        stream: req.stream,
-        tools: req.tools.clone(),
-    };
-
-    let resp = client
-        .post(url)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&req_body)
-        .send()
-        .await
-        .map_err(|e| format!("AI 请求失败: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        // 429 = 服务端限流（免费额度/并发限制），给友好提示，别透传一坨错误体
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            let msg = "AI 服务限流（429）：请求太频繁，请稍等片刻再试。若持续出现，可能是当日额度已用完。"
-                .to_string();
-            log::error!("[ai] 服务限流 429");
-            return Err(msg);
-        }
-        let body = resp.text().await.unwrap_or_default();
-        // 截断过长错误体（有些网关返回整页 HTML，原样透传会让前端显示一坨）
-        // 注意按字符截断而非字节切片——中文等多字节字符的字节边界会 panic
-        let body = if body.chars().count() > 200 {
-            let truncated: String = body.chars().take(200).collect();
-            format!("{}…(截断)", truncated)
-        } else {
-            body
-        };
-        log::error!("[ai] 服务错误 {}: {}", status, body);
-        return Err(format!("AI 服务错误 {}: {}", status, body));
-    }
-
-    let data: ChatResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("AI 响应解析失败: {}", e))?;
-
-    let reply = data
-        .choices
-        .into_iter()
-        .next()
-        .map(|c| c.message)
-        .ok_or_else(|| "AI 无回复".to_string())?;
-    Ok(reply)
+    Err(crate::error::AppError::net("AI 工具调用超过 6 轮上限，已终止").into())
 }
 
 /// AI 对话（流式，SSE 逐块推送）——经 Provider 抽象路由（默认 AGNES）
@@ -311,16 +218,19 @@ pub async fn ai_chat_stream(
     model: Option<String>,
     base_url: Option<String>,
     api_key: Option<String>,
-) -> Result<(), String> {
+) -> crate::error::CommandResult<()> {
     let provider_id = provider.unwrap_or_default();
     let provider =
         match crate::engine::ai_provider::resolve_provider(&provider_id, base_url, api_key) {
             Ok(p) => p,
             Err(e) => {
+                // StreamEvent::Error.message 保持纯消息字符串（渠道内契约不变）
                 on_event
-                    .send(StreamEvent::Error { message: e.clone() })
+                    .send(StreamEvent::Error {
+                        message: e.to_string(),
+                    })
                     .ok();
-                return Err(e);
+                return Err(e.into());
             }
         };
     let model = model.unwrap_or_else(|| "agnes-2.0-flash".to_string());
@@ -372,124 +282,9 @@ pub async fn ai_chat_stream(
                     .send(StreamEvent::Error { message: e.clone() })
                     .ok();
             }
-            Err(e)
+            // 流式管线失败（SSE 读取/HTTP/上游中断）统一 E_NET
+            Err(crate::error::AppError::net(e).into())
         }
-    }
-}
-
-/// AGNES 流式对话实现（provider 内部调用，含 SSRF 校验 + SSE 解析）。
-/// `cancel` 为 true 时中断（返回"已停止生成"）；`on_delta` 每块增量回调，
-/// 返回 Err 表示前端通道已关闭，停止推送。
-pub async fn agnes_chat_stream_impl<F>(
-    base_url: &str,
-    api_key: &str,
-    req: &crate::engine::ai_provider::ProviderRequest,
-    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    on_delta: F,
-) -> Result<String, String>
-where
-    F: Fn(String) -> Result<(), ()>,
-{
-    let base_url = validate_base_url(base_url)?;
-    // P0-6：解析一次并 pin 死公网地址，reqwest 建连不再二次解析（防 DNS rebinding）
-    let (resolve_key, pinned) = resolve_pin_for_https(&base_url).await?;
-    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-
-    let mut builder = reqwest::Client::builder()
-      .timeout(std::time::Duration::from_secs(120));
-    if let Some(addrs) = &pinned {
-      builder = builder.resolve_to_addrs(&resolve_key, addrs);
-    }
-    let client = builder
-      .build()
-      .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
-    let req_body = ChatRequest {
-        model: req.model.clone(),
-        messages: req.messages.clone(),
-        stream: req.stream,
-        tools: req.tools.clone(),
-    };
-
-    let resp = client
-        .post(url)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&req_body)
-        .send()
-        .await
-        .map_err(|e| format!("AI 请求失败: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            let msg = "AI 服务限流（429）：请求太频繁，请稍等片刻再试。若持续出现，可能是当日额度已用完。"
-                .to_string();
-            log::error!("[ai] 流式服务限流 429");
-            return Err(msg);
-        }
-        let body = resp.text().await.unwrap_or_default();
-        let body = if body.chars().count() > 200 {
-            let truncated: String = body.chars().take(200).collect();
-            format!("{}…(截断)", truncated)
-        } else {
-            body
-        };
-        let msg = format!("AI 服务错误 {}: {}", status, body);
-        log::error!("[ai] 流式服务错误 {}: {}", status, body);
-        return Err(msg);
-    }
-
-    // 读取 SSE 流，逐块解析 delta.content 推送
-    use futures_util::StreamExt;
-    let mut stream = resp.bytes_stream();
-    let mut buf = String::new();
-    let mut full = String::new();
-    let mut done = false;
-
-    while let Some(chunk) = stream.next().await {
-        if cancel.load(Ordering::Relaxed) {
-            log::info!("[ai] 流式请求被用户取消");
-            return Err("已停止生成".to_string());
-        }
-        let chunk = match chunk {
-            Ok(c) => c,
-            Err(e) => return Err(format!("流读取失败: {}", e)),
-        };
-        buf.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(pos) = buf.find('\n') {
-            let line = buf[..pos].to_string();
-            buf = buf[pos + 1..].to_string();
-            let line = line.trim();
-            if let Some(data) = line.strip_prefix("data:") {
-                let data = data.trim();
-                if data == "[DONE]" {
-                    done = true;
-                    break;
-                }
-                if let Ok(parsed) = serde_json::from_str::<ChatStreamResponse>(data) {
-                    if let Some(delta) = parsed.choices.first().and_then(|c| c.delta.as_ref()) {
-                        if let Some(content) = delta.content.as_ref() {
-                            if !content.is_empty() {
-                                full.push_str(content);
-                                // 前端已关闭通道时回调返回 Err → 停止推送
-                                if on_delta(content.clone()).is_err() {
-                                    log::info!("[ai] 前端已关闭流式通道，停止推送");
-                                    return Ok(full);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if done {
-            break;
-        }
-    }
-
-    if done {
-        Ok(full)
-    } else {
-        Err("AI 响应流意外中断".to_string())
     }
 }
 
@@ -518,180 +313,6 @@ pub fn register_provider_impls() {
     );
 }
 
+// SSRF/pin 相关 12 个安全测试随被测面外置（避免门面超长）
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use super::ssrf::parse_obfuscated_ipv4;
-
-    #[test]
-    fn base_url_accepts_https_public() {
-        assert!(validate_base_url("https://apihub.agnes-ai.com/v1").is_ok());
-        assert!(validate_base_url("https://api.openai.com/v1").is_ok());
-    }
-
-    #[test]
-    fn base_url_rejects_plain_http() {
-        assert!(validate_base_url("http://apihub.agnes-ai.com/v1").is_err());
-    }
-
-    #[test]
-    fn base_url_rejects_private_and_local() {
-        // 本机/内网 IP
-        assert!(validate_base_url("https://127.0.0.1:11434/v1").is_err());
-        assert!(validate_base_url("https://localhost:11434/v1").is_err());
-        assert!(validate_base_url("https://192.168.1.1/v1").is_err());
-        assert!(validate_base_url("https://10.0.0.1/v1").is_err());
-        assert!(validate_base_url("https://172.16.0.1/v1").is_err());
-        assert!(validate_base_url("https://169.254.169.254/latest/meta-data").is_err());
-        // 内网域名后缀
-        assert!(validate_base_url("https://router.local/v1").is_err());
-        assert!(validate_base_url("https://nas.home/v1").is_err());
-        assert!(validate_base_url("https://myhost.lan/v1").is_err());
-    }
-
-    #[test]
-    fn base_url_rejects_userinfo() {
-        assert!(validate_base_url("https://user:pass@apihub.agnes-ai.com/v1").is_err());
-    }
-
-    #[test]
-    fn base_url_rejects_ipv6_private_and_mapped() {
-        // IPv6 内网/链路本地/站点本地
-        assert!(validate_base_url("https://[::1]:11434/v1").is_err());
-        assert!(validate_base_url("https://[fc00::1]/v1").is_err());
-        assert!(validate_base_url("https://[fd12:3456::1]/v1").is_err());
-        assert!(validate_base_url("https://[fe80::1]/v1").is_err());
-        assert!(validate_base_url("https://[fec0::1]/v1").is_err());
-        // IPv4-mapped IPv6：必须按 v4 判内网（SSRF 绕过点）
-        assert!(validate_base_url("https://[::ffff:127.0.0.1]/v1").is_err());
-        assert!(validate_base_url("https://[::ffff:192.168.1.1]/v1").is_err());
-        assert!(validate_base_url("https://[::ffff:10.0.0.1]/v1").is_err());
-        // 公网 v6 放行
-        assert!(validate_base_url("https://[2606:4700::1111]/v1").is_ok());
-    }
-
-    #[test]
-    fn base_url_rejects_obfuscated_ipv4() {
-        // 十六进制/八进制/十进制整数混淆 → 127.0.0.1
-        assert!(validate_base_url("https://0x7f000001/v1").is_err());
-        assert!(validate_base_url("https://017700000001/v1").is_err());
-        assert!(validate_base_url("https://2130706433/v1").is_err());
-        // 省略段混淆 → 127.0.0.1
-        assert!(validate_base_url("https://127.1/v1").is_err());
-        assert!(validate_base_url("https://127.0.1/v1").is_err());
-        // 段内进制：127.0x0.0x0.1 → 127.0.0.1
-        assert!(validate_base_url("https://127.0x0.0x0.1/v1").is_err());
-        // 混淆的内网 192.168.1.1
-        assert!(validate_base_url("https://0xc0a80101/v1").is_err());
-        assert!(validate_base_url("https://3232235777/v1").is_err());
-    }
-
-    #[test]
-    fn parse_obfuscated_ipv4_works() {
-        use std::net::Ipv4Addr;
-        assert_eq!(
-            parse_obfuscated_ipv4("0x7f000001"),
-            Some(Ipv4Addr::new(127, 0, 0, 1))
-        );
-        assert_eq!(
-            parse_obfuscated_ipv4("2130706433"),
-            Some(Ipv4Addr::new(127, 0, 0, 1))
-        );
-        assert_eq!(
-            parse_obfuscated_ipv4("127.1"),
-            Some(Ipv4Addr::new(127, 0, 0, 1))
-        );
-        assert_eq!(
-            parse_obfuscated_ipv4("127.0.1"),
-            Some(Ipv4Addr::new(127, 0, 0, 1))
-        );
-        assert_eq!(
-            parse_obfuscated_ipv4("127.0x0.0x0.1"),
-            Some(Ipv4Addr::new(127, 0, 0, 1))
-        );
-        assert_eq!(
-            parse_obfuscated_ipv4("0xc0a80101"),
-            Some(Ipv4Addr::new(192, 168, 1, 1))
-        );
-        // 非法/非混淆格式返回 None
-        assert_eq!(parse_obfuscated_ipv4("example.com"), None);
-        assert_eq!(parse_obfuscated_ipv4("999.1.1.1"), None);
-        assert_eq!(parse_obfuscated_ipv4("256.0.0.1"), None);
-    }
-
-    #[test]
-    fn pin_accepts_all_public_addrs_and_carries_port() {
-        // 公网 v4 + 公网 v6 全部放行，pin 地址带上请求端口
-        let ips = [
-            "93.184.216.34".parse::<std::net::IpAddr>().unwrap(),
-            "2606:4700::1111".parse::<std::net::IpAddr>().unwrap(),
-        ];
-        let addrs = check_resolved_ips("example.com", ips, 8443).unwrap();
-        assert_eq!(addrs.len(), 2);
-        assert!(addrs.iter().all(|a| a.port() == 8443));
-    }
-
-    #[test]
-    fn pin_rejects_dual_answer_dns_with_one_internal_ip() {
-        // P0-6 核心场景：双答 DNS 公网+内网混答，必须 fail-closed 整体拒绝，
-        // 不能"连到公网那个就行"——攻击者靠交替应答在校验后换内网
-        let ips = [
-            std::net::IpAddr::V4(std::net::Ipv4Addr::new(93, 184, 216, 34)),
-            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-        ];
-        assert!(check_resolved_ips("rebind.evil", ips, 443).is_err());
-        // 云元数据地址混答同样拒绝
-        let ips2 = [
-            std::net::IpAddr::V4(std::net::Ipv4Addr::new(93, 184, 216, 34)),
-            std::net::IpAddr::V4(std::net::Ipv4Addr::new(169, 254, 169, 254)),
-        ];
-        assert!(check_resolved_ips("rebind.evil", ips2, 443).is_err());
-    }
-
-    #[test]
-    fn pin_rejects_all_private_v4_ranges() {
-        for bad in [
-            "127.0.0.1",
-            "10.1.2.3",
-            "172.16.5.5",
-            "192.168.9.9",
-            "169.254.169.254",
-            "0.0.0.0",
-            "224.0.0.1",
-            "255.255.255.255",
-        ] {
-            let ip: std::net::IpAddr = bad.parse().unwrap();
-            assert!(check_resolved_ips("x.test", [ip], 443).is_err(), "{bad} 应拒绝");
-        }
-    }
-
-    #[test]
-    fn pin_rejects_native_and_mapped_v6_internal() {
-        for bad in [
-            "::1",
-            "fc00::1",
-            "fdff::1",
-            "fe80::1",
-            "fec0::1",
-            "ff02::1",
-            // IPv4-mapped 绕过形态必须按 v4 判定
-            "::ffff:127.0.0.1",
-            "::ffff:169.254.169.254",
-            "::ffff:10.0.0.1",
-        ] {
-            let ip: std::net::IpAddr = bad.parse().unwrap();
-            assert!(check_resolved_ips("x.test", [ip], 443).is_err(), "{bad} 应拒绝");
-        }
-    }
-
-    #[test]
-    fn pin_rejects_empty_dns_answer() {
-        // 空解析结果不能被当成放行（旧实现遍历空集合直接 Ok）
-        assert!(check_resolved_ips(
-            "nx.example",
-            std::iter::empty::<std::net::IpAddr>(),
-            443
-        )
-        .is_err());
-    }
-}
+mod tests;

@@ -17,6 +17,8 @@ use webkit2gtk::{SettingsExt, WebView, WebViewExt};
 pub static DEVTOOLS_ENABLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+// 同模块单测断言 UA 形态（lib 构建期无业务引用，保留作契约常量）
+#[allow(dead_code)]
 pub const DEFAULT_USER_AGENT: &str = crate::useragent::DEFAULT_UA;
 
 /// 新建 child webview 时应用页面默认设置。
@@ -103,27 +105,6 @@ pub fn set_muted(wv: &WebView, muted: bool) {
     webkit2gtk::WebViewExt::set_is_muted(wv, muted);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_ua_looks_like_chrome() {
-        // UA 必须同时含 Safari 标记与 Chrome 版本号，否则部分站点返回简化页
-        assert!(DEFAULT_USER_AGENT.contains("Safari/537.36"));
-        assert!(DEFAULT_USER_AGENT.starts_with("Mozilla/5.0"));
-        // 版本号需 ≥ 131（2026-09-22：原断言写死 120，UA 升级后过时；
-        // 改为"主版本号 >= 131"的区间断言，避免每次升版本都要改测试）
-        let major: u32 = DEFAULT_USER_AGENT
-            .split("Chrome/")
-            .nth(1)
-            .and_then(|s| s.split('.').next())
-            .and_then(|s| s.parse().ok())
-            .expect("UA 应含 Chrome/<主版本>");
-        assert!(major >= 131, "Chrome 主版本过低: {}", major);
-    }
-}
-
 // ============================================================
 // P0-2 补完（2026-09-22）：WebView 后端抽象 trait（真抽象版）
 // ============================================================
@@ -136,6 +117,9 @@ mod tests {
 // 移植时：为 WebView2/系统 WebView 各提供一份 `impl WebViewBackend`，业务代码零改动。
 
 /// WebView 后端能力抽象
+// 跨平台（R5 WebView2）预留的统一后端面：部分方法当前仅经自由函数调用，
+// 待业务层全切到 trait 方法后各项即被消费
+#[allow(dead_code)]
 pub trait WebViewBackend {
     /// 重新加载
     fn reload(&self);
@@ -229,4 +213,25 @@ pub fn attach_download_policy(wv: &WebView) {
         }
         false
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_ua_looks_like_chrome() {
+        // UA 必须同时含 Safari 标记与 Chrome 版本号，否则部分站点返回简化页
+        assert!(DEFAULT_USER_AGENT.contains("Safari/537.36"));
+        assert!(DEFAULT_USER_AGENT.starts_with("Mozilla/5.0"));
+        // 版本号需 ≥ 131（2026-09-22：原断言写死 120，UA 升级后过时；
+        // 改为"主版本号 >= 131"的区间断言，避免每次升版本都要改测试）
+        let major: u32 = DEFAULT_USER_AGENT
+            .split("Chrome/")
+            .nth(1)
+            .and_then(|s| s.split('.').next())
+            .and_then(|s| s.parse().ok())
+            .expect("UA 应含 Chrome/<主版本>");
+        assert!(major >= 131, "Chrome 主版本过低: {}", major);
+    }
 }

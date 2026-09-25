@@ -4,6 +4,8 @@ pub mod certificates;
 pub mod downloads;
 pub mod extensions;
 pub mod history;
+// 密码库密钥/加解密原语（passwords 命令的内部实现，不对外）
+mod password_crypto;
 pub mod passwords;
 pub mod sessions;
 pub mod settings;
@@ -13,6 +15,8 @@ pub mod tab_groups;
 pub mod users;
 pub mod userscripts;
 pub mod vault;
+// vault.key 加解密与 v1/v2 文件格式（vault 命令的内部实现，不对外）
+mod vault_crypto;
 pub mod workspaces;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};

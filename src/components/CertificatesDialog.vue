@@ -2,7 +2,7 @@
 // 证书中心：当前网页证书（P1）+ 监测列表/例外/事件（P3）
 // 注意：child webview 是 GTK 部件盖在 Vue UI 上，弹窗必须隐藏 webview，否则被页面盖住。
 import { ref, watch } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { invokeOk, errText } from '../utils/invoke'
 import { setWebviewVisible } from '../utils/webview'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
@@ -82,7 +82,7 @@ async function loadCurrent() {
     return
   }
   try {
-    current.value = await invoke<CertInfo | null>('get_tls_info', { id })
+    current.value = await invokeOk<CertInfo | null>('get_tls_info', { id })
   } catch (e) {
     current.value = null
     console.warn('[cert] 读取当前证书失败:', e)
@@ -93,9 +93,9 @@ async function loadAll() {
   loading.value = true
   try {
     const [r, e, v] = await Promise.all([
-      invoke<CertRecord[]>('list_certificates'),
-      invoke<CertException[]>('list_cert_exceptions'),
-      invoke<CertEvent[]>('list_cert_events', { limit: 200 }),
+      invokeOk<CertRecord[]>('list_certificates'),
+      invokeOk<CertException[]>('list_cert_exceptions'),
+      invokeOk<CertEvent[]>('list_cert_events', { limit: 200 }),
     ])
     records.value = r
     exceptions.value = e
@@ -109,17 +109,17 @@ async function loadAll() {
 
 async function scanExpiry() {
   try {
-    const list = await invoke<CertRecord[]>('scan_cert_expiry', { days: 30 })
+    const list = await invokeOk<CertRecord[]>('scan_cert_expiry', { days: 30 })
     toastStore.show(`扫描完成：${list.length} 个证书临期/过期`, 'info')
     await loadAll()
   } catch (e) {
-    toastStore.show('扫描失败：' + String(e), 'error')
+    toastStore.show('扫描失败：' + errText(e), 'error')
   }
 }
 
 async function removeException(x: CertException) {
   try {
-    await invoke('delete_cert_exception', {
+    await invokeOk('delete_cert_exception', {
       host: x.host,
       port: x.port,
       fingerprint: x.fingerprint_sha256,
@@ -127,16 +127,16 @@ async function removeException(x: CertException) {
     await loadAll()
     toastStore.show('已取消证书例外', 'info')
   } catch (e) {
-    toastStore.show('取消失败：' + String(e), 'error')
+    toastStore.show('取消失败：' + errText(e), 'error')
   }
 }
 
 async function removeRecord(r: CertRecord) {
   try {
-    await invoke('delete_certificate', { host: r.host, port: r.port })
+    await invokeOk('delete_certificate', { host: r.host, port: r.port })
     await loadAll()
   } catch (e) {
-    toastStore.show('删除失败：' + String(e), 'error')
+    toastStore.show('删除失败：' + errText(e), 'error')
   }
 }
 

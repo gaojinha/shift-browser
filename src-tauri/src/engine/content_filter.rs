@@ -19,6 +19,18 @@ use gtk::glib;
 use gtk::glib::translate::ToGlibPtr;
 use webkit2gtk::UserContentManager;
 
+// 规则数据与 JSON 构造（纯函数，拆出以控制本文件行数）
+#[path = "content_filter/rules.rs"]
+mod rules;
+pub use rules::build_rules_with_keywords;
+#[allow(unused_imports)] // build_rules 供单测与后续自检使用（生产路径走 build_rules_with_keywords）
+pub use rules::build_rules;
+use rules::BUILTIN_URL_RULES;
+
+#[cfg(test)]
+#[path = "content_filter/tests.rs"]
+mod tests;
+
 /// 过滤器标识（WebKit 用它做磁盘缓存 key）
 const FILTER_ID: &str = "shift-adblock";
 
@@ -249,182 +261,4 @@ pub fn status() -> serde_json::Value {
     })
 }
 
-/// 内置拦截规则（网络层）：广告网络 / 追踪 / 统计域名。
-/// 用简单正则（前后 `.*` 子串匹配）——避免点号转义在 JSON 里产生歧义，
-/// 且这些品牌串足够独特，误伤概率极低。
-const BUILTIN_URL_RULES: &[&str] = &[
-    // 国际广告网络
-    ".*doubleclick.*",
-    ".*googlesyndication.*",
-    ".*googleadservices.*",
-    ".*adservice.google.*",
-    ".*pagead.*",
-    ".*adnxs.*",
-    ".*adsrvr.*",
-    ".*rubiconproject.*",
-    ".*pubmatic.*",
-    ".*openx.*",
-    ".*casalemedia.*",
-    ".*criteo.*",
-    ".*taboola.*",
-    ".*outbrain.*",
-    ".*smartadserver.*",
-    ".*amazon-adsystem.*",
-    ".*adsafeprotected.*",
-    ".*moatads.*",
-    ".*serving-sys.*",
-    ".*adform.*",
-    ".*bidswitch.*",
-    ".*sharethrough.*",
-    ".*teads.*",
-    ".*33across.*",
-    ".*gumgum.*",
-    ".*smaato.*",
-    ".*yieldmo.*",
-    ".*360yield.*",
-    ".*spotx.*",
-    ".*springserve.*",
-    // 追踪 / 统计 / 分析
-    ".*google-analytics.*",
-    ".*googletagmanager.*",
-    ".*googletagservices.*",
-    ".*scorecardresearch.*",
-    ".*quantserve.*",
-    ".*quantcount.*",
-    ".*hotjar.*",
-    ".*clarity.ms.*",
-    ".*mixpanel.*",
-    ".*segment.io.*",
-    ".*amplitude.com.*",
-    ".*branch.io.*",
-    ".*adjust.com.*",
-    ".*appsflyer.*",
-    ".*matomo.*",
-    ".*piwik.*",
-    ".*crazyegg.*",
-    ".*mouseflow.*",
-    ".*fullstory.*",
-    ".*bugsnag.*",
-    ".*newrelic.*",
-    // 社交像素 / 广告投放
-    ".*connect.facebook.*",
-    ".*facebook.com/tr.*",
-    ".*analytics.twitter.*",
-    ".*ads.linkedin.*",
-    ".*px.adsrvr.*",
-    ".*bat.bing.*",
-    // 国内广告 / 统计
-    ".*pos.baidu.*",
-    ".*cpro.baidu.*",
-    ".*cbjs.baidu.*",
-    ".*hm.baidu.*",
-    ".*union.cnzz.*",
-    ".*cnzz.com.*",
-    ".*umeng.com.*",
-    ".*umengcloud.*",
-    ".*mob.alibaba.*",
-    ".*tanx.com.*",
-    ".*alimama.*",
-    ".*mmstat.*",
-    ".*admaster.*",
-    ".*miaozhen.*",
-    ".*talkingdata.*",
-    ".*growingio.*",
-    ".*sensorsdata.*",
-    ".*zhugeio.*",
-];
 
-/// 生成 WebKit 内容过滤器规则 JSON（`[{trigger, action}]`，仅内置规则）
-#[allow(dead_code)] // 生产路径走 build_rules_with_keywords；此函数供单测与后续自检使用
-pub fn build_rules() -> String {
-    build_rules_with_keywords(&[])
-}
-
-/// 自定义关键词上限（防规则表爆炸）
-const MAX_CUSTOM_KEYWORDS: usize = 200;
-
-/// 生成规则 JSON：内置规则 + 用户自定义关键词（关键词也走网络层拦截）
-pub fn build_rules_with_keywords(custom: &[String]) -> String {
-    let mut patterns: Vec<String> = BUILTIN_URL_RULES.iter().map(|s| s.to_string()).collect();
-    for kw in custom.iter().take(MAX_CUSTOM_KEYWORDS) {
-        if let Some(p) = keyword_to_pattern(kw) {
-            patterns.push(p);
-        }
-    }
-    let mut out = String::with_capacity(patterns.len() * 90 + 2);
-    out.push('[');
-    for (i, pattern) in patterns.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        // pattern 只含 `.` `*` 与字母数字汉字连字符，不会产生 JSON 非法转义
-        out.push_str(&format!(
-            r#"{{"trigger":{{"url-filter":"{}"}},"action":{{"type":"block"}}}}"#,
-            pattern
-        ));
-    }
-    out.push(']');
-    out
-}
-
-/// 关键词 → 规则模式：只保留字母/数字/汉字与 `.` `-`，剔除其它字符
-/// （防止用户输入的正则元字符造成非法规则或过度拦截）
-fn keyword_to_pattern(keyword: &str) -> Option<String> {
-    let cleaned: String = keyword
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '.' || *c == '-')
-        .collect();
-    if cleaned.chars().count() < 2 {
-        return None;
-    }
-    Some(format!(".*{}.*", cleaned))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rules_json_is_well_formed() {
-        let json = build_rules();
-        let parsed: serde_json::Value =
-            serde_json::from_str(&json).expect("规则 JSON 必须能被解析");
-        let arr = parsed.as_array().expect("规则必须是数组");
-        assert_eq!(arr.len(), BUILTIN_URL_RULES.len());
-        for item in arr {
-            assert_eq!(item["action"]["type"], "block");
-            assert!(item["trigger"]["url-filter"].is_string());
-        }
-    }
-
-    #[test]
-    fn rules_use_valid_regex_chars() {
-        // 规则以 .* 开头的子串匹配；不含零宽断言等 WebKit 内容过滤器限制的构造
-        for p in BUILTIN_URL_RULES {
-            assert!(p.starts_with(".*"), "规则应以 .* 开头: {}", p);
-            assert!(!p.contains("(?="), "不应包含零宽断言: {}", p);
-            assert!(!p.contains("(?!"), "不应包含负向断言: {}", p);
-        }
-    }
-
-    #[test]
-    fn keyword_rules_are_sanitized_and_appended() {
-        let json = build_rules_with_keywords(&[
-            "广告".to_string(),    // 有效
-            "a*b".to_string(),     // 清洗为 ab，长度 2 → 有效
-            "x".to_string(),       // 太短 → 丢弃
-            "".to_string(),        // 空 → 丢弃
-            "(?=bad)".to_string(), // 元字符被剔除，剩余 bad → 有效
-        ]);
-        let parsed: serde_json::Value =
-            serde_json::from_str(&json).expect("带关键词的规则 JSON 必须可解析");
-        let arr = parsed.as_array().expect("规则必须是数组");
-        // 内置 + 3 个有效关键词
-        assert_eq!(arr.len(), BUILTIN_URL_RULES.len() + 3);
-        assert!(json.contains(".*广告.*"));
-        assert!(json.contains(".*ab.*"));
-        // 正则元字符不得进入规则
-        assert!(!json.contains("a*b"));
-        assert!(!json.contains("?="));
-    }
-}

@@ -2,6 +2,7 @@
 // 对接 AGNES AI（Rust ai_chat_stream 流式命令，OpenAI 兼容）
 import { defineStore } from 'pinia'
 import { invoke, Channel } from '@tauri-apps/api/core'
+import { errText, invokeOk } from '../utils/invoke'
 import { useSettingsStore } from './settings'
 import type { Snapshot } from '../types/content'
 
@@ -94,7 +95,7 @@ export const useAIStore = defineStore('ai', {
         // 让 AI 真正"理解页面"——正文摘要 + 可交互元素。失败则降级为标题/地址。
         let snapshotDesc = ''
         try {
-          const snap = await invoke<Snapshot>('content_snapshot')
+          const snap = await invokeOk<Snapshot>('content_snapshot')
           if (snap && snap.title) {
             const text = (snap.text || '').slice(0, 800)
             snapshotDesc = `【页面语义快照】标题：${snap.title}；地址：${snap.url}；正文摘要：${text || '(无可读文本)'}；可交互元素：链接 ${snap.interactive?.links ?? 0} 个、按钮 ${snap.interactive?.buttons ?? 0} 个、输入框 ${snap.interactive?.inputs ?? 0} 个。`
@@ -146,7 +147,7 @@ export const useAIStore = defineStore('ai', {
         // 无工具保持流式体验。工具场景需要多轮工具执行，流式反而卡顿。
         await this.loadTools()
         if (this.tools.length > 0) {
-          const reply = await invoke<string>('ai_chat', {
+          const reply = await invokeOk<string>('ai_chat', {
             provider: settingsStore.get('ai_provider') || 'agnes',
             messages: [
               { role: 'system', content: system },
@@ -188,7 +189,7 @@ export const useAIStore = defineStore('ai', {
           }
         }
 
-        await invoke('ai_chat_stream', {
+        await invokeOk('ai_chat_stream', {
           requestId,
           provider: settingsStore.get('ai_provider') || 'agnes',
           messages: [
@@ -201,7 +202,7 @@ export const useAIStore = defineStore('ai', {
           apiKey: realKey || undefined,
         })
       } catch (e) {
-        this.error = String(e)
+        this.error = errText(e)
         this.dropEmptyAssistant()
         this.loading = false
         this.streamingId = null

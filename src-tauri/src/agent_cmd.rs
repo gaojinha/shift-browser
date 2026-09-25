@@ -149,6 +149,8 @@ pub async fn execute_multi_step_action(
 /// /// 执行动作（确认后调用）。仅当前活动标签。
 /// 返回动作结果文本（供 AI 继续分析）。
 /// 记录一条动作执行（审计/回放/重试的历史地基）。
+// Tauri 命令参数与前端 IPC 一一对应，不宜为减参数引入包装结构体
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn agent_action_record(
     _app: AppHandle,
@@ -310,6 +312,7 @@ pub async fn execute_agent_action(
 
 /// 手动执行动作（前端"测试"用，绕过 AI 确认——仅供调试，生产由 AI 循环走确认流程）
 /// 注意：此命令不经过确认，仅限设置页调试入口使用。
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn agent_debug_execute(
     app: AppHandle,

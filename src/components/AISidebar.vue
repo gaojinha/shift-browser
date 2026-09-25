@@ -3,6 +3,7 @@
 // 流式输出：后端 SSE 逐块推送，前端实时渲染；回复支持 Markdown + 代码复制
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { invokeOk } from '../utils/invoke'
 import { listen } from '@tauri-apps/api/event'
 import { useAIStore } from '../stores/ai'
 import { useTabsStore } from '../stores/tabs'
@@ -33,7 +34,7 @@ const topOffset = computed(() => {
 watch(
   () => props.show,
   (v) => {
-    invoke('set_webview_ai_panel', { active: v }).catch(() => {})
+    invokeOk('set_webview_ai_panel', { active: v }).catch(() => {})
     if (v) {
       // 打开时同步当前页面上下文
       const tab = tabsStore.activeTab

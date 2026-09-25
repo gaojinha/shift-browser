@@ -7,6 +7,7 @@ use serde_json::json;
 use tauri::{AppHandle, Manager};
 
 use super::auth::{atomic_write_token, generate_token, ApiTokenShared, DashboardTickets};
+use crate::error::AppError;
 
 /// 状态面板登录页（无脚本、严格 CSP；长期 token 只接受 POST 表单）
 pub(crate) fn dashboard_login_html(error: Option<&str>, retry_after: u64) -> String {
@@ -135,7 +136,8 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
     .unwrap_or_default();
     let m: std::collections::HashMap<String, String> = rows.into_iter().collect();
     if m.get("api_model_gateway").map(|v| v.as_str()) != Some("true") {
-        return json!({"error": {"message": "模型网关已禁用：需在设置里显式开启「允许模型网关」"}});
+        return AppError::permission("模型网关已禁用：需在设置里显式开启「允许模型网关」")
+            .gateway_error_json();
     }
     let base = m
         .get("ai_base_url")
@@ -148,7 +150,8 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
         .or_else(|| std::env::var("AGNES_API_KEY").ok())
         .unwrap_or_default();
     if key.is_empty() {
-        return json!({"error": {"message": "未配置 AI API Key（设置里填或设 AGNES_API_KEY）"}});
+        return AppError::auth("未配置 AI API Key（设置里填或设 AGNES_API_KEY）")
+            .gateway_error_json();
     }
     let model = m
         .get("ai_model")
@@ -157,7 +160,9 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
 
     let mut payload: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
-        Err(e) => return json!({"error": {"message": format!("请求 JSON 非法: {}", e)}}),
+        Err(e) => {
+            return AppError::validation(format!("请求 JSON 非法: {}", e)).gateway_error_json()
+        }
     };
     if payload.get("model").is_none() {
         if let Some(o) = payload.as_object_mut() {
@@ -171,7 +176,7 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
     let base = base.trim();
     if let Err(e) = crate::ai::validate_base_url(base) {
         log::warn!("[api] 模型网关上游地址被安全策略拒绝: {} ({})", e, base);
-        return json!({"error": {"message": format!("上游地址未通过安全校验: {e}")}});
+        return AppError::permission(format!("上游地址未通过安全校验: {e}")).gateway_error_json();
     }
     // P0-6：域名解析后 pin 死公网地址，消除"校验时解析一次、发送时再解析一次"
     // 的 DNS-rebinding TOCTOU（双答 DNS 在内网混答时直接拒绝）。
@@ -179,7 +184,7 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
         Ok(v) => v,
         Err(e) => {
             log::warn!("[api] 模型网关注解/pin 上游地址失败: {} ({})", e, base);
-            return json!({"error": {"message": format!("上游地址未通过安全校验: {e}")}});
+            return AppError::permission(format!("上游地址未通过安全校验: {e}")).gateway_error_json();
         }
     };
     let mut builder = reqwest::Client::builder()
@@ -189,7 +194,9 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
     }
     let client = match builder.build() {
         Ok(c) => c,
-        Err(e) => return json!({"error": {"message": format!("创建 HTTP 客户端失败: {}", e)}}),
+        Err(e) => {
+            return AppError::net(format!("创建 HTTP 客户端失败: {}", e)).gateway_error_json()
+        }
     };
     let url = format!("{}/chat/completions", base.trim_end_matches('/'));
     match client
@@ -201,9 +208,9 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
     {
         Ok(resp) => match resp.json::<serde_json::Value>().await {
             Ok(v) => v,
-            Err(e) => json!({"error": {"message": format!("解析上游响应失败: {}", e)}}),
+            Err(e) => AppError::net(format!("解析上游响应失败: {}", e)).gateway_error_json(),
         },
-        Err(e) => json!({"error": {"message": format!("上游请求失败: {}", e)}}),
+        Err(e) => AppError::net(format!("上游请求失败: {}", e)).gateway_error_json(),
     }
 }
 

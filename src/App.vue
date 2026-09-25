@@ -1,26 +1,29 @@
 <script setup lang="ts">
 // 浏览器主窗口布局
 // 结构：TabBar(38) + AddressBar(36) + BookmarksBar(26) + 内容区(webview) + StatusBar(22)
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { invokeOk } from './utils/invoke'
 import { listen } from '@tauri-apps/api/event'
 import TabBar from './components/TabBar.vue'
 import VerticalTabBar from './components/VerticalTabBar.vue'
 import AddressBar from './components/AddressBar.vue'
 import BookmarksBar from './components/BookmarksBar.vue'
 import StatusBar from './components/StatusBar.vue'
-import PasswordsDialog from './components/PasswordsDialog.vue'
-import GroupsDialog from './components/GroupsDialog.vue'
-import DownloadsDialog from './components/DownloadsDialog.vue'
-import SettingsDialog from './components/SettingsDialog.vue'
-import AISidebar from './components/AISidebar.vue'
-import TranslatePanel from './components/TranslatePanel.vue'
-import HistoryDialog from './components/HistoryDialog.vue'
-import BookmarksDialog from './components/BookmarksDialog.vue'
-import SessionDialog from './components/SessionDialog.vue'
-import UserscriptsDialog from './components/UserscriptsDialog.vue'
-import CommandPalette from './components/CommandPalette.vue'
-import CertificatesDialog from './components/CertificatesDialog.vue'
+// R1 首屏分包：用户主动打开的弹窗/面板按需加载（点开才拉取对应 chunk）
+// 安全即时类（CertWarning/PermissionPrompt）与全局反馈（AppToast）保留同步，必须立即可见
+const PasswordsDialog = defineAsyncComponent(() => import('./components/PasswordsDialog.vue'))
+const GroupsDialog = defineAsyncComponent(() => import('./components/GroupsDialog.vue'))
+const DownloadsDialog = defineAsyncComponent(() => import('./components/DownloadsDialog.vue'))
+const SettingsDialog = defineAsyncComponent(() => import('./components/SettingsDialog.vue'))
+const AISidebar = defineAsyncComponent(() => import('./components/AISidebar.vue'))
+const TranslatePanel = defineAsyncComponent(() => import('./components/TranslatePanel.vue'))
+const HistoryDialog = defineAsyncComponent(() => import('./components/HistoryDialog.vue'))
+const BookmarksDialog = defineAsyncComponent(() => import('./components/BookmarksDialog.vue'))
+const SessionDialog = defineAsyncComponent(() => import('./components/SessionDialog.vue'))
+const UserscriptsDialog = defineAsyncComponent(() => import('./components/UserscriptsDialog.vue'))
+const CommandPalette = defineAsyncComponent(() => import('./components/CommandPalette.vue'))
+const CertificatesDialog = defineAsyncComponent(() => import('./components/CertificatesDialog.vue'))
 import CertWarning from './components/CertWarning.vue'
 import PermissionPrompt from './components/PermissionPrompt.vue'
 import AppToast from './components/AppToast.vue'
@@ -57,7 +60,7 @@ async function onToggleVerticalTabs() {
   const next = !verticalTabs.value
   await settingsStore.set('vertical_tabs', next ? 'true' : 'false')
   try {
-    await invoke('set_vertical_tabs', { active: next })
+    await invokeOk('set_vertical_tabs', { active: next })
   } catch (e) {
     console.error('[app] 切换标签栏方向失败:', e)
   }
@@ -195,7 +198,7 @@ function handleGlobalAction(action: string) {
       openCommandPalette()
       break
     case 'devtools':
-      invoke('open_devtools').catch(() => {})
+      invokeOk('open_devtools').catch(() => {})
       break
     case 'lock-vault':
       // 手动立即锁定密码库（Ctrl+Shift+L）：未设主密码/已锁定时后端为无害空操作
@@ -379,13 +382,13 @@ async function initBrowser(skipStartupTab = false) {
   // Vue 自己的 DOM，盖不住另一个独立的 GTK webview（标签页）
   // 同步书签栏显隐到 Rust 侧（初始化 top_offset）
   try {
-    await invoke('set_bookmarks_bar_visible', { visible: settingsStore.showBookmarksBar })
+    await invokeOk('set_bookmarks_bar_visible', { visible: settingsStore.showBookmarksBar })
   } catch (e) {
     console.error('[app] 书签栏初始化同步失败:', e)
   }
   // 同步标签栏方向到 Rust 侧（垂直标签：内容区 top 与 left 都变）
   try {
-    await invoke('set_vertical_tabs', {
+    await invokeOk('set_vertical_tabs', {
       active: settingsStore.get('vertical_tabs') === 'true',
     })
   } catch (e) {

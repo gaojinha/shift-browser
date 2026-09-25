@@ -3,6 +3,7 @@
 // 原版 Electron 翻译功能的核心场景——选不中文本复制到这里翻译
 import { computed, ref, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { invokeOk, errText } from '../utils/invoke'
 import { setWebviewVisible } from '../utils/webview'
 import { useSettingsStore } from '../stores/settings'
 
@@ -43,10 +44,10 @@ const elapsedMs = ref(0)
 async function translatePage() {
   error.value = ''
   try {
-    await invoke('translate_current_page')
+    await invokeOk('translate_current_page')
     emit('close') // 关掉面板，让用户直接看页面上的翻译进度浮层
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e || '整页翻译失败')
+    error.value = errText(e) || '整页翻译失败'
   }
 }
 

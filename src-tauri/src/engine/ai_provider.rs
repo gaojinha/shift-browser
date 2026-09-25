@@ -165,7 +165,7 @@ pub fn resolve_provider(
     provider_id: &str,
     base_url: Option<String>,
     api_key: Option<String>,
-) -> Result<Box<dyn AiProvider>, String> {
+) -> Result<Box<dyn AiProvider>, crate::error::AppError> {
     match provider_id {
         "agnes" | "" => {
             let base_url = base_url
@@ -176,13 +176,18 @@ pub fn resolve_provider(
                 .filter(|k| !k.contains("****"))
                 .or_else(|| std::env::var("AGNES_API_KEY").ok())
                 .ok_or_else(|| {
-                    "未配置 API Key（在设置里填写，或设置 AGNES_API_KEY 环境变量）".to_string()
+                    crate::error::AppError::auth(
+                        "未配置 API Key（在设置里填写，或设置 AGNES_API_KEY 环境变量）",
+                    )
                 })?;
             // SSRF 校验（https-only + 非内网）在 agnes_chat_impl 内部执行
             Ok(Box::new(AgnesProvider { base_url, api_key }))
         }
         "local" => Ok(Box::new(LocalProvider)),
-        other => Err(format!("未知 provider: {}", other)),
+        other => Err(crate::error::AppError::validation(format!(
+            "未知 provider: {}",
+            other
+        ))),
     }
 }
 
@@ -228,7 +233,9 @@ mod tests {
                 assert!(p.is_configured());
             }
             Err(e) => {
-                assert!(e.contains("未配置"));
+                assert!(e.to_string().contains("未配置"));
+                // R1 错误类型化：缺 key 必须是 E_AUTH（前端据此引导去设置页）
+                assert_eq!(e.code(), crate::error::E_AUTH);
             }
         }
     }

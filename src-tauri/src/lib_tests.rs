@@ -38,7 +38,9 @@ mod tests {
             include_str!("lib.rs"),
             include_str!("tabs.rs"),
             include_str!("tabs/commands/mod.rs"),
-            include_str!("tabs/commands/tabs_cmds.rs"),
+            include_str!("tabs/commands/lifecycle_cmds.rs"),
+            include_str!("tabs/commands/nav_cmds.rs"),
+            include_str!("tabs/commands/tab_state_cmds.rs"),
             include_str!("tabs/commands/ui_cmds.rs"),
             include_str!("tls.rs"),
             include_str!("perms.rs"),
@@ -61,6 +63,7 @@ mod tests {
             include_str!("content_cmd.rs"),
             include_str!("default_browser.rs"),
             include_str!("db/bookmarks.rs"),
+            include_str!("db/bookmarks_html.rs"),
             include_str!("db/history.rs"),
             include_str!("db/sessions.rs"),
             include_str!("db/settings.rs"),
@@ -77,6 +80,7 @@ mod tests {
             include_str!("db/users/import_export.rs"),
             include_str!("db/users/security.rs"),
             include_str!("engine/llmstxt.rs"),
+            include_str!("app/misc_cmds.rs"),
         ];
         let mut defined: std::collections::HashSet<String> = std::collections::HashSet::new();
         for s in sources {

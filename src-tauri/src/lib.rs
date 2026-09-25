@@ -5,10 +5,17 @@ mod ai;
 mod about;
 mod audit;
 mod capabilities;
+// constants.rs/contracts.rs 同时被 build.rs include! 用于生成前端 constants.ts，
+// 部分条目仅 codegen 使用，在本 crate 编译期看似无引用——模块级 allow(dead_code)
+#[allow(dead_code)]
 mod constants;
 mod content_cmd;
+/// 同上：契约源与 build.rs 共享，部分常量/方法仅服务 TS 生成
+#[allow(dead_code)]
 mod contracts;
 mod db;
+// R1 错误类型化：统一错误码（E_DB/E_PERM/E_TIMEOUT/E_AUTH/E_NET/E_VALIDATION/E_INTERNAL）
+mod error;
 mod default_browser;
 mod engine;
 mod extensions;
@@ -41,6 +48,18 @@ mod proto_shift;
 // R2-1b 拆分（2026-09-24）：setup 启动装配独立成子模块
 #[path = "app/bootstrap.rs"]
 mod bootstrap;
+// R2-1c 拆分（2026-09-25）：panic 钩子 / 启动环境变量 / 敏感文件加固 / 杂项命令
+#[path = "app/panic_hook.rs"]
+mod panic_hook;
+#[path = "app/env_setup.rs"]
+mod env_setup;
+#[path = "app/harden.rs"]
+mod harden;
+#[path = "app/misc_cmds.rs"]
+mod misc_cmds;
+pub(crate) use panic_hook::PANIC_LOG_DIR;
+#[cfg(unix)]
+pub use harden::harden_sensitive_files;
 
 use db::{
     bookmarks, downloads, history, passwords, sessions, settings, tab_groups, users, workspaces,
@@ -60,257 +79,16 @@ pub fn redact_url(u: &str) -> String {
     }
 }
 
-/// 敏感文件权限加固（安全 · 2026-09-22）：Cookie 库/侧车 WAL 按 umask 落盘时
-/// 常见 664（组/其他用户可读），会话 Cookie 泄露风险。应用数据目录虽为 0700 兜底，
-/// 但纵深防御要求文件自身也为 0600。运行时 WebKit 可能重建这些文件，故需周期重扫。
-#[cfg(unix)]
-pub fn harden_sensitive_files(dir: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    const SENSITIVE: &[&str] = &[
-        "cookies",
-        "cookies.sqlite",
-        "cookies.bak",
-        "cookies-wal",
-        "cookies-shm",
-        "cookies.sqlite-wal",
-        "cookies.sqlite-shm",
-        "shift-browser.db-wal",
-        "shift-browser.db-shm",
-    ];
-    for name in SENSITIVE {
-        let p = dir.join(name);
-        if p.exists() {
-            let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600));
-        }
-    }
-    // 日志目录同样收紧（隐私：日志虽已脱敏，仍不应组/其他可读）
-    let logs = dir.join("logs");
-    if logs.exists() {
-        let _ = std::fs::set_permissions(&logs, std::fs::Permissions::from_mode(0o700));
-        if let Ok(rd) = std::fs::read_dir(&logs) {
-            for e in rd.flatten() {
-                let _ = std::fs::set_permissions(e.path(), std::fs::Permissions::from_mode(0o600));
-            }
-        }
-    }
-}
-
-/// 查询是否处于启动锁屏状态（前端初始化前调用，不依赖 Db）
-#[tauri::command]
-fn is_locked() -> bool {
-    crate::lock_dialog::is_locked()
-}
-
-/// 前端日志桥：把前端关键节点的执行情况写进 Rust 日志，
-/// 便于排查"前端白屏/事件收不到/初始化不执行"这类看不到 console 的问题。
-#[tauri::command]
-fn front_log(msg: String) {
-    log::info!("[front] {}", msg);
-}
-
-/// 一键自检：汇总版本/存储/运行时/能力状态（只读，不修改任何状态）
-#[tauri::command]
-async fn selfcheck_cmd(app: tauri::AppHandle) -> Result<selfcheck::SelfCheckReport, String> {
-    let report = selfcheck::run(&app).await;
-    log::info!(
-        "[selfcheck] 健康={} 版本项={} 存储项={} 运行时项={} 能力项={}",
-        report.healthy,
-        report.versions.len(),
-        report.storage.len(),
-        report.runtime.len(),
-        report.capabilities.len()
-    );
-    // 关键环境事实写入日志（排查问题时第一手资料：版本/引擎/路径）
-    let env_line: Vec<String> = report
-        .versions
-        .iter()
-        .map(|i| format!("{}={}", i.name, i.detail))
-        .collect();
-    log::info!("[selfcheck] 环境: {}", env_line.join(" | "));
-    // 能力状态也记一行（过滤器是否就绪、拦截是否开启、隐私档位）
-    let cap_line: Vec<String> = report
-        .capabilities
-        .iter()
-        .map(|i| format!("{}={}", i.name, i.detail))
-        .collect();
-    log::info!("[selfcheck] 能力: {}", cap_line.join(" | "));
-    for item in report
-        .versions
-        .iter()
-        .chain(report.storage.iter())
-        .chain(report.runtime.iter())
-        .chain(report.capabilities.iter())
-    {
-        if !item.ok {
-            log::warn!("[selfcheck] 异常项: {} - {}", item.name, item.detail);
-        }
-    }
-    Ok(report)
-}
-
-/// 「关于」页信息（只读，打开即显示，不依赖自检）
-#[tauri::command]
-fn app_about_cmd(app: tauri::AppHandle) -> about::AboutInfo {
-    let info = about::collect(&app);
-    log::info!(
-        "[about] {} v{} · WebKitGTK {} · {} · {}",
-        info.app_name,
-        info.version,
-        info.webkit_version,
-        info.os_arch,
-        info.profile
-    );
-    info
-}
-
-/// panic 日志目录（setup 中 app_data_dir 确定后注入）；未注入前 panic 至少落 stderr + 日志
-static PANIC_LOG_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
-
-/// 安装全局 panic 钩子（P0-4，2026-09-24）。
-///
-/// 全应用无 `catch_unwind`：WebKit 网页进程崩溃有 UI 兜底，浏览器自身线程
-/// panic 却只会让进程静默消失，用户无法提供任何证据。钩子统一记录
-/// 线程/位置/载荷/backtrace 到 stderr、日志，并在数据目录追加 `panic.log`。
-fn install_panic_hook() {
-    std::panic::set_hook(Box::new(|info| {
-        let thread_name = std::thread::current()
-            .name()
-            .unwrap_or("unnamed")
-            .to_string();
-        let location = info
-            .location()
-            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
-            .unwrap_or_else(|| "<unknown>".to_string());
-        let payload = info
-            .payload()
-            .downcast_ref::<&str>()
-            .map(|s| (*s).to_string())
-            .or_else(|| info.payload().downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "<非字符串 panic 载荷>".to_string());
-        let backtrace = std::backtrace::Backtrace::force_capture();
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let line = format!(
-            "[panic] unix_ts={ts} thread={thread_name} location={location}\n          payload: {payload}\n{backtrace}"
-        );
-        // 1. stderr：logger 尚未初始化的最早启动阶段也能保留
-        eprintln!("{line}");
-        // 2. tauri-plugin-log（初始化后进入正式日志文件）
-        log::error!("{line}");
-        // 3. 数据目录 panic.log 追加落盘（用户事后可提供）
-        if let Some(dir) = PANIC_LOG_DIR.get() {
-            use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(dir.join("panic.log"))
-            {
-                let _ = writeln!(f, "{line}\n");
-            }
-        }
-    }));
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 pub fn run() {
     // 最早安装：任何后续初始化（含 GTK/WebKit）中 panic 都有证据
-    install_panic_hook();
+    panic_hook::install();
 
-    // ===== WebKit DMA-BUF 线性格式兜底（P0-7，2026-09-24）=====
-    // WEBKIT_DMABUF_RENDERER_BUFFER_FORMAT=XR24:0 用于规避 WebKitGTK 2.42+
-    // AcceleratedBackingStore 竞态空指针崩溃（见 HANDOFF-2026-09-23 全记录）。
-    // 原先只写在 .desktop 模板的 Exec= env 前缀里——从终端/IDE/MCP 客户端等
-    // 非 desktop 入口启动时不生效。前移到进程启动最早处（任何 GTK/WebKit
-    // 初始化之前），覆盖全部启动入口；用户显式设置过同名变量则不覆盖。
-    #[cfg(target_os = "linux")]
-    if std::env::var_os("WEBKIT_DMABUF_RENDERER_BUFFER_FORMAT").is_none() {
-        std::env::set_var("WEBKIT_DMABUF_RENDERER_BUFFER_FORMAT", "XR24:0");
-        log::info!("[ShiftBrowser] 已注入 WEBKIT_DMABUF_RENDERER_BUFFER_FORMAT=XR24:0（启动入口兜底，可被环境变量覆盖）");
-    }
+    // 启动环境变量与平台初始化（DMA-BUF 兜底 / 视频解码降级 / Cookie 持久化），
+    // 必须在任何 GTK/WebKit 初始化之前执行——实现见 app/env_setup.rs
+    env_setup::apply();
 
-    // ===== DMA-BUF 渲染器：不再默认禁用（2026-09-23 回退）=====
-    // 【原方案】禁用它（WEBKIT_DISABLE_DMABUF_RENDERER=1）可修 Intel HD 630 上的
-    // 网页/视频闪烁（WebKitGTK 2.42+ 默认走 DMA-BUF 路径，与 i915 配合不良）。
-    //
-    // 【为何回退】core dump 定位到崩溃在 WebKit 自身的
-    //   AcceleratedBackingStore::update()（AcceleratedBackingStore.cpp:808）
-    //   ← enterAcceleratedCompositingMode ← IPC EnterAcceleratedCompositingMode
-    // 即「网页请求进入加速合成模式」时，m_legacyMainFrameProcess 已失效仍被解引用
-    // （WebKit 生命周期竞态 bug，rdi=0）。而**禁用 DMA-BUF 会让加速合成走
-    // SHM/EGLImage 兜底路径**，更容易踩中该竞态 → 网页删文件等操作触发 SIGSEGV。
-    //
-    // 结论：不禁用 = 走 WebKit 默认 DMA-BUF 路径，绕开该竞态。
-    // 若视频闪烁复现，可显式设 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 启动（二者取舍）。
-    log::info!(
-        "[ShiftBrowser] WEBKIT_DISABLE_DMABUF_RENDERER={:?}（未设置=走默认 DMA-BUF 渲染）",
-        std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER")
-    );
-
-    // ===== 视频进程崩溃修复（2026-09-22）：降级硬件视频解码器 =====
-    // 症状：播放某些 H.264 视频时 WebKitWebProcess 直接 abort：
-    //   ** (WebKitWebProcess:PID): ERROR **: video meta uses 368x480 instead of 360x480
-    // 成因：硬件解码器（V4L2 stateless / VA-API）输出帧宽按 16 字节对齐（360→368），
-    // 而 WebKit 的 video meta 校验期望未对齐宽度，断言失败 → g_error() → 进程终止。
-    // 规避：用 GStreamer 标准的 GST_PLUGIN_FEATURE_RANK 把硬件解码器 rank 压到 0，
-    // 使其回退到软件解码（libav），彻底绕开对齐 padding 路径。
-    // 用户可覆盖（机器上硬解正常、且想要 4K 硬解性能时，自行设置该变量）。
-    if std::env::var_os("GST_PLUGIN_FEATURE_RANK").is_none() {
-        std::env::set_var(
-            "GST_PLUGIN_FEATURE_RANK",
-            // rank 0 = 不参与自动选择；软件解码 avdec_* 保持默认 rank
-            "v4l2slh264dec:0,v4l2slh265dec:0,v4l2slvp8dec:0,v4l2slvp9dec:0,v4l2slav1dec:0,\
-             v4l2h264dec:0,v4l2h265dec:0,v4l2vp8dec:0,v4l2vp9dec:0,\
-             vah264dec:0,vah265dec:0,vavp8dec:0,vavp9dec:0,vaav1dec:0,vajpegdec:0",
-        );
-    }
-    log::info!(
-        "[ShiftBrowser] GST_PLUGIN_FEATURE_RANK={:?}（视频进程崩溃修复）",
-        std::env::var("GST_PLUGIN_FEATURE_RANK")
-    );
-
-    // ===== Cookie 持久化（修复"登录状态不保存"）=====
-    // WebKitGTK 的 CookieManager 默认是内存模式，重启即丢——必须显式
-    // set_persistent_storage 落盘。且该调用必须在任何 web process 创建之前
-    // （tauri 的 setup 回调执行时主 webview 已创建，已太晚），故放在 run() 开头。
-    // 存储路径与 app_data_dir 一致：$XDG_DATA_HOME/com.shiftbrowser.app/cookies.sqlite
-    #[cfg(target_os = "linux")]
-    {
-        // P0-2：平台代码下沉到 engine::platform（GTK 初始化 + Cookie 持久化）
-        let data_home = std::env::var("XDG_DATA_HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| {
-                std::env::var("HOME")
-                    .map(|h| std::path::PathBuf::from(h).join(".local/share"))
-                    .unwrap_or_else(|_| std::path::PathBuf::from("."))
-            });
-        if let Some(cookie_path) =
-            crate::engine::platform::init_cookie_persistence(&data_home)
-        {
-            // 安全：Cookie 库按 umask 落盘（常见 664），立即收紧到 600（另有周期重扫）
-            if let Some(dir) = cookie_path.parent() {
-                crate::harden_sensitive_files(dir);
-            }
-            // 此处 logger 插件尚未初始化，用 println! 保证启动日志可见
-            println!(
-                "[ShiftBrowser] Cookie 持久化已启用: {}",
-                cookie_path.display()
-            );
-        }
-    }
-
-    // ===== 隐私防护 P3：TLS 指纹规范化（已回退，2026-09-18）=====
-    // 回退原因：设置 G_TLS_GNUTLS_PRIORITY 后邮箱正文渲染为空 —— 该环境变量
-    // 作用于进程内全部 TLS 连接，若站点部分资源依赖被裁掉的协议/套件组合，
-    // 会表现为内容加载不全（空白）。网络底层改动风险远高于收益，故回退。
-    // 保留结论：JA4 无法伪装成 Chrome（GnuTLS vs BoringSSL），
-    // 与其在底层冒险，不如把预算放在页面内的加噪与归一化。
-    // std::env::set_var(
-    //     "G_TLS_GNUTLS_PRIORITY",
-    //     "NORMAL:-VERS-ALL:+VERS-TLS1.3:+VERS-TLS1.2:-VERS-TLS1.0:-VERS-TLS1.1",
-    // );
     tauri::Builder::default()
     // 单实例（阶段 4 D3）：已有实例运行时，新实例退出并把命令行参数转发给已有实例。
     // 必须注册为第一个插件（官方要求）。回调在已有实例进程里执行，
@@ -357,9 +135,9 @@ pub fn run() {
     )
     .invoke_handler(tauri::generate_handler![
       // 启动锁屏状态（前端初始化前查询，锁屏期间静默等待解锁）
-      is_locked,
+      misc_cmds::is_locked,
       // 前端日志桥（排查前端执行链路）
-      front_log,
+      misc_cmds::front_log,
       // 设置
       settings::get_setting,
       settings::get_all_settings,
@@ -407,9 +185,9 @@ pub fn run() {
       bookmarks::delete_bookmark,
       bookmarks::delete_bookmark_folder,
       bookmarks::search_bookmarks,
-      bookmarks::import_bookmarks_html,
-      bookmarks::import_bookmarks_from_file,
-      bookmarks::export_bookmarks_html,
+      bookmarks::bookmarks_html::import_bookmarks_html,
+      bookmarks::bookmarks_html::import_bookmarks_from_file,
+      bookmarks::bookmarks_html::export_bookmarks_html,
       // 历史
       history::record_history,
       history::backfill_history_titles,
@@ -496,9 +274,9 @@ pub fn run() {
       tabs::commands::set_webview_ai_panel,
       tabs::commands::open_devtools,
       // 自检（可观测性）
-      selfcheck_cmd,
+      misc_cmds::selfcheck_cmd,
       // 关于页信息（只读，打开即显示）
-      app_about_cmd,
+      misc_cmds::app_about_cmd,
       // AI 侧边栏
       ai::ai_chat,
       ai::ai_chat_stream,

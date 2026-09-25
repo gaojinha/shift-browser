@@ -3,6 +3,7 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { invokeOk } from '../utils/invoke'
 import type { Tab } from '../types/tab'
 import type { Session, SessionTab } from '../types/session'
 import { useGroupsStore } from './groups'
@@ -91,7 +92,7 @@ export const useTabsStore = defineStore('tabs', {
     /** 从 Rust 拉取全部标签（启动时调用），失败不抛（App.vue 初始化链依赖此方法不炸） */
     async loadTabs() {
       try {
-        const tabs = await invoke<Tab[]>('get_tabs')
+        const tabs = await invokeOk<Tab[]>('get_tabs')
         // Rust 返回的 Tab 无 groupId 字段，补默认值（未分组）
         this.tabs = tabs.map((t) => ({ ...t, groupId: t.groupId ?? null }))
         const active = tabs.find((t) => t.is_active)
@@ -106,19 +107,19 @@ export const useTabsStore = defineStore('tabs', {
     /** 分屏：加载当前分屏标签（启动时同步，阶段 3.1） */
     async loadSplit() {
       try {
-        this.splitTabId = await invoke<string | null>('get_split_tab')
+        this.splitTabId = await invokeOk<string | null>('get_split_tab')
       } catch {
         this.splitTabId = null
       }
     },
     /** 分屏：在右侧窗格显示指定标签 */
     async setSplit(id: string) {
-      await invoke('set_split_tab', { id })
+      await invokeOk('set_split_tab', { id })
       this.splitTabId = id
     },
     /** 分屏：关闭分屏 */
     async clearSplit() {
-      await invoke('clear_split')
+      await invokeOk('clear_split')
       this.splitTabId = null
     },
 
@@ -252,16 +253,16 @@ export const useTabsStore = defineStore('tabs', {
       if (target === 'newtab') {
         try {
           // 先刷新数据（书签/历史面板），再取 URL
-          await invoke('refresh_newtab').catch((e) => {
+          await invokeOk('refresh_newtab').catch((e) => {
             console.error('[tabs] 刷新新标签页数据失败:', e)
           })
-          target = await invoke<string>('get_newtab_url')
+          target = await invokeOk<string>('get_newtab_url')
         } catch {
           target = 'https://www.bing.com'
         }
       }
       try {
-        const tab = await invoke<Tab>('create_tab', {
+        const tab = await invokeOk<Tab>('create_tab', {
           url: target,
           private: isPrivate,
           afterActive,
@@ -309,7 +310,7 @@ export const useTabsStore = defineStore('tabs', {
     async closeTab(id: string) {
       const my = ++this._opSeq
       try {
-        const next = await invoke<Tab | null>('close_tab', { id })
+        const next = await invokeOk<Tab | null>('close_tab', { id })
         // 标签确实关了，列表总是同步（Rust 是权威）
         this.tabs = this.tabs.filter((t) => t.id !== id)
         // 但 activeTabId 归属只在没有更新的用户操作时回写，
@@ -344,7 +345,7 @@ export const useTabsStore = defineStore('tabs', {
       this._switching = true
       const my = ++this._opSeq
       try {
-        const tab = await invoke<Tab | null>('switch_tab', { id })
+        const tab = await invokeOk<Tab | null>('switch_tab', { id })
         // 过期回调：期间用户又关了/切了别的标签，不回写激活状态
         if (!tab || my !== this._opSeq) return
         for (const t of this.tabs) {
@@ -375,7 +376,7 @@ export const useTabsStore = defineStore('tabs', {
       this.canGoBack = true
       this.canGoForward = false
       try {
-        const tab = await invoke<Tab | null>('navigate_tab', { id, url })
+        const tab = await invokeOk<Tab | null>('navigate_tab', { id, url })
         if (tab) {
           const idx = this.tabs.findIndex((t) => t.id === id)
           // 保留分组：Rust 返回的 Tab 无 groupId 字段，整体替换会掉组（与 pinTab/muteTab 对齐）
@@ -391,7 +392,7 @@ export const useTabsStore = defineStore('tabs', {
     /** 固定/取消固定标签（原版 tab-pin） */
     async pinTab(id: string) {
       try {
-        const tab = await invoke<Tab | null>('toggle_pin', { id })
+        const tab = await invokeOk<Tab | null>('toggle_pin', { id })
         if (tab) {
           const idx = this.tabs.findIndex((t) => t.id === id)
           if (idx !== -1) this.tabs[idx] = { ...tab, groupId: this.tabs[idx].groupId ?? null }
@@ -405,7 +406,7 @@ export const useTabsStore = defineStore('tabs', {
     /** 静音/取消静音标签（原版 tab-mute） */
     async muteTab(id: string) {
       try {
-        const tab = await invoke<Tab | null>('toggle_mute', { id })
+        const tab = await invokeOk<Tab | null>('toggle_mute', { id })
         if (tab) {
           const idx = this.tabs.findIndex((t) => t.id === id)
           if (idx !== -1) this.tabs[idx] = { ...tab, groupId: this.tabs[idx].groupId ?? null }
@@ -430,11 +431,11 @@ export const useTabsStore = defineStore('tabs', {
       const moved = this.tabs.splice(from, 1)[0]
       this.tabs.splice(to, 0, moved)
       try {
-        await invoke('reorder_tabs', { ids: this.tabs.map((t) => t.id) })
+        await invokeOk('reorder_tabs', { ids: this.tabs.map((t) => t.id) })
       } catch (e) {
         console.error('[tabs] 排序同步失败:', e)
         // 失败回滚：重新拉取权威顺序
-        const tabs = await invoke<Tab[]>('get_tabs').catch(() => [])
+        const tabs = await invokeOk<Tab[]>('get_tabs').catch(() => [])
         if (tabs.length) this.tabs = tabs.map((t) => ({ ...t, groupId: t.groupId ?? null }))
       }
     },
@@ -443,7 +444,7 @@ export const useTabsStore = defineStore('tabs', {
     async reloadTab(id: string) {
       this._markLoading(id)
       try {
-        const tab = await invoke<Tab | null>('reload_tab', { id })
+        const tab = await invokeOk<Tab | null>('reload_tab', { id })
         if (tab) {
           const idx = this.tabs.findIndex((t) => t.id === id)
           // 保留分组：reload 返回的 Tab 无 groupId，整体替换会掉组（对齐 navigateTab/pinTab）
@@ -465,7 +466,7 @@ export const useTabsStore = defineStore('tabs', {
         return
       }
       try {
-        const nav = await invoke<{ canGoBack: boolean; canGoForward: boolean }>(
+        const nav = await invokeOk<{ canGoBack: boolean; canGoForward: boolean }>(
           'get_nav_state',
           { id: this.activeTabId }
         )
@@ -481,7 +482,7 @@ export const useTabsStore = defineStore('tabs', {
       if (!this.activeTabId || !this.canGoBack) return
       this._markLoading(this.activeTabId)
       try {
-        await invoke<Tab | null>('go_back')
+        await invokeOk<Tab | null>('go_back')
         // 修复：导航后同步真实状态（原为"后退后一定能前进"的猜测）
         setTimeout(() => this.syncNavState(), 150)
       } catch (e) {
@@ -496,7 +497,7 @@ export const useTabsStore = defineStore('tabs', {
       if (!this.activeTabId || !this.canGoForward) return
       this._markLoading(this.activeTabId)
       try {
-        await invoke<Tab | null>('go_forward')
+        await invokeOk<Tab | null>('go_forward')
         setTimeout(() => this.syncNavState(), 150)
       } catch (e) {
         console.error('[tabs] 前进失败:', e)
@@ -588,7 +589,7 @@ export const useTabsStore = defineStore('tabs', {
     /** 关闭全部标签（切换工作区时清空用） */
     async clearAllTabs() {
       try {
-        await invoke('close_all_tabs')
+        await invokeOk('close_all_tabs')
       } catch (e) {
         console.error('[tabs] 清空标签失败:', e)
       }
@@ -600,7 +601,7 @@ export const useTabsStore = defineStore('tabs', {
     async syncTabs() {
       try {
         const my = this._opSeq
-        const tabs = await invoke<Tab[]>('get_tabs')
+        const tabs = await invokeOk<Tab[]>('get_tabs')
         // 保留前端运行时 groupId（Rust 侧无此字段）
         const prevGroups = new Map(this.tabs.map((t) => [t.id, t.groupId]))
         const prevUrls = new Map(this.tabs.map((t) => [t.id, t.url]))
@@ -674,7 +675,7 @@ export const useTabsStore = defineStore('tabs', {
         // 阈值由 settings.tab_hibernate_minutes 控制（默认 30 分钟，0=关闭）
         if (++hibernateTick >= 8) {
           hibernateTick = 0
-          invoke('hibernate_idle_tabs').catch((e) => {
+          invokeOk('hibernate_idle_tabs').catch((e) => {
             console.error('[tabs] 空闲标签休眠检查失败:', e)
           })
         }

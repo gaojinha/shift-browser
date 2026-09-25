@@ -108,6 +108,7 @@ pub async fn get(pool: &SqlitePool, key: &str) -> Option<String> {
 }
 
 /// 同步读（仅用于已在缓存中的热路径；未命中返回 None，调用方自行回源）
+#[allow(dead_code)] // R3 启动/恢复优化接线时使用
 pub fn get_sync(key: &str) -> Option<String> {
     if !is_cachable(key) {
         return None; // 非白名单不缓存，同步读等价于未命中

@@ -212,7 +212,7 @@ cp target/release/shift-browser-mcp ~/.local/bin/   # 装到 PATH，供 MCP 客�
 ```bash
 npm run lint                     # ESLint
 npm run build                    # 含 vue-tsc 类型检查
-cargo test                       # Rust 单测（139 个）
+cargo test                       # Rust 单测（数量以 cargo test --lib -- --list 实测为准）
 scripts/smoke.sh                 # E2E 冒烟（10 项，完整模式会重启浏览器）
 scripts/smoke.sh --no-restart    # 只检查当前实例
 scripts/package-deb.sh           # 一键 deb 打包（校验工具链 → 构建扩展 → 前端 → release deb）

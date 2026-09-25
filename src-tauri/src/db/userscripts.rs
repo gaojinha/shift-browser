@@ -119,11 +119,13 @@ pub async fn delete_userscript(db: tauri::State<'_, Db>, id: i64) -> DbResult<()
     Ok(())
 }
 
-/// 注入缓存（同步读；inject 在 tokio 上下文里不能 await/block_on，故用缓存）
-static CACHE: std::sync::OnceLock<std::sync::Mutex<Vec<(String, Vec<String>)>>> =
-    std::sync::OnceLock::new();
+/// 注入缓存条目：(脚本源码, 注入时机/匹配等参数列表)
+type InjectCache = std::sync::Mutex<Vec<(String, Vec<String>)>>;
 
-fn cache() -> &'static std::sync::Mutex<Vec<(String, Vec<String>)>> {
+/// 注入缓存（同步读；inject 在 tokio 上下文里不能 await/block_on，故用缓存）
+static CACHE: std::sync::OnceLock<InjectCache> = std::sync::OnceLock::new();
+
+fn cache() -> &'static InjectCache {
     CACHE.get_or_init(|| std::sync::Mutex::new(Vec::new()))
 }
 

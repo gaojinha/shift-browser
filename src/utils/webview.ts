@@ -2,7 +2,7 @@
 // 弹窗/右键菜单等 HTML 覆盖层需要隐藏 GTK 层 webview（否则盖不住）。
 // 快速开关时多次 invoke 并发乱序会导致最终状态错位，这里用单调递增
 // seq 令牌：后端只应用最新 seq 的指令，过期指令直接丢弃。
-import { invoke } from '@tauri-apps/api/core'
+import { invokeOk } from './invoke'
 
 let seq = 0
 
@@ -13,5 +13,5 @@ let seq = 0
  */
 export function setWebviewVisible(visible: boolean, source?: string) {
   seq += 1
-  return invoke('set_webview_visible', { visible, seq, source }).catch(() => {})
+  return invokeOk('set_webview_visible', { visible, seq, source }).catch(() => {})
 }

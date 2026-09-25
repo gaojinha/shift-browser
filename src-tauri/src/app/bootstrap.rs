@@ -4,8 +4,15 @@
 // 数据库初始化、锁屏、TabManager/缓存/白名单载入、托盘、外部链接打开等。
 // 失败路径（如数据库初始化失败）用本地 show_fatal_dialog 弹 GTK 原生窗后返回 Err。
 
-use tauri::Emitter;
 use tauri::Manager;
+
+// setup 的子步骤（按域拆出以控制本文件行数；调用顺序即原启动顺序，不可乱）
+#[path = "bootstrap/guards.rs"]
+mod guards;
+#[path = "bootstrap/caches.rs"]
+mod caches;
+#[path = "bootstrap/tray_setup.rs"]
+mod tray_setup;
 
 /// 致命错误提示：setup 失败路径（如数据库初始化失败）下 Vue UI 尚不可用，
 /// 只能走 GTK 原生层弹窗；与启动锁屏同模式——setup 在 GTK 主线程执行，
@@ -39,38 +46,14 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     // 安全（#1 · 2026-09-22）：敏感文件（cookie 库/WAL）启动即加固到 0600，
     // 并每 120s 重扫一次——WebKit 运行时会按 umask 重建这些文件。
     #[cfg(unix)]
-    {
-        if let Ok(dir) = app.path().app_data_dir() {
-            crate::harden_sensitive_files(&dir);
-            let dir2 = dir.clone();
-            tauri::async_runtime::spawn(async move {
-                loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(120)).await;
-                    crate::harden_sensitive_files(&dir2);
-                }
-            });
-        }
-    }
+    guards::spawn_sensitive_file_guard(app);
     // ===== 性能：WebKitGTK 内存压力治理 =====
     // 实测痛点：9 个标签时全部 WebKit 进程合计 3.75 GB（每标签一个渲染进程、
     // 单个 240-500MB，WebKitGTK 默认不主动回收）。
     // 方案：设置内存压力阈值，超过后 WebKit 分级回收（保守→严格→杀进程）。
     // 必须在使用任何 WebContext 之前设置（WebsiteDataManager 的静态全局设置）。
     #[cfg(target_os = "linux")]
-    {
-        // P0-2：平台代码下沉到 engine::platform::linux
-        let total_mb: u32 = std::fs::read_to_string("/proc/meminfo")
-            .ok()
-            .and_then(|s| {
-                s.lines()
-                    .find(|l| l.starts_with("MemTotal:"))
-                    .and_then(|l| l.split_whitespace().nth(1))
-                    .and_then(|v| v.parse::<u64>().ok())
-            })
-            .map(|kb| (kb / 1024) as u32)
-            .unwrap_or(8192);
-        crate::engine::platform::linux::setup_memory_pressure(total_mb);
-    }
+    guards::setup_memory_pressure();
 
     // 锁屏是否启用过（解锁后通知前端重试初始化——锁屏期间 Db/TabManager 未就绪，
     // 主窗口 Vue 的 onMounted 命令调用全部失败，必须等 setup 完成后重试）
@@ -80,38 +63,7 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     // 背景设为透明，GTK 窗口本身没设透明——圆角外露出黑色窗口背景（四个黑角）。
     // 手动设置 RGBA visual + app_paintable，让窗口真正透明，圆角外透出桌面。
     #[cfg(target_os = "linux")]
-    {
-        use gtk::prelude::*;
-        if let Some(win) = app.get_window("main") {
-            if let Ok(gtk_win) = win.gtk_window() {
-                if let Some(screen) = gtk::prelude::WidgetExt::screen(&gtk_win) {
-                    if let Some(visual) = screen.rgba_visual() {
-                        gtk_win.set_visual(Some(&visual));
-                    }
-                    // Wayland 下 set_visual 无效（X11 概念），GTK 默认还会画主题背景色——
-                    // 用 CSS 强制窗口背景透明，圆角外才能透出桌面
-                    let css = gtk::CssProvider::new();
-                    css.load_from_data(b"window { background-color: transparent; }")
-                        .map_err(|e| format!("CSS 加载失败: {}", e))?;
-                    gtk::StyleContext::add_provider_for_screen(
-                        &screen,
-                        &css,
-                        gtk::STYLE_PROVIDER_PRIORITY_USER,
-                    );
-                    log::info!(
-                        "[ShiftBrowser] 窗口透明设置：rgba_visual={}",
-                        screen.rgba_visual().is_some()
-                    );
-                }
-                gtk_win.set_app_paintable(true);
-                gtk_win.queue_draw();
-                log::info!(
-                    "[ShiftBrowser] 窗口透明已启用（app_paintable={}）",
-                    gtk_win.is_app_paintable()
-                );
-            }
-        }
-    }
+    guards::apply_window_transparency(app)?;
 
     // 初始化数据库（异步）
     let app_data_dir = app
@@ -186,41 +138,8 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     app.manage(crate::tabs::TabManager::new());
     log::info!("[ShiftBrowser] 标签管理器初始化成功");
 
-    // 用户脚本注入缓存（启动时刷新，确保首个页面注入前就绪——inject 路径只读缓存，不能 await）
-    {
-        let db = app.state::<crate::db::Db>();
-        tauri::async_runtime::block_on(crate::db::userscripts::refresh_cache(&db.pool));
-        log::info!("[ShiftBrowser] 用户脚本注入缓存已刷新");
-    }
-
-    // 性能 P0：settings 缓存预热（消除热路径 N+1 查库）
-    {
-        let db = app.state::<crate::db::Db>();
-        tauri::async_runtime::block_on(crate::db::settings_cache::warmup(&db.pool));
-    }
-
-    // 权限白名单载入内存（安全 #2 · 2026-09-22）
-    {
-        let db = app.state::<crate::db::Db>();
-        tauri::async_runtime::block_on(crate::perms::load_allowlist(&db.pool));
-    }
-    // User-Agent 配置载入（方案 B · 2026-09-22）
-    {
-        let db = app.state::<crate::db::Db>();
-        tauri::async_runtime::block_on(crate::useragent::load(&db.pool));
-    }
-    // 开发者工具开关载入（安全 #6 · 2026-09-22，默认关）
-    {
-        let db = app.state::<crate::db::Db>();
-        if let Ok(Some((v,))) = tauri::async_runtime::block_on(async {
-            sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'enable_devtools'")
-                .fetch_optional(&db.pool)
-                .await
-        }) {
-            crate::engine::webview::DEVTOOLS_ENABLED
-                .store(v == "true", std::sync::atomic::Ordering::Relaxed);
-        }
-    }
+    // 用户脚本注入缓存 / settings 预热 / 权限白名单 / UA / devtools 开关载入
+    caches::warmup_caches(app);
 
     // 定时任务调度器（阶段3 自动化：设置驱动的后台任务）
     crate::auto_tasks::spawn(app.handle().clone());
@@ -324,78 +243,8 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
 
     // ===== 系统托盘（关闭 = 缩托盘）=====
     // 见 tray.rs。ksni 菜单闭包跑在 D-Bus 线程，只往 mpsc 投动作，
-    // 由下面的 glib 定时器在 GTK 主线程排空执行（绝不跨线程碰 GTK）。
-    {
-        let (tray_tx, tray_rx) = std::sync::mpsc::channel::<crate::tray::TrayAction>();
-
-        // 起托盘服务（ksni 的 spawn 是 async，交给 tauri runtime）
-        tauri::async_runtime::spawn(async move {
-            use ksni::TrayMethods;
-            match crate::tray::ShiftTray::new(tray_tx).spawn().await {
-                Ok(handle) => {
-                    log::info!("[tray] 系统托盘已启动");
-                    // Handle 必须存活到进程结束，drop 掉托盘图标就没了
-                    std::mem::forget(handle);
-                }
-                Err(e) => log::warn!("[tray] 托盘启动失败（无宿主扩展？）: {}", e),
-            }
-        });
-
-        // 关窗 = 缩托盘：拦截主窗口 delete-event
-        if let Some(w) = app.get_window("main") {
-            if let Ok(gtk_win) = w.gtk_window() {
-                use gtk::prelude::*;
-                let app_de = app.handle().clone();
-                gtk_win.connect_delete_event(move |_, _| {
-                    use std::sync::atomic::Ordering;
-                    if crate::tray::REAL_QUIT.load(Ordering::SeqCst) {
-                        // 真退出：放行，窗口关闭 → 应用退出
-                        gtk::glib::Propagation::Proceed
-                    } else {
-                        // 缩托盘：隐藏窗口，阻止关闭
-                        if let Some(win) = app_de.get_window("main") {
-                            let _ = win.hide();
-                        }
-                        log::info!("[tray] 窗口已缩到托盘（未退出）");
-                        gtk::glib::Propagation::Stop
-                    }
-                });
-            }
-        }
-
-        // GTK 主线程排空托盘动作（120ms 一轮，开销可忽略）
-        let app_tray = app.handle().clone();
-        gtk::glib::timeout_add_local(std::time::Duration::from_millis(120), move || {
-            use std::sync::atomic::Ordering;
-            while let Ok(action) = tray_rx.try_recv() {
-                match action {
-                    crate::tray::TrayAction::ToggleWindow => {
-                        if let Some(w) = app_tray.get_window("main") {
-                            if w.is_visible().unwrap_or(false) {
-                                let _ = w.hide();
-                            } else {
-                                let _ = w.show();
-                                let _ = w.set_focus();
-                            }
-                        }
-                    }
-                    crate::tray::TrayAction::OpenDownloads => {
-                        let _ = app_tray.emit(crate::contracts::events::TRAY_OPEN_DOWNLOADS, ());
-                    }
-                    crate::tray::TrayAction::OpenPasswords => {
-                        let _ = app_tray.emit(crate::contracts::events::TRAY_OPEN_PASSWORDS, ());
-                    }
-                    crate::tray::TrayAction::Quit => {
-                        crate::tray::REAL_QUIT.store(true, Ordering::SeqCst);
-                        if let Some(w) = app_tray.get_window("main") {
-                            let _ = w.close();
-                        }
-                    }
-                }
-            }
-            gtk::glib::ControlFlow::Continue
-        });
-    }
+    // 由 glib 定时器在 GTK 主线程排空执行（绝不跨线程碰 GTK）。
+    tray_setup::setup_tray(app);
 
     // 外部 URL 打开（默认浏览器入口）：命令行带 http/https 参数时（desktop 文件
     // Exec=shift-browser %U），启动后延迟打开新标签——等前端初始化完（onMounted

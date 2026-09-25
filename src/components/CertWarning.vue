@@ -2,7 +2,7 @@
 // 证书错误拦截页（P2）：TLS 校验失败时弹"危险站点"警告
 // 由 App.vue 监听 tls-error 事件后挂载；"继续前往"= 调 accept_cert_exception 放行并重载
 import { ref, watch } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { invokeOk, errText } from '../utils/invoke'
 import { setWebviewVisible } from '../utils/webview'
 import { useToastStore } from '../stores/toast'
 
@@ -46,7 +46,7 @@ async function proceed() {
   if (!props.info || busy.value) return
   busy.value = true
   try {
-    await invoke('accept_cert_exception', {
+    await invokeOk('accept_cert_exception', {
       id: props.info.tabId,
       host: props.info.host,
       port: props.info.port,
@@ -56,7 +56,7 @@ async function proceed() {
     toastStore.show('已放行该证书（可在证书中心撤销）', 'info')
     emit('close')
   } catch (e) {
-    toastStore.show('放行失败：' + String(e), 'error')
+    toastStore.show('放行失败：' + errText(e), 'error')
   } finally {
     busy.value = false
   }

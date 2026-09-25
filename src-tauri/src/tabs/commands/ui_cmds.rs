@@ -1,11 +1,12 @@
-//! 标签命令门面（R2-1 拆分 · 2026-09-24）
+//! 窗口/布局/可见性命令（R2-1 拆分 · 2026-09-24）
 //!
-//! 29 个 #[tauri::command] 从 tabs.rs 迁出，按主题拆为 tabs_cmds（生命周期/导航）
-//! 与 ui_cmds（窗口/布局/可见性）两个子模块，本文件仅声明并重导出。
+//! #[tauri::command] 从 tabs.rs 迁出，本模块负责窗口/布局/可见性；
+//! 生命周期/导航/标签状态命令见同级 lifecycle_cmds/nav_cmds/tab_state_cmds。
 
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
 
 use super::super::*;
+use crate::error::{AppError, CommandResult};
 use tauri::Manager;
 
 #[tauri::command]
@@ -15,7 +16,7 @@ pub async fn set_webview_visible(
     visible: bool,
     seq: u64,
     source: Option<String>,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     // 过期指令丢弃：并发乱序时只应用最大 seq
     {
         let mut last = state
@@ -38,7 +39,7 @@ pub async fn set_webview_visible(
     UI_OVERLAY_ACTIVE.store(!visible, std::sync::atomic::Ordering::Relaxed);
     let window = app
         .get_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?;
+        .ok_or_else(|| AppError::internal("主窗口不存在"))?;
     // 注意：child webview 不在 window.webviews() 列表里（只有 main），
     // 必须从 TabManager 拿已知标签逐个 get_webview
     let ids: Vec<String> = state
@@ -92,14 +93,14 @@ pub async fn set_webview_ai_panel(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
     active: bool,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     *state
         .ai_panel_active
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = active;
     let window = app
         .get_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?;
+        .ok_or_else(|| AppError::internal("主窗口不存在"))?;
     let top = state.top_offset();
     let vertical = state.vertical_tabs();
     let geo = crate::engine::layout::ContentGeometry::compute(&window, top, active, vertical);
@@ -145,7 +146,7 @@ pub async fn set_bookmarks_bar_visible(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
     visible: bool,
-) -> Result<f64, String> {
+) -> CommandResult<f64> {
     let new_top = state.set_show_bookmarks_bar(visible);
     log::info!(
         "[tabs] 书签栏显隐切换: visible={} 新 top_offset={}",
@@ -185,7 +186,7 @@ pub async fn set_vertical_tabs(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
     active: bool,
-) -> Result<f64, String> {
+) -> CommandResult<f64> {
     state.set_vertical_tabs(active);
     let new_top = state.top_offset();
     log::info!(
@@ -224,18 +225,18 @@ pub async fn set_split_tab(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
     id: String,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     if !state
         .tabs
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .contains_key(&id)
     {
-        return Err("标签不存在".to_string());
+        return Err(AppError::validation("标签不存在").into());
     }
     state.set_split_tab(Some(id.clone()));
     log::info!("[tabs] set_split_tab: {}", id);
-    apply_split_layout(&app, &state)
+    apply_split_layout(&app, &state).map_err(crate::error::CommandError::from)
 }
 
 /// 关闭分屏
@@ -244,16 +245,16 @@ pub async fn set_split_tab(
 pub async fn clear_split(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     state.set_split_tab(None);
     log::info!("[tabs] clear_split");
-    apply_split_layout(&app, &state)
+    apply_split_layout(&app, &state).map_err(crate::error::CommandError::from)
 }
 
 /// 查询当前分屏标签（None = 未分屏）
 
 #[tauri::command]
-pub async fn get_split_tab(state: tauri::State<'_, TabManager>) -> Result<Option<String>, String> {
+pub async fn get_split_tab(state: tauri::State<'_, TabManager>) -> CommandResult<Option<String>> {
     Ok(state.split_tab())
 }
 
@@ -266,7 +267,7 @@ pub async fn get_split_tab(state: tauri::State<'_, TabManager>) -> Result<Option
 pub async fn open_devtools(
     app: AppHandle,
     _state: tauri::State<'_, TabManager>,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     open_devtools_for_active(&app);
     Ok(())
 }
@@ -274,15 +275,19 @@ pub async fn open_devtools(
 /// 固定/取消固定标签（原版 tab-pin IPC）
 
 #[tauri::command]
-pub async fn toggle_maximize(app: AppHandle) -> Result<bool, String> {
+pub async fn toggle_maximize(app: AppHandle) -> CommandResult<bool> {
     let window = app
         .get_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?;
+        .ok_or_else(|| AppError::internal("主窗口不存在"))?;
     let maximized = window.is_maximized().unwrap_or(false);
     if maximized {
-        window.unmaximize().map_err(|e| e.to_string())?;
+        window
+            .unmaximize()
+            .map_err(|e| AppError::internal(e.to_string()))?;
     } else {
-        window.maximize().map_err(|e| e.to_string())?;
+        window
+            .maximize()
+            .map_err(|e| AppError::internal(e.to_string()))?;
     }
     Ok(!maximized)
 }
@@ -290,34 +295,40 @@ pub async fn toggle_maximize(app: AppHandle) -> Result<bool, String> {
 /// 最小化主窗口（标题栏/标签栏合并后的窗口控制按钮）
 
 #[tauri::command]
-pub async fn minimize_window(app: AppHandle) -> Result<(), String> {
+pub async fn minimize_window(app: AppHandle) -> CommandResult<()> {
     let window = app
         .get_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?;
-    window.minimize().map_err(|e| e.to_string())
+        .ok_or_else(|| AppError::internal("主窗口不存在"))?;
+    window
+        .minimize()
+        .map_err(|e| AppError::internal(e.to_string()).into())
 }
 
 /// 关闭主窗口（标题栏/标签栏合并后的窗口控制按钮）
 
 #[tauri::command]
-pub async fn close_window(app: AppHandle) -> Result<(), String> {
+pub async fn close_window(app: AppHandle) -> CommandResult<()> {
     // 前端「退出」按钮是明确要退出，先置真退出标志，
     // 否则会被「关窗=缩托盘」的 delete-event 拦截，变成只隐藏。
     crate::tray::REAL_QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
     let window = app
         .get_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?;
-    window.close().map_err(|e| e.to_string())
+        .ok_or_else(|| AppError::internal("主窗口不存在"))?;
+    window
+        .close()
+        .map_err(|e| AppError::internal(e.to_string()).into())
 }
 
 /// 开始拖动主窗口（无边框窗口标题栏拖拽，标签栏空白处按住调用）
 
 #[tauri::command]
-pub async fn start_drag_window(app: AppHandle) -> Result<(), String> {
+pub async fn start_drag_window(app: AppHandle) -> CommandResult<()> {
     let window = app
         .get_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?;
-    window.start_dragging().map_err(|e| e.to_string())
+        .ok_or_else(|| AppError::internal("主窗口不存在"))?;
+    window
+        .start_dragging()
+        .map_err(|e| AppError::internal(e.to_string()).into())
 }
 
 

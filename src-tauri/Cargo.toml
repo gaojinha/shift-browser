@@ -7,7 +7,7 @@ version = "5.7.0"
 description = "Shift Browser - AI 增强型浏览器（Tauri 重构版）"
 authors = ["OpenClaw Team"]
 license = ""
-repository = ""
+repository = "https://gitcode.com/gaojinha/shiftbrowser-tauri"
 edition = "2021"
 rust-version = "1.77.2"
 

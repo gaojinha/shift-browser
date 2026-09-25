@@ -1,14 +1,21 @@
-//! 标签命令门面（R2-1 拆分 · 2026-09-24）
+//! 标签命令门面（R2-1 拆分 · R1 二次拆分 2026-09-24）
 //!
-//! 29 个 #[tauri::command] 从 tabs.rs 迁出，按主题拆为 tabs_cmds（生命周期/导航）
-//! 与 ui_cmds（窗口/布局/可见性）两个子模块，本文件仅声明并重导出。
+//! #[tauri::command] 从 tabs.rs 迁出后按主题拆为四个子模块，本文件仅声明并重导出：
+//! - lifecycle_cmds：创建/关闭/切换/休眠（标签生命周期）
+//! - nav_cmds：导航/刷新/前进后退/翻译/导航状态
+//! - tab_state_cmds：排序/元数据/固定/静音/清除浏览数据
+//! - ui_cmds：窗口/布局/可见性
 
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
 
-mod tabs_cmds;
+mod lifecycle_cmds;
+mod nav_cmds;
+mod tab_state_cmds;
 mod ui_cmds;
 
-pub use tabs_cmds::*;
+pub use lifecycle_cmds::*;
+pub use nav_cmds::*;
+pub use tab_state_cmds::*;
 pub use ui_cmds::*;
 
 #[cfg(test)]

@@ -53,6 +53,9 @@ pub fn clear_web_data(cookies: bool, cache: bool, storage: bool) {
     if let Some(ctx) = WebContext::default() {
         if cookies {
             if let Some(cm) = ctx.cookie_manager() {
+                // webkit2gtk 2.16 起标记 deprecated，替代 API（clear + WebsiteData）
+                // 迁移随 R5 平台化一并做；当前发行版仍可用
+                #[allow(deprecated)]
                 cm.delete_all_cookies();
             }
         }

@@ -4,7 +4,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useTabsStore } from '../stores/tabs'
 import { useGroupsStore } from '../stores/groups'
 import { useToastStore } from '../stores/toast'
-import { invoke } from '@tauri-apps/api/core'
+import { invokeOk } from '../utils/invoke'
 import { setWebviewVisible } from '../utils/webview'
 import type { Tab } from '../types/tab'
 // 默认网站图标（单一来源：constants.ts，地球版）
@@ -365,18 +365,18 @@ function onTabScrollDblClick(e: MouseEvent) {
   // 只有点击空白处（非标签/分组头/按钮）才触发
   const t = e.target as HTMLElement
   if (t.closest('.tab') || t.closest('.group-head') || t.closest('.new-tab-btn')) return
-  invoke('toggle_maximize').catch(() => {})
+  invokeOk('toggle_maximize').catch(() => {})
 }
 
 // ---- 无边框窗口控制（标签栏 = 标题栏，Chrome 式）----
 function onMinimize() {
-  invoke('minimize_window').catch(() => {})
+  invokeOk('minimize_window').catch(() => {})
 }
 function onToggleMax() {
-  invoke('toggle_maximize').catch(() => {})
+  invokeOk('toggle_maximize').catch(() => {})
 }
 function onClose() {
-  invoke('close_window').catch(() => {})
+  invokeOk('close_window').catch(() => {})
 }
 
 /** 标签栏空白处按住拖动窗口（标签/分组头/按钮上有自己的交互，不触发）
@@ -407,7 +407,7 @@ function onTabBarMouseDown(e: MouseEvent) {
     tabBarDragTimer = null
     if (!tabBarDragPending) return
     tabBarDragPending = false
-    invoke('start_drag_window').catch(() => {})
+    invokeOk('start_drag_window').catch(() => {})
   }, 200)
 }
 
@@ -422,7 +422,7 @@ function onTabBarWindowMouseMove(e: MouseEvent) {
       window.clearTimeout(tabBarDragTimer)
       tabBarDragTimer = null
     }
-    invoke('start_drag_window').catch(() => {})
+    invokeOk('start_drag_window').catch(() => {})
   }
 }
 
