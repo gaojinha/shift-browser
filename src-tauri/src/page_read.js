@@ -14,6 +14,10 @@
   var SELECTOR = '__SELECTOR__';
   var MAX_CHARS = __MAX_CHARS__;
   var MAX_ITEMS = __MAX_ITEMS__;
+  // P1b 开关（Rust 侧注入 0/1）
+  var EXPAND = __EXPAND__ === 1;
+  var SHADOW = __SHADOW__ === 1;
+  var IFRAME = __IFRAME__ === 1;
 
   function finish(v) { return JSON.stringify(v); }
   function fail(m) { return JSON.stringify({ error: m }); }
@@ -137,6 +141,58 @@
       .trim();
   }
 
+  // B3：展开原生 <details>（只动原生可折叠，不点按钮，零副作用）
+  function expandDetails(rootEl) {
+    try {
+      var ds = qsa(rootEl, 'details');
+      for (var i = 0; i < ds.length; i++) {
+        if (!ds[i].open) ds[i].open = true;
+      }
+    } catch (e) { /* 忽略 */ }
+  }
+
+  // B5：尽力穿透开放 shadow root（closed shadow 读不到，按提示处理）
+  function shadowText(rootEl) {
+    var out = [];
+    try {
+      var all = qsa(rootEl, '*');
+      var cap = Math.min(all.length, 5000);
+      var budget = 0;
+      for (var i = 0; i < cap && budget < MAX_CHARS; i++) {
+        var sr = all[i] && all[i].shadowRoot;
+        if (!sr) continue;
+        var t = compact(sr.textContent || '');
+        if (t) {
+          out.push(t);
+          budget += t.length;
+        }
+      }
+    } catch (e) { /* 忽略 */ }
+    return out.join('\n');
+  }
+
+  // B4：同源 iframe 文本并入；跨源记数（读不到，给提示）
+  function iframeText(rootEl) {
+    var out = [];
+    var cross = 0;
+    try {
+      var fs = qsa(rootEl, 'iframe');
+      var cap = Math.min(fs.length, 20);
+      for (var i = 0; i < cap; i++) {
+        try {
+          var d = fs[i].contentDocument;
+          if (!d || !d.body) { cross++; continue; }
+          var b = d.body;
+          var t = compact(b.innerText != null ? b.innerText : (b.textContent || ''));
+          if (t) out.push(t);
+        } catch (e) {
+          cross++; // 跨源访问抛异常
+        }
+      }
+    } catch (e) { /* 忽略 */ }
+    return { text: out.join('\n'), cross: cross };
+  }
+
   // 列表类模式公共收尾
   function finishList(key, items, total) {
     base[key] = items;
@@ -147,11 +203,25 @@
   }
 
   if (MODE === 'text') {
-    var t = compact(rawText(root));
+    if (EXPAND) expandDetails(root);
+    var parts = [rawText(root)];
+    if (SHADOW) {
+      var st = shadowText(root);
+      if (st) parts.push(st);
+    }
+    if (IFRAME) {
+      var ifr = iframeText(root);
+      if (ifr.text) parts.push(ifr.text);
+      if (ifr.cross > 0) {
+        base.hints.push('存在 ' + ifr.cross + ' 个跨源 iframe，内容无法读取');
+      }
+    }
+    var joined = parts.join('\n');
+    var t = compact(joined);
     var tTrunc = t.length > MAX_CHARS;
     if (tTrunc) t = t.slice(0, MAX_CHARS);
     base.text = t;
-    base.total = rawText(root).length;
+    base.total = joined.length;
     base.returned = t.length;
     base.truncated = tTrunc;
     base.empty = t.length === 0;
@@ -224,11 +294,15 @@
   if (MODE === 'tables') {
     var tables = qsa(root, 'table');
     var tItems = [];
+    var anyMerged = false; // C1：检测 rowspan/colspan（合并单元格会打乱行列对应）
     // 表格本身限 50 张（单表行数再限 100），max_items 取两者较小
     var tableCap = Math.min(MAX_ITEMS, 50);
     for (var ti = 0; ti < tables.length && tItems.length < tableCap; ti++) {
       var tb = tables[ti];
       if (!visible(tb)) continue;
+      try {
+        if (qsa(tb, '[rowspan], [colspan]').length > 0) anyMerged = true;
+      } catch (e) { /* 忽略 */ }
       var rows = [];
       var trs = qsa(tb, 'tr');
       var rowCap = Math.min(trs.length, 100);
@@ -242,6 +316,7 @@
       }
       tItems.push(rows);
     }
+    base.merged = anyMerged;
     return finishList('tables', tItems, tables.length);
   }
 

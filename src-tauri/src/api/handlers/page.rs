@@ -178,11 +178,18 @@ pub(super) async fn read_page(app: &AppHandle, req: &Value) -> Value {
         return AppError::internal("找不到标签 webview").error_json();
     };
     // 固定脚本 + 占位符注入（selector 经 js_escape；mode 已白名单校验，无注入面）
+    // P1b 开关（B3 展开 details / B5 穿透 shadow / B4 并入同源 iframe）
+    let expand = bool_arg(req, "expand");
+    let shadow = bool_arg(req, "shadow");
+    let iframe = bool_arg(req, "iframe");
     let script = include_str!("../../page_read.js")
         .replace("__MODE__", mode)
         .replace("__SELECTOR__", &crate::api::js_escape(&selector))
         .replace("__MAX_CHARS__", &max_chars.to_string())
-        .replace("__MAX_ITEMS__", &max_items.to_string());
+        .replace("__MAX_ITEMS__", &max_items.to_string())
+        .replace("__EXPAND__", if expand { "1" } else { "0" })
+        .replace("__SHADOW__", if shadow { "1" } else { "0" })
+        .replace("__IFRAME__", if iframe { "1" } else { "0" });
     let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
     let dispatched = wv.with_webview(move |pwv| {
         crate::engine::webview::eval_js_with(&pwv.inner(), &script, move |res| {
@@ -375,6 +382,16 @@ pub(super) async fn read_status(app: &AppHandle, req: &Value) -> Value {
         "hints": probe.get("hints").cloned().unwrap_or(json!([])),
         "counts": probe.get("counts").cloned().unwrap_or(json!({})),
     }})
+}
+
+/// 取布尔参数（true/false、"true"/"1"、数字 1 均可；缺省 false）
+fn bool_arg(req: &Value, key: &str) -> bool {
+    match req.get(key) {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Number(n)) => n.as_i64().unwrap_or(0) != 0,
+        Some(Value::String(s)) => matches!(s.as_str(), "1" | "true" | "yes"),
+        _ => false,
+    }
 }
 
 /// 解析目标标签的 webview label（`tab_id` 优先，缺省活动标签）。
@@ -664,6 +681,38 @@ fn prune_screenshots(dir: &std::path::Path, keep: usize) {
     let remove_n = shots.len() - keep;
     for p in shots.into_iter().take(remove_n) {
         let _ = std::fs::remove_file(p);
+    }
+}
+
+/// `action/dismiss`：关闭常见弹窗（B8/H3）。保守识别（浮层内 close 语义/白名单文案），
+/// 识别不了返回提示，**绝不盲点**。属交互（改变页面状态）→ Risk::Write，受 api_readonly 约束。
+pub(super) async fn dismiss(app: &AppHandle, req: &Value) -> Value {
+    let label = match target_label(app, req) {
+        Ok(l) => l,
+        Err(resp) => return resp,
+    };
+    let Some(wv) = app.get_webview(&label) else {
+        return AppError::internal("找不到标签 webview").error_json();
+    };
+    let script = include_str!("../../page_dismiss.js");
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
+    let dispatched = wv.with_webview(move |pwv| {
+        crate::engine::webview::eval_js_with(&pwv.inner(), script, move |res| {
+            let _ = tx.send(res);
+        });
+    });
+    if dispatched.is_err() {
+        return AppError::internal("弹窗识别调度失败").error_json();
+    }
+    let raw = match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+        Ok(Ok(Ok(v))) => v,
+        Ok(Ok(Err(e))) => return AppError::internal(format!("弹窗识别执行失败: {e}")).error_json(),
+        Ok(Err(_)) => return AppError::internal("弹窗识别结果丢失").error_json(),
+        Err(_) => return AppError::timeout("弹窗识别超时").error_json(),
+    };
+    match serde_json::from_str::<Value>(&raw) {
+        Ok(v) => json!({"ok": true, "data": v}),
+        Err(e) => AppError::internal(format!("弹窗识别结果解析失败: {e}")).error_json(),
     }
 }
 

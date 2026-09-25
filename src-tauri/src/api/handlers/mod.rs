@@ -64,6 +64,7 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     ("reader/extract", |a, r| Box::pin(content::reader_extract(a, r))),
     ("translate", |a, r| Box::pin(content::translate(a, r))),
     ("content/snapshot", |a, r| Box::pin(content::snapshot(a, r))),
+    ("action/dismiss", |a, r| Box::pin(page::dismiss(a, r))),
     // MCP 工具网关
     ("tools", |a, r| Box::pin(tools::list_tools(a, r))),
     ("tool_call", |a, r| Box::pin(tools::call_tool(a, r))),

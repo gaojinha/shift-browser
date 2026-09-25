@@ -7,8 +7,8 @@ fn tool_defs_wellformed() {
   let defs = tool_defs();
   assert_eq!(
     defs.len(),
-    35,
-    "工具数应为 35（读 23 含 page/content 读命令 + 写 12 含 tabs/close_ai）"
+    36,
+    "工具数应为 36（读 23 + 写 13 含 tabs/close_ai、action/dismiss）"
   );
   for d in &defs {
     assert!(d.get("name").and_then(|v| v.as_str()).is_some(), "缺 name");

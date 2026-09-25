@@ -188,6 +188,15 @@ fn registry() -> Vec<ToolDef> {
       vec![],
       Risk::Write,
     ),
+    t(
+      "action/dismiss",
+      "关闭常见弹窗（Cookie 同意/遮罩浮层）。保守识别（浮层内 close 语义或白名单文案），识别不了返回提示、绝不盲点。属交互，受只读闸门约束。参数：tab_id（可选）。",
+      json!({
+        "tab_id": { "type": "string", "description": "目标标签 id（可选，缺省活动标签）" }
+      }),
+      vec![],
+      Risk::Write,
+    ),
     // 审计查询（K/O3）：读 AI 操作记录（只含 url/命令/结果码，无内容）。Read。
     t(
       "audit/reads",
@@ -363,6 +372,9 @@ fn registry() -> Vec<ToolDef> {
         "mode": { "type": "string", "enum": ["text", "elements", "links", "images", "tables", "forms", "article", "html"], "description": "读取模式（默认 text）" },
         "selector": { "type": "string", "description": "CSS 选择器限定范围（可选；非法选择器返回错误；≤1024 字符）" },
         "tab_id": { "type": "string", "description": "目标标签 id（可选；缺省活动标签。open_and_read 返回的 tab_id 可直接复用，无需先切标签）" },
+        "expand": { "type": "boolean", "description": "读前展开原生 <details>（默认 false）" },
+        "shadow": { "type": "boolean", "description": "尽力穿透开放 shadow root（默认 false）" },
+        "iframe": { "type": "boolean", "description": "并入同源 iframe 文本、跨源给提示（默认 false）" },
         "max_chars": { "type": "integer", "description": "文本/HTML 字符上限（默认 200000，硬顶 2000000）" },
         "max_items": { "type": "integer", "description": "列表类模式条数上限（默认 500，硬顶 5000）" }
       }),
