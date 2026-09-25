@@ -68,12 +68,21 @@ impl TabManager {
         WebviewBuilder::new(label.clone(), webview_url)
           // 无痕标签：走 ephemeral WebContext（Cookie/缓存/存储不落盘、与常规标签隔离）
           .incognito(private)
-          // Linux：显式指定 web extensions 目录（exe 同目录），否则 Tauri 的 IPC 桥
-          // 依赖的 WebKit web extension 不会加载，__TAURI_INTERNALS__ 注入失败
+          // Linux：显式指定 web extensions 目录，否则 Tauri 的 IPC 桥依赖的 WebKit
+          // web extension 不会加载，__TAURI_INTERNALS__ 注入失败。
+          // 修复（2026-09-25）：优先用**资源目录**（打包安装后 .so 在 /usr/lib/…/resources，
+          // exe 目录 /usr/bin 只读且无 .so，会导致无痕等 ephemeral context 建不出来）；
+          // 回退 exe 目录（开发运行场景 .so 就在 target/release 旁）。
           .extensions_path(
-            std::env::current_exe()
+            app.path()
+              .resource_dir()
               .ok()
-              .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+              .filter(|d| d.join("libshift_web_extension.so").exists())
+              .or_else(|| {
+                std::env::current_exe()
+                  .ok()
+                  .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+              })
               .unwrap_or_default(),
           )
           // target=_blank / window.open 新窗口请求：统一创建新标签页打开链接

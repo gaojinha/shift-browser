@@ -84,27 +84,27 @@ pub fn download_dir() -> Option<std::path::PathBuf> {
 }
 
 /// 设置 WebKit web extensions 目录（tauri://localhost 协议依赖 web extension）
-/// 含打包兜底：扩展 .so 不在 exe 目录时从资源目录复制过去。
+/// 修复（2026-09-25）：打包安装后 exe 在 /usr/bin（只读、无 .so），资源 .so 在
+/// /usr/lib/…/resources。原实现"把 .so 复制到 exe 目录"在只读目录下必然失败
+/// （表现为无痕等 ephemeral context 建不出来）。改为**优先直接指向资源目录**，
+/// 仅当资源目录无 .so 时才回退 exe 目录（开发运行场景）。
 /// 从 lib.rs 下沉（P0-2 补完 · 2026-09-22）。
 pub fn setup_web_extensions_dir(resource_dir: Option<std::path::PathBuf>) {
     use webkit2gtk::{WebContext, WebContextExt};
     let Some(context) = WebContext::default() else { return };
-    let Ok(exe) = std::env::current_exe() else { return };
-    let Some(dir) = exe.parent() else { return };
-    let target = dir.join("libshift_web_extension.so");
-    if !target.exists() {
-        if let Some(res) = resource_dir {
-            let src = res.join("libshift_web_extension.so");
-            if src.exists() {
-                match std::fs::copy(&src, &target) {
-                    Ok(_) => log::info!("[ShiftBrowser] 扩展 .so 已从资源目录复制到 exe 目录"),
-                    Err(e) => log::warn!("[ShiftBrowser] 扩展 .so 复制失败: {}", e),
-                }
-            }
+    // 优先资源目录（打包安装场景：.so 在 resources/，exe 目录只读）
+    if let Some(res) = resource_dir.as_ref() {
+        if res.join("libshift_web_extension.so").exists() {
+            context.set_web_extensions_directory(&res.display().to_string());
+            log::info!("[ShiftBrowser] web extensions 目录（资源）: {}", res.display());
+            return;
         }
     }
+    // 回退 exe 目录（开发运行场景：.so 就在 target/release 旁）
+    let Ok(exe) = std::env::current_exe() else { return };
+    let Some(dir) = exe.parent() else { return };
     context.set_web_extensions_directory(&dir.display().to_string());
-    log::info!("[ShiftBrowser] web extensions 目录: {}", dir.display());
+    log::info!("[ShiftBrowser] web extensions 目录（exe）: {}", dir.display());
 }
 
 /// 第三方 Cookie 阻断策略（仅"严格档"启用）
