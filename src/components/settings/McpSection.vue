@@ -254,7 +254,7 @@ onMounted(loadMcp)
   font-size: 11px;
 }
 .ext-error {
-  color: #ff6b6b;
+  color: var(--danger);
   font-size: 12px;
   margin-bottom: 6px;
 }
@@ -345,7 +345,7 @@ onMounted(loadMcp)
   align-items: baseline;
 }
 .mcp-audit-row.fail {
-  color: #ff6b6b;
+  color: var(--danger);
 }
 .mcp-audit-time {
   color: var(--text-secondary);
@@ -400,13 +400,13 @@ onMounted(loadMcp)
   border-color: var(--accent-2);
 }
 .mini-btn.danger {
-  color: #ff8a8a;
-  background: rgba(229, 57, 53, 0.16);
-  border-color: rgba(229, 57, 53, 0.45);
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: transparent;
 }
 .mini-btn.danger:hover {
-  background: rgba(229, 57, 53, 0.34);
-  color: #ffb3b3;
-  border-color: rgba(229, 57, 53, 0.6);
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
 }
 </style>

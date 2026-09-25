@@ -693,7 +693,7 @@ watch(
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: linear-gradient(135deg, #0d1220 0%, #111828 50%, #16233c 100%);
+  background: var(--bg-app);
   overflow: hidden;
 }
 /* 主体：横向标签时仅一个主列；垂直标签时左侧栏 + 主列 */
@@ -713,7 +713,7 @@ watch(
 .content-area {
   flex: 1;
   position: relative;
-  background: linear-gradient(135deg, #0d1220 0%, #111828 50%, #16233c 100%);
+  background: var(--bg-app);
 }
 </style>
 
@@ -721,71 +721,109 @@ watch(
 /* 主题变量：深色（默认）+ 浅色（.theme-light 覆盖）
    各组件 scoped 样式引用 var(--xxx)，实现全局深浅色切换 */
 :root {
-  --bg-primary: #0f1522;
-  --bg-secondary: #182033;
-  --bg-hover: #1f2940;
-  --bg-active: #283450;
-  --text-primary: #e6ebf4;
-  --text-secondary: #c6d0df;
-  --text-muted: #9aa8bd;
-  --border-color: rgba(255, 255, 255, 0.14);
-  --border-subtle: rgba(255, 255, 255, 0.09);
+  /* 应用底色（内容区兜底，生产环境由原生 webview 覆盖） */
+  --bg-app: linear-gradient(135deg, #0b1222 0%, #0f1830 52%, #14233f 100%);
+  /* Chrome 色阶：primary 条带底 → secondary 控件底 → hover → active 选中态 */
+  --bg-primary: #0e1626;
+  --bg-secondary: #162033;
+  --bg-hover: #1d2942;
+  --bg-active: #283a61;
+  /* 浮层表面：弹窗 / 菜单 / 下拉，比条带略亮以建立仰角 */
+  --bg-elevated: #1a2438;
+  --bg-elevated-2: #202c44;
+  --text-primary: #e9eef8;
+  --text-secondary: #bcc8dd;
+  --text-muted: #8a97b0;
+  --text-faint: #5f6b83;
+  --border-color: rgba(255, 255, 255, 0.13);
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --hairline: rgba(255, 255, 255, 0.06);
   --accent: #5b8cff;
   --accent-2: #7c5cff;
+  --accent-hover: #6e9bff;
+  --accent-press: #4778e6;
+  --accent-contrast: #ffffff;
   --accent-soft: rgba(91, 140, 255, 0.16);
+  --accent-ring: rgba(91, 140, 255, 0.38);
   --grad-accent: linear-gradient(135deg, #5b8cff, #7c5cff);
   --success: #34c759;
-  --danger: #e53935;
+  --success-soft: rgba(52, 199, 89, 0.14);
+  --warning: #f5a623;
+  --warning-soft: rgba(245, 166, 35, 0.14);
+  --danger: #ff605c;
+  --danger-soft: rgba(255, 96, 92, 0.14);
+  --scrim: rgba(7, 11, 22, 0.56);
+  --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.42), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 .theme-light {
-  --bg-primary: #f7f8fa;
+  --bg-app: linear-gradient(135deg, #eef2f8 0%, #f4f6fa 50%, #e9eef7 100%);
+  --bg-primary: #e9edf4;
   --bg-secondary: #ffffff;
-  --bg-hover: #eeeef2;
-  --bg-active: #e4e6ee;
-  --text-primary: #1f2430;
-  --text-secondary: #4a5263;
-  --text-muted: #6b7488;
-  --border-color: #c9ced8;
-  --border-subtle: #e0e4eb;
+  --bg-hover: #e6ebf3;
+  --bg-active: #dde5f2;
+  --bg-elevated: #ffffff;
+  --bg-elevated-2: #f4f6fa;
+  --text-primary: #1b2333;
+  --text-secondary: #46506a;
+  --text-muted: #6b768c;
+  --text-faint: #97a0b3;
+  --border-color: #d2d9e5;
+  --border-subtle: #e3e8f0;
+  --hairline: #eaedf3;
   --accent: #3a7afe;
   --accent-2: #6c4dff;
-  --accent-soft: rgba(58, 122, 254, 0.14);
+  --accent-hover: #5a90ff;
+  --accent-press: #2f69df;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(58, 122, 254, 0.12);
+  --accent-ring: rgba(58, 122, 254, 0.3);
   --grad-accent: linear-gradient(135deg, #3a7afe, #6c4dff);
   --success: #15a34a;
+  --success-soft: rgba(21, 163, 74, 0.1);
+  --warning: #d97706;
+  --warning-soft: rgba(217, 119, 6, 0.12);
   --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.1);
+  --scrim: rgba(17, 24, 39, 0.32);
+  --shadow-pop: 0 8px 24px rgba(31, 41, 59, 0.14), 0 1px 2px rgba(31, 41, 59, 0.08);
+  --shadow-dialog: 0 24px 60px rgba(31, 41, 59, 0.22), 0 2px 6px rgba(31, 41, 59, 0.08);
 }
 
 /* 全局按钮反馈 */
 button:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: 1px;
 }
 
 /* 输入类控件占位文字：深色主题下必须可见（默认浏览器灰太暗） */
 ::placeholder {
   color: var(--text-muted);
-  opacity: 0.8;
+  opacity: 0.85;
 }
 button:active:not(:disabled) {
-  transform: scale(0.97);
+  transform: scale(0.96);
 }
 
 /* ===== 弹窗公共样式（各弹窗组件共用，组件内仅覆盖宽度差异） ===== */
 .dialog-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--z-dropdown);
 }
 .dialog {
   width: min(480px, calc(100vw - 32px));
   max-height: 80vh;
-  background: var(--bg-secondary);
-  border-radius: 10px;
-  border: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-dialog);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -794,30 +832,43 @@ button:active:not(:disabled) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 14px 18px;
   color: var(--text-primary);
-  font-size: 14px;
-  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--text-md);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border-bottom: 1px solid var(--hairline);
+  flex-shrink: 0;
 }
 .close-btn {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 13px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .close-btn:hover {
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
 .dialog-body {
-  padding: 12px 16px;
+  padding: 14px 18px;
   overflow-y: auto;
 }
 
-/* 弹窗/侧栏开关动画 */
+/* 弹窗/侧栏开关动画（时长/缓动统一走令牌） */
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.18s ease;
+  transition: opacity var(--dur) var(--ease);
 }
 .fade-enter-from,
 .fade-leave-to {
@@ -826,8 +877,8 @@ button:active:not(:disabled) {
 .slide-enter-active,
 .slide-leave-active {
   transition:
-    transform 0.22s ease,
-    opacity 0.22s ease;
+    transform var(--dur-slow) var(--ease-out),
+    opacity var(--dur-slow) var(--ease-out);
 }
 .slide-enter-from,
 .slide-leave-to {

@@ -591,13 +591,24 @@ function onFaviconError(e: Event) {
 <style scoped>
 .tab-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   height: var(--sb-tab-bar-h);
   background: var(--bg-primary);
   padding: 0 8px;
   flex-shrink: 0;
   user-select: none;
   position: relative;
+}
+/* 条带底缘发丝线：标签栏与地址栏同色时提供一层结构分隔 */
+.tab-bar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--hairline);
+  pointer-events: none;
 }
 
 .tab-scroll {
@@ -614,6 +625,7 @@ function onFaviconError(e: Event) {
 }
 .tab {
   position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   /* 宽度自适应：标签少时撑到最多 180px，标签变多后自动收窄，
@@ -622,87 +634,97 @@ function onFaviconError(e: Event) {
   max-width: 180px;
   width: 180px;
   flex: 1 1 180px;
-  height: 32px;
+  height: 33px;
   padding: 0 10px;
-  margin-right: 3px;
-  background: var(--bg-secondary);
-  border-radius: 8px 8px 0 0;
+  margin-bottom: -1px; /* 压过条带底缘发丝线，活动标签与下一层连成一体 */
+  background: transparent;
+  border-radius: 9px 9px 0 0;
   border: 1px solid transparent;
+  color: var(--text-secondary);
   cursor: pointer;
+  opacity: 0.85;
   transition:
-    opacity 0.15s,
-    background 0.2s,
-    box-shadow 0.2s,
-    color 0.2s,
-    border-color 0.2s;
+    opacity var(--dur) var(--ease),
+    background var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
 }
 .tab.dragging {
   opacity: 0.45;
 }
 .tab:hover {
   background: var(--bg-hover);
+  opacity: 1;
 }
 .tab.active {
-  background: var(--bg-active);
-  border-color: var(--bg-active);
-  box-shadow: inset 0 3px 0 var(--accent);
+  background: var(--bg-secondary);
+  border-color: var(--border-subtle);
+  border-bottom-color: var(--bg-secondary);
+  color: var(--text-primary);
+  opacity: 1;
+  box-shadow:
+    inset 0 2.5px 0 var(--accent),
+    0 -3px 10px rgba(0, 0, 0, 0.22);
 }
 .tab .favicon {
   width: 16px;
   height: 16px;
-  border-radius: 3px;
-  margin-right: 6px;
+  border-radius: 4px;
+  margin-right: 7px;
   flex-shrink: 0;
   object-fit: contain;
 }
 .tab .title {
   flex: 1;
-  font-size: 12px;
-  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  color: inherit;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.tab.active .title {
-  color: var(--text-primary);
-}
 .tab .pin-icon {
-  font-size: 13px;
+  font-size: 12px;
   margin-right: 4px;
   flex-shrink: 0;
 }
 .tab .close-btn {
   display: none;
-  width: 16px;
-  height: 16px;
+  width: 17px;
+  height: 17px;
   border: none;
   background: transparent;
   color: var(--text-muted);
-  border-radius: 3px;
+  border-radius: var(--radius-full);
   cursor: pointer;
-  font-size: 14px;
-  line-height: 16px;
+  font-size: 13px;
+  line-height: 17px;
+  padding: 0;
   margin-left: 4px;
   flex-shrink: 0;
+  text-align: center;
   transition:
-    background 0.15s,
-    color 0.15s;
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .tab:hover .close-btn,
 .tab.active .close-btn {
   display: block;
 }
 .tab .close-btn:hover {
-  background: #e53935;
-  color: var(--text-primary);
+  background: var(--danger);
+  color: #fff;
 }
 .tab.pinned {
-  min-width: 32px;
-  max-width: 32px;
-  width: 32px;
+  min-width: 34px;
+  max-width: 34px;
+  width: 34px;
   padding: 0;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 8px 8px 0 0;
+}
+.tab.pinned .title {
+  display: none;
 }
 .tab.pinned .favicon {
   margin-right: 0;
@@ -716,44 +738,49 @@ function onFaviconError(e: Event) {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 8px;
-  margin-right: 3px;
+  height: 30px;
+  align-self: flex-end;
+  padding: 0 9px;
+  margin: 0 3px -1px 0;
   background: var(--bg-secondary);
-  border-radius: 6px 6px 0 0;
+  border-radius: 8px 8px 0 0;
   border-left: 3px solid var(--accent);
   flex-shrink: 0;
   cursor: default;
-  transition: box-shadow 0.15s;
+  transition: box-shadow var(--dur-fast) var(--ease);
 }
 .group-head[dragging] {
-  box-shadow: 0 0 0 2px var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
 }
 .group-head.drop-target {
-  box-shadow: 0 0 0 2px var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
   background: var(--bg-active);
 }
 .group-name {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   white-space: nowrap;
 }
 .group-count {
-  font-size: 11px;
-  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
   background: var(--bg-hover);
-  border-radius: 8px;
+  border-radius: var(--radius-full);
   padding: 0 6px;
   line-height: 16px;
+  font-variant-numeric: tabular-nums;
 }
 .group-toggle {
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 9px;
   cursor: pointer;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .group-toggle:hover {
   background: var(--bg-hover);
@@ -761,24 +788,35 @@ function onFaviconError(e: Event) {
 }
 
 .new-tab-btn {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border: none;
   background: transparent;
   color: var(--text-muted);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 18px;
+  font-size: 17px;
   flex-shrink: 0;
+  margin-bottom: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition:
-    background 0.15s,
-    color 0.15s;
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
-.priv-tab-btn { font-size: 13px; }
-.priv-mark { font-size: 11px; margin-right: 3px; opacity: 0.75; }
+.priv-tab-btn {
+  font-size: 13px;
+}
+.priv-mark {
+  font-size: 10px;
+  margin-right: 3px;
+  opacity: 0.75;
+}
 .new-tab-btn:hover {
-  background: var(--bg-active);
-  color: var(--text-primary);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* 窗口控制按钮（无边框窗口：标签栏 = 标题栏） */
@@ -790,7 +828,7 @@ function onFaviconError(e: Event) {
   height: 100%;
 }
 .wc-btn {
-  width: 38px;
+  width: 40px;
   height: 100%;
   border: none;
   background: transparent;
@@ -802,52 +840,54 @@ function onFaviconError(e: Event) {
   align-items: center;
   justify-content: center;
   transition:
-    background 0.15s,
-    color 0.15s;
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .wc-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
 .wc-close:hover {
-  background: #e53935;
+  background: var(--danger);
   color: #fff;
 }
 
 /* 右键菜单 */
 .context-menu {
   position: fixed;
-  z-index: 2000;
-  min-width: 160px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  z-index: var(--z-menu);
+  min-width: 168px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
   padding: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-pop);
   cursor: grab;
   user-select: none;
 }
 .context-menu.menu-dragging {
   cursor: grabbing;
-  opacity: 0.9;
+  opacity: 0.92;
 }
 .menu-title {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
-  padding: 4px 8px;
+  padding: 5px 8px 3px;
+  letter-spacing: 0.04em;
 }
 .menu-item {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 7px 8px;
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text-primary);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
 }
 .menu-item:hover {
-  background: var(--bg-active);
+  background: var(--bg-hover);
 }
 .menu-item.accent {
   color: var(--accent);
@@ -856,14 +896,14 @@ function onFaviconError(e: Event) {
   color: var(--danger);
 }
 .menu-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 2.5px;
   flex-shrink: 0;
 }
 .menu-divider {
   height: 1px;
-  background: var(--border-color);
-  margin: 4px 0;
+  background: var(--hairline);
+  margin: 5px 4px;
 }
 </style>

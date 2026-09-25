@@ -106,8 +106,8 @@ function closeWin() {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--bg-secondary);
-  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-primary);
+  border-right: 1px solid var(--hairline);
   overflow: hidden;
 }
 .vtab-head {
@@ -119,20 +119,23 @@ function closeWin() {
   display: flex;
   gap: 6px;
   padding: 0 8px 8px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--hairline);
 }
 .vtab-win {
   flex: 1;
-  height: 24px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-primary);
+  height: 26px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--bg-secondary);
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-sm);
   display: flex;
   align-items: center;
   justify-content: center;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .vtab-win:hover {
   background: var(--bg-hover);
@@ -144,17 +147,20 @@ function closeWin() {
 }
 .vtab-btn {
   flex: 1;
-  height: 28px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-primary);
+  height: 30px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--bg-secondary);
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-sm);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .vtab-btn:hover {
   background: var(--bg-hover);
@@ -166,27 +172,45 @@ function closeWin() {
   padding: 6px;
 }
 .vtab-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 8px;
-  border-radius: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
 }
 .vtab-item:hover {
   background: var(--bg-hover);
 }
 .vtab-item.active {
-  background: var(--bg-active);
+  background: var(--accent-soft);
+}
+.vtab-item.active::before {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+}
+.vtab-item.active .vtab-title {
+  color: var(--accent);
+  font-weight: 600;
 }
 .vtab-fav {
   width: 16px;
   height: 16px;
+  border-radius: 4px;
   flex-shrink: 0;
 }
 .vtab-title {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -194,10 +218,10 @@ function closeWin() {
 }
 .vtab-close {
   flex-shrink: 0;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -206,6 +230,9 @@ function closeWin() {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .vtab-item:hover .vtab-close {
   opacity: 1;

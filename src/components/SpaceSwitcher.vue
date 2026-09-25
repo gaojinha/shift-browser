@@ -120,25 +120,31 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
 .space-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-secondary);
+  gap: 7px;
+  height: 29px;
+  padding: 0 10px 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: var(--accent-soft);
   color: var(--text-primary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-sm);
+  font-weight: 500;
   max-width: 150px;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 .space-btn:hover {
   background: var(--bg-hover);
+  border-color: var(--border-subtle);
 }
 .space-dot {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12);
 }
 .space-name {
   white-space: nowrap;
@@ -147,37 +153,54 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
 }
 .space-caret {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 9px;
 }
 .space-menu {
   position: absolute;
-  top: 32px;
+  top: 34px;
   left: 0;
-  z-index: 3000;
-  min-width: 200px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  z-index: var(--z-menu);
+  min-width: 208px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
   padding: 6px;
+  animation: space-pop var(--dur) var(--ease-out);
+  transform-origin: top left;
+}
+@keyframes space-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 .space-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
+  gap: 9px;
+  padding: 7px 9px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
 }
 .space-item:hover {
   background: var(--bg-hover);
 }
 .space-item.active {
-  background: var(--bg-active);
+  background: var(--accent-soft);
+}
+.space-item.active .space-item-name {
+  color: var(--accent);
+  font-weight: 600;
 }
 .space-item-name {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--text-base);
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -185,30 +208,33 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
 }
 .space-item.add {
   color: var(--accent);
-  font-size: 12px;
+  font-size: var(--text-base);
 }
 .space-edit {
   flex: 1;
   min-width: 0;
-  height: 22px;
+  height: 24px;
   border: 1px solid var(--accent);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 12px;
-  padding: 0 6px;
+  font-size: var(--text-base);
+  padding: 0 7px;
   outline: none;
 }
 .space-mini {
   flex-shrink: 0;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   font-size: 11px;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .space-mini:hover {
   background: var(--bg-active);
@@ -220,7 +246,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
 }
 .space-divider {
   height: 1px;
-  background: var(--border-subtle);
-  margin: 4px 0;
+  background: var(--hairline);
+  margin: 5px 4px;
 }
 </style>

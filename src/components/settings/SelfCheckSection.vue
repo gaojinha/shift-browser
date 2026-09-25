@@ -117,12 +117,12 @@ onMounted(() => {
   font-size: 13px;
 }
 .selfcheck-summary.ok {
-  background: rgba(46, 160, 67, 0.15);
-  color: #3fb950;
+  background: var(--success-soft);
+  color: var(--success);
 }
 .selfcheck-summary.bad {
-  background: rgba(229, 57, 53, 0.12);
-  color: #e53935;
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 .selfcheck-hint {
   color: var(--text-muted);
@@ -130,8 +130,8 @@ onMounted(() => {
   padding: 12px 0;
 }
 .selfcheck-error {
-  color: #e53935;
-  font-size: 12px;
+  color: var(--danger);
+  font-size: var(--text-sm);
   padding: 8px 0;
 }
 .selfcheck-group {

@@ -295,17 +295,17 @@ function hostOf(url: string): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
-  border-radius: 10px;
+  background: var(--scrim);
+  border-radius: var(--radius-md);
   z-index: 10;
 }
 .confirm-box {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
   padding: 18px 20px;
   min-width: 260px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-pop);
 }
 .confirm-text {
   font-size: 13px;

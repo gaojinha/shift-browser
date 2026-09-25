@@ -314,7 +314,7 @@ function onOverlaySelf() {
   border-radius: 4px;
 }
 .ai-close:hover {
-  background: #e53935;
+  background: var(--danger);
   color: var(--text-primary);
 }
 .ai-actions {
@@ -388,7 +388,7 @@ function onOverlaySelf() {
   gap: 8px;
 }
 .ai-error {
-  color: #e53935;
+  color: var(--danger);
   font-size: 12px;
   padding: 6px 12px;
   background: rgba(229, 57, 53, 0.1);
@@ -436,7 +436,7 @@ function onOverlaySelf() {
 .ai-stop {
   height: 32px;
   padding: 0 14px;
-  background: #e53935;
+  background: var(--danger);
   color: var(--text-primary);
   border: none;
   border-radius: 8px;
@@ -565,7 +565,7 @@ function onOverlaySelf() {
   cursor: pointer;
 }
 .ai-clear:hover {
-  color: #e53935;
+  color: var(--danger);
 }
 .ai-hint {
   color: var(--text-muted);

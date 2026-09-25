@@ -1,5 +1,7 @@
-/* 设计令牌（Design Tokens）：圆角 / 阴影 / 缓动 / 时长
-   各组件 scoped 样式逐步引用，替代散落硬编码的 6/7/8/10/16px */
+/* 设计令牌（Design Tokens）
+   主题色（bg/text/accent/语义色）在 App.vue 的 :root / .theme-light 定义；
+   这里放与主题无关的原语：圆角、阴影、缓动、字号、层级，以及全局基线打磨。
+   各组件 scoped 样式统一引用，替代散落硬编码。 */
 :root {
   /* 圆角 */
   --radius-xs: 6px;
@@ -9,19 +11,91 @@
   --radius-xl: 18px;
   --radius-full: 999px;
 
-  /* 阴影（深色为主，浅色自动减淡见主题） */
+  /* 阴影（深色为主，浅色主题在 App.vue 覆盖减淡） */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.18);
   --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.24);
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.36);
+  /* 浮层专用：右键菜单 / 下拉建议 / 弹窗，统一仰角语言 */
+  --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.42), 0 1px 3px rgba(0, 0, 0, 0.3);
 
   /* 缓动与时长 */
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-fast: 0.12s;
   --dur: 0.18s;
   --dur-slow: 0.28s;
+
+  /* 字号阶梯（紧凑桌面 Chrome，基准 13px） */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+
+  /* 层级 */
+  --z-sticky: 100;
+  --z-dropdown: 1000;
+  --z-menu: 2000;
+  --z-overlay: 4000;
 }
 
 /* 统一的控件 focus 光圈（输入框 / 按钮 / 选择器通用） */
 .focus-ring {
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* ===== 全局基线打磨 ===== */
+
+/* 字体渲染：深色界面下开启抗锯齿与等距数字（状态栏/时钟/网速不跳动） */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+.status-bar,
+.clock-time,
+.net-status {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 选区颜色跟随品牌强调色 */
+::selection {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+/* 细滚动条（弹窗/列表面板统一） */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 尊重系统"减弱动态效果"：关闭装饰性动画/过渡，保留即时状态切换 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

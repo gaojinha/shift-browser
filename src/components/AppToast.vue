@@ -33,39 +33,68 @@ const toastStore = useToastStore()
 .toast-item {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  font-size: 13px;
+  gap: 9px;
+  padding: 11px 14px 11px 11px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
   line-height: 1.5;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  background: var(--bg-elevated);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-pop);
   pointer-events: auto;
   word-break: break-word;
+  animation: toast-in var(--dur) var(--ease-out);
 }
-.toast-item.error {
-  background: var(--bg-secondary);
-  border: 1px solid var(--danger);
-  color: var(--text-primary);
-}
-.toast-item.success {
-  background: var(--bg-secondary);
-  border: 1px solid var(--success);
-  color: var(--text-primary);
-}
-.toast-item.info {
-  background: var(--bg-secondary);
-  border: 1px solid var(--accent);
-  color: var(--text-primary);
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 .toast-icon {
   flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+.toast-item.error {
+  color: var(--text-primary);
+}
+.toast-item.error .toast-icon {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.toast-item.success {
+  color: var(--text-primary);
+}
+.toast-item.success .toast-icon {
+  color: var(--success);
+  background: var(--success-soft);
+}
+.toast-item.info {
+  color: var(--text-primary);
+}
+.toast-item.info .toast-icon {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 .toast-msg {
   flex: 1;
+  padding-top: 2px;
 }
 .toast-enter-active,
 .toast-leave-active {
-  transition: all 0.25s ease;
+  transition:
+    opacity var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
 }
 .toast-enter-from {
   opacity: 0;
@@ -76,6 +105,6 @@ const toastStore = useToastStore()
   transform: translateX(24px);
 }
 .toast-move {
-  transition: transform 0.25s ease;
+  transition: transform var(--dur) var(--ease);
 }
 </style>

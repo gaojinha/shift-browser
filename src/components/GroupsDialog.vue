@@ -292,7 +292,7 @@ function cancelDelete() {
   height: 14px;
 }
 .form-error {
-  color: #ff6b6b;
+  color: var(--danger);
   font-size: 12px;
 }
 .save-btn {

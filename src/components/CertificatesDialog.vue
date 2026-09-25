@@ -297,65 +297,96 @@ watch(
 .cert-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 60;
+  background: var(--scrim);
+  z-index: var(--z-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(6px);
 }
 .cert-box {
   width: 720px;
-  max-width: 92vw;
+  max-width: min(720px, calc(100vw - 32px));
   max-height: 80vh;
-  background: rgba(24, 34, 56, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-dialog);
+  animation: cert-pop var(--dur) var(--ease-out);
+}
+@keyframes cert-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 .cert-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 14px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--hairline);
 }
 .cert-head h3 {
   margin: 0;
-  font-size: 15px;
-  color: #fff;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-primary);
 }
 .cert-close {
-  background: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
   border: none;
-  color: #aaa;
-  font-size: 16px;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  font-size: 15px;
   cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .cert-close:hover {
-  color: #fff;
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 .cert-tabs {
   display: flex;
   gap: 6px;
-  padding: 10px 18px 0;
+  padding: 12px 18px 0;
 }
 .cert-tabs button {
   padding: 6px 14px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  color: #bbb;
-  font-size: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
   cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.cert-tabs button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 .cert-tabs button.on {
-  background: rgba(74, 158, 255, 0.22);
-  border-color: rgba(74, 158, 255, 0.5);
-  color: #fff;
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+  font-weight: 600;
 }
 .cert-body {
   padding: 14px 18px 18px;
@@ -363,56 +394,55 @@ watch(
   flex: 1;
 }
 .cert-empty {
-  color: #888;
-  font-size: 13px;
-  padding: 24px 0;
+  color: var(--text-muted);
+  font-size: var(--text-base);
+  padding: 28px 0;
   text-align: center;
 }
 .cert-line {
   display: flex;
   gap: 12px;
-  padding: 6px 0;
-  font-size: 13px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 7px 0;
+  font-size: var(--text-base);
+  border-bottom: 1px solid var(--hairline);
 }
 .cert-line .k {
   width: 72px;
   flex-shrink: 0;
-  color: #8a9bb5;
+  color: var(--text-muted);
 }
 .cert-line .v {
-  color: #ddd;
+  color: var(--text-primary);
   word-break: break-all;
 }
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .ok {
-  color: #57d38c;
+  color: var(--success);
 }
 .bad {
-  color: #ff6b6b;
+  color: var(--danger);
 }
 .warn {
-  color: #ffb14e;
+  color: var(--warning);
 }
 .tag {
   margin-left: 8px;
-  padding: 1px 8px;
-  border-radius: 8px;
-  background: rgba(255, 177, 78, 0.2);
-  color: #ffb14e;
-  font-size: 11px;
+  padding: 1px 9px;
+  border-radius: var(--radius-full);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: var(--text-xs);
 }
 .cert-errs {
   margin: 8px 0;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: rgba(255, 90, 90, 0.12);
-  border: 1px solid rgba(255, 90, 90, 0.3);
-  color: #ff9b9b;
-  font-size: 12px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--text-sm);
 }
 .cert-bar {
   display: flex;
@@ -420,43 +450,51 @@ watch(
   margin-bottom: 10px;
 }
 .btn-mini {
-  padding: 5px 14px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 12px;
-  color: #ccc;
-  font-size: 12px;
+  padding: 6px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
   cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .btn-mini:hover {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 .btn-x {
-  background: rgba(204, 68, 68, 0.2);
-  border: 1px solid rgba(204, 68, 68, 0.4);
-  color: #ff9b9b;
-  border-radius: 8px;
-  font-size: 11px;
-  padding: 2px 8px;
+  background: var(--danger-soft);
+  border: 1px solid transparent;
+  color: var(--danger);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  padding: 3px 10px;
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.btn-x:hover {
+  background: var(--danger);
+  color: #fff;
 }
 .cert-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .cert-table th {
   text-align: left;
-  color: #8a9bb5;
+  color: var(--text-muted);
   font-weight: 500;
-  padding: 6px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--hairline);
 }
 .cert-table td {
-  padding: 6px 8px;
-  color: #ccc;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 7px 8px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--hairline);
 }
 .ellip {
   max-width: 180px;
@@ -473,20 +511,21 @@ watch(
   display: flex;
   gap: 10px;
   align-items: center;
-  padding: 7px 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  font-size: 12px;
+  padding: 8px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  font-size: var(--text-sm);
 }
 .ev-row.sev-danger {
-  background: rgba(255, 90, 90, 0.1);
+  background: var(--danger-soft);
 }
 .ev-row.sev-warn {
-  background: rgba(255, 177, 78, 0.1);
+  background: var(--warning-soft);
 }
 .ev-kind {
   flex-shrink: 0;
-  color: #fff;
+  color: var(--text-primary);
+  font-weight: 500;
   width: 72px;
 }
 .ev-host {
@@ -494,17 +533,18 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #9fb3d1;
+  color: var(--text-secondary);
 }
 .ev-detail {
   flex: 1;
-  color: #ccc;
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .ev-time {
   flex-shrink: 0;
-  color: #6b7a90;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 </style>

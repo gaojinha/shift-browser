@@ -216,8 +216,8 @@ function openHelp() {
   justify-content: space-between;
   height: var(--sb-status-bar-h);
   background: var(--bg-primary);
-  border-top: 1px solid var(--border-subtle);
-  padding: 0 12px;
+  border-top: 1px solid var(--hairline);
+  padding: 0 10px;
   flex-shrink: 0;
   user-select: none;
   gap: 8px;
@@ -235,8 +235,8 @@ function openHelp() {
   min-width: 0; /* flexbox 默认 min-width:auto 会让长 URL 撑满空间、把 .status-right 挤出可视区 */
 }
 .status-load-failed {
-  color: #e53935;
-  font-size: 11px;
+  color: var(--danger);
+  font-size: var(--text-xs);
   animation: pulse 2s infinite;
 }
 @keyframes pulse {
@@ -269,30 +269,34 @@ function openHelp() {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 1px 10px;
-  border-radius: 10px;
-  font-size: 10px;
+  gap: 5px;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
-  border: 1px solid var(--border-color);
-  background: var(--bg-secondary);
+  border: 1px solid transparent;
+  background: var(--success-soft);
   color: var(--success);
-  transition: background 0.15s;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .privacy-badge:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
 .privacy-badge.privacy-off {
+  background: var(--bg-secondary);
+  border-color: var(--border-subtle);
   color: var(--text-muted);
-  opacity: 0.6;
 }
 
 /* 右段 */
 .status-right {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -305,10 +309,17 @@ function openHelp() {
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
-  font-size: 11px;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
+  font-size: 12px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .status-btn:hover {
   background: var(--bg-hover);
@@ -316,43 +327,60 @@ function openHelp() {
 }
 .dl-badge {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 13px;
-  height: 13px;
+  top: -3px;
+  right: -3px;
+  min-width: 14px;
+  height: 14px;
   padding: 0 3px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--danger);
   color: #fff;
   font-size: 9px;
-  line-height: 13px;
+  line-height: 14px;
   text-align: center;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 .net-status {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   margin-left: 6px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 10px;
-  font-family: monospace;
+  padding: 2px 9px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   cursor: default;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-subtle);
 }
 .net-good {
   color: var(--success);
-  border-color: rgba(67, 160, 71, 0.4);
+  background: var(--success-soft);
+  border-color: transparent;
 }
 .net-mid {
-  color: #ff9800;
-  border-color: rgba(255, 152, 0, 0.35);
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-color: transparent;
 }
 .net-bad {
   color: var(--danger);
-  border-color: rgba(229, 57, 53, 0.4);
+  background: var(--danger-soft);
+  border-color: transparent;
+}
+
+/* ===== 窄窗：隐藏域名（地址栏已可见）===== */
+@media (max-width: 720px) {
+  .status-domain {
+    display: none;
+  }
+}
+@media (max-width: 480px) {
+  .privacy-badge {
+    display: none;
+  }
 }
 </style>

@@ -303,16 +303,16 @@ async function onReader() {
     <button class="action-btn ai-btn" title="AI 助手" @click="emit('openAi')">
       <AppIcon name="sparkles" :size="15" />
     </button>
-    <button class="action-btn" title="密码管理" @click="emit('openPasswords')">
+    <button class="action-btn hide-narrow" title="密码管理" @click="emit('openPasswords')">
       <AppIcon name="key" :size="15" />
     </button>
-    <button class="action-btn" title="标签分组" @click="emit('openGroups')">
+    <button class="action-btn hide-narrow" title="标签分组" @click="emit('openGroups')">
       <AppIcon name="folder" :size="15" />
     </button>
-    <button class="action-btn" title="用户脚本" @click="emit('openUserscripts')">
+    <button class="action-btn hide-narrow" title="用户脚本" @click="emit('openUserscripts')">
       <AppIcon name="scroll" :size="15" />
     </button>
-    <button class="action-btn" title="历史记录（Ctrl+H）" @click="emit('openHistory')">
+    <button class="action-btn hide-narrow" title="历史记录（Ctrl+H）" @click="emit('openHistory')">
       <AppIcon name="clock" :size="15" />
     </button>
     <button class="action-btn" title="下载管理" @click="emit('openDownloads')">
@@ -338,38 +338,43 @@ async function onReader() {
 }
 .nav-btn,
 .action-btn {
-  width: 30px;
-  height: 30px;
+  width: 31px;
+  height: 31px;
   border: none;
   background: transparent;
   color: var(--text-muted);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 15px;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition:
-    background 0.15s,
-    color 0.15s;
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
 .action-btn:disabled {
-  opacity: 0.5;
-  cursor: wait;
+  opacity: 0.45;
+  cursor: default;
 }
 .reader-tip {
   position: absolute;
   right: 8px;
-  top: 36px;
-  font-size: 11px;
-  color: #ff9b9b;
-  max-width: 220px;
+  top: 37px;
+  font-size: var(--text-xs);
+  color: var(--danger);
+  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 2px 8px;
-  z-index: 20;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  padding: 4px 10px;
+  box-shadow: var(--shadow-pop);
+  z-index: var(--z-sticky);
   pointer-events: none;
 }
 .btn-icon {
@@ -379,16 +384,20 @@ async function onReader() {
 .ai-btn {
   color: var(--accent);
 }
+.ai-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
 .icon-spin {
   animation: nav-spin 0.8s linear infinite;
 }
 .nav-btn:hover:not(:disabled),
 .action-btn:hover {
-  background: var(--bg-active);
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
 .nav-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: default;
 }
 .address-container {
@@ -398,14 +407,22 @@ async function onReader() {
   display: flex;
   align-items: center;
   background: var(--bg-secondary);
-  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
   padding: 0 14px;
-  height: 30px;
+  height: 31px;
   position: relative;
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+.address-container:hover {
+  border-color: var(--border-color);
 }
 .address-container:focus-within {
-  outline: 1.5px solid var(--accent);
-  outline-offset: 0;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .lock-icon {
   font-size: 11px;
@@ -466,28 +483,30 @@ async function onReader() {
   position: absolute;
   left: 0;
   right: 0;
-  top: 32px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  z-index: 100;
+  top: 37px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  z-index: var(--z-sticky);
   overflow: hidden;
   max-height: 320px;
   overflow-y: auto;
+  padding: 5px;
 }
 .suggest-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
+  gap: 9px;
+  padding: 7px 11px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text-primary);
-  transition: background 0.1s;
+  transition: background var(--dur-fast) var(--ease);
 }
 .suggest-item.selected {
-  background: var(--bg-active);
+  background: var(--accent-soft);
 }
 .suggest-item:hover {
   background: var(--bg-hover);
@@ -510,7 +529,33 @@ async function onReader() {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   text-align: right;
+}
+
+/* ===== 窄窗响应式（小窗口 / 横屏窄屏）===== */
+@media (max-width: 860px) {
+  .address-container {
+    min-width: 60px;
+  }
+}
+@media (max-width: 620px) {
+  .address-bar {
+    gap: 2px;
+    padding: 0 5px;
+  }
+  .nav-btn,
+  .action-btn {
+    width: 28px;
+    height: 28px;
+  }
+  /* 低频入口（密码/分组/用户脚本/历史）让位给地址栏，仍可由命令栏 Ctrl+K 到达 */
+  .action-btn.hide-narrow {
+    display: none;
+  }
+  .address-container {
+    min-width: 0;
+    padding: 0 11px;
+  }
 }
 </style>

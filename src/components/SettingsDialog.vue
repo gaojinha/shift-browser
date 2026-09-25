@@ -145,26 +145,26 @@ watch(
 .settings-nav {
   width: 184px;
   flex-shrink: 0;
-  border-right: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--hairline);
   padding: 12px 10px;
   display: flex;
   flex-direction: column;
   gap: 3px;
-  background: var(--bg-primary);
+  background: var(--bg-elevated-2);
 }
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 9px 12px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text-secondary);
   transition:
-    background var(--dur),
-    color var(--dur),
-    box-shadow var(--dur);
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
   user-select: none;
 }
 .nav-item:hover {
@@ -172,10 +172,12 @@ watch(
   color: var(--text-primary);
 }
 .nav-item.active {
-  background: var(--grad-accent);
-  color: #fff;
+  background: var(--accent-soft);
+  color: var(--accent);
   font-weight: 600;
-  box-shadow: var(--shadow-sm);
+}
+.nav-item.active .nav-icon {
+  color: var(--accent);
 }
 .nav-icon {
   width: 18px;

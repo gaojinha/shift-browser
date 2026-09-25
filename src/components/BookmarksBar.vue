@@ -299,8 +299,8 @@ async function onSaveEdit() {
   display: flex;
   align-items: center;
   height: var(--sb-bookmarks-bar-h);
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--hairline);
   padding: 0 8px;
   gap: 4px;
   flex-shrink: 0;
@@ -319,15 +319,26 @@ async function onSaveEdit() {
 }
 .bookmark-item {
   white-space: nowrap;
-  padding: 3px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  border-radius: 4px;
+  border-radius: var(--radius-full);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-sm);
   flex-shrink: 0;
-  transition: background 0.15s;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.bookmark-item img {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
 }
 .bookmark-item:hover {
   background: var(--bg-hover);
@@ -335,37 +346,39 @@ async function onSaveEdit() {
 }
 .folder-item {
   white-space: nowrap;
-  padding: 3px 8px;
+  padding: 3px 9px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  border-radius: 4px;
+  border-radius: var(--radius-full);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-sm);
   flex-shrink: 0;
-  transition: background 0.15s;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .folder-item:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
 .folder-item.active {
-  background: var(--bg-active);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 .folder-menu {
   position: fixed;
-  z-index: 2000;
+  z-index: var(--z-menu);
   min-width: 200px;
   max-width: 300px;
   max-height: 320px;
   overflow-y: auto;
   scrollbar-width: none;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
   padding: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-pop);
 }
 .folder-menu::-webkit-scrollbar {
   display: none;
@@ -401,7 +414,7 @@ async function onSaveEdit() {
   display: inline;
 }
 .bm-del:hover {
-  color: #ff6b6b;
+  color: var(--danger);
 }
 .empty {
   justify-content: flex-end;

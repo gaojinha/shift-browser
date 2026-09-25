@@ -222,25 +222,25 @@ async function onReveal(path: string | null) {
   flex-shrink: 0;
 }
 .state {
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 4px;
+  font-size: var(--text-sm);
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
 }
 .state-run {
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.15);
+  background: var(--accent-soft);
 }
 .state-done {
-  color: #4ecb71;
-  background: rgba(78, 203, 113, 0.15);
+  color: var(--success);
+  background: var(--success-soft);
 }
 .state-fail {
-  color: #ff6b6b;
-  background: rgba(255, 107, 107, 0.15);
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 .state-cancel {
   color: var(--text-muted);
-  background: rgba(153, 153, 153, 0.15);
+  background: var(--bg-secondary);
 }
 .mini-btn {
   background: var(--bg-active);
