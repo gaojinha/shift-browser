@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { invokeOk } from '../../utils/invoke'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { useSettingsStore } from '../../stores/settings'
 import { useSettingsSet } from '../../composables/useSettingsSet'
@@ -12,7 +13,7 @@ const { onSet } = useSettingsSet()
 const webmcpPolyfill = ref(false)
 async function loadWebmcpPolyfill() {
   try {
-    webmcpPolyfill.value = await invoke<boolean>('get_webmcp_polyfill')
+    webmcpPolyfill.value = await invokeOk<boolean>('get_webmcp_polyfill')
   } catch (e) {
     console.error('[settings] 读取 WebMCP polyfill 开关失败:', e)
   }
@@ -21,7 +22,7 @@ async function onToggleWebmcpPolyfill() {
   const next = !webmcpPolyfill.value
   webmcpPolyfill.value = next
   try {
-    await invoke('set_webmcp_polyfill', { enabled: next })
+    await invokeOk('set_webmcp_polyfill', { enabled: next })
     useToastStore().success(next ? 'WebMCP polyfill 已开启（刷新页面后生效）' : 'WebMCP polyfill 已关闭')
   } catch (e) {
     webmcpPolyfill.value = !next

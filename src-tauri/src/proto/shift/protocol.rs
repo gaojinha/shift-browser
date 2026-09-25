@@ -15,6 +15,11 @@ use super::{
     WHOLE_PAGE_TRANSLATE_JS,
 };
 
+// URI scheme handler 的签名强制返回具体 Response（无 Result 通道）；下面的 unwrap
+// 全部作用于"静态 CONTENT_TYPE + Vec<u8>/字节体"的 builder，header 为编译期常量、
+// body 为任意字节，http 类型上不可能构造失败，也无优雅降级路径，与 lib.rs/nav_cmds.rs
+// 里既有同款豁免一致。
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub(crate) fn handle(
     ctx: &tauri::UriSchemeContext<'_, tauri::Wry>,
     request: tauri::http::Request<Vec<u8>>,

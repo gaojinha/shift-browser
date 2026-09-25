@@ -114,8 +114,7 @@ pub async fn ai_chat(
         };
         let reply = provider
             .chat(&req)
-            .await
-            .map_err(crate::error::AppError::net)?;
+            .await?;
 
         // 模型请求调用工具
         if let Some(calls) = reply.tool_calls.clone() {
@@ -277,13 +276,14 @@ pub async fn ai_chat_stream(
         }
         Err(e) => {
             // 用户主动停止不算错误（impl 里 cancel 时返回"已停止生成"）
-            if e != "已停止生成" {
+            if e.message != "已停止生成" {
                 on_event
-                    .send(StreamEvent::Error { message: e.clone() })
+                    .send(StreamEvent::Error { message: e.message.clone() })
                     .ok();
             }
-            // 流式管线失败（SSE 读取/HTTP/上游中断）统一 E_NET
-            Err(crate::error::AppError::net(e).into())
+            // 流式管线失败（SSE 读取/HTTP/上游中断）错误码由 provider 实现给出
+            // （agnes 注册闭包统一 E_NET）；停止生成同样向上抛错，调用方按消息识别
+            Err(e)
         }
     }
 }
@@ -301,13 +301,19 @@ pub fn register_provider_impls() {
         |base_url, api_key, req| {
             Box::pin(async move {
                 let r = crate::engine::ai_provider::ProviderRequest { ..req };
-                agnes_chat_impl(&base_url, &api_key, &r).await
+                // agnes 实现仍返回裸 String：聊天管线失败统一归 E_NET（与旧调用点行为一致），
+                // 后续细化 agnes 内部（鉴权/SSRF/序列化）时在实现侧分类。
+                agnes_chat_impl(&base_url, &api_key, &r)
+                    .await
+                    .map_err(|e| crate::error::AppError::net(e).into())
             })
         },
         |base_url, api_key, req, cancel, on_delta| {
             Box::pin(async move {
                 let r = crate::engine::ai_provider::ProviderRequest { ..req };
-                agnes_chat_stream_impl(&base_url, &api_key, &r, cancel, on_delta).await
+                agnes_chat_stream_impl(&base_url, &api_key, &r, cancel, on_delta)
+                    .await
+                    .map_err(|e| crate::error::AppError::net(e).into())
             })
         },
     );

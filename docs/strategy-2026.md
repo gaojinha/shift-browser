@@ -2,7 +2,7 @@
 
 > 立档时间：2026-09-19
 > 决策记录：**本地模型集成暂缓**（2026-09-19 高哥决策，阶段 1 推理层先只做云端 + 多 provider 抽象，本地 provider 留接口不实现）
-> 关联文档：`HANDOFF.md`（工程交接）、`docs/browser-privacy-fingerprint-research-2026.md`（隐私调研）
+> 关联文档：`docs/archive/HANDOFF.md`（工程交接归档）、`docs/browser-privacy-fingerprint-research-2026.md`（隐私调研）
 
 ---
 

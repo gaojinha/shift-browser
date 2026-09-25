@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { errText, invokeOk } from '../../utils/invoke'
 import { useToastStore } from '../../stores/toast'
 
 // ---- MCP 工具层（阶段 1.3）：server 配置 + 工具列表 + 手动调用 + 审计 ----
@@ -49,11 +49,11 @@ async function loadMcp() {
   mcpLoading.value = true
   mcpError.value = ''
   try {
-    mcpServers.value = await invoke<McpServer[]>('mcp_list_servers')
-    mcpTools.value = await invoke<McpTool[]>('mcp_list_tools')
-    mcpAudit.value = await invoke<AuditEntry[]>('mcp_get_audit_log', { limit: 30 })
+    mcpServers.value = await invokeOk<McpServer[]>('mcp_list_servers')
+    mcpTools.value = await invokeOk<McpTool[]>('mcp_list_tools')
+    mcpAudit.value = await invokeOk<AuditEntry[]>('mcp_get_audit_log', { limit: 30 })
   } catch (e) {
-    mcpError.value = String(e)
+    mcpError.value = errText(e)
   } finally {
     mcpLoading.value = false
   }
@@ -77,7 +77,7 @@ async function addMcpServer() {
     return
   }
   try {
-    await invoke('mcp_add_server', { name, command, args, allowedTools: allowed })
+    await invokeOk('mcp_add_server', { name, command, args, allowedTools: allowed })
     mcpNewName.value = ''
     mcpNewCommand.value = ''
     mcpNewArgs.value = ''
@@ -85,27 +85,27 @@ async function addMcpServer() {
     useToastStore().success('MCP server 已添加')
     await loadMcp()
   } catch (e) {
-    mcpError.value = String(e)
+    mcpError.value = errText(e)
   }
 }
 
 async function removeMcpServer(id: number) {
   try {
-    await invoke('mcp_remove_server', { id })
+    await invokeOk('mcp_remove_server', { id })
     useToastStore().success('已删除')
     await loadMcp()
   } catch (e) {
-    mcpError.value = String(e)
+    mcpError.value = errText(e)
   }
 }
 
 async function toggleMcpServer(s: McpServer) {
   try {
-    await invoke('mcp_set_server_enabled', { id: s.id, enabled: !s.enabled })
+    await invokeOk('mcp_set_server_enabled', { id: s.id, enabled: !s.enabled })
     s.enabled = !s.enabled
     await loadMcp()
   } catch (e) {
-    mcpError.value = String(e)
+    mcpError.value = errText(e)
   }
 }
 
@@ -116,12 +116,12 @@ async function callMcpTool() {
   mcpError.value = ''
   try {
     const args = JSON.parse(mcpCallArgs.value || '{}')
-    mcpCallResult.value = await invoke<string>('mcp_call_tool', {
+    mcpCallResult.value = await invokeOk<string>('mcp_call_tool', {
       name: mcpCallTool.value,
       arguments: args,
     })
   } catch (e) {
-    mcpCallResult.value = `❌ ${String(e)}`
+    mcpCallResult.value = `❌ ${errText(e)}`
   } finally {
     mcpCalling.value = false
   }

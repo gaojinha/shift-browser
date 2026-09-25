@@ -23,7 +23,7 @@ pub(super) async fn list_tools(app: &AppHandle, _req: &Value) -> Value {
                 .collect();
             json!({"ok": true, "data": items})
         }
-        Err(e) => AppError::net(e).error_json(),
+        Err(e) => AppError::from(e).error_json(),
     }
 }
 
@@ -42,6 +42,6 @@ pub(super) async fn call_tool(app: &AppHandle, req: &Value) -> Value {
     let db = app.state::<crate::db::Db>();
     match crate::engine::mcp::call_tool(&db.pool, &name, args).await {
         Ok(r) => json!({"ok": true, "data": {"result": r}}),
-        Err(e) => AppError::net(e).error_json(),
+        Err(e) => AppError::from(e).error_json(),
     }
 }

@@ -1,0 +1,266 @@
+//! 「打开并读取」一体化 handler（R1 三次拆分 · 2026-09-25）：
+//! 开标签 → 等加载就绪（含 SPA 内容稳定判定）→ 重定向 SSRF 复核 → 读取。
+
+use serde_json::{json, Value};
+use tauri::{AppHandle, Manager};
+
+use crate::error::AppError;
+
+use super::read::read_page;
+use super::util::probe_page;
+
+/// 移动版 UA（M 类响应式读取）：`open_and_read` 传 `ua:"mobile"` 时启用，
+/// 便于读取移动版更简洁的页面（闲鱼/淘宝等）。版本与默认 UA 对齐。
+const MOBILE_UA: &str = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36";
+
+/// open_and_read 的内网 SSRF 守卫（入口 + 最终 URL 复核共用）。
+///
+/// 返回 `Ok(())` 放行；`Err(响应)` 为拒绝（非 http/https、或内网地址且未进白名单）。
+async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
+    let Ok(parsed) = tauri::Url::parse(url) else {
+        return Err(AppError::validation("URL 解析失败").error_json());
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(AppError::permission(format!(
+            "open_and_read 只接受 http/https（收到 {}）",
+            parsed.scheme()
+        ))
+        .error_json());
+    }
+    let Some(host) = parsed.host_str().map(|h| h.to_string()) else {
+        return Err(AppError::validation("URL 缺少主机名").error_json());
+    };
+    // 内网 / 私有地址：查库取白名单（同时刷新进程内缓存，供 GTK 导航守卫同步读取）
+    let allowlist: String = {
+        let db = app.state::<crate::db::Db>();
+        sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = 'api_allowed_ips'")
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    };
+    crate::net_guard::set_allowlist(&allowlist);
+    if crate::net_guard::host_permitted(&host) {
+        Ok(())
+    } else {
+        Err(AppError::permission(format!(
+            "内网 / 私有地址默认拒绝：{host}（如确需读取，请在 api_allowed_ips 白名单中显式放行）"
+        ))
+        .error_json())
+    }
+}
+
+/// 打开 URL 并读取页面（P0 杀招命令 · 方案 §4.1）。
+///
+/// 一次调用完成「开标签 → 等加载 → 读页面」，返回统一结构（tab_id/final_url/meta/read）。
+/// 登记 `Risk::Read`（语义读）→ api_readonly 下放行（P2 核心拍板：能看不能动）。
+/// 一期实现：SSRF 内网守卫 + 等就绪 + 读取 + `close` + `reuse`；`ua` / 重定向逐跳校验留待后续切片。
+pub(crate) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
+    let url = req
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if url.is_empty() {
+        return AppError::validation("缺少 url").error_json();
+    }
+    if let Err(resp) = guard_url(app, &url).await {
+        return resp;
+    }
+    let close_after = req.get("close").and_then(|v| v.as_bool()).unwrap_or(false);
+    let reuse = req.get("reuse").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // 1) 决定目标标签：reuse 命中已有同 URL 的 AI 标签 → 直接复用；否则开新标签
+    let Some(state) = app.try_state::<crate::tabs::TabManager>() else {
+        return AppError::internal("标签管理器不可用").error_json();
+    };
+    let reused_id = if reuse {
+        state
+            .all_tabs()
+            .into_iter()
+            .find(|t| t.origin == "ai" && t.url == url)
+            .map(|t| t.id)
+    } else {
+        None
+    };
+    let (tab_id, reused) = match reused_id {
+        Some(id) => (id, true),
+        None => {
+            // AI 标签上限（J 类）：默认 10，超限拒绝（提示先 tabs/close_ai 回收），防标签堆爆
+            const AI_TAB_LIMIT: usize = 10;
+            if state.ai_tab_count() >= AI_TAB_LIMIT {
+                return AppError::permission(format!(
+                    "AI 标签已达上限 {AI_TAB_LIMIT}（先调用 tabs/close_ai 回收再试）"
+                ))
+                .error_json();
+            }
+            let tab = match crate::tabs::commands::create_tab(
+                app.clone(),
+                state,
+                url.clone(),
+                None,
+                None,
+                Some(true), // J6：AI 标签后台打开，不抢用户焦点
+            )
+            .await
+            {
+                Ok(t) => t,
+                Err(e) => return AppError::from(e).error_json(),
+            };
+            let id = tab.id.clone();
+            // 标记 AI 来源（J 类）：供 tabs/close_ai 回收、AI 上限计数、看板区分
+            app.state::<crate::tabs::TabManager>().set_origin(&id, "ai");
+            (id, false)
+        }
+    };
+
+    // ua 覆盖（M 类响应式）：mobile 时切移动版 UA 并重载，读移动版（闲鱼/淘宝类更简洁）
+    let ua_mode = req.get("ua").and_then(|v| v.as_str()).unwrap_or("desktop");
+    let ua_mobile = ua_mode == "mobile";
+    if ua_mobile {
+        if let Some(wv) = app.get_webview(&format!("tab-{}", tab_id)) {
+            let ua = MOBILE_UA.to_string();
+            let _ = wv.with_webview(move |pwv| {
+                use webkit2gtk::{SettingsExt, WebViewExt};
+                if let Some(settings) = pwv.inner().settings() {
+                    settings.set_user_agent(Some(&ua));
+                }
+            });
+            if let Some(st) = app.try_state::<crate::tabs::TabManager>() {
+                let _ = crate::tabs::commands::reload_tab(app.clone(), st, tab_id.clone()).await;
+            }
+        }
+    }
+
+    // 2) 等加载就绪：复用标签视为已就绪（探测一次）；新开标签轮询 readyState（最多 ~8s）
+    let mut ready_state = "unknown".to_string();
+    let mut final_url = url.clone();
+    if reused {
+        if let Some(p) = probe_page(app, &tab_id).await {
+            ready_state = p
+                .get("ready_state")
+                .and_then(|s| s.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            if let Some(u) = p.get("url").and_then(|s| s.as_str()) {
+                if !u.is_empty() {
+                    final_url = u.to_string();
+                }
+            }
+        }
+    } else {
+        // 等就绪：需满足 ① URL 已是 http/https（排除初始 about:blank）
+        // ② readyState === complete ③ **文本长度连续两次稳定**（SPA 的 complete ≠ 渲染完；
+        //    gitee/36kr 等客户端渲染站点在 complete 时内容还是空的）。
+        // 修复 2026-09-25：批量测试暴露 SPA 读到空/骨架。
+        let mut prev_len: i64 = -1;
+        let mut stable_hits = 0;
+        for _ in 0..60 {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            if let Some(p) = probe_page(app, &tab_id).await {
+                let rs = p
+                    .get("ready_state")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                if let Some(u) = p.get("url").and_then(|s| s.as_str()) {
+                    if !u.is_empty() {
+                        final_url = u.to_string();
+                    }
+                }
+                ready_state = rs.clone();
+                let len = p.get("text_len").and_then(|n| n.as_i64()).unwrap_or(-1);
+                let url_is_http =
+                    final_url.starts_with("http://") || final_url.starts_with("https://");
+                if url_is_http && rs == "complete" {
+                    if len > 0 && len == prev_len {
+                        stable_hits += 1;
+                        // 连续两次长度一致 → 认为内容已稳定（约 400ms 无变化）
+                        if stable_hits >= 2 {
+                            break;
+                        }
+                    } else {
+                        stable_hits = 0;
+                    }
+                    prev_len = len;
+                }
+            }
+        }
+    }
+
+    // 2b) O1 重定向逐跳/最终 URL 复核：加载后的真实 URL 再跑一遍 SSRF 守卫。
+    //     公开页跳转到内网（重定向绕过入口校验）→ 读取前拦截并回收，绝不让内网内容外流。
+    //     注意：仅当 final_url 是 http/https 且与入口不同才复核——新标签未加载完时为
+    //     `about:blank`（非 http），不应触发拦截（修复 2026-09-25：曾误伤所有读取）。
+    let final_is_http = final_url.starts_with("http://") || final_url.starts_with("https://");
+    if final_is_http && final_url != url {
+        if let Err(resp) = guard_url(app, &final_url).await {
+            // 复核失败：回收刚开的标签（复用标签不关，避免误关用户标签）
+            if !reused {
+                if let Some(st) = app.try_state::<crate::tabs::TabManager>() {
+                    let _ = crate::tabs::commands::close_tab(app.clone(), st, tab_id.clone()).await;
+                }
+            }
+            let msg = resp
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("重定向到内网地址被拦截");
+            return AppError::permission(format!(
+                "重定向复核拦截（{final_url}）：{msg}"
+            ))
+            .error_json();
+        }
+    }
+
+    // 3) 读取（复用 read_page，显式指定刚开的 tab_id，避免活动标签漂移读错）
+    let mut read_req = json!({
+        "mode": req.get("mode").cloned().unwrap_or(json!("text")),
+        "selector": req.get("selector").cloned().unwrap_or(json!("")),
+        "tab_id": tab_id.clone(),
+        "max_chars": req.get("max_chars").cloned().unwrap_or(json!(200000)),
+        "max_items": req.get("max_items").cloned().unwrap_or(json!(500)),
+    });
+    if let Some(obj) = read_req.as_object_mut() {
+        obj.insert("cmd".to_string(), json!("read_page"));
+    }
+    let read_resp = read_page(app, &read_req).await;
+    let read_ok = read_resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // 4) 可选关闭
+    if close_after {
+        if let Some(st) = app.try_state::<crate::tabs::TabManager>() {
+            let _ = crate::tabs::commands::close_tab(app.clone(), st, tab_id.clone()).await;
+        }
+    }
+
+    // final_url：优先用 read_page 采集到的真实 URL（探测时可能还是 about:blank）
+    let final_url_resp = {
+        let from_read = read_resp
+            .get("data")
+            .and_then(|d| d.get("url"))
+            .and_then(|u| u.as_str())
+            .unwrap_or("");
+        if from_read.starts_with("http") {
+            from_read.to_string()
+        } else {
+            final_url.clone()
+        }
+    };
+    let data = json!({
+        "tab_id": tab_id,
+        "url": url,
+        "final_url": final_url_resp,
+        "title": read_resp.get("data").and_then(|d| d.get("title")).cloned().unwrap_or(json!("")),
+        "ready_state": ready_state,
+        "closed": close_after,
+        "reused": reused,
+        "ua": if ua_mobile { "mobile" } else { "desktop" },
+        "read_ok": read_ok,
+        "content_type": "page",
+        "read": if read_ok { read_resp.get("data").cloned().unwrap_or(Value::Null) } else { Value::Null },
+        "read_error": if read_ok { Value::Null } else { read_resp.get("error").cloned().unwrap_or(Value::Null) },
+    });
+    json!({"ok": true, "data": data})
+}

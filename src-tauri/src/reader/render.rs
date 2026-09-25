@@ -85,6 +85,52 @@ pub(super) fn sanitize_html(html: &str) -> String {
     .to_string()
 }
 
+/// 阅读页唯一内联脚本（固定静态内容）。
+/// CSP 不放行 'unsafe-inline'，改用本常量字节的 sha256 白名单（见 inline_script_hash）；
+/// hash 在运行时对同一常量计算，脚本改动时 CSP 自动同步，不存在两处漂移。
+/// 首尾换行属于 `<script>` 标签内文本，参与 hash 计算，勿删。
+const READER_SCRIPT: &str = r#"
+(function() {
+  var root = document.documentElement;
+  var fs = parseInt(localStorage.getItem('sb_reader_fs') || '19', 10);
+  function apply() { root.style.setProperty('--fs', fs + 'px'); }
+  apply();
+  document.getElementById('fsUp').addEventListener('click', function() { fs = Math.min(fs + 2, 30); apply(); localStorage.setItem('sb_reader_fs', fs); });
+  document.getElementById('fsDown').addEventListener('click', function() { fs = Math.max(fs - 2, 14); apply(); localStorage.setItem('sb_reader_fs', fs); });
+
+  // ---- 懒加载图片修复：很多新闻站用 data-src/data-original 占位，直接渲染不显示 ----
+  // 提升 data-* 占位为真 src，剥掉 srcset（多尺寸会加载错图/拖慢），补协议头，再懒加载滚动出图
+  var CONT = document.getElementById('content');
+  var imgFix = (function() {
+    var imgs = CONT.querySelectorAll('img');
+    for (var i = 0; i < imgs.length; i++) {
+      var im = imgs[i];
+      var s = im.getAttribute('data-src') || im.getAttribute('data-original') || im.getAttribute('data-lazy-src') || im.getAttribute('data-echo') || im.getAttribute('src');
+      if (!s) continue;
+      if (s.charAt(0) === '/' && s.charAt(1) === '/') s = location.protocol + s;       // //cdn → //当页协议
+      if (im.hasAttribute('srcset')) im.removeAttribute('srcset');                     // 剥多尺寸
+      if (im.src === im.baseURI && s !== '') { im.removeAttribute('src'); }            // 占位图 src 去掉
+      im.setAttribute('src', s);
+      im.setAttribute('loading', 'lazy');                                             // 滚动到才加载
+      im.setAttribute('decoding', 'async');
+      im.style.maxWidth = '100%'; im.style.height = 'auto';
+    }
+  })();
+})();
+"#;
+
+/// 计算内联脚本的 CSP hash token：`'sha256-<base64>'`。
+/// 算法遵循 CSP Level 2/3：对 `<script>` 元素 text content 的 UTF-8 字节做 SHA-256 再 base64。
+fn inline_script_hash(script: &str) -> String {
+  use base64::Engine;
+  use sha2::{Digest, Sha256};
+  let digest = Sha256::digest(script.as_bytes());
+  format!(
+    "'sha256-{}'",
+    base64::engine::general_purpose::STANDARD.encode(digest)
+  )
+}
+
 /// 阅读页模板（占位符用 replace 注入，正文 HTML 里可能有花括号，不能走 format!）
 pub(super) fn render_reader_html(title: &str, source: &str, content: &str) -> String {
   r#"<!DOCTYPE html>
@@ -93,8 +139,10 @@ pub(super) fn render_reader_html(title: &str, source: &str, content: &str) -> St
 <meta charset="utf-8">
 <title>__TITLE__</title>
 <!-- 阅读页是 file:// 加载，tauri.conf.json 的全局 CSP 不生效，必须自带 meta CSP。
-     正文是外部网页内容（已过 sanitize_html），此处纵深防御：禁 connect/frame/form/base。 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: http: data:; media-src https: http: data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+     正文是外部网页内容（已过 sanitize_html），此处纵深防御：禁 connect/frame/form/base。
+     script-src 只白名单模板内固定脚本的 sha256（R1-6 去 unsafe-inline），
+     注入的任何其他 <script>/内联事件处理器均不执行。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src __SCRIPT_HASH__; style-src 'unsafe-inline'; img-src https: http: data:; media-src https: http: data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <style>
   :root { --fs: 19px; }
   body { background:#1c1c1e; color:#d8d8d8; margin:0; font:var(--fs)/1.9 -apple-system,"PingFang SC","Microsoft YaHei",serif; }
@@ -128,40 +176,16 @@ pub(super) fn render_reader_html(title: &str, source: &str, content: &str) -> St
     <h1>__TITLE__</h1>
     <div id="content">__CONTENT__</div>
   </article>
-<script>
-(function() {
-  var root = document.documentElement;
-  var fs = parseInt(localStorage.getItem('sb_reader_fs') || '19', 10);
-  function apply() { root.style.setProperty('--fs', fs + 'px'); }
-  apply();
-  document.getElementById('fsUp').addEventListener('click', function() { fs = Math.min(fs + 2, 30); apply(); localStorage.setItem('sb_reader_fs', fs); });
-  document.getElementById('fsDown').addEventListener('click', function() { fs = Math.max(fs - 2, 14); apply(); localStorage.setItem('sb_reader_fs', fs); });
-
-  // ---- 懒加载图片修复：很多新闻站用 data-src/data-original 占位，直接渲染不显示 ----
-  // 提升 data-* 占位为真 src，剥掉 srcset（多尺寸会加载错图/拖慢），补协议头，再懒加载滚动出图
-  var CONT = document.getElementById('content');
-  var imgFix = (function() {
-    var imgs = CONT.querySelectorAll('img');
-    for (var i = 0; i < imgs.length; i++) {
-      var im = imgs[i];
-      var s = im.getAttribute('data-src') || im.getAttribute('data-original') || im.getAttribute('data-lazy-src') || im.getAttribute('data-echo') || im.getAttribute('src');
-      if (!s) continue;
-      if (s.charAt(0) === '/' && s.charAt(1) === '/') s = location.protocol + s;       // //cdn → //当页协议
-      if (im.hasAttribute('srcset')) im.removeAttribute('srcset');                     // 剥多尺寸
-      if (im.src === im.baseURI && s !== '') { im.removeAttribute('src'); }            // 占位图 src 去掉
-      im.setAttribute('src', s);
-      im.setAttribute('loading', 'lazy');                                             // 滚动到才加载
-      im.setAttribute('decoding', 'async');
-      im.style.maxWidth = '100%'; im.style.height = 'auto';
-    }
-  })();
-})();
-</script>
+<script>__READER_SCRIPT__</script>
 </body>
 </html>"#
   .replace("__TITLE__", &esc_html(title))
   .replace("__SOURCE__", &esc_html(source))
   .replace("__SOURCE_LINK__", &esc_attr(source))
+  // 脚本/hash 占位符必须在 __CONTENT__ 之前替换：正文是外部内容，
+  // 不能给它"后替换"而获得占位符展开的机会
+  .replace("__SCRIPT_HASH__", &inline_script_hash(READER_SCRIPT))
+  .replace("__READER_SCRIPT__", READER_SCRIPT)
   .replace("__CONTENT__", content)
 }
 
@@ -232,5 +256,73 @@ mod tests {
     assert!(s.contains("粗体"));
     assert!(s.contains("链接"));
     assert!(s.contains("<li>"));
+  }
+
+  /// 从渲染结果抠出 meta CSP 的 content
+  fn extract_csp(html: &str) -> &str {
+    let marker = "Content-Security-Policy\" content=\"";
+    let start = html.find(marker).unwrap() + marker.len();
+    let end = html[start..].find('"').unwrap() + start;
+    &html[start..end]
+  }
+
+  /// 抠出页面模板脚本 `<script>...</script>` 的元素内文本（参与 hash 的部分）。
+  /// 用 rfind：head 注释里含 "<script>" 字面说明文字；正文经净化不含 script 标签，
+  /// 即便纵深防御测试直接注入，模板脚本也始终是最后一个。
+  fn extract_inline_script(html: &str) -> &str {
+    let start = html.rfind("<script>").unwrap() + "<script>".len();
+    let end = html[start..].find("</script>").unwrap() + start;
+    &html[start..end]
+  }
+
+  #[test]
+  fn csp_whitelists_template_script_by_sha256_without_unsafe_inline() {
+    let html = render_reader_html("标题", "https://x.com/a", "<p>正文</p>");
+    let csp = extract_csp(&html);
+
+    // script-src 不得放行任何内联脚本（style-src 的 unsafe-inline 与本断言无关）
+    assert!(
+      !csp.contains("script-src 'unsafe-inline'"),
+      "CSP 仍含 script-src 'unsafe-inline': {csp}"
+    );
+
+    // CSP 中的 hash 必须精确等于页面里实际脚本字节的 hash（防两处漂移）
+    let actual_script = extract_inline_script(&html);
+    let expected = inline_script_hash(actual_script);
+    assert!(
+      csp.contains(&expected),
+      "CSP 未放行实际脚本 hash {expected}，CSP: {csp}"
+    );
+    // READER_SCRIPT 常量就是页面脚本本身（占位符替换后无偏差）
+    assert_eq!(actual_script, READER_SCRIPT);
+
+    // 改动一个字节的脚本不得被放行（证明 hash 不是摆设）
+    let mutated = inline_script_hash(&READER_SCRIPT.replace("19", "20"));
+    assert_ne!(mutated, expected);
+    assert!(!csp.contains(&mutated));
+  }
+
+  #[test]
+  fn injected_scripts_are_not_whitelisted() {
+    // 即便净化层漏过（纵深防御场景），注入脚本/事件处理器的 hash 也不在白名单
+    let html = render_reader_html(
+      "t",
+      "https://x.com",
+      r#"<script>alert(1)</script><img src="x" onerror="alert(1)">"#,
+    );
+    let csp = extract_csp(&html);
+    assert!(!csp.contains(&inline_script_hash("alert(1)")));
+    assert!(!csp.contains(&inline_script_hash("\nalert(1)\n")));
+    // 白名单里只有一个 sha256 token
+    assert_eq!(csp.matches("'sha256-").count(), 1);
+  }
+
+  #[test]
+  fn hash_matches_w3c_known_vector() {
+    // CSP 规范已知向量：空内容的 sha256-base64，锚定实现与浏览器验签口径一致
+    assert_eq!(
+      inline_script_hash(""),
+      "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='"
+    );
   }
 }

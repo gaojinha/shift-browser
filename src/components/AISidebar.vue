@@ -2,7 +2,6 @@
 // AI 侧边栏：右侧分屏面板（不隐藏 webview，页面保持可见可交互，边看边描述）
 // 流式输出：后端 SSE 逐块推送，前端实时渲染；回复支持 Markdown + 代码复制
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
 import { invokeOk } from '../utils/invoke'
 import { listen } from '@tauri-apps/api/event'
 import { useAIStore } from '../stores/ai'
@@ -34,6 +33,7 @@ const topOffset = computed(() => {
 watch(
   () => props.show,
   (v) => {
+    // 有意静默：child webview 布局同步失败只影响避让宽度，下次开关/切换标签会重发自愈
     invokeOk('set_webview_ai_panel', { active: v }).catch(() => {})
     if (v) {
       // 打开时同步当前页面上下文
@@ -128,7 +128,7 @@ async function confirmAction(approved: boolean) {
   if (!req) return
   pendingAction.value = null
   try {
-    await invoke('agent_confirm_action', { requestId: req.requestId, approved })
+    await invokeOk('agent_confirm_action', { requestId: req.requestId, approved })
   } catch (err) {
     console.error('[agent] 确认回调失败:', err)
   }
@@ -138,7 +138,7 @@ async function confirmMultiStep(approved: boolean) {
   if (!plan) return
   pendingMultiStep.value = null
   try {
-    await invoke('agent_confirm_multi_step', { requestId: plan.requestId, approved })
+    await invokeOk('agent_confirm_multi_step', { requestId: plan.requestId, approved })
   } catch (err) {
     console.error('[agent] 多步确认回调失败:', err)
   }

@@ -22,6 +22,10 @@ jobs:
       # P2-4 供应链：npm 依赖漏洞扫描（high+ 即失败）
       - name: npm audit
         run: npm audit --audit-level=high
+      # R1-1（2026-09-25）：前端单测必须在 CI 执行——69+ vitest 用例（stores 状态机/
+      # markdown XSS/invoke 契约）此前只在本地跑，回归可静默合入
+      - name: Vitest 单元测试
+        run: npm run test
       - name: 类型检查 + 构建
         run: npm run build
 

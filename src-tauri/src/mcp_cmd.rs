@@ -1,5 +1,6 @@
-// MCP 工具层命令（阶段 1.3）：server 配置管理 + 工具列表 + 手动调用 + 审计查询
+// MCP 工具层命令（阶段 1.3 / R1 错误类型化第二批 · 2026-09-25）：server 配置管理 + 工具列表 + 手动调用 + 审计查询
 use crate::db::Db;
+use crate::error::CommandResult;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -26,7 +27,7 @@ pub struct McpToolView {
 
 /// 全部 server（含启用状态与工具数）——设置页展示
 #[tauri::command]
-pub async fn mcp_list_servers(db: tauri::State<'_, Db>) -> Result<Vec<McpServerView>, String> {
+pub async fn mcp_list_servers(db: tauri::State<'_, Db>) -> CommandResult<Vec<McpServerView>> {
     let servers = crate::engine::mcp::list_servers(&db.pool).await?;
     let mut views = Vec::new();
     for s in &servers {
@@ -59,13 +60,13 @@ pub async fn mcp_add_server(
     command: String,
     args: Vec<String>,
     allowed_tools: Vec<String>,
-) -> Result<i64, String> {
+) -> CommandResult<i64> {
     crate::engine::mcp::add_server(&db.pool, name, command, args, allowed_tools).await
 }
 
 /// 删除 server
 #[tauri::command]
-pub async fn mcp_remove_server(db: tauri::State<'_, Db>, id: i64) -> Result<(), String> {
+pub async fn mcp_remove_server(db: tauri::State<'_, Db>, id: i64) -> CommandResult<()> {
     crate::engine::mcp::remove_server(&db.pool, id).await
 }
 
@@ -75,13 +76,13 @@ pub async fn mcp_set_server_enabled(
     db: tauri::State<'_, Db>,
     id: i64,
     enabled: bool,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     crate::engine::mcp::set_server_enabled(&db.pool, id, enabled).await
 }
 
 /// 全部启用 server 的工具列表（合并，供 AI 面板展示 / function calling）
 #[tauri::command]
-pub async fn mcp_list_tools(db: tauri::State<'_, Db>) -> Result<Vec<McpToolView>, String> {
+pub async fn mcp_list_tools(db: tauri::State<'_, Db>) -> CommandResult<Vec<McpToolView>> {
     let tools = crate::engine::mcp::list_tools(&db.pool).await?;
     Ok(tools
         .into_iter()
@@ -100,7 +101,7 @@ pub async fn mcp_call_tool(
     db: tauri::State<'_, Db>,
     name: String,
     arguments: serde_json::Value,
-) -> Result<String, String> {
+) -> CommandResult<String> {
     crate::engine::mcp::call_tool(&db.pool, &name, arguments).await
 }
 
@@ -109,6 +110,6 @@ pub async fn mcp_call_tool(
 pub async fn mcp_get_audit_log(
     db: tauri::State<'_, Db>,
     limit: Option<i64>,
-) -> Result<Vec<crate::engine::mcp::AuditEntry>, String> {
+) -> CommandResult<Vec<crate::engine::mcp::AuditEntry>> {
     crate::engine::mcp::get_audit_log(&db.pool, limit.unwrap_or(50)).await
 }

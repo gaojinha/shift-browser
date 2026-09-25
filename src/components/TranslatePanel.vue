@@ -111,7 +111,8 @@ async function copyOutput() {
     ta.style.left = '-9999px'
     document.body.appendChild(ta)
     ta.select()
-    try { document.execCommand('copy') } catch {}
+    // 有意静默：execCommand('copy') 在剪贴板权限受限时会抛错，此时降级为用户手动选中文本复制
+    try { document.execCommand('copy') } catch { /* 见上行注释 */ }
     ta.remove()
     flashCopied()
   }

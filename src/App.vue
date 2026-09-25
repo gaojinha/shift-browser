@@ -4,7 +4,7 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { invokeOk } from './utils/invoke'
-import { listen } from '@tauri-apps/api/event'
+import { useManagedListeners } from './composables/useManagedListeners'
 import TabBar from './components/TabBar.vue'
 import VerticalTabBar from './components/VerticalTabBar.vue'
 import AddressBar from './components/AddressBar.vue'
@@ -138,6 +138,11 @@ const showCommandPalette = ref(false)
 const showUserscripts = ref(false)
 const addressBarRef = ref<InstanceType<typeof AddressBar> | null>(null)
 let saveTimer: number | null = null
+// 锁屏兜底轮询句柄（R1-5：提升到组件级，卸载时必须清理，避免组件销毁后轮询仍在跑）
+let lockTimer: ReturnType<typeof window.setInterval> | null = null
+
+// Tauri 事件监听统一托管：组件卸载时自动解绑全部 unlisten（R1-5，防重复监听泄漏）
+const { add: onEvent } = useManagedListeners()
 
 /** Esc 关闭最上层弹窗（AI 侧栏优先，再设置/下载/分组/密码）；Ctrl 组合键为浏览器标配快捷键 */
 /** 弹窗是否打开（弹窗打开时标签级快捷键不响应，避免误关/误建标签） */
@@ -198,13 +203,14 @@ function handleGlobalAction(action: string) {
       openCommandPalette()
       break
     case 'devtools':
+      // 有意静默：开发者工具开关属调试辅助，webview 侧失败无任何用户可见后果，无需提示
       invokeOk('open_devtools').catch(() => {})
       break
     case 'lock-vault':
       // 手动立即锁定密码库（Ctrl+Shift+L）：未设主密码/已锁定时后端为无害空操作
       invoke('lock_vault')
         .then(() => useToastStore().success('密码库已锁定'))
-        .catch(() => {})
+        .catch(() => {}) // 有意静默：锁定失败后端已记日志，弹窗会打断用户当前操作
       break
   }
 }
@@ -427,6 +433,7 @@ async function initBrowser(skipStartupTab = false) {
     console.error('[app] 启动初始化失败:', e)
     // 兜底：至少保证有一个标签可用（解锁路径由调用方建启动页，这里跳过）
     if (!skipStartupTab && tabsStore.tabs.length === 0) {
+      // 有意静默：错误兜底路径里的最后降级，createTab 失败已无法再向用户呈现更多内容
       await tabsStore.createTab().catch(() => {})
     }
   }
@@ -437,6 +444,7 @@ onMounted(async () => {
 
   // 前端日志桥：关键节点写进 Rust 日志（排查前端白屏/事件收不到/初始化不执行）
   function frontLog(msg: string) {
+    // 有意静默：日志桥本身失败不能再 toast/console（会形成噪音递归），后端不可用时直接丢弃
     invoke('front_log', { msg }).catch(() => {})
   }
   frontLog('onMounted 开始')
@@ -495,26 +503,25 @@ onMounted(async () => {
 
   if (locked) {
     // ② 锁屏中：await 注册 app-unlocked（确保注册完成，避免"解锁事件早于注册"丢失）
-    try {
-      await listen(EVENTS.APP_UNLOCKED, () => {
-        frontLog('收到 app-unlocked 事件')
-        onReady(true)
-      })
-      frontLog('已注册 app-unlocked 监听')
-    } catch (e) {
-      frontLog('注册 app-unlocked 失败: ' + e)
-    }
+    //    监听由 useManagedListeners 托管，卸载自动解绑
+    await onEvent(EVENTS.APP_UNLOCKED, () => {
+      frontLog('收到 app-unlocked 事件')
+      onReady(true)
+    })
+    frontLog('已注册 app-unlocked 监听')
     // ③ 兜底轮询：万一时序问题导致事件丢失，每秒查一次锁屏状态，解开就初始化
-    const lockTimer = window.setInterval(async () => {
+    lockTimer = window.setInterval(async () => {
       if (ready) {
-        clearInterval(lockTimer)
+        if (lockTimer) clearInterval(lockTimer)
+        lockTimer = null
         return
       }
       try {
         const l = await invoke<boolean>('is_locked')
         if (!l) {
           frontLog('兜底轮询检测到已解锁')
-          clearInterval(lockTimer)
+          if (lockTimer) clearInterval(lockTimer)
+          lockTimer = null
           onReady(true)
         }
       } catch {
@@ -526,14 +533,14 @@ onMounted(async () => {
   }
 
   // 启动页右侧栏按钮 → 打开主界面组件（newtab webview 通过 IPC 触发）
-  listen(EVENTS.OPEN_AI_FROM_NEWTAB, () => {
+  onEvent(EVENTS.OPEN_AI_FROM_NEWTAB, () => {
     showAI.value = true
-  }).catch(() => {})
-  listen(EVENTS.OPEN_SETTINGS_FROM_NEWTAB, () => {
+  })
+  onEvent(EVENTS.OPEN_SETTINGS_FROM_NEWTAB, () => {
     showSettings.value = true
-  }).catch(() => {})
+  })
   // 启动页资讯点击 → 左窗格保持列表页，右窗格分屏打开资讯原文（占满右半区域）
-  listen<string>(EVENTS.OPEN_URL_FROM_NEWTAB, async (e) => {
+  onEvent<string>(EVENTS.OPEN_URL_FROM_NEWTAB, async (e) => {
     if (!e.payload) return
     // 已有分屏：右窗格直接换内容（"点一条看一条"，不重复开标签）
     const existing = tabsStore.splitTabId
@@ -547,28 +554,28 @@ onMounted(async () => {
     // 活动标签切回列表页（左窗格），资讯标签放右窗格分屏
     if (leftId && leftId !== tab.id) await tabsStore.switchTab(leftId)
     await tabsStore.setSplit(tab.id)
-  }).catch(() => {})
+  })
 
   // 系统托盘菜单 → 打开面板（Rust 侧 emit，见 tray.rs）
-  listen(EVENTS.TRAY_OPEN_DOWNLOADS, () => {
+  onEvent(EVENTS.TRAY_OPEN_DOWNLOADS, () => {
     openPanel('downloads')
-  }).catch(() => {})
-  listen(EVENTS.TRAY_OPEN_PASSWORDS, () => {
+  })
+  onEvent(EVENTS.TRAY_OPEN_PASSWORDS, () => {
     openPanel('passwords')
-  }).catch(() => {})
+  })
 
   // 证书错误（P2 · Rust 侧 on_tls_error emit）→ 弹"危险站点"拦截页
-  listen<TlsErrorInfo>(EVENTS.TLS_ERROR, (ev) => {
+  onEvent<TlsErrorInfo>(EVENTS.TLS_ERROR, (ev) => {
     tlsError.value = ev.payload
-  }).catch(() => {})
+  })
 
   // 权限请求（安全 #2 · Rust 侧 perms::attach emit）→ 弹权限提示
-  listen<PermissionRequest>(EVENTS.PERMISSION_REQUEST, (ev) => {
+  onEvent<PermissionRequest>(EVENTS.PERMISSION_REQUEST, (ev) => {
     permReq.value = ev.payload
-  }).catch(() => {})
+  })
 
   // Web 进程崩溃（视频崩溃修复 · Rust 侧 connect_web_process_terminated emit）→ 提示
-  listen<WebProcessCrash>(EVENTS.WEB_PROCESS_CRASHED, (ev) => {
+  onEvent<WebProcessCrash>(EVENTS.WEB_PROCESS_CRASHED, (ev) => {
     const p = ev.payload ?? {}
     const reason = p.reason === 'ExceededMemoryLimit' ? '内存超限' : '进程崩溃'
     useToastStore().show(
@@ -576,32 +583,35 @@ onMounted(async () => {
       'error',
       4500,
     )
-  }).catch(() => {})
+  })
 
   // GTK 窗口层转发的全局快捷键：页面（child webview）持焦时，前端 keydown 收不到按键，
   // 由 Rust 在 GTK 顶层窗口拦截后发事件过来（见 tabs.rs 的 UI_FOCUSED 焦点跟踪）。
-  listen<string>(EVENTS.GLOBAL_SHORTCUT, (ev) => {
+  onEvent<string>(EVENTS.GLOBAL_SHORTCUT, (ev) => {
     handleGlobalAction(ev.payload)
-  }).catch(() => {})
+  })
 
   // 定时 Agent 提示词（阶段3 Agent 编排）：调度器到点发事件 → 打开 AI 侧栏并发送
-  listen<string>(EVENTS.AUTO_AGENT, (ev) => {
+  onEvent<string>(EVENTS.AUTO_AGENT, (ev) => {
     const prompt = ev.payload
     if (!prompt) return
     openPanel('ai')
     nextTick(() => aiStore.sendMessage(prompt))
-  }).catch(() => {})
+  })
 
   // 密码库空闲自动锁定：后端 watchdog 清空内存主密码后提示用户
-  listen(EVENTS.VAULT_AUTO_LOCKED, () => {
+  onEvent(EVENTS.VAULT_AUTO_LOCKED, () => {
     useToastStore().show('密码库已因空闲自动锁定', 'info', 5000)
-  }).catch(() => {})
+  })
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
   tabsStore.stopPolling()
   if (saveTimer) clearTimeout(saveTimer)
+  // 兜底锁屏轮询必须停掉（监听器由 useManagedListeners 自动解绑）
+  if (lockTimer) clearInterval(lockTimer)
+  lockTimer = null
 })
 
 // 标签变化时自动保存会话（防抖 3 秒，按当前工作区保存）

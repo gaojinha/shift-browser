@@ -2,7 +2,7 @@
 // 设置弹窗 · 隐私防护分区（R2-1d 拆分：原 SettingsDialog.vue 内联节抽出）
 // 浏览防护（档位/反指纹/白名单/统计/自测）+ 网络与追踪（GPC/广告拦截/拦截规则/请求头/GPC 检测/外联审计）
 import { computed, onMounted, ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { invokeOk } from '../../utils/invoke'
 import { useSettingsStore } from '../../stores/settings'
 import { useSettingsSet } from '../../composables/useSettingsSet'
 import { usePrivacyAudit } from '../../composables/usePrivacyAudit'
@@ -22,7 +22,7 @@ async function onChangePrivacyLevel(e: Event) {
   const level = (e.target as HTMLSelectElement).value
   await settingsStore.set('privacy_shield_level', level)
   try {
-    await invoke('set_privacy_shield_level', { level })
+    await invokeOk('set_privacy_shield_level', { level })
     const msg =
       level === 'off' ? '隐私防护已关闭' : level === 'strict' ? '已切换到严格档' : '已切换到标准档'
     useToastStore().success(msg)
@@ -41,7 +41,7 @@ async function onChangeFpMode(e: Event) {
   const mode = (e.target as HTMLSelectElement).value
   await settingsStore.set('privacy_fp_mode', mode)
   try {
-    await invoke('set_privacy_fp_mode', { mode })
+    await invokeOk('set_privacy_fp_mode', { mode })
     useToastStore().success(
       mode === 'uniform' ? '已切换到统一化（Tor/Mullvad 派）' : '已切换到加噪（推荐）'
     )
@@ -55,7 +55,7 @@ async function onChangeFpMode(e: Event) {
 const whitelistText = ref('')
 async function loadWhitelist() {
   try {
-    const list = await invoke<string[]>('get_privacy_whitelist')
+    const list = await invokeOk<string[]>('get_privacy_whitelist')
     whitelistText.value = list.join('\n')
   } catch (e) {
     console.error('[settings] 读取加噪白名单失败:', e)
@@ -67,8 +67,8 @@ async function saveWhitelist() {
     .map((s) => s.trim())
     .filter(Boolean)
   try {
-    await invoke('set_privacy_whitelist', { domains })
-    const list = await invoke<string[]>('get_privacy_whitelist')
+    await invokeOk('set_privacy_whitelist', { domains })
+    const list = await invokeOk<string[]>('get_privacy_whitelist')
     whitelistText.value = list.join('\n')
     useToastStore().success(`白名单已保存（${list.length} 个站点）`)
   } catch (e) {
@@ -84,7 +84,7 @@ async function onToggleAdblock() {
   const next = (!current).toString()
   await settingsStore.set('adblock_enabled', next)
   try {
-    await invoke('set_adblock_enabled', { enabled: next === 'true' })
+    await invokeOk('set_adblock_enabled', { enabled: next === 'true' })
   } catch (e) {
     console.error('[settings] 广告拦截同步失败:', e)
     useToastStore().error('广告拦截切换失败')
@@ -98,7 +98,7 @@ const kwMsg = ref('')
 
 async function loadKeywords() {
   try {
-    customKeywords.value = await invoke<string[]>('get_adblock_keywords')
+    customKeywords.value = await invokeOk<string[]>('get_adblock_keywords')
   } catch {
     customKeywords.value = []
   }
@@ -108,7 +108,7 @@ async function saveKeywords(list: string[]) {
   const prev = customKeywords.value
   customKeywords.value = list
   try {
-    await invoke('set_adblock_keywords', { keywords: list })
+    await invokeOk('set_adblock_keywords', { keywords: list })
     kwMsg.value = '已保存，刷新页面后生效'
     setTimeout(() => (kwMsg.value = ''), 2500)
   } catch (e) {

@@ -1,6 +1,7 @@
 //! 会话管理与账号认证（R2-1 拆分）
 
 use crate::db::Db;
+use crate::error::{AppError, CommandResult};
 
 use super::*;
 use super::security::*;
@@ -69,7 +70,7 @@ pub(crate) async fn load_user(db: &Db, user_id: i64) -> Option<User> {
 
 /// 偏好写入 settings 表（登录时应用 / 更新时同步，newtab 等读取生效）
 /// 返回 Result：写入失败如实上报，避免"前端显示成功、实际没生效"的假成功
-pub(crate) async fn apply_prefs_to_settings(db: &Db, prefs: &UserPrefs) -> Result<(), String> {
+pub(crate) async fn apply_prefs_to_settings(db: &Db, prefs: &UserPrefs) -> CommandResult<()> {
     let entries: Vec<(&str, String)> = vec![
         (
             "show_lunar",
@@ -97,26 +98,26 @@ pub(crate) async fn apply_prefs_to_settings(db: &Db, prefs: &UserPrefs) -> Resul
         .bind(v)
         .execute(&db.pool)
         .await
-        .map_err(|e| format!("写入设置 {} 失败: {}", k, e))?;
+        .map_err(|e| AppError::db(format!("写入设置 {} 失败: {}", k, e)))?;
     }
     Ok(())
 }
 
 
 /// 清除当前会话（启动锁屏验证身份后调用，确保个人中心未登录）
-pub async fn clear_session(db: &Db) -> Result<(), String> {
+pub async fn clear_session(db: &Db) -> CommandResult<()> {
     sqlx::query(
         "INSERT INTO user_session (id, user_id, logged_in) VALUES (1, NULL, 0)
      ON CONFLICT(id) DO UPDATE SET user_id = excluded.user_id, logged_in = excluded.logged_in",
     )
     .execute(&db.pool)
     .await
-    .map_err(|e| format!("清除会话失败: {}", e))?;
+    .map_err(|e| AppError::db(format!("清除会话失败: {}", e)))?;
     Ok(())
 }
 
 
-pub(crate) async fn set_session(db: &Db, user_id: Option<i64>) -> Result<(), String> {
+pub(crate) async fn set_session(db: &Db, user_id: Option<i64>) -> CommandResult<()> {
     let logged_in = if user_id.is_some() { 1 } else { 0 };
     sqlx::query(
         "INSERT INTO user_session (id, user_id, logged_in) VALUES (1, ?, ?)
@@ -126,7 +127,7 @@ pub(crate) async fn set_session(db: &Db, user_id: Option<i64>) -> Result<(), Str
     .bind(logged_in)
     .execute(&db.pool)
     .await
-    .map_err(|e| format!("写入会话失败: {}", e))?;
+    .map_err(|e| AppError::db(format!("写入会话失败: {}", e)))?;
     Ok(())
 }
 
@@ -139,7 +140,7 @@ pub async fn user_register(
     db: tauri::State<'_, Db>,
     username: String,
     password: String,
-) -> Result<UserResult, String> {
+) -> CommandResult<UserResult> {
     let name = username.trim().to_string();
     if name.is_empty() || password.is_empty() {
         return Ok(UserResult::err("用户名和密码不能为空"));
@@ -189,16 +190,16 @@ pub async fn user_register(
   .bind(&prefs.wallpaper)
   .execute(&db.pool)
   .await
-  .map_err(|e| format!("初始化偏好失败: {}", e))?;
+  .map_err(|e| AppError::db(format!("初始化偏好失败: {}", e)))?;
     if inserted.rows_affected() == 0 {
         return Ok(UserResult::err("初始化偏好失败，请重试"));
     }
     set_session(&db, Some(uid))
         .await
-        .map_err(|e| format!("注册成功但登录会话写入失败: {}", e))?;
+        .map_err(|e| AppError::db(format!("注册成功但登录会话写入失败: {}", e)))?;
     apply_prefs_to_settings(&db, &prefs)
         .await
-        .map_err(|e| format!("注册成功但偏好应用失败: {}", e))?;
+        .map_err(|e| AppError::db(format!("注册成功但偏好应用失败: {}", e)))?;
     log::info!("[users] 注册新账号: {}", name);
     match load_user(&db, uid).await {
         Some(u) => Ok(UserResult::ok_user("注册成功", u)),
@@ -209,7 +210,7 @@ pub async fn user_register(
 
 /// 纯密码验证（供启动锁屏等非 IPC 场景使用，不写会话、不触发防爆破）
 /// 按存储的 hash_algo 选迭代次数校验；成功后若是旧参数则透明升级到当前参数
-pub async fn verify_password(db: &Db, username: &str, password: &str) -> Result<bool, String> {
+pub async fn verify_password(db: &Db, username: &str, password: &str) -> CommandResult<bool> {
     let name = username.trim().to_string();
     if name.is_empty() || password.is_empty() {
         return Ok(false);
@@ -220,7 +221,7 @@ pub async fn verify_password(db: &Db, username: &str, password: &str) -> Result<
     .bind(&name)
     .fetch_optional(&db.pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| AppError::db(e.to_string()))?;
     let Some((stored_hash, salt, algo)) = row else {
         return Ok(false);
     };
@@ -251,7 +252,7 @@ pub async fn user_login(
     db: tauri::State<'_, Db>,
     username: String,
     password: String,
-) -> Result<UserResult, String> {
+) -> CommandResult<UserResult> {
     let name = username.trim().to_string();
     if name.is_empty() || password.is_empty() {
         return Ok(UserResult::err("用户名和密码不能为空"));
@@ -298,11 +299,11 @@ pub async fn user_login(
     guard_clear(&name);
     set_session(&db, Some(uid))
         .await
-        .map_err(|e| format!("登录成功但会话写入失败: {}", e))?;
+        .map_err(|e| AppError::db(format!("登录成功但会话写入失败: {}", e)))?;
     let prefs = load_prefs(&db, uid).await;
     apply_prefs_to_settings(&db, &prefs)
         .await
-        .map_err(|e| format!("登录成功但偏好应用失败: {}", e))?;
+        .map_err(|e| AppError::db(format!("登录成功但偏好应用失败: {}", e)))?;
     log::info!("[users] 用户登录: {}", name);
     match load_user(&db, uid).await {
         Some(u) => Ok(UserResult::ok_user("登录成功", u)),
@@ -313,13 +314,13 @@ pub async fn user_login(
 
 /// 退出登录（偏好恢复默认）
 #[tauri::command]
-pub async fn user_logout(db: tauri::State<'_, Db>) -> Result<UserResult, String> {
+pub async fn user_logout(db: tauri::State<'_, Db>) -> CommandResult<UserResult> {
     set_session(&db, None)
         .await
-        .map_err(|e| format!("退出登录失败: {}", e))?;
+        .map_err(|e| AppError::db(format!("退出登录失败: {}", e)))?;
     apply_prefs_to_settings(&db, &UserPrefs::default())
         .await
-        .map_err(|e| format!("退出登录但偏好恢复失败: {}", e))?;
+        .map_err(|e| AppError::db(format!("退出登录但偏好恢复失败: {}", e)))?;
     log::info!("[users] 用户退出登录");
     Ok(UserResult::ok("已退出登录"))
 }

@@ -100,11 +100,12 @@ async fn mcp_end_to_end_with_fake_server() {
   let tools = list_tools(&pool).await.unwrap();
   assert!(tools.is_empty(), "白名单应过滤掉 echo");
 
-  // 手动调用白名单外的工具应被拒绝
+  // 手动调用白名单外的工具应被拒绝（R1 错误类型化：白名单拒绝固定 E_PERM）
   let err = call_tool(&pool, "fake__echo", json!({"text": "x"}))
     .await
     .unwrap_err();
-  assert!(err.contains("白名单"), "应拒绝白名单外工具: {}", err);
+  assert_eq!(err.code, crate::error::E_PERM);
+  assert!(err.message.contains("白名单"), "应拒绝白名单外工具: {}", err);
 }
 
 #[test]

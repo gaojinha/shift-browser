@@ -69,7 +69,7 @@ export const useAIStore = defineStore('ai', {
     async loadTools() {
       if (this.toolsLoaded) return
       try {
-        this.tools = await invoke('mcp_list_tools')
+        this.tools = await invokeOk('mcp_list_tools')
       } catch {
         this.tools = []
       }

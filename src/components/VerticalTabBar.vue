@@ -39,12 +39,15 @@ function onNew() {
 }
 // 窗口按钮（垂直模式下 TabBar 被隐藏，窗口控制移到这里）
 function minimize() {
+  // 有意静默：OS 窗口动作，失败无用户可见的补偿手段
   invokeOk('minimize_window').catch(() => {})
 }
 function maximize() {
+  // 有意静默：OS 窗口动作，失败无用户可见的补偿手段
   invokeOk('toggle_maximize').catch(() => {})
 }
 function closeWin() {
+  // 有意静默：窗口关闭失败仅表现为窗口还在，用户可再点一次
   invokeOk('close_window').catch(() => {})
 }
 </script>

@@ -13,5 +13,6 @@ let seq = 0
  */
 export function setWebviewVisible(visible: boolean, source?: string) {
   seq += 1
+  // 有意静默：显隐是高频可丢弃指令（有 seq 令牌保证最终一致），单次失败由后续指令覆盖自愈
   return invokeOk('set_webview_visible', { visible, seq, source }).catch(() => {})
 }

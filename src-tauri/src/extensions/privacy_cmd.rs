@@ -1,15 +1,16 @@
-//! 隐私/广告设置命令（P1-3 补完 · 2026-09-22）
+//! 隐私/广告设置命令（P1-3 补完 · 2026-09-22 / R1 错误类型化第二批 · 2026-09-25）
 //!
 //! 隐私白名单 / 防护档位 / 反指纹模式 / GPC / 广告拦截 的设置命令。原在 extensions.rs。
 
 use super::*;
+use crate::error::{AppError, CommandResult};
 
 #[tauri::command]
 pub async fn set_privacy_whitelist(
     db: State<'_, Db>,
     app: AppHandle,
     domains: Vec<String>,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     // 清洗：去空、去协议/路径、去重、限长
     let mut cleaned: Vec<String> = Vec::new();
     for d in domains {
@@ -34,7 +35,8 @@ pub async fn set_privacy_whitelist(
         "[extensions] set_privacy_whitelist: {} 个域名",
         cleaned.len()
     );
-    let json = serde_json::to_string(&cleaned).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(&cleaned)
+        .map_err(|e| AppError::internal(e.to_string()))?;
     sqlx::query(
         "INSERT INTO settings (key, value) VALUES ('privacy_whitelist', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -42,7 +44,7 @@ pub async fn set_privacy_whitelist(
     .bind(&json)
     .execute(&db.pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
     inject_extensions(&app, items, webmcp_on);
     Ok(())
@@ -50,12 +52,12 @@ pub async fn set_privacy_whitelist(
 
 /// 读取 WebMCP polyfill 试验开关（阶段 1.5，默认关）
 #[tauri::command]
-pub async fn get_webmcp_polyfill(db: State<'_, Db>) -> Result<bool, String> {
+pub async fn get_webmcp_polyfill(db: State<'_, Db>) -> CommandResult<bool> {
     let row: Option<(String,)> =
         sqlx::query_as("SELECT value FROM settings WHERE key = 'webmcp_polyfill'")
             .fetch_optional(&db.pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| AppError::db(e.to_string()))?;
     Ok(row.map(|(v,)| v == "true").unwrap_or(false))
 }
 
@@ -65,7 +67,7 @@ pub async fn set_webmcp_polyfill(
     db: State<'_, Db>,
     app: AppHandle,
     enabled: bool,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     log::info!("[extensions] set_webmcp_polyfill: {}", enabled);
     sqlx::query(
         "INSERT INTO settings (key, value) VALUES ('webmcp_polyfill', ?)
@@ -74,7 +76,7 @@ pub async fn set_webmcp_polyfill(
     .bind(if enabled { "true" } else { "false" })
     .execute(&db.pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
     inject_extensions(&app, items, webmcp_on);
     Ok(())
@@ -82,15 +84,23 @@ pub async fn set_webmcp_polyfill(
 
 /// 读取加噪白名单
 #[tauri::command]
-pub async fn get_privacy_whitelist(db: State<'_, Db>) -> Result<Vec<String>, String> {
+pub async fn get_privacy_whitelist(db: State<'_, Db>) -> CommandResult<Vec<String>> {
     let row: Option<(String,)> =
         sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_whitelist'")
             .fetch_optional(&db.pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| AppError::db(e.to_string()))?;
     Ok(row
         .and_then(|(v,)| serde_json::from_str::<Vec<String>>(&v).ok())
         .unwrap_or_default())
+}
+
+/// 校验隐私防护档位入参（防漂移锚点：非法档位固定 E_VALIDATION，前端引导重选而非重试）
+pub(crate) fn parse_shield_level(level: &str) -> CommandResult<&str> {
+    match level {
+        "off" | "standard" | "strict" => Ok(level),
+        other => Err(AppError::validation(format!("未知的隐私防护档位: {}", other)).into()),
+    }
 }
 
 /// 隐私防护档位设置（off / standard / strict），存设置 + 立即重新注入
@@ -99,20 +109,17 @@ pub async fn set_privacy_shield_level(
     db: State<'_, Db>,
     app: AppHandle,
     level: String,
-) -> Result<(), String> {
-    let level = match level.as_str() {
-        "off" | "standard" | "strict" => level,
-        other => return Err(format!("未知的隐私防护档位: {}", other)),
-    };
+) -> CommandResult<()> {
+    let level = parse_shield_level(&level)?;
     log::info!("[extensions] set_privacy_shield_level: {}", level);
     sqlx::query(
         "INSERT INTO settings (key, value) VALUES ('privacy_shield_level', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     )
-    .bind(&level)
+    .bind(level)
     .execute(&db.pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| AppError::db(e.to_string()))?;
     // 同步旧布尔键，避免两处状态不一致
     let bool_val = if level == "off" { "false" } else { "true" };
     sqlx::query(
@@ -122,7 +129,7 @@ pub async fn set_privacy_shield_level(
     .bind(bool_val)
     .execute(&db.pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
     inject_extensions(&app, items, webmcp_on);
     Ok(())
@@ -130,12 +137,12 @@ pub async fn set_privacy_shield_level(
 
 /// 隐私防护档位查询（默认 standard）
 #[tauri::command]
-pub async fn get_privacy_shield_level(db: State<'_, Db>) -> Result<String, String> {
+pub async fn get_privacy_shield_level(db: State<'_, Db>) -> CommandResult<String> {
     let row: Option<(String,)> =
         sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_shield_level'")
             .fetch_optional(&db.pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| AppError::db(e.to_string()))?;
     if let Some((l,)) = row {
         return Ok(l);
     }
@@ -143,7 +150,7 @@ pub async fn get_privacy_shield_level(db: State<'_, Db>) -> Result<String, Strin
         sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_shield'")
             .fetch_optional(&db.pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| AppError::db(e.to_string()))?;
     Ok(match srow.map(|r| r.0).as_deref() {
         Some("false") => "off".to_string(),
         _ => "standard".to_string(),
@@ -164,10 +171,10 @@ pub async fn set_privacy_fp_mode(
     db: State<'_, Db>,
     app: AppHandle,
     mode: String,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     let mode = match mode.as_str() {
         "noise" | "uniform" => mode,
-        other => return Err(format!("未知的反指纹模式: {}", other)),
+        other => return Err(AppError::validation(format!("未知的反指纹模式: {}", other)).into()),
     };
     log::info!("[extensions] set_privacy_fp_mode: {}", mode);
     sqlx::query(
@@ -177,7 +184,7 @@ pub async fn set_privacy_fp_mode(
     .bind(&mode)
     .execute(&db.pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
     inject_extensions(&app, items, webmcp_on);
     Ok(())
@@ -185,12 +192,12 @@ pub async fn set_privacy_fp_mode(
 
 /// 反指纹模式查询（默认 noise）
 #[tauri::command]
-pub async fn get_privacy_fp_mode(db: State<'_, Db>) -> Result<String, String> {
+pub async fn get_privacy_fp_mode(db: State<'_, Db>) -> CommandResult<String> {
     let row: Option<(String,)> =
         sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_fp_mode'")
             .fetch_optional(&db.pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| AppError::db(e.to_string()))?;
     Ok(normalize_fp_mode(row.map(|r| r.0).as_deref()).to_string())
 }
 
@@ -200,7 +207,7 @@ pub async fn set_privacy_shield_enabled(
     db: State<'_, Db>,
     app: AppHandle,
     enabled: bool,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     log::info!("[extensions] set_privacy_shield_enabled: {}", enabled);
     sqlx::query(
         "INSERT INTO settings (key, value) VALUES ('privacy_shield', ?)
@@ -209,7 +216,7 @@ pub async fn set_privacy_shield_enabled(
     .bind(enabled.to_string())
     .execute(&db.pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
     inject_extensions(&app, items, webmcp_on);
     Ok(())
@@ -217,12 +224,12 @@ pub async fn set_privacy_shield_enabled(
 
 /// 隐私防护当前状态（前端初始化用；默认开启）
 #[tauri::command]
-pub async fn get_privacy_shield_enabled(db: State<'_, Db>) -> Result<bool, String> {
+pub async fn get_privacy_shield_enabled(db: State<'_, Db>) -> CommandResult<bool> {
     let row: Option<(String,)> =
         sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_shield'")
             .fetch_optional(&db.pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| AppError::db(e.to_string()))?;
     Ok(row.map(|r| r.0 != "false").unwrap_or(true))
 }
 
@@ -232,7 +239,7 @@ pub async fn set_adblock_enabled(
     db: State<'_, Db>,
     app: AppHandle,
     enabled: bool,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     log::info!("[extensions] set_adblock_enabled: {}", enabled);
     sqlx::query(
         "INSERT INTO settings (key, value) VALUES ('adblock_enabled', ?)
@@ -241,7 +248,7 @@ pub async fn set_adblock_enabled(
     .bind(enabled.to_string())
     .execute(&db.pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
     inject_extensions(&app, items, webmcp_on);
     Ok(())
@@ -249,18 +256,18 @@ pub async fn set_adblock_enabled(
 
 /// 广告拦截当前状态（给前端初始化用）
 #[tauri::command]
-pub async fn get_adblock_enabled(db: State<'_, Db>) -> Result<bool, String> {
+pub async fn get_adblock_enabled(db: State<'_, Db>) -> CommandResult<bool> {
     let row: Option<(String,)> =
         sqlx::query_as("SELECT value FROM settings WHERE key = 'adblock_enabled'")
             .fetch_optional(&db.pool)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| AppError::db(e.to_string()))?;
     Ok(row.map(|r| r.0 == "true").unwrap_or(true))
 }
 
 /// 读取用户自定义广告关键词（不含内置）
 #[tauri::command]
-pub async fn get_adblock_keywords(db: State<'_, Db>) -> Result<Vec<String>, String> {
+pub async fn get_adblock_keywords(db: State<'_, Db>) -> CommandResult<Vec<String>> {
     Ok(adblock::load_custom_keywords(&db).await)
 }
 
@@ -270,13 +277,14 @@ pub async fn set_adblock_keywords(
     db: State<'_, Db>,
     app: AppHandle,
     keywords: Vec<String>,
-) -> Result<(), String> {
+) -> CommandResult<()> {
     let cleaned: Vec<String> = keywords
         .into_iter()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
-    let json = serde_json::to_string(&cleaned).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(&cleaned)
+        .map_err(|e| AppError::internal(e.to_string()))?;
     log::info!(
         "[extensions] set_adblock_keywords: {} 个自定义词",
         cleaned.len()
@@ -288,8 +296,24 @@ pub async fn set_adblock_keywords(
     .bind(&json)
     .execute(&db.pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
     inject_extensions(&app, items, webmcp_on);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 防漂移：合法档位集合与非法档位的 E_VALIDATION 分类不得悄悄改变
+    #[test]
+    fn shield_level_validation_is_stable() {
+        for ok in ["off", "standard", "strict"] {
+            assert_eq!(parse_shield_level(ok).unwrap(), ok);
+        }
+        let err = parse_shield_level("paranoid").unwrap_err();
+        assert_eq!(err.code, crate::error::E_VALIDATION);
+        assert!(err.message.contains("paranoid"), "消息应回显非法值: {}", err);
+    }
 }

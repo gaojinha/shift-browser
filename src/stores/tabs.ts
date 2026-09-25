@@ -202,6 +202,7 @@ export const useTabsStore = defineStore('tabs', {
       if (!domain) return
       const groups = useGroupsStore()
       if (groups.groups.length === 0) {
+        // 有意静默：分组元数据加载失败时按空列表降级，不阻塞后续按域名归组
         await groups.loadGroups().catch(() => {})
       }
       // 已有该域名分组 → 直接归入
@@ -284,6 +285,7 @@ export const useTabsStore = defineStore('tabs', {
         // skipAutoGroup=true（会话恢复）：恢复出的标签不做自动归组，
         // 避免"关闭窗口再打开，自动分组还在"（自动组是临时概念，不应跨会话复活）
         if (!skipAutoGroup) {
+          // 有意静默：自动归组是后台便利功能，失败不影响标签创建主流程（fire-and-forget）
           this.autoGroupTab(tab.id, tab.url || '').catch(() => {})
         }
         // 取消旧标签激活
@@ -610,6 +612,7 @@ export const useTabsStore = defineStore('tabs', {
         // 自动按域名归组：URL 变化/新标签时触发（fire-and-forget）
         for (const t of this.tabs) {
           if (t.url && t.url !== prevUrls.get(t.id)) {
+            // 有意静默：自动归组是后台便利功能，失败不影响导航主流程（fire-and-forget）
             this.autoGroupTab(t.id, t.url).catch(() => {})
           }
         }

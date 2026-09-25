@@ -21,6 +21,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::sqlite::SqlitePool;
 
+use crate::error::{AppError, CommandResult};
+
 #[path = "mcp/transport.rs"]
 mod transport;
 #[path = "mcp/tests.rs"]
@@ -67,13 +69,13 @@ pub struct AuditEntry {
 }
 
 /// 读取全部启用 server 的配置行
-pub async fn list_servers(pool: &SqlitePool) -> Result<Vec<McpServerRow>, String> {
+pub async fn list_servers(pool: &SqlitePool) -> CommandResult<Vec<McpServerRow>> {
   let rows = sqlx::query_as::<_, (i64, String, String, String, i64, String)>(
     "SELECT id, name, command, args, enabled, allowed_tools FROM mcp_servers ORDER BY id",
   )
   .fetch_all(pool)
   .await
-  .map_err(|e| format!("读取 MCP server 配置失败: {}", e))?;
+  .map_err(|e| AppError::db(format!("读取 MCP server 配置失败: {}", e)))?;
 
   Ok(
     rows
@@ -97,9 +99,9 @@ pub async fn add_server(
   command: String,
   args: Vec<String>,
   allowed_tools: Vec<String>,
-) -> Result<i64, String> {
+) -> CommandResult<i64> {
   if name.trim().is_empty() || command.trim().is_empty() {
-    return Err("name 与 command 不能为空".to_string());
+    return Err(AppError::validation("name 与 command 不能为空").into());
   }
   let args_json = serde_json::to_string(&args).unwrap_or_else(|_| "[]".to_string());
   let allowed_json = serde_json::to_string(&allowed_tools).unwrap_or_else(|_| "[]".to_string());
@@ -112,18 +114,18 @@ pub async fn add_server(
   .bind(allowed_json)
   .execute(pool)
   .await
-  .map_err(|e| format!("新增 MCP server 失败: {}", e))?;
+  .map_err(|e| AppError::db(format!("新增 MCP server 失败: {}", e)))?;
   Ok(result.last_insert_rowid())
 }
 
 /// 删除 server 配置（同时断开连接缓存）
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-pub async fn remove_server(pool: &SqlitePool, id: i64) -> Result<(), String> {
+pub async fn remove_server(pool: &SqlitePool, id: i64) -> CommandResult<()> {
   sqlx::query("DELETE FROM mcp_servers WHERE id = ?")
     .bind(id)
     .execute(pool)
     .await
-    .map_err(|e| format!("删除 MCP server 失败: {}", e))?;
+    .map_err(|e| AppError::db(format!("删除 MCP server 失败: {}", e)))?;
   // 断开缓存连接（drop 后子进程随 stdin 关闭退出）
   connections().lock().unwrap().remove(&id);
   Ok(())
@@ -135,13 +137,13 @@ pub async fn set_server_enabled(
   pool: &SqlitePool,
   id: i64,
   enabled: bool,
-) -> Result<(), String> {
+) -> CommandResult<()> {
   sqlx::query("UPDATE mcp_servers SET enabled = ? WHERE id = ?")
     .bind(if enabled { 1 } else { 0 })
     .bind(id)
     .execute(pool)
     .await
-    .map_err(|e| format!("更新 MCP server 状态失败: {}", e))?;
+    .map_err(|e| AppError::db(format!("更新 MCP server 状态失败: {}", e)))?;
   if !enabled {
     connections().lock().unwrap().remove(&id);
   }
@@ -152,13 +154,15 @@ pub async fn set_server_enabled(
 pub async fn fetch_tools(
   pool: &SqlitePool,
   row: &McpServerRow,
-) -> Result<Vec<McpTool>, String> {
-  let conn = connect(pool, row).await?;
+) -> CommandResult<Vec<McpTool>> {
+  let conn = connect(pool, row)
+    .await
+    .map_err(AppError::net)?;
   let mut conn = conn.lock().await;
   let result = conn
     .request("tools/list", json!({}))
     .await
-    .map_err(|e| format!("server '{}' tools/list 失败: {}", row.name, e))?;
+    .map_err(|e| AppError::net(format!("server '{}' tools/list 失败: {}", row.name, e)))?;
 
   let tools: Vec<Value> = result
     .get("tools")
@@ -197,7 +201,7 @@ pub async fn fetch_tools(
 }
 
 /// 汇总全部启用 server 的工具列表（工具注册表快照）
-pub async fn list_tools(pool: &SqlitePool) -> Result<Vec<McpTool>, String> {
+pub async fn list_tools(pool: &SqlitePool) -> CommandResult<Vec<McpTool>> {
   let servers = list_servers(pool).await?;
   let mut all = Vec::new();
   for row in servers {
@@ -218,29 +222,32 @@ pub async fn call_tool(
   pool: &SqlitePool,
   full_name: &str,
   arguments: Value,
-) -> Result<String, String> {
+) -> CommandResult<String> {
   // 解析 full_name：`{server_name}__{tool_name}`（__ 分隔）
   let (server_name, tool_name) = full_name
     .split_once("__")
-    .ok_or_else(|| format!("工具名格式不合法: {}", full_name))?;
+    .ok_or_else(|| AppError::validation(format!("工具名格式不合法: {}", full_name)))?;
 
   let servers = list_servers(pool).await?;
   let row = servers
     .iter()
     .find(|s| s.name == server_name)
-    .ok_or_else(|| format!("MCP server '{}' 不存在", server_name))?;
+    .ok_or_else(|| AppError::validation(format!("MCP server '{}' 不存在", server_name)))?;
   if !row.enabled {
-    return Err(format!("MCP server '{}' 已停用", server_name));
+    return Err(AppError::permission(format!("MCP server '{}' 已停用", server_name)).into());
   }
   // 白名单校验
   if !row.allowed_tools.is_empty() && !row.allowed_tools.iter().any(|a| a == tool_name) {
-    return Err(format!(
+    return Err(AppError::permission(format!(
       "工具 '{}' 不在 server '{}' 白名单内",
       tool_name, server_name
-    ));
+    ))
+    .into());
   }
 
-  let conn = connect(pool, row).await?;
+  let conn = connect(pool, row)
+    .await
+    .map_err(AppError::net)?;
   let mut conn = conn.lock().await;
   let result = conn
     .request(
@@ -285,7 +292,7 @@ pub async fn call_tool(
     Ok(v) => {
       let is_error = v.get("isError").and_then(|e| e.as_bool()).unwrap_or(false);
       if is_error {
-        Err(format!("工具 '{}' 执行失败: {}", full_name, text))
+        Err(AppError::net(format!("工具 '{}' 执行失败: {}", full_name, text)).into())
       } else {
         log::info!(
           "[mcp] 工具调用成功: {} 结果 {} 字符",
@@ -295,12 +302,12 @@ pub async fn call_tool(
         Ok(text)
       }
     }
-    Err(e) => Err(e),
+    Err(e) => Err(AppError::net(e).into()),
   }
 }
 
 /// 最近审计日志（倒序，limit 条）
-pub async fn get_audit_log(pool: &SqlitePool, limit: i64) -> Result<Vec<AuditEntry>, String> {
+pub async fn get_audit_log(pool: &SqlitePool, limit: i64) -> CommandResult<Vec<AuditEntry>> {
   let limit = limit.clamp(1, 200);
   let rows = sqlx::query_as::<_, (i64, String, String, String, String, i64, String)>(
     "SELECT id, server_name, tool_name, arguments, result_summary, success, created_at FROM tool_audit_log ORDER BY id DESC LIMIT ?",
@@ -308,7 +315,7 @@ pub async fn get_audit_log(pool: &SqlitePool, limit: i64) -> Result<Vec<AuditEnt
   .bind(limit)
   .fetch_all(pool)
   .await
-  .map_err(|e| format!("读取审计日志失败: {}", e))?;
+  .map_err(|e| AppError::db(format!("读取审计日志失败: {}", e)))?;
 
   Ok(
     rows

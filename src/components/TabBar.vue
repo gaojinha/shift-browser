@@ -144,6 +144,7 @@ function onMenuSplit() {
   const id = menu.value.tabId
   closeMenu()
   if (tabsStore.splitTabId === id) {
+    // 有意静默：退出分屏是本地状态复位，失败也会在下次切换/关签时被覆盖，无需打扰
     tabsStore.clearSplit().catch(() => {})
   } else {
     tabsStore.setSplit(id).catch((e) => {
@@ -365,17 +366,21 @@ function onTabScrollDblClick(e: MouseEvent) {
   // 只有点击空白处（非标签/分组头/按钮）才触发
   const t = e.target as HTMLElement
   if (t.closest('.tab') || t.closest('.group-head') || t.closest('.new-tab-btn')) return
+  // 有意静默：OS 窗口动作，失败时窗口本身仍是唯一反馈渠道，toast 无意义
   invokeOk('toggle_maximize').catch(() => {})
 }
 
 // ---- 无边框窗口控制（标签栏 = 标题栏，Chrome 式）----
 function onMinimize() {
+  // 有意静默：OS 窗口动作，失败无用户可见的补偿手段
   invokeOk('minimize_window').catch(() => {})
 }
 function onToggleMax() {
+  // 有意静默：OS 窗口动作，失败无用户可见的补偿手段
   invokeOk('toggle_maximize').catch(() => {})
 }
 function onClose() {
+  // 有意静默：窗口关闭失败仅表现为窗口还在，用户可再点一次
   invokeOk('close_window').catch(() => {})
 }
 
@@ -407,6 +412,7 @@ function onTabBarMouseDown(e: MouseEvent) {
     tabBarDragTimer = null
     if (!tabBarDragPending) return
     tabBarDragPending = false
+    // 有意静默：拖动启动失败仅本次手势不生效，瞬时操作无状态残留
     invokeOk('start_drag_window').catch(() => {})
   }, 200)
 }
@@ -422,6 +428,7 @@ function onTabBarWindowMouseMove(e: MouseEvent) {
       window.clearTimeout(tabBarDragTimer)
       tabBarDragTimer = null
     }
+    // 有意静默：拖动启动失败仅本次手势不生效，瞬时操作无状态残留
     invokeOk('start_drag_window').catch(() => {})
   }
 }

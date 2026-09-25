@@ -273,4 +273,33 @@ mod tests {
             validate_import_account("zhang3", &ok_hash, &ok_salt, "pbkdf2-sha512-abc").is_err()
         );
     }
+
+    /// R1 错误类型化防漂移：会话写入/清除往返 + 未登录态读取
+    #[tokio::test]
+    async fn test_session_roundtrip() {
+        let (_dir, db) = temp_db().await;
+        assert_eq!(current_user_id(&db).await, None);
+        insert_user(&db, "alice", "test-pass-42", HASH_ALGO_CURRENT).await;
+        let uid: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'alice'")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        set_session(&db, Some(uid)).await.unwrap();
+        assert_eq!(current_user_id(&db).await, Some(uid));
+        clear_session(&db).await.unwrap();
+        assert_eq!(current_user_id(&db).await, None);
+    }
+
+    /// R1 错误类型化防漂移：持久层故障必须归类 E_DB（前端据此提示"稍后重试"，
+    /// 而不是误报账号密码错误）
+    #[tokio::test]
+    async fn test_db_failure_is_e_db() {
+        let (_dir, db) = temp_db().await;
+        sqlx::query("DROP TABLE users")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        let err = verify_password(&db, "someone", "whatever").await.unwrap_err();
+        assert_eq!(err.code, crate::error::E_DB);
+    }
 }

@@ -6,6 +6,10 @@
 //!
 //! 见 docs/架构-能力与常量统一治理方案_2026-09-23.md
 
+// 构建脚本在编译期运行，IO/生成失败只能让编译立即中止（panic 是 build.rs 的
+// 标准错误通道，无法像运行时代码那样向用户优雅降级），整文件豁免 expect_used。
+#![allow(clippy::expect_used)]
+
 include!("src/constants.rs");
 include!("src/contracts.rs");
 

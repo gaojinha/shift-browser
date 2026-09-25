@@ -10,6 +10,7 @@
 //! 校验函数从 ai.rs 迁来，保持行为一致。
 
 use crate::engine::types::ChatMessage;
+use crate::error::{AppError, CommandResult};
 use async_trait::async_trait;
 
 /// 推理请求（统一结构，与 OpenAI 兼容格式对齐）
@@ -36,14 +37,14 @@ pub trait AiProvider: Send + Sync {
     #[allow(dead_code)]
     fn is_configured(&self) -> bool;
     /// 非流式对话，返回完整回复
-    async fn chat(&self, req: &ProviderRequest) -> Result<ChatMessage, String>;
+    async fn chat(&self, req: &ProviderRequest) -> CommandResult<ChatMessage>;
     /// 流式对话：每块增量经 `on_delta` 回调（SSE 解析在实现内部）
     async fn chat_stream(
         &self,
         req: &ProviderRequest,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         on_delta: Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>,
-    ) -> Result<String, String>;
+    ) -> CommandResult<String>;
 }
 
 /// 云端 AGNES Provider（OpenAI 兼容）
@@ -74,7 +75,7 @@ pub type ChatFn = fn(
     base_url: String,
     api_key: String,
     req: ProviderRequest,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<ChatMessage, String>> + Send>>;
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = CommandResult<ChatMessage>> + Send>>;
 
 /// 流式聊天实现签名（由 ai.rs 注册）
 pub type ChatStreamFn = fn(
@@ -83,7 +84,7 @@ pub type ChatStreamFn = fn(
     req: ProviderRequest,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     on_delta: Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send>>;
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = CommandResult<String>> + Send>>;
 
 static CHAT_IMPL: std::sync::OnceLock<ChatFn> = std::sync::OnceLock::new();
 static CHAT_STREAM_IMPL: std::sync::OnceLock<ChatStreamFn> = std::sync::OnceLock::new();
@@ -105,8 +106,10 @@ impl AiProvider for AgnesProvider {
     fn is_configured(&self) -> bool {
         !self.api_key.is_empty()
     }
-    async fn chat(&self, req: &ProviderRequest) -> Result<ChatMessage, String> {
-        let f = CHAT_IMPL.get().ok_or("聊天实现未注册（ai::register）")?;
+    async fn chat(&self, req: &ProviderRequest) -> CommandResult<ChatMessage> {
+        let f = CHAT_IMPL
+            .get()
+            .ok_or_else(|| AppError::internal("聊天实现未注册（ai::register）"))?;
         f(self.base_url.clone(), self.api_key.clone(), req.clone()).await
     }
     async fn chat_stream(
@@ -114,10 +117,10 @@ impl AiProvider for AgnesProvider {
         req: &ProviderRequest,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         on_delta: Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>,
-    ) -> Result<String, String> {
+    ) -> CommandResult<String> {
         let f = CHAT_STREAM_IMPL
             .get()
-            .ok_or("流式聊天实现未注册（ai::register）")?;
+            .ok_or_else(|| AppError::internal("流式聊天实现未注册（ai::register）"))?;
         f(
             self.base_url.clone(),
             self.api_key.clone(),
@@ -144,16 +147,23 @@ impl AiProvider for LocalProvider {
     fn is_configured(&self) -> bool {
         false
     }
-    async fn chat(&self, _req: &ProviderRequest) -> Result<ChatMessage, String> {
-        Err("本地模型集成暂缓（2026-09-19 决策）：当前仅预留接口，未实现。".to_string())
+    async fn chat(&self, _req: &ProviderRequest) -> CommandResult<ChatMessage> {
+        // 功能按决策暂缓不开放：E_PERM 告知调用方不要重试
+        Err(AppError::permission(
+            "本地模型集成暂缓（2026-09-19 决策）：当前仅预留接口，未实现。",
+        )
+        .into())
     }
     async fn chat_stream(
         &self,
         _req: &ProviderRequest,
         _cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         _on_delta: Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>,
-    ) -> Result<String, String> {
-        Err("本地模型集成暂缓（2026-09-19 决策）：当前仅预留接口，未实现。".to_string())
+    ) -> CommandResult<String> {
+        Err(AppError::permission(
+            "本地模型集成暂缓（2026-09-19 决策）：当前仅预留接口，未实现。",
+        )
+        .into())
     }
 }
 
@@ -245,6 +255,21 @@ mod tests {
         let p = resolve_provider("local", None, None).unwrap();
         assert_eq!(p.id(), "local");
         assert!(!p.is_configured());
+    }
+
+    /// 防漂移：本地 provider 暂缓决策若被推翻（接入实现），本测试会提醒同步错误契约
+    #[tokio::test]
+    async fn local_provider_chat_is_perm_stub() {
+        let p = LocalProvider;
+        let req = ProviderRequest {
+            model: String::new(),
+            messages: Vec::new(),
+            stream: false,
+            tools: None,
+        };
+        let err = p.chat(&req).await.unwrap_err();
+        assert_eq!(err.code, crate::error::E_PERM);
+        assert!(err.message.contains("暂缓"), "未预期的消息: {}", err.message);
     }
 
     #[test]

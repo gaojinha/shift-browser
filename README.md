@@ -254,7 +254,7 @@ AI 对话默认使用 AGNES AI（OpenAI 兼容协议）。API Key 两种配置�
 
 | 文档 | 说明 |
 |---|---|
-| [HANDOFF.md](HANDOFF.md) | 工程交接：逐轮交付记录、踩坑与根因分析、验证方法 |
+| [docs/archive/HANDOFF.md](docs/archive/HANDOFF.md) | 历史工程交接归档：逐轮交付记录、踩坑与根因分析、验证方法 |
 | [docs/strategy-2026.md](docs/strategy-2026.md) | 战略规划：定位 / 五大支柱 / 分阶段路线图 / 风险治理 |
 | [docs/spike-engine-capabilities-2026-09-19.md](docs/spike-engine-capabilities-2026-09-19.md) | 引擎能力实测报告（WebKitGTK 边界） |
 | [docs/standard-tracking-2026-09-20.md](docs/standard-tracking-2026-09-20.md) | WebMCP / Agentic Browsing 标准跟踪 |

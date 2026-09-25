@@ -12,6 +12,8 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::error::{AppError, CommandResult};
+
 /// 待确认的动作：request_id -> oneshot 应答通道（用户允许/拒绝）
 static PENDING: OnceLock<Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>> =
     OnceLock::new();
@@ -60,11 +62,11 @@ pub async fn request_agent_action(
 /// 前端确认回调：用户点"允许/拒绝"后调用
 #[tauri::command]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-pub fn agent_confirm_action(request_id: String, approved: bool) -> Result<(), String> {
+pub fn agent_confirm_action(request_id: String, approved: bool) -> CommandResult<()> {
     let mut map = pending().lock().unwrap();
     let tx = map
         .remove(&request_id)
-        .ok_or_else(|| "确认请求不存在或已过期".to_string())?;
+        .ok_or_else(|| AppError::validation("确认请求不存在或已过期"))?;
     let _ = tx.send(approved);
     log::info!("[agent] 用户确认动作: request={} approved={}", request_id, approved);
     Ok(())
@@ -108,11 +110,11 @@ pub async fn request_multi_step_action(
 /// 前端多步确认回调：用户点"允许全部/拒绝"后调用
 #[tauri::command]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-pub fn agent_confirm_multi_step(request_id: String, approved: bool) -> Result<(), String> {
+pub fn agent_confirm_multi_step(request_id: String, approved: bool) -> CommandResult<()> {
     let mut map = pending().lock().unwrap();
     let tx = map
         .remove(&request_id)
-        .ok_or_else(|| "多步确认请求不存在或已过期".to_string())?;
+        .ok_or_else(|| AppError::validation("多步确认请求不存在或已过期"))?;
     let _ = tx.send(approved);
     log::info!("[agent] 用户确认多步动作: request={} approved={}", request_id, approved);
     Ok(())
@@ -161,7 +163,7 @@ pub async fn agent_action_record(
     url: Option<String>,
     ms: Option<u64>,
     result: String,
-) -> Result<u64, String> {
+) -> CommandResult<u64> {
     let params = crate::engine::agent::AgentActionParams {
         action,
         selector,
@@ -191,11 +193,11 @@ pub async fn agent_action_replay_or_retry(
     state: tauri::State<'_, crate::tabs::TabManager>,
     step: Option<u64>,
     retry_last: Option<bool>,
-) -> Result<String, String> {
+) -> CommandResult<String> {
     let step_no = if retry_last.unwrap_or(false) {
         crate::engine::agent::last_failed_step()?
     } else {
-        step.ok_or_else(|| "需要 step 或 retry_last=true".to_string())?
+        step.ok_or_else(|| AppError::validation("需要 step 或 retry_last=true"))?
     };
     let params = crate::engine::agent::rebuild_params(step_no)?;
     let action = params.action.clone();
@@ -208,7 +210,11 @@ pub async fn agent_action_replay_or_retry(
     let verb = if retry_last.unwrap_or(false) { "重试" } else { "回放" };
     match r {
         Ok(txt) => Ok(format!("{}第 {} 步（{}）→ {}", verb, step_no, action, txt)),
-        Err(e) => Err(format!("{}第 {} 步（{}）失败: {}", verb, step_no, action, e)),
+        Err(e) => Err(AppError::internal(format!(
+            "{}第 {} 步（{}）失败: {}",
+            verb, step_no, action, e
+        ))
+        .into()),
     }
 }
 
@@ -220,14 +226,14 @@ pub async fn agent_actions_batch_retry(
     app: AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, crate::tabs::TabManager>,
-) -> Result<String, String> {
+) -> CommandResult<String> {
     let pairs = crate::engine::agent::failed_action_params()?;
     let plan = crate::engine::agent::batch_retry_plan(&pairs);
     let approved = request_multi_step_action(&app, &plan).await?;
     if !approved {
         return Ok("整批重试已被用户拒绝".to_string());
     }
-    execute_multi_step_action(&app, &window, &state, &plan).await
+    Ok(execute_multi_step_action(&app, &window, &state, &plan).await?)
 }
 
 pub async fn execute_agent_action(
@@ -323,7 +329,7 @@ pub async fn agent_debug_execute(
     direction: Option<String>,
     url: Option<String>,
     ms: Option<u64>,
-) -> Result<String, String> {
+) -> CommandResult<String> {
     let params = crate::engine::agent::AgentActionParams {
         action,
         selector,
@@ -334,6 +340,21 @@ pub async fn agent_debug_execute(
     };
     let window = app
         .get_webview_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?;
-    execute_agent_action(&app, &window, &state, &params).await
+        .ok_or_else(|| AppError::internal("主窗口不存在"))?;
+    Ok(execute_agent_action(&app, &window, &state, &params).await?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 防漂移：确认不存在/过期 request_id 必须是 E_VALIDATION
+    /// （前端据此提示"请求已过期"，而不是当成系统故障）
+    #[test]
+    fn confirm_unknown_request_is_validation() {
+        let err = agent_confirm_action("no-such-request".to_string(), true).unwrap_err();
+        assert_eq!(err.code, crate::error::E_VALIDATION);
+        let err = agent_confirm_multi_step("no-such-request".to_string(), false).unwrap_err();
+        assert_eq!(err.code, crate::error::E_VALIDATION);
+    }
 }
