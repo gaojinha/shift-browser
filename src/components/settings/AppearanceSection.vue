@@ -42,6 +42,20 @@ const { onSet } = useSettingsSet()
                   <span class="slider"></span>
                 </label>
               </div>
+              <div class="field">
+                <label>禁用 DMA-BUF 渲染</label>
+                <span class="field-desc">
+                  修复视频播放闪烁（Intel HD 630 实测：禁用后不闪且更省资源）。<b>改后需重启生效</b>；若遇崩溃可关闭回退。
+                </span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.get('render_disable_dmabuf') !== 'false'"
+                    @change="onSet('render_disable_dmabuf', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
               <div class="card-title" style="margin-top: 16px"><AppIcon name="house" :size="14" /> 启动页</div>
               <div class="field">
                 <label>动态背景</label>

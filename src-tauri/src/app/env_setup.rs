@@ -1,5 +1,49 @@
 //! 启动环境变量与平台初始化（run() 最早段，任何 GTK/WebKit 初始化之前执行）
 
+/// 读一个布尔设置（启动最早期，DB 连接池尚未建立 → 自建临时 runtime 直读 SQLite）。
+/// 读不到（库不存在/表不存在/键缺失）时返回 `default`。
+#[cfg(target_os = "linux")]
+fn read_setting_bool(key: &str, default: bool) -> bool {
+    let data_home = std::env::var("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::env::var("HOME")
+                .map(|h| std::path::PathBuf::from(h).join(".local/share"))
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
+    let db_path = data_home.join("com.shiftbrowser.app").join("shift-browser.db");
+    if !db_path.exists() {
+        return default;
+    }
+    // 临时单线程 runtime（此时主 runtime 尚未建立）
+    let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(rt) => rt,
+        Err(_) => return default,
+    };
+    rt.block_on(async {
+        use sqlx::sqlite::SqliteConnectOptions;
+        let opts = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .read_only(true);
+        let pool = match sqlx::SqlitePool::connect_with(opts).await {
+            Ok(p) => p,
+            Err(_) => return default,
+        };
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT value FROM settings WHERE key = ?")
+                .bind(key)
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten();
+        pool.close().await;
+        match row {
+            Some((v,)) => v == "true",
+            None => default,
+        }
+    })
+}
+
 /// 应用启动环境默认值 + Cookie 持久化。必须在 Builder 构建前调用。
 pub(crate) fn apply() {
     // ===== WebKit DMA-BUF 线性格式兜底（P0-7，2026-09-24）=====
@@ -14,23 +58,31 @@ pub(crate) fn apply() {
         log::info!("[ShiftBrowser] 已注入 WEBKIT_DMABUF_RENDERER_BUFFER_FORMAT=XR24:0（启动入口兜底，可被环境变量覆盖）");
     }
 
-    // ===== DMA-BUF 渲染器：不再默认禁用（2026-09-23 回退）=====
-    // 【原方案】禁用它（WEBKIT_DISABLE_DMABUF_RENDERER=1）可修 Intel HD 630 上的
-    // 网页/视频闪烁（WebKitGTK 2.42+ 默认走 DMA-BUF 路径，与 i915 配合不良）。
+    // ===== DMA-BUF 渲染器：**由设置控制**（2026-09-25）=====
+    // 设置项 `render_disable_dmabuf`（默认 true）。历史与实测见下：
+    // 【历史】2026-09-23 曾回退为"不禁用"：当时定位到 core dump 在 WebKit 自身的
+    //   AcceleratedBackingStore::update()（生命周期竞态），而禁用 DMA-BUF 会走
+    //   SHM/EGLImage 兜底路径，**理论上**更容易踩中该竞态。
     //
-    // 【为何回退】core dump 定位到崩溃在 WebKit 自身的
-    //   AcceleratedBackingStore::update()（AcceleratedBackingStore.cpp:808）
-    //   ← enterAcceleratedCompositingMode ← IPC EnterAcceleratedCompositingMode
-    // 即「网页请求进入加速合成模式」时，m_legacyMainFrameProcess 已失效仍被解引用
-    // （WebKit 生命周期竞态 bug，rdi=0）。而**禁用 DMA-BUF 会让加速合成走
-    // SHM/EGLImage 兜底路径**，更容易踩中该竞态 → 网页删文件等操作触发 SIGSEGV。
+    // 【2026-09-25 实测反转】Intel HD Graphics 630 上对照测试：
+    //   - 不禁用 DMA-BUF：视频**闪烁**，视频进程 CPU **111%** / 内存 1172MB
+    //   - 禁用 DMA-BUF：  **不闪**，     视频进程 CPU **79%**  / 内存 1006MB
+    //   即禁用后**既修闪烁、又降 CPU 29% / 内存 166MB**。实测无崩溃。
     //
-    // 结论：不禁用 = 走 WebKit 默认 DMA-BUF 路径，绕开该竞态。
-    // 若视频闪烁复现，可显式设 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 启动（二者取舍）。
-    log::info!(
-        "[ShiftBrowser] WEBKIT_DISABLE_DMABUF_RENDERER={:?}（未设置=走默认 DMA-BUF 渲染）",
-        std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER")
-    );
+    // 结论：默认禁用；用户可在「设置 → 外观」关闭（若遇崩溃可回退默认路径）。
+    // 环境变量优先（用户显式设置则不覆盖）。
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        let disable = read_setting_bool("render_disable_dmabuf", true);
+        if disable {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+        log::info!(
+            "[ShiftBrowser] render_disable_dmabuf={} → WEBKIT_DISABLE_DMABUF_RENDERER={:?}",
+            disable,
+            std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER")
+        );
+    }
 
     // ===== 视频进程崩溃修复（2026-09-22）：降级硬件视频解码器 =====
     // 症状：播放某些 H.264 视频时 WebKitWebProcess 直接 abort：
