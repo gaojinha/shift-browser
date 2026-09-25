@@ -10,7 +10,7 @@ Corrections, insights, and knowledge gaps captured during development.
 
 **类别**: insight
 **场景**: ShiftBrowser v5.0.0 Tauri 重构 Phase 0
-**要点**: 
+**要点**:
 - 数据库 code 14 根因是 sqlx `create_if_missing` 默认 false（详见 ERRORS.md）
 - 修复后 `Db::init()` 用 `SqliteConnectOptions::new().filename().create_if_missing(true).foreign_keys(true).journal_mode(Wal)` 连接池方式，绕开 URL 解析
 - 前端 App.vue 的 invoke 测试全通：set_setting → get_setting → create_bookmark → get_bookmarks
@@ -20,7 +20,7 @@ Corrections, insights, and knowledge gaps captured during development.
 ## 2026-09-11 18:20 — sqlx 排查方法论（best_practice）
 
 **类别**: best_practice
-**要点**: 
+**要点**:
 - 排查依赖库问题时，对比测试必须**逐项核对默认值**（flags、features、配置项），不能想当然
 - 原生 libsqlite3-sys 测试成功 ≠ sqlx 成功，两者默认配置可能不同（如 create_if_missing）
 - 内存库成功 + 文件库失败 = 典型"创建文件权限/flag 缺失"特征

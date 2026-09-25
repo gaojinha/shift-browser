@@ -270,4 +270,4 @@ ls -la ~/.local/share/com.shiftbrowser.app/api.sock   # 应为 srw-------
   工具清单由 `capabilities/list` 自动派生——新增命令只需在 `HANDLERS` 表 +
   `capabilities/registry.rs` 两处登记，MCP 侧零改动。
 - 页面读取能力完善方案（2026-09-25）已全量落地：见
-  `docs/开放API-页面读取能力完善方案_2026-09-25.md` 与 `docs/开放API-页面读取能力-变更小结_2026-09-25.md`。
+  `docs/开放API-页面读取能力完善方案_2026-09-25.md`。

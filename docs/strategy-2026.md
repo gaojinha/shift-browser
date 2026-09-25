@@ -162,14 +162,12 @@
 
 ## 五、前置技术验证清单（spike）
 
-> 📄 实测证据与详细结论见：`docs/spike-engine-capabilities-2026-09-19.md`
-
 | # | 验证项 | 用途 | 若不可行的退路 | 状态 |
 |---|---|---|---|---|
 | 1 | 引擎升级可行性 | 阶段 0 起点 | — | ✅ **实测：不可行**（系统源冻结 2.52.3）→ 改为版本跟踪 |
 | 2 | WebAuthn/Passkeys 在 WebKitGTK 的可用性 | 阶段 2 | 降级为"密码管理器增强" | ✅ **实测完成（2026-09-21）**：页面探针 `typeof PublicKeyCredential === "undefined"` → 引擎二进制含 WebAuthn 符号但**未在 JS 层暴露**，Passkeys 不可用 → 按预案**降级为密码管理器增强** |
 | 3 | `send-request` 信号可改请求头 | GPC 实现 | — | ✅ **实测：可行**（web process extension `send-request` + 可变 `SoupMessageHeaders`） |
-| 4 | WebKitWebProcessExtension 能力边界（能否网络层拦截） | 阶段 3 扩展体系 | 维持注入式 + 自研规则 | ✅ **spike 完成（2026-09-21）**：`WebKitWebPage::send-request` 支持改请求/取消 → 网络层拦截**可行**，走独立 Web 进程扩展 .so（裸 FFI，非 chrome.*）；详见 [spike-extension-capabilities-2026-09-21.md](spike-extension-capabilities-2026-09-21.md) |
+| 4 | WebKitWebProcessExtension 能力边界（能否网络层拦截） | 阶段 3 扩展体系 | 维持注入式 + 自研规则 | ✅ **spike 完成（2026-09-21）**：`WebKitWebPage::send-request` 支持改请求/取消 → 网络层拦截**可行**，走独立 Web 进程扩展 .so（裸 FFI，非 chrome.*） |
 | 5 | WebGPU 在 2.54 的启用状态 | 平台能力 | 保持指纹防护定位 | ✅ **实测：引擎有、无公开开关** → 不作依赖 |
 | 6 | 本地模型集成路径（Ollama 兼容性/性能/内存） | 阶段 1 推理层 | — | ⏸ **暂缓（2026-09-19 决策）** |
 
@@ -221,7 +219,7 @@
 | 日期 | 变更 |
 |---|---|
 | 2026-09-19 | 方案立档；决策：本地模型集成暂缓（阶段 1.2 只做 provider 抽象 + 云端 provider） |
-| 2026-09-19 | 完成批次 0.1（引擎能力 spike #1-#5），产出 `docs/spike-engine-capabilities-2026-09-19.md`；修订阶段 0：引擎治理改为"版本冻结+跟踪"（系统源冻结 2.52.3）；新增"能力补齐"项（内容过滤器 + DevTools）；新增 4.1 引擎耦合现状 |
+| 2026-09-19 | 完成批次 0.1（引擎能力 spike #1-#5）；修订阶段 0：引擎治理改为"版本冻结+跟踪"（系统源冻结 2.52.3）；新增"能力补齐"项（内容过滤器 + DevTools）；新增 4.1 引擎耦合现状 |
 | 2026-09-19 | 交付① **DevTools**（`enable-developer-extras` + GTK 窗口层 F12/Ctrl+Shift+I 拦截，解决"焦点在网页时快捷键失效"）；交付② **广告拦截 2.0 v1**（新增 `engine/` 模块 = 架构解耦第一块砖；手写 FFI 对接 `WebKitUserContentFilterStore`，75 条网络层拦截规则，启动异步编译并缓存，随注入流程挂载；含 2 个单测） |
 | 2026-09-19 | 记录现实问题：**前端快捷键绑在 HTML 层**，页面持有焦点时全部失效 → 新增阶段 0 批次 0.3（GTK 层统一路由 + 焦点跟踪） |
 | 2026-09-19 | 交付③ **批次 0.3 快捷键路由**：GTK 顶层窗口统一拦截（焦点跟踪 `UI_FOCUSED`），页面持焦时 emit `global-shortcut` 给前端执行，覆盖 Ctrl+T/W/R/L/H、Ctrl+Tab、Ctrl+Shift+T/S、F12；前端抽出统一动作入口 `handleGlobalAction`。阶段 0 的"工程基座"三项（引擎抽象首块砖 / DevTools / 快捷键路由）已就位 |

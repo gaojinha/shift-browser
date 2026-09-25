@@ -10,7 +10,7 @@ Command failures and integration errors.
 **场景**: ShiftBrowser Tauri 重构，`Db::init()` 用 sqlx 0.8 连接文件数据库
 **错误**: `SqlitePoolOptions::connect("sqlite:///path/db")` 报 `(code: 14) unable to open database file`，数据库文件未创建
 **根因**: sqlx 的 `SqliteConnectOptions::create_if_missing` **默认是 false**！默认 flags 只有 `SQLITE_OPEN_READWRITE`（没有 `SQLITE_OPEN_CREATE`），打开不存在的文件时 SQLite 直接返回 CANTOPEN。内存库（`sqlite::memory:`）不受影响，所以"内存库能开、文件库全挂"是典型特征。
-**正确**: 
+**正确**:
 ```rust
 let options = SqliteConnectOptions::new()
   .filename(&db_path)
@@ -29,7 +29,7 @@ let pool = SqlitePoolOptions::new().max_connections(5).connect_with(options).awa
 **类别**: correction
 **场景**: 清理 shift-browser / vite / cargo 旧进程
 **错误**: `pkill -f "cargo"`、`grep "shift-browser" | xargs kill` 把**自己的 shell 进程**也杀了（命令行字符串里含关键字），导致命令被中止、工具超时
-**正确**: 
+**正确**:
 - 用 `ps -eo pid,comm | grep -i 关键字`（只看进程名 comm，不看完整命令行）再取 PID kill
 - 或 `pgrep -x 精确进程名`（精确匹配进程名）
 - 避免用 `pkill -f` / `pgrep -f` 匹配宽泛关键字
@@ -42,7 +42,7 @@ let pool = SqlitePoolOptions::new().max_connections(5).connect_with(options).awa
 **类别**: correction
 **场景**: 用 `setsid nohup npm run dev &` 后台启动 vite / cargo run
 **错误**: bash 工具等待后台进程导致 120 秒超时被中止
-**正确**: 
+**正确**:
 ```bash
 (setsid npm run dev > /tmp/vite-dev.log 2>&1 < /dev/null &)
 ```

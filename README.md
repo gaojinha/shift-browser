@@ -4,8 +4,10 @@
 
 ShiftBrowser 是一款基于 **Tauri 2 + Rust + Vue 3** 的 AI 增强型桌面浏览器。它不是"又一个浏览器"，而是在 WebKitGTK 之上构建的、面向多任务与 AI 协作的个人工作空间：本地数据自持、AI 助手能读页面 / 调工具 / 在授权下执行任务、隐私能力可验证。
 
-**当前版本：v5.8.0**（平台：Linux / GTK）
+**当前版本：v5.8.1**（平台：Linux / GTK）
 
+> **v5.8.1 更新**：R1 工程质量批次——CI 接入前端测试门禁；大文件拆分（`page.rs`、`capabilities/registry.rs`）；命令面错误类型化第二批；前端事件监听/定时器泄漏治理（`useManagedListeners`）；阅读模式 CSP 去除 `unsafe-inline`（sha256 白名单）；新增性能基线采集脚本与基线报告（冷启 / 恢复耗时 / RSS / 包体）。
+>
 > **v5.8.0 更新**：开放 API 页面读取能力全量落地——命令 26→43（`open_and_read` 原子读、`extract`/`reader`/`translate`/`snapshot`、交互七动作 `action/*`）；三层权限（只读放行 / 交互开关 / 内网 SSRF 入口+逐跳拦截）；标签来源治理（AI 标签不写历史、上限 10、`tabs/close_ai`）；审计持久化（`ai_audit`）。
 
 ---
@@ -41,7 +43,7 @@ ShiftBrowser 是一款基于 **Tauri 2 + Rust + Vue 3** 的 AI 增强型桌面�
 - **多步任务编排**：`browser_action_plan` 整体确认 + 按序执行，动作回放 / 整批重试（断点续跑）
 - **AI 友好度检测**：对齐 Lighthouse Agentic Browsing 四信号（WebMCP 工具注册 / 无障碍树 / CLS / llms.txt）
 - **WebMCP polyfill 试验**（默认关闭）：捕获网站 WebMCP 工具声明，只捕获不伪造能力
-- **MCP Server**：独立二进制 `shift-browser-mcp`（MCP 2025-03-26 stdio / newline-delimited JSON-RPC），25 个工具（13 读 + 12 写）与开放 API 同名同参，直连 Unix socket 零依赖；任何 MCP 客户端（opencode / Claude Desktop 等）配一行即驱动浏览器，eval / tool_call 不暴露
+- **MCP Server**：独立二进制 `shift-browser-mcp`（MCP 2025-03-26 stdio / newline-delimited JSON-RPC），43 个工具（24 读 + 19 写）与开放 API 同名同参，直连 Unix socket 零依赖；任何 MCP 客户端（opencode / Claude Desktop 等）配一行即驱动浏览器，eval / tool_call 不暴露
 
 ### 隐私与安全
 
@@ -98,7 +100,7 @@ src-tauri/src/
 ├── db/                 # sqlx 数据层：bookmarks / history / passwords / sessions / settings / vault / sync / certificates / workspaces …
 ├── tabs.rs             # TabManager：多 webview 生命周期 + WebKit 信号回调
 ├── ai.rs               # AI 命令：对话 / 流式 / function calling 工具循环（≤6 轮）
-├── api.rs              # 开放 API（28 命令，Unix socket + HTTP 双形态，鉴权 / 只读 / IP 白名单）
+├── api.rs              # 开放 API（43 命令，Unix socket + HTTP 双形态，鉴权 / 只读 / IP 白名单）
 ├── auto_tasks.rs       # 自动化任务（批量操作 / 定时任务 / Agent 编排）
 ├── extensions.rs       # 用户脚本 / 样式注入（UserContentManager）
 ├── feed.rs             # RSS 聚合（62 源，16 路并发，4MB 响应上限）
@@ -248,7 +250,7 @@ AI 对话默认使用 AGNES AI（OpenAI 兼容协议）。API Key 两种配置�
 | 1 · AI 原生内核 | 页面理解 / Provider 抽象 / MCP 工具层 / Agent 执行层 / 标准跟踪 | ✅（持续增强） |
 | 2 · 隐私主权 | 反指纹 2.0、GPC、零遥测审计、密码库主密码、E2E 加密同步（服务器零知识） | ✅（Passkeys 实测引擎未暴露 WebAuthn，已降级为密码管理器增强） |
 | 3 · 交互形态与平台化 | 分屏 ✅、垂直标签 ✅、命令栏（Ctrl+K）✅、空间（Spaces）✅、真扩展体系（网络层拦截/头改写/热更新）✅、用户脚本 ✅、自动化（批量操作/定时任务/Agent 编排）✅、系统托盘 ✅ | ✅ |
-| 4 · 开放生态 | 开放 API（28 命令，Unix socket + HTTP 双形态，端口可配 / 局域网开关 / eval 闸门 / 只读模式 `api_readonly` / IP 白名单 `api_allowed_ips`）、MCP Server（`shift-browser-mcp`，25 工具，AI 标准协议驱动）、多端协同（密码库/书签/会话/历史 E2E 加密同步）、自托管服务端套件（同步 / 工具网关 MCP / 管理页状态面板 / 模型网关） | ✅（持续增强：多端形态） |
+| 4 · 开放生态 | 开放 API（43 命令，Unix socket + HTTP 双形态，端口可配 / 局域网开关 / eval 闸门 / 只读模式 `api_readonly` / IP 白名单 `api_allowed_ips`）、MCP Server（`shift-browser-mcp`，43 工具，AI 标准协议驱动）、多端协同（密码库/书签/会话/历史 E2E 加密同步）、自托管服务端套件（同步 / 工具网关 MCP / 管理页状态面板 / 模型网关） | ✅（持续增强：多端形态） |
 
 ## 文档
 
@@ -256,12 +258,9 @@ AI 对话默认使用 AGNES AI（OpenAI 兼容协议）。API Key 两种配置�
 |---|---|
 | [docs/archive/HANDOFF.md](docs/archive/HANDOFF.md) | 历史工程交接归档：逐轮交付记录、踩坑与根因分析、验证方法 |
 | [docs/strategy-2026.md](docs/strategy-2026.md) | 战略规划：定位 / 五大支柱 / 分阶段路线图 / 风险治理 |
-| [docs/spike-engine-capabilities-2026-09-19.md](docs/spike-engine-capabilities-2026-09-19.md) | 引擎能力实测报告（WebKitGTK 边界） |
 | [docs/standard-tracking-2026-09-20.md](docs/standard-tracking-2026-09-20.md) | WebMCP / Agentic Browsing 标准跟踪 |
 | [docs/browser-privacy-fingerprint-research-2026.md](docs/browser-privacy-fingerprint-research-2026.md) | 浏览器指纹识别调研 |
-| [docs/local-api.md](docs/local-api.md) | 本地开放 API：28 命令、Unix socket + HTTP 双形态、鉴权与配置 |
-| [docs/spike-extension-capabilities-2026-09-21.md](docs/spike-extension-capabilities-2026-09-21.md) | 扩展体系能力边界实测（WebProcessExtension 网络层拦截） |
-| [docs/架构修复方案_2026-09-22.md](docs/架构修复方案_2026-09-22.md) | 架构修复方案（待审批） |
+| [docs/local-api.md](docs/local-api.md) | 本地开放 API：43 命令、Unix socket + HTTP 双形态、鉴权与配置 |
 | [docs/跨平台移植规划_2026-09-22.md](docs/跨平台移植规划_2026-09-22.md) | Windows / Android 双端移植规划 |
 | [scripts/](scripts/) | `smoke.sh`（E2E 冒烟）· `backup.sh`（数据库备份）· `build-extension.sh`（构建 Web 扩展 .so）· `package-deb.sh`（一键 deb 打包） |
 

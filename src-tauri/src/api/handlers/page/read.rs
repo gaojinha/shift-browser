@@ -9,7 +9,7 @@ use crate::error::AppError;
 use super::util::{bool_arg, eval_value, target_label};
 
 pub(crate) async fn read_page(app: &AppHandle, req: &Value) -> Value {
-    // 页面读取（固定采集脚本，非任意 JS；方案见 docs/read_page-命令方案_2026-09-24.md）
+    // 页面读取（固定采集脚本，非任意 JS；方案见 docs/开放API-页面读取能力完善方案_2026-09-25.md）
     // 脱敏与截断在 page_read.js 内完成；Rust 侧做参数硬顶、超时、4MB 尺寸兜底
     let mode = req.get("mode").and_then(|v| v.as_str()).unwrap_or("text");
     if !matches!(

@@ -1,6 +1,6 @@
 // read_page 固定采集脚本（编译期嵌入，include_str! 于 api.rs）
 //
-// 方案：docs/read_page-命令方案_2026-09-24.md
+// 方案：docs/开放API-页面读取能力完善方案_2026-09-25.md
 // - 脚本固定，调用方只能选 mode + selector + 截断上限（不能注入任意 JS）；
 // - 占位符由 Rust 侧 replace 注入：__MODE__ / __SELECTOR__ / __MAX_CHARS__ / __MAX_ITEMS__
 //   （__SELECTOR__ 经 js_escape 转义为 JS 字符串字面量内容；两个 MAX 为裸数字）；
