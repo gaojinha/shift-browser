@@ -433,9 +433,9 @@ fn ip_is_private(ip: std::net::IpAddr) -> bool {
     }
 }
 
-/// 打开 URL 并读取页面（open_and_read 的 SSRF 守卫）。
+/// open_and_read 的内网 SSRF 守卫（入口 + 最终 URL 复核共用）。
 ///
-/// 返回 `Ok(())` 放行；`Err(响应)` 为拒绝（内网地址且未进白名单）。
+/// 返回 `Ok(())` 放行；`Err(响应)` 为拒绝（非 http/https、或内网地址且未进白名单）。
 async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
     let Ok(parsed) = tauri::Url::parse(url) else {
         return Err(AppError::validation("URL 解析失败").error_json());
@@ -463,8 +463,7 @@ async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
             .flatten()
             .unwrap_or_default()
     };
-    let covered = !allowlist.trim().is_empty()
-        && crate::api::auth::ip_allowed(&host, &allowlist);
+    let covered = !allowlist.trim().is_empty() && crate::api::auth::ip_allowed(&host, &allowlist);
     if covered {
         Ok(())
     } else {
@@ -475,8 +474,8 @@ async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
     }
 }
 
-/// 单次探测标签就绪态（open_and_read 等加载用）。
-async fn probe_ready_state(app: &AppHandle, tab_id: &str) -> Option<String> {
+/// 单次探测标签状态（open_and_read 等加载 / 最终 URL 复核用）。返回 page_status.js 的完整 JSON。
+async fn probe_page(app: &AppHandle, tab_id: &str) -> Option<Value> {
     let wv = app.get_webview(&format!("tab-{}", tab_id))?;
     let script = include_str!("../../page_status.js");
     let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
@@ -489,9 +488,7 @@ async fn probe_ready_state(app: &AppHandle, tab_id: &str) -> Option<String> {
         return None;
     }
     match tokio::time::timeout(std::time::Duration::from_secs(2), rx).await {
-        Ok(Ok(Ok(raw))) => serde_json::from_str::<Value>(&raw)
-            .ok()
-            .and_then(|v| v.get("ready_state").and_then(|s| s.as_str()).map(String::from)),
+        Ok(Ok(Ok(raw))) => serde_json::from_str::<Value>(&raw).ok(),
         _ => None,
     }
 }
@@ -580,19 +577,60 @@ pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
 
     // 2) 等加载就绪：复用标签视为已就绪（探测一次）；新开标签轮询 readyState（最多 ~8s）
     let mut ready_state = "unknown".to_string();
+    let mut final_url = url.clone();
     if reused {
-        if let Some(rs) = probe_ready_state(app, &tab_id).await {
-            ready_state = rs;
+        if let Some(p) = probe_page(app, &tab_id).await {
+            ready_state = p
+                .get("ready_state")
+                .and_then(|s| s.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            if let Some(u) = p.get("url").and_then(|s| s.as_str()) {
+                if !u.is_empty() {
+                    final_url = u.to_string();
+                }
+            }
         }
     } else {
         for _ in 0..40 {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            if let Some(rs) = probe_ready_state(app, &tab_id).await {
+            if let Some(p) = probe_page(app, &tab_id).await {
+                let rs = p
+                    .get("ready_state")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                if let Some(u) = p.get("url").and_then(|s| s.as_str()) {
+                    if !u.is_empty() {
+                        final_url = u.to_string();
+                    }
+                }
                 ready_state = rs.clone();
                 if rs == "complete" {
                     break;
                 }
             }
+        }
+    }
+
+    // 2b) O1 重定向逐跳/最终 URL 复核：加载后的真实 URL 再跑一遍 SSRF 守卫。
+    //     公开页跳转到内网（重定向绕过入口校验）→ 读取前拦截并回收，绝不让内网内容外流。
+    if final_url != url {
+        if let Err(resp) = guard_url(app, &final_url).await {
+            // 复核失败：回收刚开的标签（复用标签不关，避免误关用户标签）
+            if !reused {
+                if let Some(st) = app.try_state::<crate::tabs::TabManager>() {
+                    let _ = crate::tabs::commands::close_tab(app.clone(), st, tab_id.clone()).await;
+                }
+            }
+            let msg = resp
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("重定向到内网地址被拦截");
+            return AppError::permission(format!(
+                "重定向复核拦截（{final_url}）：{msg}"
+            ))
+            .error_json();
         }
     }
 
@@ -620,7 +658,7 @@ pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
     let data = json!({
         "tab_id": tab_id,
         "url": url,
-        "final_url": read_resp.get("data").and_then(|d| d.get("url")).cloned().unwrap_or(json!(url)),
+        "final_url": final_url,
         "title": read_resp.get("data").and_then(|d| d.get("title")).cloned().unwrap_or(json!("")),
         "ready_state": ready_state,
         "closed": close_after,
