@@ -47,7 +47,7 @@ Cursor / 自研 agent）配一条 command 即可驱动浏览器——不用自�
 
 | 类别 | 工具 |
 |---|---|
-| 读 | `status` · `list_tabs` · `active_tab` · `history` · `bookmarks` · `search_history` · `list_downloads` · `list_sessions` · `list_groups` · `list_spaces` · `list_userscripts` · `get_setting` · `list_settings` · `screenshot` · `read_page` · `read_status` · `open_and_read` · `audit/reads` |
+| 读 | `status` · `list_tabs` · `active_tab` · `history` · `bookmarks` · `search_history` · `list_downloads` · `list_sessions` · `list_groups` · `list_spaces` · `list_userscripts` · `get_setting` · `list_settings` · `screenshot` · `read_page` · `read_status` · `open_and_read` · `audit/reads` · `audit/egress` |
 | 写 | `open_url` · `new_tab` · `close_tab` · `switch_tab` · `reload_tab` · `navigate` · `search` · `pin_tab` · `mute_tab` · `minimize_window` · `maximize_window` · `tabs/close_ai` |
 
 手动测试（三行握手 + 调工具）：
@@ -116,6 +116,7 @@ curl -s -X POST http://127.0.0.1:19701/v1/chat/completions \
 | `{"cmd":"close_tab","id":"…"}` | `{"ok":true,"data":Tab\|null}` | 关标签（返回接管的活动标签） |
 | `{"cmd":"tabs/close_ai"}` | `{"ok":true,"data":{"closed":[…],"count":N}}` | 关闭**所有 AI 标签**（`origin=ai`，开放 API 打开的那些）——绝不碰用户标签。AI 读完回收现场用 |
 | `{"cmd":"audit/reads","limit":50}` | `{"ok":true,"data":[{id,ts,cmd,url,tab_id,ok,error_code,origin}…]}` | 查询最近 AI 操作审计（**只记命令/url/结果码，不含页面内容**）。所有 API 命令自动入库（元命令与 `audit/reads` 自身除外） |
+| `{"cmd":"audit/egress"}` | `{"ok":true,"data":{processes,connections:[{pid,proto,remote_ip,remote_port,state}…],distinct_remotes,loopback,external,checked_at}}` | 网络外发审计：列出本应用及子进程当前 TCP 外联端点（只读 /proc、零出网），核对"浏览器连了哪儿" |
 | `{"cmd":"switch_tab","id":"…"}` | `{"ok":true,"data":Tab\|null}` | 切换活动标签 |
 | `{"cmd":"reload_tab","id":"…"}` | `{"ok":true,"data":Tab\|null}` | 刷新标签 |
 | `{"cmd":"navigate","id":"…","url":"…"}` | `{"ok":true,"data":Tab\|null}` | 让指定标签导航到网址 |

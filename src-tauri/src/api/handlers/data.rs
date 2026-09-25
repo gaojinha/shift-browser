@@ -144,3 +144,12 @@ pub(super) async fn audit_reads(app: &AppHandle, req: &Value) -> Value {
         Err(e) => AppError::db(format!("查询审计失败: {e}")).error_json(),
     }
 }
+
+/// 网络外发审计（N3）：列出本应用及其子进程当前的全部 TCP 外联端点。
+/// 复用 `audit::egress_audit`（只读 /proc，零出网）。Read，只读模式下放行。
+pub(super) async fn audit_egress(_app: &AppHandle, _req: &Value) -> Value {
+    match crate::audit::egress_audit().await {
+        Ok(report) => json!({"ok": true, "data": report}),
+        Err(e) => AppError::internal(format!("网络审计失败: {e}")).error_json(),
+    }
+}

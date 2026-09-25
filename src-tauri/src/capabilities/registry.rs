@@ -198,6 +198,14 @@ fn registry() -> Vec<ToolDef> {
       vec![],
       Risk::Read,
     ),
+    // 网络外发审计（N3）：读本应用及其子进程的 TCP 外联端点（只读 /proc、零出网）。Read。
+    t(
+      "audit/egress",
+      "网络外发审计：列出本应用及其全部子进程当前的 TCP 外联端点（IP:端口/状态），用于核对“浏览器到底连了哪儿”。只读 /proc、零出网。只读模式下放行。",
+      json!({}),
+      vec![],
+      Risk::Read,
+    ),
     t(
       "switch_tab",
       "切换活动标签页（窗口前置）。",

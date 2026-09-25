@@ -74,6 +74,8 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     ("list_settings", |a, r| Box::pin(data::list_settings(a, r))),
     // 审计（K/O3）：AI 操作记录查询
     ("audit/reads", |a, r| Box::pin(data::audit_reads(a, r))),
+    // 审计（N3）：网络外发端点查询
+    ("audit/egress", |a, r| Box::pin(data::audit_egress(a, r))),
 ];
 
 /// 命令分发：解析后的请求 JSON + cmd 字符串 → 响应 JSON。
@@ -92,7 +94,7 @@ pub(crate) async fn dispatch(app: &AppHandle, req: &Value, cmd: &str) -> Value {
 
 /// 中央审计（尽力而为）：跳过高频元命令与审计查询自身，避免噪声/自指。
 async fn record_audit(app: &AppHandle, req: &Value, cmd: &str, resp: &Value) {
-    const SKIP: &[&str] = &["capabilities/list", "skills/list", "tools", "audit/reads"];
+    const SKIP: &[&str] = &["capabilities/list", "skills/list", "tools", "audit/reads", "audit/egress"];
     if SKIP.contains(&cmd) {
         return;
     }
