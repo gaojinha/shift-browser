@@ -607,7 +607,10 @@ pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
             }
         }
     } else {
-        for _ in 0..40 {
+        // 等就绪：必须**同时**满足 ① URL 已是 http/https（排除新标签初始的 about:blank）
+        // 与 ② readyState === complete。修复 2026-09-25：此前只看 readyState，
+        // about:blank 本身就是 complete → 立刻退出 → 读到空页面。
+        for _ in 0..50 {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             if let Some(p) = probe_page(app, &tab_id).await {
                 let rs = p
@@ -621,7 +624,9 @@ pub(super) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
                     }
                 }
                 ready_state = rs.clone();
-                if rs == "complete" {
+                let url_is_http =
+                    final_url.starts_with("http://") || final_url.starts_with("https://");
+                if url_is_http && rs == "complete" {
                     break;
                 }
             }
