@@ -4,9 +4,9 @@
 
 ShiftBrowser 是一款基于 **Tauri 2 + Rust + Vue 3** 的 AI 增强型桌面浏览器。它不是"又一个浏览器"，而是在 WebKitGTK 之上构建的、面向多任务与 AI 协作的个人工作空间：本地数据自持、AI 助手能读页面 / 调工具 / 在授权下执行任务、隐私能力可验证。
 
-**当前版本：v5.7.0**（平台：Linux / GTK）
+**当前版本：v5.8.0**（平台：Linux / GTK）
 
-> **v5.7.0 更新**：AI 侧边栏交互修复（✕ 可即时点击关闭、打开后立即响应鼠标，根因 GtkOverlay natural-size 布局）+ 应用图标全平台统一（关于页 / 桌面 / 托盘 / 打包图标同源同图）。
+> **v5.8.0 更新**：开放 API 页面读取能力全量落地——命令 26→43（`open_and_read` 原子读、`extract`/`reader`/`translate`/`snapshot`、交互七动作 `action/*`）；三层权限（只读放行 / 交互开关 / 内网 SSRF 入口+逐跳拦截）；标签来源治理（AI 标签不写历史、上限 10、`tabs/close_ai`）；审计持久化（`ai_audit`）。
 
 ---
 
