@@ -98,10 +98,128 @@ describe('整页汉化：注入脚本 DOM 行为', () => {
   })
 
   /**
-   * 回归：曾因 collect 的 cleanup 里 `delete n.__sbOrig` 造成原文永久丢失——
-   * 用户重复点汉化时备份被清掉，还原只能回到"上一轮译文"，回不到真原文。
-   * 已在 jsdom 手工复现过，这里锁死。
+   * 回归：段落里只要有内联标签（<a>/<span>/<b>），整段主体文字曾被整段漏掉。
+   *
+   * 旧实现只收"没有元素子节点的纯文本节点"，RFC 9110 实测 1708 段里 66% 是
+   * <20 字碎片、Abstract 整段一个字没收到（用户原话"汉化率不高、很多没翻"）。
+   * 现在按块级段落整段收。
+   *
+   * 2026-09-27 起内联标签不再被抹平：收集文本带 ⟦n⟧ 结构标记，markers 结构表
+   * 随段带回，写回时重建真实标签（链接翻完还能点）。
    */
+  it('回归：段落含内联标签也要整段收集（标签变 ⟦n⟧ 标记）', () => {
+    const p = makePage(
+      '<!doctype html><html><body>' +
+        '<p>The <span>HTTP</span> protocol is a stateless application-level protocol.</p>' +
+        '<li><a href="#x">1. Introduction</a></li>' +
+        '</body></html>',
+    )
+    const segs = p.collect().segments as Array<{
+      text: string
+      markers: Record<string, { tag: string; a: string[][] }> | null
+    }>
+    const para = segs.find((s) => s.text.includes('stateless'))!
+    // 整段正文都在，span 被替换成成对结构标记而不是被删掉
+    expect(para.text).toBe('The ⟦0⟧HTTP⟦/0⟧ protocol is a stateless application-level protocol.')
+    expect(para.markers).toEqual({ 0: { tag: 'span', a: [] } })
+    const li = segs.find((s) => s.text.includes('Introduction'))!
+    expect(li.text).toBe('⟦0⟧1. Introduction⟦/0⟧')
+    // 链接的 href 必须随结构表带走，写回时才能重建可点链接
+    expect(li.markers).toEqual({ 0: { tag: 'a', a: [['href', '#x']] } })
+  })
+
+  /** 写回：带标记的译文重建真实 <a>，链接位置可随译文语序移动 */
+  it('占位符写回：重建 <a href>，链接文本被翻译且仍可点', () => {
+    const p = makePage(
+      '<!doctype html><html><body><p>See the <a href="/x">manual</a> for details.</p></body></html>',
+    )
+    const origHtml = p.html()
+    const seg = p.collect().segments[0] as {
+      id: string; text: string
+      markers: Record<string, { tag: string; a: string[][] }>
+    }
+    expect(seg.text).toBe('See the ⟦0⟧manual⟦/0⟧ for details.')
+    const res = p.apply('apply', {
+      // 链接被挪到句首——模型有权调整语序，标记跟着走
+      pairs: [{ id: seg.id, orig: seg.text, translated: '⟦0⟧手册⟦/0⟧里有详情。', markers: seg.markers }],
+      attrs: [],
+    })
+    expect(res.applied).toBe(1)
+    expect(res.badMarkers ?? 0).toBe(0)
+    const a = p.html()
+    expect(a).toContain('href="/x"')
+    expect(a).toContain('>手册</a>')
+    expect(p.text()).toContain('里有详情')
+    // 还原：连链接带位置逐字节回来
+    p.apply('restore', null)
+    expect(p.html()).toBe(origHtml)
+  })
+
+  /** 自闭合标记：<br> 这种空元素用 ⟦n/⟧ 表示，写回后仍是换行 */
+  it('占位符写回：<br> 自闭合标记重建', () => {
+    const p = makePage(
+      '<!doctype html><html><body><p>Line one<br/>Line two</p></body></html>',
+    )
+    const seg = p.collect().segments[0] as { id: string; text: string; markers: unknown }
+    expect(seg.text).toBe('Line one⟦0/⟧Line two')
+    p.apply('apply', {
+      pairs: [{ id: seg.id, orig: seg.text, translated: '第一行⟦0/⟧第二行', markers: seg.markers }],
+      attrs: [],
+    })
+    const html = p.html()
+    expect(html).toMatch(/第一行<br\s*\/?>第二行/)
+  })
+
+  /**
+   * 安全回退：模型把标记弄丢/编号搞乱是常态。任何一种损坏都必须：
+   * 不动页面（原文保留）、applied 不计数、badMarkers 计数；备份仍可正常还原。
+   */
+  // 嵌套 a>b 的段落：map 里有两个 id，交叉/缺号这类深层损坏才能造出来
+  const NESTED_HTML =
+    '<!doctype html><html><body><p>Click <a href="/x"><b>here</b></a> now</p></body></html>'
+  it.each([
+    ['标记被整体删掉', '请点击这里'],
+    ['有开无闭', '⟦0⟧⟦1⟧这里⟦/1⟧现在'],
+    ['幻觉出不存在的 id', '⟦0⟧⟦1⟧这里⟦/1⟧⟦/0⟧⟦2⟧多余⟦/2⟧'],
+    ['嵌套交叉闭合', '⟦0⟧⟦1⟧x⟦/0⟧⟦/1⟧'],
+    ['闭标记 id 对不上', '⟦0⟧⟦1⟧x⟦/1⟧⟦/9⟧'],
+    ['空壳译文', '⟦0⟧⟦1⟧⟦/1⟧⟦/0⟧'],
+  ])('占位符损坏安全回退（%s）', (_name, translated) => {
+    const p = makePage(NESTED_HTML)
+    const origText = p.text()
+    const origHtml = p.html()
+    const seg = p.collect().segments[0] as { id: string; text: string; markers: unknown }
+    const res = p.apply('apply', {
+      pairs: [{ id: seg.id, orig: seg.text, translated, markers: seg.markers }],
+      attrs: [],
+    })
+    expect(res.applied).toBe(0)
+    expect(res.badMarkers).toBe(1)
+    // 页面一个字都不能被改动
+    expect(p.text()).toBe(origText)
+    // 即便损坏的是最后一条，也不能影响后续还原
+    expect(p.apply('restore', null).restored).toBeGreaterThanOrEqual(0)
+    expect(p.html()).toBe(origHtml)
+  })
+
+  /** 段落级写回：整段换成译文，还原靠 innerHTML 备份，内联标签一起回来 */
+  it('段落级写回 + 还原：内联标签与原文逐字节恢复', () => {
+    const p = makePage(
+      '<!doctype html><html><body><p>See the <a href="/x">manual</a> for details.</p></body></html>',
+    )
+    const origHtml = p.html()
+    const c = p.collect()
+    const seg = c.segments[0]
+    p.apply('apply', {
+      pairs: [{ id: seg.id, orig: seg.text, translated: '详见手册。' }],
+      attrs: [],
+    })
+    expect(p.text()).toContain('详见手册')
+    const rs = p.apply('restore', null)
+    expect(rs.restored).toBeGreaterThan(0)
+    // 连 <a href> 一起回到原样
+    expect(p.html()).toBe(origHtml)
+  })
   it('回归：连汉化三次不还原，最终还原仍回原文', () => {
     const p = makePage(PAGE)
     const orig = p.text()
@@ -132,5 +250,33 @@ describe('整页汉化：注入脚本 DOM 行为', () => {
     })
     expect(res.applied).toBe(0)
     expect(res.mismatched).toBe(1)
+  })
+
+  /**
+   * 2026-09-27：日文是"汉字+假名"混排（これは設定です）、韩文是谚文音节。
+   * 旧检测只数汉字，会把它们当中文跳过 → 日韩页面整页漏翻。
+   * 出现假名/谚文必须判为"需要汉化成中文"。
+   */
+  it('语种识别：日文假名/韩文谚文要翻，纯中文不翻', () => {
+    const p = makePage(
+      '<!doctype html><html><body>' +
+        '<p>これは設定です</p>' +
+        '<p>コードを保存する</p>' +
+        '<p>설정 화면입니다</p>' +
+        '<p>这是一个中文段落</p>' +
+        '<p>English needs translation</p>' +
+        '</body></html>',
+    )
+    const texts = p.collect().segments.map((s: { text: string }) => s.text)
+    // 平假名混汉字：收
+    expect(texts).toContain('これは設定です')
+    // 片假名：收
+    expect(texts).toContain('コードを保存する')
+    // 韩文：收
+    expect(texts).toContain('설정 화면입니다')
+    // 英文：照常收
+    expect(texts).toContain('English needs translation')
+    // 纯中文：不浪费一轮翻译
+    expect(texts).not.toContain('这是一个中文段落')
   })
 })

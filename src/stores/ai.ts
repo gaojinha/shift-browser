@@ -6,6 +6,23 @@ import { errText, invokeOk } from '../utils/invoke'
 import { useSettingsStore } from './settings'
 import type { Snapshot } from '../types/content'
 
+/**
+ * webzh 三件套命令（collect / apply / restore）统一返回 `{ok, msg, data}`，
+ * 与 api.sock 协议一致（见 webzh.rs 的 CollectResult / ApplyResult）。
+ *
+ * 坑一：`invokeOk` 只归一化错误、**不解包**。曾经直接写 `col.segments`，
+ * 实际拿到的是 `{ok,msg,data}`，`col.segments` 恒为 undefined，于是整页汉化
+ * 永远报"这页没找到需要翻译的文字"——而且只在真机会犯：api.sock 那条路协议层
+ * 会自动展开 `{ok,data}`，测试和手测全绿，前端链路一次没跑过。
+ * 坑二：`ok:false` 必须抛错。当成空数据的话，"收集失败"会被下游误判成
+ * "页面没文字"，提示驴唇不对马嘴。
+ */
+async function zhCall<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
+  const r = await invokeOk<{ ok?: boolean; msg?: string | null; data?: T }>(cmd, args)
+  if (!r || r.ok !== true) throw new Error(r?.msg || `${cmd} 失败`)
+  return r.data as T
+}
+
 export interface AIMessage {
   role: 'user' | 'assistant'
   content: string
@@ -74,8 +91,6 @@ interface AIState {
   zhApplied: boolean
   /** 取消汉化的开关：置 true 后当前批次做完就停 */
   zhCancel: boolean
-  /** 汉化会话 id：多批复用同一个 opencode 会话 */
-  zhSessionId: string | null
 }
 
 export const useAIStore = defineStore('ai', {
@@ -96,7 +111,6 @@ export const useAIStore = defineStore('ai', {
     zhProgress: null,
     zhApplied: false,
     zhCancel: false,
-    zhSessionId: null,
   }),
 
   actions: {
@@ -299,8 +313,17 @@ export const useAIStore = defineStore('ai', {
      * 编排逻辑放前端而不是 Rust：分批大小、并发、进度节奏都得随页面大小和
      * 实测速度调，写死后端每次调整都要重新出包。
      *
-     * 三步：收集 → 分批翻译 → 写回。中间任何一批失败都**继续往下走**，
-     * 不整页回滚——已经翻好的部分留在页面上，剩下的保留原文，比全白费强。
+     * 2026-09-27 速度优化（实测 opencode 云端每批固定开销 ~6s、边际 ~0.07s/段）：
+     * 1. 每批**独立会话** + 3 路 worker 并发——复用会话时历史 prefill 逐批滚雪球，
+     *    实测 6 路并发仅 1.36x，2-3 路性价比最高；视口首批在收集时已排最前，
+     *    worker 按批次顺序抢任务，首屏仍是最先翻完的。
+     * 2. 失败批自动**拆半重试**直到单条：一批 60 条里模型只吐了 50 条，
+     *    旧逻辑整批留原文；现在只补翻缺的 10 条。
+     * 3. SQLite 翻译记忆（模型维度）：同站常见短语（Submit/Settings…）命中即写，
+     *    连模型都不用问；换模型自动失效。
+     * 4. 收集期**预热**：模型名查询与 3 个独立会话在收集/查缓存期间就建好。
+     *
+     * 任何一批失败都继续往下走，不整页回滚——翻好的留在页面上，其余保留原文。
      */
     async translatePage(tabId?: string) {
       if (this.zhBusy) return
@@ -308,13 +331,26 @@ export const useAIStore = defineStore('ai', {
       this.zhBusy = true
       this.zhCancel = false
       this.zhProgress = null
-      // 每次汉化开新会话：上一轮的翻译历史留着只会拖慢、串味
-      this.zhSessionId = null
+
+      // 并发路数：实测 3 路是甜点（6 路只 1.36x，云端会话固定开销反而摊不平）
+      const CONC = 3
+      type Item = { id: string; text: string }
+      type Markers = Record<string, { tag: string; a: string[][] }>
+      type Seg = {
+        id: string; kind: string; text: string; chars: number
+        markers?: Markers | null
+      }
+
+      // 模型名（翻译记忆的隔离维度）与页面收集**并行**跑：一个本地请求、
+      // 一个 DOM 遍历，谁也不等谁。模型取不到 = 本轮禁用缓存（绝不用空名读写）。
+      const modelP = invokeOk<string>('opencode_translate_model')
+        .then((m) => (typeof m === 'string' ? m : ''))
+        .catch(() => '')
 
       try {
         // ---- 1. 收集 ----
-        const col = await invokeOk<{
-          segments: Array<{ id: string; kind: string; text: string; chars: number }>
+        const col = await zhCall<{
+          segments: Seg[]
           attrs: Array<{ id: string; attr: string; orig: string }>
           total: number
           attrTotal: number
@@ -329,108 +365,343 @@ export const useAIStore = defineStore('ai', {
           return
         }
 
-        // ---- 2. 分批（后端算分批方案，前后端口径一致）----
-        const items = [
+        const items: Item[] = [
           ...segs.map((s) => ({ id: s.id, text: s.text })),
           // 属性条目用 x 前缀 id，跟文本节点区分开；写回时分开处理
           ...attrs.map((a) => ({ id: a.id, text: a.orig })),
         ]
-        // data 是**批次的数组的数组**：Array<Array<条目>>。
-        // 写成 Array<条目[]> 读起来像前者、实际也是前者，但容易误改成后者，
-        // 后面 batches[bi] 就会拿到 undefined 而静默什么都不翻。这里写全。
-        const plan = await invokeOk<{ data: Array<Array<{ id: string; text: string }>> }>(
-          'plan_translate_batches',
-          { req: { items, page_title: col.title } },
-        )
-        const batches = plan.data || []
-        this.zhProgress = { done: 0, total: items.length, batch: 0, batches: batches.length, preview: '' }
-
-        // ---- 3. 逐批翻译 ----
-        const pairs: Array<{ id: string; orig: string; translated: string }> = []
-        const attrPairs: Array<{ attr: string; orig: string; translated: string }> = []
         const origById = new Map(items.map((i) => [i.id, i.text]))
         const attrMeta = new Map(attrs.map((a) => [a.id, a]))
-        // 超长段在分批时被切成 `原id.序号` 子块，先按整段 id 攒起译文，
-        // 等全部批次跑完再拼成整段写回（page_apply.js 仍按原 id 整段替换）
-        const textChunk = new Map<string, string>()
-        const attrChunk = new Map<string, string>()
-        let failed = 0
+        const markersById = new Map<string, Markers>()
+        for (const s of segs) if (s.markers) markersById.set(s.id, s.markers)
 
-        for (let bi = 0; bi < batches.length; bi++) {
-          if (this.zhCancel) break
+        const model = await modelP
+        const cacheOn = !!model
+
+        const lookupP: Promise<Array<{ id: string; text: string }>> = cacheOn
+          ? invokeOk<Array<{ id: string; text: string }>>('translate_memory_lookup', {
+              req: { model, items },
+            })
+              .then((h) => h ?? [])
+              .catch(() => [])
+          : Promise.resolve([])
+
+        // ---- 2. 过滤缓存命中 → 未命中分批（后端算分批，前后端口径一致）----
+        const hits = await lookupP
+        const hitIds = new Set<string>()
+        const cachePairs: Array<{ id: string; orig: string; translated: string; markers?: Markers }> = []
+        const cacheAttrs: Array<{ attr: string; orig: string; translated: string }> = []
+        for (const h of hits) {
+          const orig = origById.get(h.id)
+          if (orig === undefined || hitIds.has(h.id)) continue
+          hitIds.add(h.id)
+          if (h.text.trim() === orig.trim()) continue
+          const meta = attrMeta.get(h.id)
+          if (meta) cacheAttrs.push({ attr: meta.attr, orig: meta.orig, translated: h.text.trim() })
+          else {
+            const mk = markersById.get(h.id)
+            cachePairs.push(
+              mk
+                ? { id: h.id, orig, translated: h.text.trim(), markers: mk }
+                : { id: h.id, orig, translated: h.text.trim() },
+            )
+          }
+        }
+        const missItems = items.filter((i) => !hitIds.has(i.id))
+        // 预热与分批并行：确认有未命中段才建会话，全命中页不白带 3 个空会话。
+        // 预热失败无所谓：translateItems 拿不到就传 null，Rust 照常按需新建。
+        const warmP =
+          missItems.length === 0
+            ? Promise.resolve([] as string[])
+            : invokeOk<string[]>('opencode_translate_warmup', { want: CONC })
+                .then((s) => (Array.isArray(s) ? s.filter((x) => typeof x === 'string') : []))
+                .catch(() => [] as string[])
+        const batches =
+          missItems.length === 0
+            ? []
+            : await zhCall<Item[][]>('plan_translate_batches', {
+                req: { items: missItems, page_title: col.title },
+              })
+        const warmSessions = await warmP
+
+        this.zhProgress = {
+          done: cachePairs.length + cacheAttrs.length,
+          total: items.length,
+          batch: 0,
+          batches: batches.length,
+          preview: '',
+        }
+
+        // ---- 3. 共享状态：写回串行链 / 子块拼装表 / 计数 ----
+        let appliedTotal = 0
+        let mismatchedTotal = 0
+        let applyError: string | null = null
+        let done = cachePairs.length + cacheAttrs.length
+        let batchesDone = 0
+        let fatalMsg: string | null = null
+        // 本页新译文，收尾统一进翻译记忆（命中缓存的不重复写）
+        const rememberPairs: Array<{
+          id: string; orig: string; translated: string; markers?: Markers
+        }> = []
+
+        // 多个 worker 会同时翻完，但同一 webview 的 eval 写回必须串行：
+        // 两条写回交叉执行，备份/校验的时序就没法推理了。
+        let writeChain: Promise<void> = Promise.resolve()
+        const scheduleApply = (
+          pairs: typeof cachePairs,
+          attrs: typeof cacheAttrs,
+        ): Promise<void> => {
+          const run = writeChain
+            .then(async () => {
+              if (pairs.length === 0 && attrs.length === 0) return
+              const ap = await zhCall<{ applied: number; mismatched: number }>(
+                'page_apply_translation',
+                {
+                  tab_id: tabId ?? null,
+                  mode: 'apply',
+                  payload: { pairs, attrs },
+                },
+              )
+              appliedTotal += ap.applied || 0
+              mismatchedTotal += ap.mismatched || 0
+              if ((ap.applied || 0) > 0) this.zhApplied = true
+            })
+            .catch((e) => {
+              // 一批写回失败不拖垮后续批次（每批都是独立页面操作）
+              applyError = applyError || `部分译文写回失败：${String(e)}`
+            })
+          writeChain = run.then(
+            () => undefined,
+            () => undefined,
+          )
+          return run
+        }
+
+        // 缓存命中的译文立即贴到页面上——全命中时用户看到的是"秒翻"
+        await scheduleApply(cachePairs, cacheAttrs)
+
+        // 超长段在分批时被切成 `原id.序号` 子块：chunkSpec 记每个 base 的
+        // 有序子块 id，chunkParts 收到一块记一块，齐了就拼成整段写回。
+        const chunkSpec = new Map<string, string[]>()
+        for (const b of batches) {
+          for (const it of b) {
+            const dot = it.id.lastIndexOf('.')
+            if (dot === -1) continue
+            const base = it.id.slice(0, dot)
+            if (!origById.has(base)) continue
+            const arr = chunkSpec.get(base)
+            if (arr) arr.push(it.id)
+            else chunkSpec.set(base, [it.id])
+          }
+        }
+        const chunkParts = new Map<string, Map<number, string>>()
+        // 已拼成整段（或半截）写回过的超长段 id，扫尾时不重复处理
+        const chunkEmitted = new Set<string>()
+
+        /**
+         * 把整段译文转成"写回对"（文本/属性两条路）。
+         * 模型偶尔把译文写成原文（尤其短词）：白改一遍还引起页面重排，跳过。
+         */
+        const emitBase = (
+          baseId: string,
+          translated: string,
+        ): { pair?: (typeof cachePairs)[number]; attr?: (typeof cacheAttrs)[number] } => {
+          const orig = origById.get(baseId)!
+          if (translated.trim() === orig.trim()) return {}
+          const meta = attrMeta.get(baseId)
+          if (meta) {
+            return { attr: { attr: meta.attr, orig: meta.orig, translated } }
+          }
+          const mk = markersById.get(baseId)
+          return {
+            pair: mk
+              ? { id: baseId, orig, translated, markers: mk }
+              : { id: baseId, orig, translated },
+          }
+        }
+
+        /** 把一批模型结果分成"可立即写回的对"，子块齐了就拼成整段 */
+        const acceptResults = async (
+          got: Map<string, string>,
+          requested: Item[],
+        ): Promise<void> => {
+          const readyPairs: typeof cachePairs = []
+          const readyAttrs: typeof cacheAttrs = []
+          for (const r of requested) {
+            const t = got.get(r.id)
+            if (t === undefined) continue
+            const dot = r.id.lastIndexOf('.')
+            if (dot !== -1 && chunkSpec.has(r.id.slice(0, dot))) {
+              const base = r.id.slice(0, dot)
+              const idx = Number(r.id.slice(dot + 1))
+              let parts = chunkParts.get(base)
+              if (!parts) {
+                parts = new Map()
+                chunkParts.set(base, parts)
+              }
+              parts.set(idx, t.trim())
+              const spec = chunkSpec.get(base)!
+              if (parts.size < spec.length) continue
+              // 拼接顺序 == 分批顺序 == 原文顺序
+              const translated = spec
+                .map((cid) => parts!.get(Number(cid.slice(cid.lastIndexOf('.') + 1))) || '')
+                .join('')
+              const { pair, attr } = emitBase(base, translated)
+              chunkEmitted.add(base)
+              if (pair) {
+                readyPairs.push(pair)
+                rememberPairs.push(pair)
+              }
+              if (attr) {
+                readyAttrs.push(attr)
+                rememberPairs.push({ id: base, orig: origById.get(base)!, translated })
+              }
+              done++
+              continue
+            }
+            const { pair, attr } = emitBase(r.id, t.trim())
+            if (pair) {
+              readyPairs.push(pair)
+              rememberPairs.push(pair)
+            }
+            if (attr) {
+              readyAttrs.push(attr)
+              rememberPairs.push({ id: r.id, orig: origById.get(r.id)!, translated: t.trim() })
+            }
+            done++
+          }
+          // 每批翻完立刻贴：不用等整页跑完，视口首批在前，头几批贴完首屏就好
+          await scheduleApply(readyPairs, readyAttrs)
           this.zhProgress = {
             ...this.zhProgress!,
-            batch: bi + 1,
-            preview: batches[bi][0]?.text?.slice(0, 40) || '',
+            done,
+            batch: ++batchesDone,
           }
+        }
+
+        /**
+         * 翻译一组条目，返回 id → 译文（缺的不出现）。
+         *
+         * 每次调用都用**独立会话**（预热池里取一个，取不到就让 Rust 新建）：
+         * 会话历史不复用 = 没有逐批 prefill 滚雪球。
+         * 缺项自动拆半递归重试，直到单条——只补真正没翻出来的，不重复花钱。
+         */
+        const translateItems = async (itemsB: Item[]): Promise<Map<string, string>> => {
+          const out = new Map<string, string>()
           let res: {
-            data: Array<{ id: string; text: string }> | null
-            msg: string | null
-            session_id?: string | null
+            data?: Array<{ id: string; text: string }> | null
           }
           try {
-            res = await invokeOk('opencode_translate_batch', {
+            res = await invokeOk<{
+              ok?: boolean
+              msg?: string | null
+              data?: Array<{ id: string; text: string }> | null
+            }>('opencode_translate_batch', {
               req: {
-                items: batches[bi],
+                items: itemsB,
                 page_title: col.title,
-                session_id: this.zhSessionId,
+                // 预热会话一个只用一次；消费完即弃，绝不复用成"长会话"
+                session_id: warmSessions.shift() ?? null,
               },
             })
           } catch (e) {
-            // 网络/凭据层面的硬错：重试也是白试，直接中止
-            this.error = `第 ${bi + 1}/${batches.length} 批翻译失败：${String(e)}`
-            failed = batches.length
-            break
+            // 传输/凭据层硬错：拆半重试也是白试，向上抛给 worker 中止
+            throw new Error(String(e))
           }
-          if (res.session_id) this.zhSessionId = res.session_id
-          const got = res.data || []
-          if (got.length === 0) failed++
-          for (const g of got) {
-            // 超长段在分批时被切成 `原id.序号` 的子块，这里按子块收，
-            // 稍后统一拼回整段。
-            const dot = g.id.lastIndexOf('.')
-            const baseId = dot === -1 ? g.id : g.id.slice(0, dot)
-            const orig = origById.get(baseId)
-            if (orig === undefined) continue
-            // 模型偶尔把译文写成原文（尤其短词），白改一遍还可能把
-            // 页面搞得更难看（长度变化引起重排）。原样跳过。
-            if (g.text.trim() === orig.trim()) continue
-            const meta = attrMeta.get(baseId)
-            if (meta) {
-              attrChunk.set(baseId, (attrChunk.get(baseId) || '') + g.text.trim())
-            } else {
-              textChunk.set(baseId, (textChunk.get(baseId) || '') + g.text.trim())
+          for (const g of res?.data || []) out.set(g.id, g.text)
+          if (this.zhCancel) return out
+          const missing = itemsB.filter((i) => !out.has(i.id))
+          if (missing.length === 0 || itemsB.length === 1) return out
+          // 拆半重试：两瓣串行，避免重试请求和正常批次的并发叠加成风暴
+          const half = Math.ceil(missing.length / 2)
+          const a = await translateItems(missing.slice(0, half))
+          a.forEach((v, k) => {
+            if (!out.has(k)) out.set(k, v)
+          })
+          if (this.zhCancel) return out
+          const b = await translateItems(missing.slice(half))
+          b.forEach((v, k) => {
+            if (!out.has(k)) out.set(k, v)
+          })
+          return out
+        }
+
+        // ---- 4. worker 池：按批次顺序抢任务（视口首批天然先被抢到）----
+        let cursor = 0
+        const stripPreview = (s: string) => s.replace(/⟦[^⟧]*⟧/g, '').slice(0, 40)
+        const worker = async () => {
+          while (!fatalMsg && !this.zhCancel) {
+            const bi = cursor++
+            if (bi >= batches.length) return
+            this.zhProgress = {
+              ...this.zhProgress!,
+              preview: stripPreview(batches[bi][0]?.text || ''),
             }
+            let got: Map<string, string>
+            try {
+              got = await translateItems(batches[bi])
+            } catch (e) {
+              fatalMsg = `第 ${bi + 1}/${batches.length} 批翻译失败：${String(e)}`
+              return
+            }
+            await acceptResults(got, batches[bi])
           }
-          this.zhProgress = { ...this.zhProgress!, done: this.zhProgress!.done + got.length }
+        }
+        await Promise.all(
+          Array.from({ length: Math.min(CONC, Math.max(batches.length, 1)) }, () => worker()),
+        )
+
+        // 超长段拆半重试后仍缺子块：按旧契约把**已翻到的部分**先拼起来贴上
+        // （有半截译文也比整段留原文强）。缺失位置留空，不补原文；不进翻译记忆，
+        // 避免把半截译文当成整段权威译文缓存。
+        const partialPairs: typeof cachePairs = []
+        const partialAttrs: typeof cacheAttrs = []
+        for (const [base, spec] of chunkSpec) {
+          if (chunkEmitted.has(base)) continue
+          const parts = chunkParts.get(base)
+          if (!parts || parts.size === 0) continue
+          const translated = spec
+            .map((cid) => parts.get(Number(cid.slice(cid.lastIndexOf('.') + 1))) || '')
+            .join('')
+          const { pair, attr } = emitBase(base, translated)
+          chunkEmitted.add(base)
+          if (pair) partialPairs.push(pair)
+          if (attr) partialAttrs.push(attr)
+          done++
+        }
+        await scheduleApply(partialPairs, partialAttrs)
+        // 等所有排队中的 DOM 写回落袋
+        await writeChain
+
+        // ---- 5. 新译文入翻译记忆（失败静默：缓存只是加速，不影响本轮结果）----
+        if (cacheOn && rememberPairs.length > 0) {
+          try {
+            await invokeOk<number>('translate_memory_remember', {
+              req: { model, pairs: rememberPairs },
+            })
+          } catch {
+            // 记日志是后端的事，前端不打扰用户
+          }
         }
 
-        // 超长段的子块译文已在循环里按整段 id 拼好，这里取出成 pairs。
-        // 拼接顺序 == 翻译请求里的顺序 == 原文顺序。
-        for (const [id, translated] of textChunk) {
-          pairs.push({ id, orig: origById.get(id)!, translated })
-        }
-        for (const [id, translated] of attrChunk) {
-          const meta = attrMeta.get(id)!
-          attrPairs.push({ attr: meta.attr, orig: meta.orig, translated })
-        }
-
-        // ---- 4. 写回页面 ----
-        if (pairs.length > 0 || attrPairs.length > 0) {
-          const ap = await invokeOk<{ applied: number; mismatched: number }>(
-            'page_apply_translation',
-            { tab_id: tabId ?? null, mode: 'apply', payload: { pairs, attrs: attrPairs } },
-          )
-          this.zhApplied = (ap.applied || 0) > 0
-          const skippedNote = ap.mismatched ? `（${ap.mismatched} 处页面已变动，跳过）` : ''
+        // ---- 6. 收尾汇报 ----
+        if (fatalMsg) this.error = fatalMsg
+        if (applyError && !fatalMsg) this.error = applyError
+        const failedCount = items.length - done
+        if (appliedTotal > 0 || cachePairs.length > 0 || cacheAttrs.length > 0) {
+          const hitNote =
+            cachePairs.length + cacheAttrs.length > 0
+              ? `（其中 ${cachePairs.length + cacheAttrs.length} 处来自本地翻译记忆）`
+              : ''
+          const skippedNote = mismatchedTotal ? `（${mismatchedTotal} 处页面已变动，跳过）` : ''
           this.messages.push({
             role: 'assistant',
             content:
-              `已汉化本页：${ap.applied} 处${skippedNote}。` +
-              (failed ? `另有 ${failed} 批没翻出来，保留原文。` : '') +
+              `已汉化本页：${appliedTotal} 处${hitNote}${skippedNote}。` +
+              (failedCount > 0 ? `另有 ${failedCount} 处没翻出来，保留原文。` : '') +
               (this.zhCancel ? '已按你的要求停下。' : ''),
           })
-        } else {
+        } else if (!fatalMsg) {
           this.error = '这批一句都没翻出来，页面保持原样。多半是页面本身没问题。'
         }
       } catch (e) {
@@ -442,17 +713,62 @@ export const useAIStore = defineStore('ai', {
       }
     },
 
+    /**
+     * 翻译页面上选中的一段文字（不整页）。
+     *
+     * 走的是和整页汉化同一套 opencode 翻译链路（独立"网页汉化"会话），
+     * 区别只在于：输入是选区那一段，输出贴在对话框里，**不动页面 DOM**。
+     * 选不中或落在密码区就拿不到内容，直接给提示，不发请求。
+     */
+    async translateSelection(tabId?: string) {
+      if (this.zhBusy) return
+      this.error = null
+      await this.captureSelection(tabId)
+      const sel = this.selection
+      if (!sel || !sel.text.trim()) {
+        if (!this.error) this.error = '没读到选中内容——先在页面上选中要翻译的文字，再点这里。'
+        return
+      }
+      const text = sel.text.trim()
+      this.messages.push({
+        role: 'user',
+        content: `翻译选中内容（${text.length} 字）`,
+      })
+      try {
+        const res = await invokeOk<{
+          ok: boolean
+          msg?: string | null
+          data?: Array<{ id: string; text: string }> | null
+          session_id?: string | null
+        }>('opencode_translate_batch', {
+          req: {
+            items: [{ id: 's0', text }],
+            page_title: sel.title || null,
+            // 翻译选中是临时一次性请求，用新会话，不污染整页汉化的进度会话
+            session_id: null,
+          },
+        })
+        const got = res?.data || []
+        if (got.length === 0) {
+          this.error = res?.msg || '这段没翻出来，换一段再试。'
+          return
+        }
+        this.messages.push({ role: 'assistant', content: got[0].text })
+      } catch (e) {
+        this.error = `翻译选中内容失败：${String(e)}`
+      }
+    },
+
     /** 还原当前页原文（DOM 改回去了） */
     async restorePage(tabId?: string) {
       if (this.zhBusy) return
       try {
-        const r = await invokeOk<{ restored: number }>('page_apply_translation', {
+        const r = await zhCall<{ restored: number }>('page_apply_translation', {
           tab_id: tabId ?? null,
           mode: 'restore',
           payload: null,
         })
         this.zhApplied = false
-        this.zhSessionId = null
         this.messages.push({
           role: 'assistant',
           content: `已还原原文 ${r.restored} 处。`,

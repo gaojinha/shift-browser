@@ -158,3 +158,109 @@ async fn live_真页面片段翻译落盘() {
     std::fs::write("/tmp/opencode/translated.json", &out).expect("落盘");
     println!("  已写 /tmp/opencode/translated.json");
 }
+
+/// 同会话连续翻多批——**真机就是这个路径**：前端第一批新建会话，后续批次
+/// 复用同一个 session_id。会话里一旦有历史消息，baseline 取错就会把本批
+/// 新消息当成历史回放丢掉，表现为"模型输出无法解析"（空串）。
+///
+/// 这个测试盯的就是 `ask_once` 里 baseline 的取值时机：必须在 POST 之前。
+#[tokio::test]
+#[ignore]
+async fn live_同会话连翻多批都拿到译文() {
+    let http = webqa::client_pub(&creds()).expect("建 HTTP 客户端");
+    let base = webqa::base_url_pub();
+    let (sid, _) = webqa::ensure_session_pub(&http, None, "网页汉化多批")
+        .await
+        .expect("建汉化会话");
+    for round in 0..5 {
+        let items = vec![BatchItem {
+            id: format!("t{round}"),
+            text: format!("Round {round}: the server returned an error."),
+        }];
+        let prompt = webzh::build_translate_prompt_pub(&items, Some("test"));
+        let raw = webqa::ask_once(&http, &base, &sid, webqa::DEFAULT_AGENT, &prompt, 60)
+            .await
+            .expect("发翻译请求");
+        let got = webzh::parse_translate_response_pub(&raw, &items);
+        println!("  第 {round} 批：raw {} 字，解析 {} 条", raw.chars().count(), got.len());
+        assert!(
+            !got.is_empty(),
+            "第 {round} 批没拿到译文（{} 字）——baseline 大概率把本批新消息当历史丢了",
+            raw.chars().count()
+        );
+    }
+}
+
+/// 提速基准：顺序 6 批 vs 并发 6 批（各用独立会话，避免同会话事件乱序）。
+/// 并发是否有效取决于本机 opencode 能不能并行推理——本地模型常常单线程，
+/// 那就只能靠"批次调大"省往返，不能靠并发。先量，再改。
+#[tokio::test]
+#[ignore]
+async fn live_并发提速对比() {
+    use std::time::Instant;
+    let http = webqa::client_pub(&creds()).expect("client");
+    let base = webqa::base_url_pub();
+    let mk = |r: usize| vec![BatchItem {
+        id: format!("t{r}"),
+        text: format!("Round {r}: the server returned an error when posting the request."),
+    }];
+
+    let (sid, _) = webqa::ensure_session_pub(&http, None, "提速顺序")
+        .await.expect("建会话");
+    let t0 = Instant::now();
+    for r in 0..6 {
+        let items = mk(r);
+        let prompt = webzh::build_translate_prompt_pub(&items, Some("bench"));
+        let _ = webqa::ask_once(&http, &base, &sid, webqa::DEFAULT_AGENT, &prompt, 120)
+            .await.expect("顺序批");
+    }
+    let seq = t0.elapsed();
+
+    let t1 = Instant::now();
+    let mut futs = Vec::new();
+    for r in 0..6 {
+        let http = http.clone();
+        let base = base.clone();
+        futs.push(tokio::spawn(async move {
+            let (sid, _) = webqa::ensure_session_pub(&http, None, "提速并发")
+                .await.expect("建会话");
+            let items = mk(r);
+            let prompt = webzh::build_translate_prompt_pub(&items, Some("bench"));
+            webqa::ask_once(&http, &base, &sid, webqa::DEFAULT_AGENT, &prompt, 120)
+                .await.expect("并发批")
+        }));
+    }
+    for f in futs { let _ = f.await; }
+    let par = t1.elapsed();
+
+    println!("顺序 6 批: {seq:?}  ({:?}/批)", seq / 6);
+    println!("并发 6 批: {par:?}  ({:?}/批)", par / 6);
+}
+
+/// 批大小 vs 单批耗时：判断时间花在"固定开销"还是"推理量"上。
+/// 若 1 段和 60 段耗时接近 → 固定开销主导 → 批次调大直接省时间。
+#[tokio::test]
+#[ignore]
+async fn live_批大小对单批耗时影响() {
+    use std::time::Instant;
+    // 每批必须用独立会话，否则同一会话里上下文越滚越大，测不准
+    for n in [1usize, 5, 15, 30, 60] {
+        let http = webqa::client_pub(&creds()).expect("client");
+        let base = webqa::base_url_pub();
+        let items: Vec<BatchItem> = (0..n)
+            .map(|i| BatchItem {
+                id: format!("t{i}"),
+                text: format!("Paragraph {i}: the client must not reuse a connection after the server closes it."),
+            })
+            .collect();
+        let (sid, _) = webqa::ensure_session_pub(&http, None, "批量基准").await.expect("会话");
+        let prompt = webzh::build_translate_prompt_pub(&items, Some("bench"));
+        let t = Instant::now();
+        let raw = webqa::ask_once(&http, &base, &sid, webqa::DEFAULT_AGENT, &prompt, 180)
+            .await.expect("批");
+        let el = t.elapsed();
+        let got = webzh::parse_translate_response_pub(&raw, &items).len();
+        println!("  {n:>2} 段: {el:>8.2?}  解析 {got}/{n}");
+    }
+}
+

@@ -413,23 +413,44 @@ describe('整页汉化', () => {
 
   function mockHappy() {
     mockDefaultInvoke()
+    // mock 必须照抄后端**真实**返回结构（webzh.rs 的 {ok,msg,data} 包装）。
+    // 之前 mock 返回裸 {segments...}，前端也按裸的写，测试全绿、真机全挂——
+    // 因为 invokeOk 不解包，前端拿到的其实是 {ok,msg,data}。mock 一旦"美化"
+    // 契约，就只是在自证清白。
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === 'page_collect_translatable')
         return Promise.resolve({
-          segments: SEGS,
-          attrs: ATTRS,
-          total: 2,
-          attrTotal: 1,
-          skipped: 7,
-          title: 'Demo Page',
+          ok: true,
+          msg: null,
+          data: {
+            segments: SEGS,
+            attrs: ATTRS,
+            total: 2,
+            attrTotal: 1,
+            skipped: 7,
+            title: 'Demo Page',
+          },
         })
+      if (cmd === 'opencode_translate_model')
+        // CommandResult<String>：成功时是裸字符串，不是 {ok,data} 包装
+        return Promise.resolve('opencode/big-pickle')
+      if (cmd === 'opencode_translate_warmup')
+        // 默认不预热：每批 session_id 应为 null（Rust 按需建会话）
+        return Promise.resolve([])
+      if (cmd === 'translate_memory_lookup')
+        // CommandResult<Vec<BatchItem>>：裸数组；空 = 全 miss
+        return Promise.resolve([])
+      if (cmd === 'translate_memory_remember') return Promise.resolve(0)
       if (cmd === 'plan_translate_batches')
-        // 真实结构：data 是 BatchItem[][]（批次的数组的数组）
+        // 真实结构：{ok, data: BatchItem[][]}（data 是批次的数组的数组）
         return Promise.resolve({
+          ok: true,
           data: [[{ id: 't0', text: 'Submit' }, { id: 't1', text: 'Cancel' }, { id: 'x0', text: 'Close window' }]],
         })
       if (cmd === 'opencode_translate_batch')
         return Promise.resolve({
+          ok: true,
+          msg: null,
           data: [
             { id: 't0', text: '提交' },
             { id: 't1', text: '取消' },
@@ -437,7 +458,8 @@ describe('整页汉化', () => {
           ],
           session_id: 'ses_zh',
         })
-      if (cmd === 'page_apply_translation') return Promise.resolve({ applied: 3, mismatched: 0 })
+      if (cmd === 'page_apply_translation')
+        return Promise.resolve({ ok: true, msg: null, data: { applied: 3, mismatched: 0 } })
       return Promise.resolve(undefined)
     })
   }
@@ -482,12 +504,12 @@ describe('整页汉化', () => {
     mockDefaultInvoke()
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === 'page_collect_translatable')
-        return Promise.resolve({ segments: SEGS, attrs: [], total: 2, attrTotal: 0, skipped: 0, title: 'T' })
-      if (cmd === 'plan_translate_batches') return Promise.resolve({ data: [SEGS] })
+        return Promise.resolve({ ok: true, msg: null, data: { segments: SEGS, attrs: [], total: 2, attrTotal: 0, skipped: 0, title: 'T' } })
+      if (cmd === 'plan_translate_batches') return Promise.resolve({ ok: true, data: [SEGS] })
       if (cmd === 'opencode_translate_batch')
         // 模型原样吐回英文：等于没翻
-        return Promise.resolve({ data: [{ id: 't0', text: 'Submit' }, { id: 't1', text: 'Cancel' }] })
-      if (cmd === 'page_apply_translation') return Promise.resolve({ applied: 0, mismatched: 0 })
+        return Promise.resolve({ ok: true, msg: null, data: [{ id: 't0', text: 'Submit' }, { id: 't1', text: 'Cancel' }] })
+      if (cmd === 'page_apply_translation') return Promise.resolve({ ok: true, msg: null, data: { applied: 0, mismatched: 0 } })
       return Promise.resolve(undefined)
     })
     const ai = useAIStore()
@@ -504,17 +526,17 @@ describe('整页汉化', () => {
     let batch = 0
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === 'page_collect_translatable')
-        return Promise.resolve({ segments: SEGS, attrs: [], total: 2, attrTotal: 0, skipped: 0, title: 'T' })
+        return Promise.resolve({ ok: true, msg: null, data: { segments: SEGS, attrs: [], total: 2, attrTotal: 0, skipped: 0, title: 'T' } })
       if (cmd === 'plan_translate_batches')
-        return Promise.resolve({ data: [[SEGS[0]], [SEGS[1]]] })
+        return Promise.resolve({ ok: true, data: [[SEGS[0]], [SEGS[1]]] })
       if (cmd === 'opencode_translate_batch') {
         batch++
         // 第二批翻不出来（返回空），第一批正常
         return Promise.resolve(
-          batch === 1 ? { data: [{ id: 't0', text: '提交' }], session_id: 's' } : { data: [] },
+          batch === 1 ? { ok: true, data: [{ id: 't0', text: '提交' }], session_id: 's' } : { ok: true, data: [] },
         )
       }
-      if (cmd === 'page_apply_translation') return Promise.resolve({ applied: 1, mismatched: 0 })
+      if (cmd === 'page_apply_translation') return Promise.resolve({ ok: true, msg: null, data: { applied: 1, mismatched: 0 } })
       return Promise.resolve(undefined)
     })
     const ai = useAIStore()
@@ -530,7 +552,7 @@ describe('整页汉化', () => {
     mockDefaultInvoke()
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === 'page_collect_translatable')
-        return Promise.resolve({ segments: [], attrs: [], total: 0, attrTotal: 0, skipped: 30, title: 'T' })
+        return Promise.resolve({ ok: true, msg: null, data: { segments: [], attrs: [], total: 0, attrTotal: 0, skipped: 30, title: 'T' } })
       return Promise.resolve(undefined)
     })
     const ai = useAIStore()
@@ -544,7 +566,7 @@ describe('整页汉化', () => {
   it('还原走 mode=restore 并清掉已汉化标记', async () => {
     mockDefaultInvoke()
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === 'page_apply_translation') return Promise.resolve({ restored: 5 })
+      if (cmd === 'page_apply_translation') return Promise.resolve({ ok: true, msg: null, data: { restored: 5 } })
       return Promise.resolve(undefined)
     })
     const ai = useAIStore()
@@ -555,12 +577,179 @@ describe('整页汉化', () => {
     expect(ai.zhApplied).toBe(false)
   })
 
-  it('每轮汉化重置会话：上轮翻译历史不串进这轮', async () => {
+  it('每批独立会话：预热池为空时 session_id 恒为 null（不复用长会话）', async () => {
     mockHappy()
     const ai = useAIStore()
-    ai.zhSessionId = 'ses_old'
     await ai.translatePage('tab-1')
-    expect(ai.zhSessionId).toBe('ses_zh')
+    const batchCalls = invokeMock.mock.calls.filter((c) => c[0] === 'opencode_translate_batch')
+    expect(batchCalls.length).toBeGreaterThan(0)
+    for (const c of batchCalls) {
+      expect(c[1].req.session_id).toBeNull()
+    }
+  })
+
+  it('预热会话被每批一次性消费，绝不复用成第二批', async () => {
+    mockHappy()
+    const zh: Record<string, string> = { t0: '提交', t1: '取消' }
+    invokeMock.mockImplementation(
+      (cmd: string, args?: { req?: { items: Array<{ id: string }> } }) => {
+        if (cmd === 'page_collect_translatable')
+          return Promise.resolve({
+            ok: true, msg: null,
+            data: { segments: SEGS, attrs: [], total: 2, attrTotal: 0, skipped: 0, title: 'T' },
+          })
+        if (cmd === 'opencode_translate_warmup')
+          return Promise.resolve(['ses_w0', 'ses_w1', 'ses_w2'])
+        if (cmd === 'translate_memory_lookup') return Promise.resolve([])
+        if (cmd === 'translate_memory_remember') return Promise.resolve(0)
+        // 两批：第一批消费 ses_w0，第二批消费 ses_w1；ses_w2 闲置也不许回头复用
+        if (cmd === 'plan_translate_batches')
+          return Promise.resolve({ ok: true, data: [[SEGS[0]], [SEGS[1]]] })
+        if (cmd === 'opencode_translate_batch') {
+          const data = args!.req!.items.map((i) => ({ id: i.id, text: zh[i.id] }))
+          return Promise.resolve({ ok: true, msg: null, data })
+        }
+        if (cmd === 'page_apply_translation')
+          return Promise.resolve({ ok: true, msg: null, data: { applied: 1, mismatched: 0 } })
+        return Promise.resolve(undefined)
+      },
+    )
+    const ai = useAIStore()
+    await ai.translatePage('tab-1')
+    const sids = invokeMock.mock.calls
+      .filter((c) => c[0] === 'opencode_translate_batch')
+      .map((c) => c[1].req.session_id)
+    expect(sids).toContain('ses_w0')
+    expect(sids).toContain('ses_w1')
+    // 两个会话各出现一次
+    expect(sids.filter((s) => s === 'ses_w0')).toHaveLength(1)
+    expect(sids.filter((s) => s === 'ses_w1')).toHaveLength(1)
+  })
+
+  it('翻译记忆：命中段直接写回、不进批次；新译文收尾入记忆', async () => {
+    mockHappy()
+    const MARK = { 0: { tag: 'a', a: [['href', '/x']] } }
+    invokeMock.mockImplementation(
+      (cmd: string, args?: { req?: { items: Array<{ id: string }> } }) => {
+      if (cmd === 'page_collect_translatable')
+        return Promise.resolve({
+          ok: true, msg: null,
+          data: {
+            // t0 带 markers：缓存译文写回时结构表必须透传
+            segments: [
+              { id: 't0', kind: 'b', text: 'Submit', chars: 6, markers: MARK },
+              SEGS[1],
+            ],
+            attrs: [], total: 2, attrTotal: 0, skipped: 0, title: 'T',
+          },
+        })
+      if (cmd === 'opencode_translate_model') return Promise.resolve('opencode/big-pickle')
+      if (cmd === 'opencode_translate_warmup') return Promise.resolve([])
+      if (cmd === 'translate_memory_lookup')
+        return Promise.resolve([{ id: 't0', text: '提交' }])
+      if (cmd === 'translate_memory_remember') return Promise.resolve(1)
+      if (cmd === 'plan_translate_batches')
+        // 只有未命中的 t1 进批次
+        return Promise.resolve({ ok: true, data: [[{ id: 't1', text: 'Cancel' }]] })
+      if (cmd === 'opencode_translate_batch') {
+        // 防御：命中的 t0 绝不能再发给模型
+        expect(args!.req!.items.map((i) => i.id)).not.toContain('t0')
+        return Promise.resolve({ ok: true, msg: null, data: [{ id: 't1', text: '取消' }] })
+      }
+      if (cmd === 'page_apply_translation')
+        return Promise.resolve({ ok: true, msg: null, data: { applied: 2, mismatched: 0 } })
+      return Promise.resolve(undefined)
+      },
+    )
+    const ai = useAIStore()
+    await ai.translatePage('tab-1')
+
+    // 第一次写回就是缓存命中的 t0，且 markers 跟着走
+    const applyCalls = invokeMock.mock.calls.filter((c) => c[0] === 'page_apply_translation')
+    const firstPairs = applyCalls[0][1].payload.pairs
+    expect(firstPairs).toEqual([
+      { id: 't0', orig: 'Submit', translated: '提交', markers: MARK },
+    ])
+    // remember 只收新译文 t1，缓存命中的 t0 不重复写
+    const remCall = invokeMock.mock.calls.find((c) => c[0] === 'translate_memory_remember')
+    const remIds = remCall![1].req.pairs.map((p: { id: string }) => p.id)
+    expect(remIds).toEqual(['t1'])
+    // 汇报里告诉用户多少处来自本地记忆
+    expect(ai.messages[ai.messages.length - 1].content).toContain('本地翻译记忆')
+  })
+
+  it('翻译记忆：全命中时不建会话、不调模型，直接秒翻', async () => {
+    mockHappy()
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'page_collect_translatable')
+        return Promise.resolve({
+          ok: true, msg: null,
+          data: { segments: SEGS, attrs: [], total: 2, attrTotal: 0, skipped: 0, title: 'T' },
+        })
+      if (cmd === 'opencode_translate_model') return Promise.resolve('m1')
+      if (cmd === 'translate_memory_lookup')
+        return Promise.resolve([
+          { id: 't0', text: '提交' },
+          { id: 't1', text: '取消' },
+        ])
+      if (cmd === 'page_apply_translation')
+        return Promise.resolve({ ok: true, msg: null, data: { applied: 2, mismatched: 0 } })
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    await ai.translatePage('tab-1')
+    const cmds = invokeMock.mock.calls.map((c) => c[0])
+    expect(cmds).not.toContain('opencode_translate_batch')
+    expect(cmds).not.toContain('opencode_translate_warmup')
+    expect(cmds).not.toContain('plan_translate_batches')
+    expect(cmds).not.toContain('translate_memory_remember')
+  })
+
+  it('拆半重试：整批缺项时只补翻缺的，补回的照样写页面', async () => {
+    mockHappy()
+    const FOUR = ['a', 'b', 'c', 'd'].map((x, i) => ({ id: `t${i}`, text: `Word${x}` }))
+    invokeMock.mockImplementation((cmd: string, args?: { req?: { items: Array<{ id: string }> } }) => {
+      if (cmd === 'page_collect_translatable')
+        return Promise.resolve({
+          ok: true, msg: null,
+          data: {
+            segments: FOUR.map((f) => ({ id: f.id, kind: 't', text: f.text, chars: 5 })),
+            attrs: [], total: 4, attrTotal: 0, skipped: 0, title: 'T',
+          },
+        })
+      if (cmd === 'opencode_translate_model') return Promise.resolve('m1')
+      if (cmd === 'opencode_translate_warmup') return Promise.resolve([])
+      if (cmd === 'translate_memory_lookup') return Promise.resolve([])
+      if (cmd === 'translate_memory_remember') return Promise.resolve(4)
+      if (cmd === 'plan_translate_batches') return Promise.resolve({ ok: true, data: [FOUR] })
+      if (cmd === 'opencode_translate_batch') {
+        const ids = args!.req!.items.map((i) => i.id).sort()
+        // 首次整批：模型只吐回 t0/t1；重试两瓣各补一个
+        if (ids.join(',') === 't0,t1,t2,t3')
+          return Promise.resolve({
+            ok: true, msg: null,
+            data: [{ id: 't0', text: '甲' }, { id: 't1', text: '乙' }],
+          })
+        if (ids.join(',') === 't2')
+          return Promise.resolve({ ok: true, msg: null, data: [{ id: 't2', text: '丙' }] })
+        if (ids.join(',') === 't3')
+          return Promise.resolve({ ok: true, msg: null, data: [{ id: 't3', text: '丁' }] })
+        return Promise.resolve({ ok: true, msg: null, data: [] })
+      }
+      if (cmd === 'page_apply_translation')
+        return Promise.resolve({ ok: true, msg: null, data: { applied: 4, mismatched: 0 } })
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    await ai.translatePage('tab-1')
+    const appliedIds = invokeMock.mock.calls
+      .filter((c) => c[0] === 'page_apply_translation')
+      .flatMap((c) => c[1].payload.pairs.map((p: { id: string }) => p.id))
+      .sort()
+    // 四个全写回：后两个是拆半重试补回来的
+    expect(appliedIds).toEqual(['t0', 't1', 't2', 't3'])
+    // 汇报里没有"保留原文"
+    expect(ai.messages[ai.messages.length - 1].content).not.toContain('保留原文')
   })
 })
 
@@ -573,20 +762,25 @@ describe('整页汉化：超长段分段翻译', () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === 'page_collect_translatable')
         return Promise.resolve({
-          segments: [{ id: 't0', kind: 't', text: LONG, chars: 5000 }],
-          attrs: [],
-          total: 1,
-          attrTotal: 0,
-          skipped: 0,
-          title: 'Long',
+          ok: true, msg: null,
+          data: {
+            segments: [{ id: 't0', kind: 't', text: LONG, chars: 5000 }],
+            attrs: [],
+            total: 1,
+            attrTotal: 0,
+            skipped: 0,
+            title: 'Long',
+          },
         })
       if (cmd === 'plan_translate_batches')
         // Rust 切成的子块：t0.0 / t0.1 / t0.2
         return Promise.resolve({
+          ok: true,
           data: [[{ id: 't0.0', text: 'AAAA' }, { id: 't0.1', text: 'BBBB' }, { id: 't0.2', text: 'CCCC' }]],
         })
       if (cmd === 'opencode_translate_batch')
         return Promise.resolve({
+          ok: true, msg: null,
           data: [
             { id: 't0.0', text: '第一块' },
             { id: 't0.1', text: '第二块' },
@@ -594,7 +788,7 @@ describe('整页汉化：超长段分段翻译', () => {
           ],
           session_id: 's',
         })
-      if (cmd === 'page_apply_translation') return Promise.resolve({ applied: 1, mismatched: 0 })
+      if (cmd === 'page_apply_translation') return Promise.resolve({ ok: true, msg: null, data: { applied: 1, mismatched: 0 } })
       return Promise.resolve(undefined)
     })
     const ai = useAIStore()
@@ -613,19 +807,66 @@ describe('整页汉化：超长段分段翻译', () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === 'page_collect_translatable')
         return Promise.resolve({
-          segments: [{ id: 't0', kind: 't', text: 'y'.repeat(5000), chars: 5000 }],
-          attrs: [], total: 1, attrTotal: 0, skipped: 0, title: 'Long',
+          ok: true, msg: null,
+          data: {
+            segments: [{ id: 't0', kind: 't', text: 'y'.repeat(5000), chars: 5000 }],
+            attrs: [], total: 1, attrTotal: 0, skipped: 0, title: 'Long',
+          },
         })
       if (cmd === 'plan_translate_batches')
-        return Promise.resolve({ data: [[{ id: 't0.0', text: 'A' }, { id: 't0.1', text: 'B' }]] })
+        return Promise.resolve({ ok: true, data: [[{ id: 't0.0', text: 'A' }, { id: 't0.1', text: 'B' }]] })
       if (cmd === 'opencode_translate_batch')
-        return Promise.resolve({ data: [{ id: 't0.0', text: '翻出来的' }] })
-      if (cmd === 'page_apply_translation') return Promise.resolve({ applied: 1, mismatched: 0 })
+        return Promise.resolve({ ok: true, msg: null, data: [{ id: 't0.0', text: '翻出来的' }] })
+      if (cmd === 'page_apply_translation') return Promise.resolve({ ok: true, msg: null, data: { applied: 1, mismatched: 0 } })
       return Promise.resolve(undefined)
     })
     const ai = useAIStore()
     await ai.translatePage('tab-1')
     const ap = invokeMock.mock.calls.find((c) => c[0] === 'page_apply_translation')
     expect(ap?.[1]?.payload?.pairs[0].translated).toBe('翻出来的')
+  })
+})
+
+
+// 翻译选中内容（高哥 2026-09-26）：只翻选区、贴进对话框，不动页面 DOM
+describe('翻译选中内容', () => {
+  it('读到选区就翻译并贴进对话，绝不碰页面 DOM', async () => {
+    mockDefaultInvoke()
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'read_page_selection')
+        return Promise.resolve({
+          has_selection: true,
+          text: 'The server returned an error.',
+          title: 'Demo',
+          url: 'https://x',
+        })
+      if (cmd === 'opencode_translate_batch')
+        return Promise.resolve({
+          ok: true,
+          msg: null,
+          data: [{ id: 's0', text: '服务器返回了一个错误。' }],
+        })
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    await ai.translateSelection('tab-1')
+    const last = ai.messages[ai.messages.length - 1]
+    expect(last.role).toBe('assistant')
+    expect(last.content).toContain('服务器返回')
+    const calls = invokeMock.mock.calls.map((c) => c[0])
+    expect(calls).not.toContain('page_apply_translation')
+    expect(calls).not.toContain('page_collect_translatable')
+  })
+
+  it('选不中就给提示、不发翻译请求', async () => {
+    mockDefaultInvoke()
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'read_page_selection') return Promise.resolve({ has_selection: false })
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    await ai.translateSelection('tab-1')
+    expect(ai.error).toContain('没读到选中内容')
+    expect(invokeMock.mock.calls.map((c) => c[0])).not.toContain('opencode_translate_batch')
   })
 })

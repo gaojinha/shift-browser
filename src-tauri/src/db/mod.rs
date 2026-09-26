@@ -13,6 +13,7 @@ pub mod settings;
 pub mod settings_cache;
 pub mod sync;
 pub mod tab_groups;
+pub mod translate_memory;
 pub mod users;
 pub mod userscripts;
 pub mod vault;
@@ -221,6 +222,11 @@ impl Db {
                 16,
                 "ai_audit",
                 include_str!("../../migrations/20260925000000_ai_audit.sql"),
+            ),
+            (
+                17,
+                "translate_memory",
+                include_str!("../../migrations/20260927000000_translate_memory.sql"),
             ),
         ];
 

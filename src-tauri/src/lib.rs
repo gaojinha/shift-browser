@@ -298,6 +298,10 @@ pub fn run() {
       webzh::page_apply_translation,
       webzh::opencode_translate_batch,
       webzh::plan_translate_batches,
+      webzh::opencode_translate_model,
+      webzh::opencode_translate_warmup,
+      webzh::translate_memory_lookup,
+      webzh::translate_memory_remember,
       // 页面理解层（阶段 1.1）
       content_cmd::content_snapshot,
       content_cmd::content_extract,

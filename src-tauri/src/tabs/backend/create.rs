@@ -68,6 +68,10 @@ impl TabManager {
         WebviewBuilder::new(label.clone(), webview_url)
           // 无痕标签：走 ephemeral WebContext（Cookie/缓存/存储不落盘、与常规标签隔离）
           .incognito(private)
+          // 页面加载前注入选区缓存监听：用户"选中→点侧栏"时选区会被浏览器清空，
+          // 靠它在选中那一刻把 Range 存下来（详见 page_selwatch.js）。
+          // 只挂一个 selectionchange 监听，不改页面、不读内容。
+          .initialization_script(include_str!("../../page_selwatch.js"))
           // Linux：显式指定 web extensions 目录，否则 Tauri 的 IPC 桥依赖的 WebKit
           // web extension 不会加载，__TAURI_INTERNALS__ 注入失败。
           // 修复（2026-09-25）：Tauri 在 Linux 用 Cargo 包名拼资源路径，与 deb 的

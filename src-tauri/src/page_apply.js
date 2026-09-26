@@ -23,40 +23,100 @@
 
   function norm(s) { return (s || '').replace(/\s+/g, ' ').trim(); }
 
-  // ---------- 还原 ----------
-  if (mode === 'restore') {
-    var rb = 0, rn = 0, ra = 0;
-    var w = document.createTreeWalker(document.body || document.documentElement,
-      NodeFilter.SHOW_TEXT, null);
-    var n;
-    while ((n = w.nextNode())) {
-      if (n[HIDDEN] === undefined && n[ORIG] === undefined) continue;
-      if (n[HIDDEN] !== undefined) {          // 整段替换法：换回原文
-        n.nodeValue = n[HIDDEN];
-        delete n[HIDDEN];
-        delete n[ORIG];
-        delete n[TAG];
-        rb++;
-      } else if (n[ORIG] !== undefined) {      // 原文+译文并存法
-        n.nodeValue = n[ORIG];
-        delete n[ORIG];
-        delete n[TAG];
-        rb++;
+  // ---- 内联标签重建（2026-09-27）----
+  //
+  // 收集时段落里的 <a>/<b>/<code> 被序列化成 ⟦n⟧…⟦/n⟧（空元素/换行 ⟦n/⟧），
+  // 模型译文里必须把这些标记原样带回。这里把带标记的译文解析回真实 DOM：
+  //   ⟦0⟧手册⟦/0⟧  →  <a href="...">手册</a>
+  //
+  // 安全第一：**任何**标记损坏（id 对不上、嵌套交叉、有开无闭、多一个少一个、
+  // 夹出空译文）都返回 null，调用方整段保留原文——宁可这一段不翻，也不能把
+  // 结构不明的东西塞进别人的页面。
+  var MARK_RE = /⟦(\/?)(\d+)(\/?)⟧/g;
+
+  function stripMarkers(s) { return (s || '').replace(MARK_RE, ''); }
+
+  function buildMasked(text, map) {
+    var frag = document.createDocumentFragment();
+    var stack = [frag];
+    var state = {};   // id: 1=自闭合已放 / 2=开标记已放 / 3=已闭合
+    var last = 0, m;
+    var re = new RegExp(MARK_RE.source, 'g');
+
+    function topEl() { return stack[stack.length - 1]; }
+    function pushText(s2) { if (s2) topEl().appendChild(document.createTextNode(s2)); }
+    function makeEl(id) {
+      var spec = map[id];
+      if (!spec || !spec.tag) return null;
+      var e;
+      try { e = document.createElement(spec.tag); } catch (err) { return null; }
+      var attrs = spec.a || [];
+      for (var i = 0; i < attrs.length; i++) {
+        try { e.setAttribute(attrs[i][0], attrs[i][1]); } catch (err) {}
       }
-      rn++;
+      return e;
     }
+
+    while ((m = re.exec(text))) {
+      pushText(text.slice(last, m.index));
+      last = re.lastIndex;
+      var closing = m[1] === '/';
+      var selfClose = m[3] === '/';
+      var id = m[2];
+      if (!map[id]) return null;                       // 幻觉出的 id
+      if (selfClose) {
+        if (closing || state[id]) return null;         // ⟦/n/⟧ 形状非法 / 重复
+        var es = makeEl(id);
+        if (!es) return null;
+        topEl().appendChild(es);
+        state[id] = 1;
+        continue;
+      }
+      if (closing) {
+        if (state[id] !== 2) return null;             // 没开过 / 拿自闭合当成对
+        if (stack.length < 2) return null;
+        var opened = stack[stack.length - 1];
+        if (opened.__sbMid !== id) return null;        // 只允许规范嵌套，不许交叉
+        stack.pop();
+        delete opened.__sbMid;
+        state[id] = 3;
+        continue;
+      }
+      if (state[id]) return null;                      // 同 id 开两次
+      var eo = makeEl(id);
+      if (!eo) return null;
+      eo.__sbMid = id;
+      topEl().appendChild(eo);
+      stack.push(eo);
+      state[id] = 2;
+    }
+    pushText(text.slice(last));
+    if (stack.length !== 1) return null;               // 有开无闭
+    for (var k in map) { if (!state[k]) return null; } // map 里的 id 一个不能少
+    for (var k2 in state) { if (!map[k2]) return null; }
+    if (!stripMarkers(text).trim()) return null;       // 不允许空壳译文
+    return frag;
+  }
+
+  // ---------- 还原 ----------
+  // 元素级：备份的是整段 innerHTML，还原时连内联标签（<a>/<span>/<b>）一起回来。
+  if (mode === 'restore') {
+    var rb = 0, ra = 0;
     var els = document.querySelectorAll('*');
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
+      if (el[ORIG] !== undefined) {
+        try { el.innerHTML = el[ORIG]; rb++; } catch (e) {}
+        delete el[ORIG];
+        delete el[TAG];
+      }
       if (el[ATTR]) {
-        for (var k in el[ATTR]) {
-          el.setAttribute(k, el[ATTR][k]);
-          ra++;
-        }
+        for (var k in el[ATTR]) el.setAttribute(k, el[ATTR][k]);
+        ra++;
         el[ATTR] = null;
       }
     }
-    return JSON.stringify({ restored: rb + ra, nodes: rn, attrs: ra });
+    return JSON.stringify({ restored: rb + ra, nodes: rb, attrs: ra });
   }
 
   // ---------- 写回 ----------
@@ -65,23 +125,41 @@
   var byId = {};
   for (var p = 0; p < pairs.length; p++) byId[pairs[p].id] = pairs[p];
 
-  var applied = 0, mismatched = 0, notFound = 0;
-  var w2 = document.createTreeWalker(document.body || document.documentElement,
-    NodeFilter.SHOW_TEXT, null);
-  var n2;
-  while ((n2 = w2.nextNode())) {
-    var id = n2[TAG];
+  var applied = 0, mismatched = 0, notFound = 0, badMarkers = 0;
+  var els3 = document.querySelectorAll('*');
+  for (var i3 = 0; i3 < els3.length; i3++) {
+    var el3 = els3[i3];
+    var id = el3[TAG];
     if (id === undefined) continue;
     var pr = byId[id];
     if (!pr) { notFound++; continue; }
-    var cur = norm(n2.nodeValue);
-    // 页面自己动过这节点（轮播/虚拟列表）：不覆盖，跳过并计数
-    if (cur !== norm(pr.orig) && cur !== norm(n2[ORIG])) {
+    var cur = norm(el3.textContent);
+    // 原文可能带 ⟦n⟧ 结构标记，比对"剥掉标记的纯文本"；el3[ORIG] 是 HTML 备份，
+    // 天然没有标记，两种口径都放行才算页面没动过。
+    var origPlain = norm(stripMarkers(pr.orig));
+    // 页面自己动过这段（轮播/虚拟列表/SPA）：不覆盖，跳过并计数
+    if (cur !== origPlain && cur !== norm(el3[ORIG])) {
       mismatched++;
       continue;
     }
-    if (n2[ORIG] === undefined) n2[ORIG] = n2.nodeValue;
-    n2.nodeValue = pr.translated;
+    if (el3[ORIG] === undefined) el3[ORIG] = el3.innerHTML;   // 整段 HTML 备份
+    // 带结构标记的段落：把译文解析成真实子元素再挂回去（链接还能点、样式保住）。
+    // 解析失败 = 模型弄坏了标记，整段保留原文，绝不硬写。
+    if (pr.markers) {
+      var frag = buildMasked(pr.translated, pr.markers);
+      if (!frag) { badMarkers++; continue; }
+      el3.textContent = '';
+      el3.appendChild(frag);
+      applied++;
+      continue;
+    }
+    // 目录项特例（无标记老路径）：整段就一个 <a>（文字全在链接里），只换它的文字，
+    // 这样翻完目录还能点。其余情况整段文本替换——段落是语义单位。
+    var onlyA = el3.children.length === 1 &&
+                el3.children[0].tagName === 'A' &&
+                norm(el3.children[0].textContent) === cur;
+    if (onlyA) el3.children[0].textContent = pr.translated;
+    else el3.textContent = pr.translated;
     applied++;
   }
 
@@ -108,7 +186,12 @@
     }
   }
 
-  return JSON.stringify({ applied: applied, mismatched: mismatched, notFound: notFound });
+  return JSON.stringify({
+    applied: applied,
+    mismatched: mismatched,
+    notFound: notFound,
+    badMarkers: badMarkers
+  });
  } catch (e) {
   return JSON.stringify({ error: '写回脚本异常: ' + (e && e.message ? e.message : e) });
  }

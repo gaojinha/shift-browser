@@ -864,6 +864,13 @@ pub async fn ask_once(
         .await
         .map_err(|e| AppError::net(format!("订阅 opencode 事件流失败：{e}")))?;
 
+    // 基线必须在 POST **之前**取：它标记"本次提问前已存在的消息"，fold_event
+    // 靠它跳过历史回放。踩过一次——原先放在 POST 之后，本地 opencode 建消息
+    // 极快，刚发出的这条被算进基线，它自己的 delta 全被当历史丢弃：模型照翻，
+    // 代码收不到，返回空串，整页汉化每批都「模型输出无法解析」（真机 30+ 批全挂；
+    // 而单测和 live 因为赶在消息落库前取到空基线，侥幸全绿——典型的 race）。
+    let baseline = baseline_ids(http, sid).await.unwrap_or_default();
+
     let resp = http
         .post(format!("{base}/session/{sid}/prompt_async"))
         .json(&json!({ "agent": agent, "parts": [{ "type": "text", "text": prompt }] }))
@@ -877,7 +884,6 @@ pub async fn ask_once(
         )));
     }
 
-    let baseline = baseline_ids(http, sid).await.unwrap_or_default();
     let mut stream = sse.bytes_stream();
     let mut acc = SseAccumulator::new();
     let mut target_msg: Option<String> = None;

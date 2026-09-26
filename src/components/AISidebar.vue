@@ -28,11 +28,15 @@ const topOffset = computed(() => {
   return LAYOUT.tabBar + LAYOUT.addressBar + bookmarkH
 })
 
-/** 汉化进度百分比：按批次算（批次大小不均，按段数算会跳） */
+/**
+ * 汉化进度百分比：按**段数**算。
+ * 并发 worker 后"第几批"完成顺序不固定，按批算会倒跳；段数单调递增。
+ * 缓存命中的段在开工前就计入 done，所以进度条可能不是从 0 起步——这是对的。
+ */
 const zhPercent = computed(() => {
   const p = aiStore.zhProgress
-  if (!p || p.batches === 0) return 0
-  return Math.min(100, Math.round(((p.batch - 1) / p.batches) * 100))
+  if (!p || p.total === 0) return 0
+  return Math.min(100, Math.round((p.done / p.total) * 100))
 })
 
 // 打开/关闭：分屏模式——不隐藏 webview，而是让 webview 让出右侧 AI_PANEL_WIDTH，
@@ -192,6 +196,7 @@ function runSkill(id: string) {
   const handlers: Record<string, () => void> = {
     summarize_page: () => aiStore.summarizePage(),
     translate_page: () => aiStore.translatePage(tabsStore.activeTabId ?? undefined),
+    translate_selection: () => aiStore.translateSelection(tabsStore.activeTabId ?? undefined),
     explain_page: () => aiStore.explainPage(),
     page_qa: () => inputRef.value?.focus(),
   }
@@ -238,7 +243,7 @@ function onOverlaySelf() {
         <template v-if="aiStore.zhBusy && aiStore.zhProgress">
           <div class="zh-row">
             <span class="zh-text">
-              汉化中…第 {{ aiStore.zhProgress.batch }}/{{ aiStore.zhProgress.batches }} 批，已翻
+              汉化中…已完成 {{ aiStore.zhProgress.batch }}/{{ aiStore.zhProgress.batches }} 批，已翻
               {{ aiStore.zhProgress.done }}/{{ aiStore.zhProgress.total }} 处
             </span>
             <button class="zh-stop" @click="aiStore.stopTranslate()">停止</button>

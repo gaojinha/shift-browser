@@ -66,6 +66,19 @@ use webkit2gtk::{
 /// 补上一直缺失的 UI 入口：选中文字右键 → 翻译选中/翻译整页。
 const CONTEXT_TRANSLATE_JS: &str = include_str!("context_translate.js");
 
+/// 选区缓存监听（见 page_selwatch.js 文件头）。
+///
+/// 为什么必须在这里也注册一遍（2026-09-27 修「翻译选中」首击必失败）：
+/// - `WebviewBuilder::initialization_script`（create.rs）在本机这条构建路径
+///   实测不生效；
+/// - page_load.rs 里的即时 eval 时机脆弱，且每次 re_inject 都先
+///   `remove_all_scripts()`，老标签/后退恢复页面上监听过一次也可能丢；
+/// - 作为**常驻 UserScript**（document_start / AllFrames / allow "*"）加进
+///   注入清单后，之后每次导航都由 WebKit 自动带上，跟广告拦截/隐私脚本同寿命。
+///
+/// 脚本自身幂等（__sbSelWatch），与另外两条注入路径重复执行也无害。
+const SELWATCH_JS: &str = include_str!("page_selwatch.js");
+
 /// 内置隐私防护脚本（P0：GPC + 反指纹随机化 + WebRTC 防泄露）
 ///
 /// 设计要点（依据 Brave/Tor 的公开实践）：
@@ -168,6 +181,19 @@ fn inject_extensions(
                 }
                 manager.remove_all_scripts();
                 manager.remove_all_style_sheets();
+                // 选区缓存监听：**常驻** document_start UserScript（所有 frame、
+                // 所有页面）。必须紧跟 remove_all_scripts 重新登记，否则下一次
+                // re_inject 又会把它清掉——这正是「翻译选中」首击读不到选区的根因。
+                // 当前已加载的页面 UserScript 追不生效，下面立刻 eval 补一次（幂等）。
+                let selwatch = UserScript::new(
+                    SELWATCH_JS,
+                    UserContentInjectedFrames::AllFrames,
+                    UserScriptInjectionTime::Start,
+                    allow_list,
+                    &[],
+                );
+                manager.add_script(&selwatch);
+                crate::engine::webview::eval_js(&webview, SELWATCH_JS);
                 // WebMCP polyfill 试验（阶段 1.5）：document_start 注入（网站脚本
                 // feature-detect 前），捕获 registerTool 声明。可开关，默认关。
                 if webmcp_on {

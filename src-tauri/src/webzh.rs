@@ -24,14 +24,17 @@ use tauri::{AppHandle, Manager};
 
 /// 一批里最多放多少字符。
 ///
-/// opencode 侧是本机大模型，一次 prompt 越长越慢、越容易输出跑偏。
-/// 2000 字符实测能在一次响应里稳定吐回完整 JSON 数组；再大就要分两次，
-/// 反而更慢。这个数是量出来的，不是拍的。
-const BATCH_MAX_CHARS: usize = 2000;
-/// 一批最多多少段。段数太多时模型容易漏项，译文和 id 对不上。
-const BATCH_MAX_SEGMENTS: usize = 25;
-/// 单次 opencode 请求超时。整页翻译慢，但单批不该超过 2 分钟。
-const BATCH_TIMEOUT_SECS: u64 = 120;
+/// 2026-09-26 实测（live_批大小对单批耗时影响）：**单批耗时几乎与批大小无关**
+/// —— 1 段 7.5s、5 段 6.7s、15 段 5.9s、30 段 7.1s、60 段 9.1s。固定开销约
+/// 6s/批（会话 + SSE + 模型唤醒），推理边际成本只有 ~0.07s/段。
+/// 所以**批开大 = 直接省时间**：RFC 9110 的 2191 段，25 段/批要 257 批、约 25 分钟；
+/// 60 段/批只要 ~40 批、约 6 分钟。原先的 2000 字符/25 段是按"怕模型漏项"拍的，
+/// 实测 60 段仍能 60/60 全解析，那个担心不成立。
+const BATCH_MAX_CHARS: usize = 6000;
+/// 一批最多多少段。同样按实测放宽（60 段/批单批 9s，全解析）。
+const BATCH_MAX_SEGMENTS: usize = 60;
+/// 单次 opencode 请求超时。批开大后单批输出更长，留足余量。
+const BATCH_TIMEOUT_SECS: u64 = 180;
 
 // ---------------------------------------------------------------- 1. 收集
 
@@ -92,6 +95,13 @@ pub struct ApplyPair {
     pub id: String,
     pub orig: String,
     pub translated: String,
+    /// 内联标签结构表：`{ "0": {tag:"a", a:[["href","/x"]]}, … }`。
+    ///
+    /// 收集时只有"段落里含 <a>/<b>/<code> 等需要保留的内联标签"才会带它；
+    /// 写回脚本据此把译文中的 ⟦0⟧…⟦/0⟧ 结构标记重建成真实 DOM（链接还能点）。
+    /// 缺失/null = 纯文本整段替换（老行为）。
+    #[serde(default)]
+    pub markers: Option<Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -257,6 +267,125 @@ pub async fn opencode_translate_batch(
     }
 }
 
+/// 查本机 opencode 当前选用的模型标识（如 `opencode/big-pickle`）。
+///
+/// 翻译记忆按模型隔离：换了模型旧译文作废。前端每次开翻前取一次，
+/// 失败返回 Err，前端据此跳过整轮缓存（不允许用空模型名读写）。
+#[tauri::command]
+pub async fn opencode_translate_model(
+    db: tauri::State<'_, crate::db::Db>,
+) -> crate::error::CommandResult<String> {
+    let creds = crate::webqa::resolve_credentials_pub(db).await?;
+    let http = crate::webqa::client_pub(&creds)?;
+    let base = crate::webqa::base_url_pub();
+    let resp = http
+        .get(format!("{base}/config"))
+        .send()
+        .await
+        .map_err(|e| crate::error::AppError::net(format!("读取 opencode 配置失败：{e}")))?;
+    if !resp.status().is_success() {
+        return Err(crate::error::AppError::net(format!(
+            "读取 opencode 配置失败：HTTP {}",
+            resp.status()
+        ))
+        .into());
+    }
+    let cfg: Value = resp
+        .json()
+        .await
+        .map_err(|e| crate::error::AppError::net(format!("解析 opencode 配置失败：{e}")))?;
+    Ok(cfg
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string())
+}
+
+/// 翻译记忆批量查询入参：模型 + 待查条目（id 仅用于回传对齐，text 是原文）。
+#[derive(Debug, Deserialize)]
+pub struct MemoryLookupReq {
+    pub model: String,
+    #[serde(default)]
+    pub items: Vec<BatchItem>,
+}
+
+/// 翻译记忆批量写入入参：复用 ApplyPair（取 orig→translated；id/markers 忽略）。
+#[derive(Debug, Deserialize)]
+pub struct MemoryRememberReq {
+    pub model: String,
+    #[serde(default)]
+    pub pairs: Vec<ApplyPair>,
+}
+
+/// 查翻译记忆：命中的条目以同样的 id 回来，未命中的不出现。
+///
+/// 缓存故障对调用方表现为"全 miss"（db 内部已吞错记日志），翻译主流程不受影响。
+#[tauri::command]
+pub async fn translate_memory_lookup(
+    db: tauri::State<'_, crate::db::Db>,
+    req: MemoryLookupReq,
+) -> crate::error::CommandResult<Vec<BatchItem>> {
+    let sources: Vec<String> = req.items.iter().map(|i| i.text.clone()).collect();
+    let hits = crate::db::translate_memory::lookup(&db.pool, &req.model, &sources).await;
+    Ok(req
+        .items
+        .into_iter()
+        .filter_map(|i| {
+            // key 在 db 层归一化，这里必须用同一个函数算 key，口径漂移 = 静默 miss
+            let key = crate::db::translate_memory::normalize_source(&i.text);
+            hits.get(&key).map(|t| BatchItem { id: i.id, text: t.clone() })
+        })
+        .collect())
+}
+
+/// 整页汉化预热：并发预建最多 n 个（夹到 1..=3）**独立**翻译会话，
+/// 供前端 worker 池的头几批直接取用。
+///
+/// 实测每批固定开销 ~6s，其中会话创建占大头；收集页面 + 查翻译记忆期间会话
+/// 就建好，等于这段延迟被完全藏掉。每个会话只服务一批（前端消费后即弃），
+/// 不复用成历史越滚越长的长会话。建失败的会话不进返回值，前端退化为按需新建。
+#[tauri::command]
+pub async fn opencode_translate_warmup(
+    db: tauri::State<'_, crate::db::Db>,
+    want: Option<usize>,
+) -> crate::error::CommandResult<Vec<String>> {
+    let n = want.unwrap_or(3).clamp(1, 3);
+    let creds = crate::webqa::resolve_credentials_pub(db).await?;
+    let http = crate::webqa::client_pub(&creds)?;
+    let mut set = tokio::task::JoinSet::new();
+    for _ in 0..n {
+        let h = http.clone();
+        set.spawn(async move {
+            crate::webqa::ensure_session_pub(&h, None, "网页汉化")
+                .await
+                .map(|(sid, _)| sid)
+        });
+    }
+    let mut sids = Vec::with_capacity(n);
+    while let Some(joined) = set.join_next().await {
+        match joined {
+            Ok(Ok(sid)) => sids.push(sid),
+            Ok(Err(e)) => log::warn!("[webzh] 预热会话失败：{e}"),
+            Err(e) => log::warn!("[webzh] 预热任务异常：{e}"),
+        }
+    }
+    Ok(sids)
+}
+
+/// 把本页新翻出来的译文写进翻译记忆（upsert）。返回写入条数。
+#[tauri::command]
+pub async fn translate_memory_remember(
+    db: tauri::State<'_, crate::db::Db>,
+    req: MemoryRememberReq,
+) -> crate::error::CommandResult<u64> {
+    let pairs: Vec<(String, String)> = req
+        .pairs
+        .into_iter()
+        .map(|p| (p.orig, p.translated))
+        .collect();
+    Ok(crate::db::translate_memory::remember(&db.pool, &req.model, &pairs).await as u64)
+}
+
 /// 把本批条目切成 ≤(BATCH_MAX_CHARS 字符 / BATCH_MAX_SEGMENTS 段) 的批次。
 ///
 /// 前端调用前会调它拿到分批方案，这样"一次要发几次"在前后端口径一致。
@@ -359,21 +488,30 @@ pub fn split_long_text(text: &str, max_chars: usize) -> Vec<String> {
 pub fn build_translate_prompt_pub(items: &[BatchItem], page_title: Option<&str>) -> String {
     // 编号列表比 JSON 输入更省 token、也更好读；输出则强制 JSON，
     // 因为要按 id 对号入座。
+    //
+    // 规则 4/5 是质量重灾区，单靠一句"翻译得自然点"小模型根本不照做：
+    // - 模板变量（{name}/%s/$1）被模型"意译"掉，页面文案直接报错；
+    // - ⟦n⟧ 结构标记（对应页面里的链接/加粗）被模型当乱码删掉，译文落页后
+    //   链接全没——所以规则写死 + 给一个带标记的具体示例。
     let list: Vec<String> = items
         .iter()
         .map(|i| format!("{}::{}", i.id, i.text))
         .collect();
     format!(
-        "你是网页汉化引擎。把下面网页片段翻译成简体中文，规则：\n\
+        "你是网页汉化引擎，把下面网页片段翻译成简体中文（zh-CN）。规则：\n\
          1. 只输出译文，不加解释、不加引号、不加 markdown 代码块。\n\
-         2. 严格输出 JSON 数组，元素形如 {{\"id\":\"t0\",\"t\":\"译文\"}}，顺序与输入一致。\n\
-         3. id 必须原样带回，不得改写、不得增删。\n\
-         4. 保留原文中的专有名词、产品名、代码标识符、URL、数字和单位。\n\
-         5. 已是中文的片段原样返回。\n\
+         2. 严格输出 JSON 数组，元素形如 {{\"id\":\"t0\",\"t\":\"译文\"}}，顺序与输入一致；id 必须原样带回，不得改写、不得增删。\n\
+         3. 风格：按钮/菜单/标题等短短语要简短地道，像原生中文界面；正文句子自然流畅，不逐字硬译；译文用中文标点。\n\
+         4. 专有名词、产品名、代码标识符、URL、邮箱、数字与单位保持原样；模板变量/占位符（如 %s、%d、{{{{name}}}}、$1、{{0}}）必须原样保留，位置可按中文语序移动。\n\
+         5. 结构标记 ⟦n⟧、⟦/n⟧、⟦n/⟧ 代表网页原有的链接/加粗等内联标签：必须原样保留、不得增删改写其中数字，位置可随译文移动；标记夹住的文字照常翻译。\n\
+         6. 同一批内同一专名/术语译法必须一致；已是中文的片段原样返回。\n\
          {}\n\
+         示例：\n\
+         输入 t0::See the ⟦0⟧manual⟦/0⟧ for details.\n\
+         输出 [{{\"id\":\"t0\",\"t\":\"详情请参阅⟦0⟧手册⟦/0⟧。\"}}]\n\
          \n输入片段（每行 id::原文）：\n{}",
         page_title
-            .map(|t| format!("6. 页面标题是「{t}」，用它的领域语境选词。\n"))
+            .map(|t| format!("7. 页面标题是「{t}」，用它的领域语境选词。\n"))
             .unwrap_or_default(),
         list.join("\n")
     )
@@ -546,12 +684,14 @@ mod tests {
 
     #[test]
     fn 分批按字符数和段数双上限() {
-        // 每段 30 字符，10 段 = 300 字符 → 字符上限不会触发，段数上限触发
-        let its: Vec<BatchItem> = (0..60)
+        // 每段 30 字符，字符上限不会触发 → 段数上限触发。数量用常量算，
+        // 免得以后调参（2026-09-26 从 25 提到 60）测试就瞎红。
+        let n = BATCH_MAX_SEGMENTS + 5;
+        let its: Vec<BatchItem> = (0..n)
             .map(|i| BatchItem { id: format!("t{i}"), text: "x".repeat(30) })
             .collect();
         let b = plan_batches(&its);
-        assert!(b.len() >= 2, "60 段必须切多批");
+        assert!(b.len() >= 2, "{n} 段必须切多批");
         for x in &b {
             assert!(x.len() <= BATCH_MAX_SEGMENTS, "单批段数超上限: {}", x.len());
         }
@@ -579,7 +719,7 @@ mod tests {
         // 段内切分（2026-09-26，高哥提醒"超大文件可以分段翻译"）之后，
         // 超长段会以 t0.0 / t0.1 / … 子块形式出现，id 不再是 t0 本身。
         // 这里断言的是"内容没丢、且能追溯回原 id"。
-        let its = items(&[("t0", &"z".repeat(5000)), ("t1", "small")]);
+        let its = items(&[("t0", &"z".repeat(BATCH_MAX_CHARS + 2000)), ("t1", "small")]);
         let b = plan_batches(&its);
         let flat: Vec<String> = b.iter().flatten().map(|i| i.id.clone()).collect();
         assert!(
@@ -595,7 +735,7 @@ mod tests {
             .filter(|i| i.id.starts_with("t0."))
             .map(|i| i.text.chars().count())
             .sum();
-        assert_eq!(z_len, 5000, "子块拼起来的长度必须等于原段长度");
+        assert_eq!(z_len, BATCH_MAX_CHARS + 2000, "子块拼起来的长度必须等于原段长度");
     }
 
     #[test]
@@ -667,6 +807,21 @@ mod tests {
     }
 
     #[test]
+    fn prompt含结构标记规则和带标记示例() {
+        // 模型把 ⟦n⟧ 当乱码删掉的话，译文落页后链接/加粗全没。
+        // 规则 + 一个具体示例一起钉在 prompt 里，改没了测试就红。
+        let its = items(&[("t0", "See the ⟦0⟧manual⟦/0⟧ for details.")]);
+        let p = build_translate_prompt_pub(&its, None);
+        assert!(p.contains('⟦'), "必须出现结构标记字符 ⟦");
+        assert!(p.contains("⟦0⟧手册⟦/0⟧"), "必须给带标记的译文示例");
+        assert!(p.contains("原样保留"), "必须要求标记原样保留");
+        // 模板变量也要点名保护
+        assert!(p.contains("%s"), "必须列举 printf 风格变量");
+        assert!(p.contains("{{name}}"), "必须列举双花括号变量");
+        assert!(p.contains("$1"), "必须列举 $1 风格变量");
+    }
+
+    #[test]
     fn 超长段被切分且不丢字() {
         // 3000 个字符的连续文本（无边界可找，测硬切也不丢）
         let long: String = "a".repeat(3000);
@@ -710,7 +865,7 @@ mod tests {
 
     #[test]
     fn 超长段的分批用子块id且带序号() {
-        let its = items(&[("t0", &"x".repeat(5000))]);
+        let its = items(&[("t0", &"x".repeat(BATCH_MAX_CHARS + 2000))]);
         let b = plan_batches(&its);
         // 全部块的 id 都该是 t0.N 形式
         for batch in &b {
@@ -740,4 +895,73 @@ mod tests {
         assert!(bases.contains("t7"));
     }
 
+
+    /// 契约测试：四条 webzh 命令的返回字段名，必须与前端解包逐字对上。
+    ///
+    /// 前端 `zhCall` 读的是 `{ok, msg, data}` 里的 `data`；`data` 里再按
+    /// segments/attrs/applied/restored 取。任何一层字段改名，前端都会静默
+    /// 拿到 undefined——这正是「整页汉化永远报‘没找到需要翻译的文字’」那个
+    /// bug 的成因（前端少解一层 data）。字段名在这里钉死，改了就必须同步前端。
+    #[test]
+    fn 返回结构契约与前端解包一致() {
+        // 1) collect：data 里是 segments / attrs / title
+        let c = CollectResult {
+            ok: true,
+            msg: None,
+            data: Some(json!({
+                "segments": [], "attrs": [], "total": 0,
+                "attrTotal": 0, "skipped": 0, "title": "t"
+            })),
+        };
+        let v = serde_json::to_value(&c).unwrap();
+        assert_eq!(v["ok"], true);
+        assert!(v.get("msg").is_some(), "必须有 msg 字段（前端读 r.msg 出错误提示）");
+        assert!(v["data"]["segments"].is_array(), "前端读 data.segments");
+        assert!(v["data"]["attrs"].is_array(), "前端读 data.attrs");
+        assert!(v["data"]["title"].is_string(), "前端读 data.title");
+
+        // 2) apply：data 里是 applied / mismatched
+        let a = ApplyResult {
+            ok: true,
+            msg: None,
+            data: Some(json!({ "applied": 1, "mismatched": 0 })),
+        };
+        let v = serde_json::to_value(&a).unwrap();
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["data"]["applied"], 1, "前端读 data.applied");
+        assert_eq!(v["data"]["mismatched"], 0, "前端读 data.mismatched");
+
+        // 3) restore 走同一个 ApplyResult，data 里是 restored
+        let r = ApplyResult {
+            ok: true,
+            msg: None,
+            data: Some(json!({ "restored": 2, "nodes": 2, "attrs": 0 })),
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["data"]["restored"], 2, "前端读 data.restored");
+
+        // 4) batch：data 是数组，另有 session_id（前端要拿它续会话）
+        let b = TranslateBatchResult {
+            ok: true,
+            msg: None,
+            data: Some(items(&[("t0", "提交")])),
+            session_id: Some("ses_x".into()),
+        };
+        let v = serde_json::to_value(&b).unwrap();
+        assert!(v["data"].is_array(), "前端读 data 当译文数组");
+        assert_eq!(v["data"][0]["id"], "t0");
+        assert_eq!(v["data"][0]["text"], "提交");
+        assert_eq!(v["session_id"], "ses_x", "前端读 session_id 续会话");
+
+        // 5) plan：{ok, data: 批次数组}（注意与上面不同：没有 msg 解包层）
+        let p = plan_translate_batches(TranslateBatchReq {
+            items: items(&[("t0", "hi")]),
+            page_title: None,
+            session_id: None,
+            agent: None,
+        });
+        assert_eq!(p["ok"], true);
+        assert!(p["data"].is_array(), "前端读 data 当批次数组");
+        assert_eq!(p["data"][0][0]["id"], "t0");
+    }
 }

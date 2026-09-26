@@ -32,6 +32,24 @@ pub(super) fn handle_page_load(
             crate::extensions::inject_to_webview(&app_ext, &label_ext).await;
         }
     });
+    // 选区缓存监听（2026-09-26）：用户"选中文字 → 点侧栏按钮"时，点击会让页面
+    // 失焦、浏览器立刻清空选区，按钮 handler 再来读就啥都没有（真机实测：
+    // 「翻译选中」永远报"没读到选中内容"）。这里在页面加载后注入监听，把选中的
+    // Range 克隆存到 window 上，读取端回退使用。
+    // 实测 `WebviewBuilder::initialization_script` 在这条构建路径下没生效，
+    // 所以走 on_page_load 注入；脚本自带幂等（__sbSelWatch），重复注入无害。
+    let _ = webview.with_webview(move |pwv| {
+        crate::engine::webview::eval_js_with(
+            &pwv.inner(),
+            include_str!("../../../page_selwatch.js"),
+            |r| {
+                if let Err(e) = r {
+                    log::warn!("[webzh] 选区缓存监听注入失败: {e}");
+                }
+            },
+        );
+    });
+
     if payload.event() == tauri::webview::PageLoadEvent::Finished {
         let url = payload.url();
         let host = url.host_str().unwrap_or("").to_string();

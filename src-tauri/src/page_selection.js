@@ -21,6 +21,39 @@
   var _qsa = Document.prototype.querySelectorAll;
   var _getSel = window.getSelection;
 
+  // 兜底：在**读取侧**也注册一次选区缓存监听（幂等）。
+  //
+  // 起因：用户"选中文字 → 点侧栏按钮"时，点击让页面失焦、浏览器立刻清空选区，
+  // 按钮 handler 再来读就啥都没有（真机实测：「翻译选中」永远报"没读到"）。
+  // 页面加载后注入 page_selwatch.js 的方案在本机没生效（on_page_load 和
+  // WebviewBuilder::initialization_script 都试过），所以在读取侧补注册——
+  // 这里和下面读 getSelection 是同一个执行世界，必然捕获得到。
+  // 代价：本次调用才装上监听器，所以"第一次点会失败"，此后正常工作。
+  (function ensureSelWatch() {
+    if (window.__sbSelWatch) return;
+    window.__sbSelWatch = 1;
+    try {
+      document.addEventListener(
+        'selectionchange',
+        function () {
+          try {
+            var s = window.getSelection && window.getSelection();
+            if (!s || s.rangeCount === 0) return;
+            var t = String(s);
+            if (!t || !t.trim()) return;
+            window.__sbLastRange = s.getRangeAt(0).cloneRange();
+            window.__sbLastSelAt = Date.now();
+          } catch (e) {
+            /* 选区不可克隆就放弃本次缓存 */
+          }
+        },
+        true,
+      );
+    } catch (e) {
+      /* 注册失败不影响只读读取 */
+    }
+  })();
+
   // 密码 / 敏感区域：命中即拒绝
   var SECRET_SEL = 'input[type=password],[type=password],' +
     '[autocomplete=current-password],[autocomplete=new-password],' +
@@ -101,11 +134,32 @@
       in_iframe: false,
       // 休眠标签无 webview，Rust 侧另行回填 true 并附 hints（见 content.rs::selection）。
       // 此处置 false，保证"未休眠"时该字段恒存在，调用方形状稳定。
-      hibernated: false
+      hibernated: false,
+      // 诊断用：选区缓存是否已挂上（排查"选中就丢"时看这个）
+      selwatch: !!window.__sbSelWatch
     };
 
     try { base.url = location.href || ''; } catch (e) { base.url = ''; }
     try { base.title = document.title || ''; } catch (e) { base.title = ''; }
+
+    // 选区被清空时回退到缓存：最典型的是"用户选中 → 点侧栏按钮"，
+    // 点击让页面失焦、浏览器立刻清空选区，等 handler 来读就啥都没有了
+    // （真机实测：永远报"没读到选中内容"）。页面侧常驻监听器
+    // （page_selwatch.js）在选中那一刻克隆过 Range，这里恢复它。
+    // 恢复的是用户自己的选区，视觉上会重新高亮——正是用户期望的"我选的还在"。
+    if ((!sel || sel.isCollapsed || sel.rangeCount === 0) && window.__sbLastRange) {
+      try {
+        var kept = window.__sbLastRange;
+        if (kept && !kept.collapsed) {
+          var gs = _getSel.call(window);
+          gs.removeAllRanges();
+          gs.addRange(kept);
+          sel = gs;
+        }
+      } catch (e) {
+        /* Range 已失效（页面重渲染）：当作没有选区，如实返回 */
+      }
+    }
 
     // 无选区 / 折叠选区：如实返回"没有"，不报错（调用方常态路径）
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
