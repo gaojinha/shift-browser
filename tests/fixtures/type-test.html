@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>fixture: type</title></head>
+<body>
+  <h1>type / key 验收</h1>
+  <input id="plain" type="text" placeholder="普通输入框">
+  <div id="editor" contenteditable="true" style="border:1px solid #999;min-height:40px;padding:4px">可编辑区</div>
+  <input id="secret" type="password" placeholder="密码框">
+  <div id="key-log">无按键</div>
+  <script>
+    // 记录最后一次键盘事件及修饰键（合成事件只对页面监听器有效，这正是验收点）
+    window.addEventListener('keydown', function (e) {
+      var m = [];
+      if (e.ctrlKey) m.push('Ctrl');
+      if (e.shiftKey) m.push('Shift');
+      if (e.altKey) m.push('Alt');
+      if (e.metaKey) m.push('Meta');
+      document.getElementById('key-log').textContent =
+        'key=' + e.key + ' mods=' + (m.join('+') || 'none');
+    });
+  </script>
+</body>
+</html>

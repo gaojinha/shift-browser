@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>fixture: shadow</title></head>
+<body>
+  <h1>shadow DOM 定位验收</h1>
+  <div id="host"></div>
+  <button id="outer-btn">外层按钮</button>
+  <script>
+    // 开放 shadow root：内部一个按钮 + 一个输入框
+    const host = document.getElementById('host');
+    const sr = host.attachShadow({ mode: 'open' });
+    sr.innerHTML = `
+      <div class="panel">
+        <button id="shadow-submit">提交订单</button>
+        <input id="shadow-input" type="text" placeholder="影子输入框">
+      </div>`;
+  </script>
+</body>
+</html>

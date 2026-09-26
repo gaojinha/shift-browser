@@ -22,7 +22,7 @@ mod open_read;
 pub(crate) use open_read::open_and_read;
 pub(crate) use read::{read_page, read_status};
 pub(crate) use shot::screenshot;
-pub(crate) use util::target_label;
+pub(crate) use util::{bool_arg, target_label};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>fixture: canvas</title></head>
+<body>
+  <h1>canvas 页（零可点元素）</h1>
+  <canvas id="board" width="400" height="200"></canvas>
+  <script>
+    // 纯 canvas 绘制界面：DOM 里没有任何按钮/链接
+    const ctx = document.getElementById('board').getContext('2d');
+    ctx.fillStyle = '#2563eb';
+    ctx.fillRect(150, 70, 100, 40);
+    ctx.fillStyle = '#fff';
+    ctx.font = '16px sans-serif';
+    ctx.fillText('提交订单', 165, 95);
+  </script>
+</body>
+</html>

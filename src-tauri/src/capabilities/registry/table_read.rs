@@ -109,12 +109,34 @@ pub(super) fn defs() -> Vec<ToolDef> {
     // ===== 页面交互（P2）：等待条件不改变状态，按读管理（其余 action/* 在写表）=====
     tool(
       "action/wait_for",
-      "等待条件满足（元素出现/消失、页面加载完成）。参数：condition（appear/gone/load）、selector（appear/gone 必填）、tab_id（可选）、timeout（毫秒，默认 10000，硬顶 60000）。超时返回 met:false。",
+      "等待条件满足。condition：appear/gone/load（原三值语义不变）、text（元素可见文本满足 expect，selector 必填）、enabled（元素存在且未禁用且可见，selector 必填）、idle（无 in-flight 请求且 DOM 连续 quiet_ms 未变，替代盲等）。参数：selector、expect={op:contains/equals/regex, value}（text 必填）、quiet_ms（默认 500，硬顶 10000）、tab_id（可选）、timeout（毫秒，默认 10000，硬顶 60000）。超时返回 met:false。",
       json!({
-        "condition": { "type": "string", "enum": ["appear", "gone", "load"], "description": "等待条件（默认 appear）" },
-        "selector": { "type": "string", "description": "CSS 选择器（appear/gone 必填）" },
+        "condition": { "type": "string", "enum": ["appear", "gone", "load", "text", "enabled", "idle"], "description": "等待条件（默认 appear）" },
+        "selector": { "type": "string", "description": "CSS 选择器（appear/gone/text/enabled 必填）" },
+        "expect": { "type": "object", "description": "text 条件的判定：{op: contains/equals/regex, value: 字符串}" },
+        "quiet_ms": { "type": "integer", "description": "idle 条件的静默毫秒（默认 500，硬顶 10000）" },
         "tab_id": { "type": "string", "description": "目标标签 id（可选）" },
         "timeout": { "type": "integer", "description": "超时毫秒（默认 10000，硬顶 60000）" }
+      }),
+      vec![],
+      Risk::Read,
+    ),
+    // 只读定位（缺口 2/6）：不改页面，纯 Read——不挂 api_agent_actions，只读模式下脑也必须能"找"。
+    tool(
+      "action/find",
+      "在页面中定位元素（只读，不改页面）。三种瞄准至少其一：text（可见文本，归一化空白，exact 控制精确/包含）、role+name（无障碍角色+名称，最稳）、selector（CSS）。可选：nth（默认 0）、exact（默认 false）、within（限定容器选择器）、visible_only（默认 true）、pierce（穿透开放 shadow root，默认 false）、frames（同源 iframe 下钻路径数组：数字=第 N 个，字符串=选择器，≤4 层）、tab_id。返回 found/returned/nth/tag/role/text/enabled/visible/rect/selector（稳定 tag 链，可直接喂 action/click）；iframe 内元素 rect 已换算主文档坐标；found>1 如实报；found:0 附 diagnose（nearby≤10、same_text≤5、in_iframe≤10，文本截 40 字）。注意：find 与后续动作须紧邻调用，中间不要 navigate/长等待（SPA 重渲染会使 selector 失效）。",
+      json!({
+        "text": { "type": "string", "description": "按可见文本找（如 \"提交订单\"）" },
+        "role": { "type": "string", "description": "按无障碍角色找（如 button/link/textbox/heading）" },
+        "name": { "type": "string", "description": "配合 role：无障碍名称（aria-label/alt/title/文本）" },
+        "selector": { "type": "string", "description": "CSS 选择器（与 text/role 三选一）" },
+        "nth": { "type": "integer", "description": "取第几个匹配（默认 0；越界返回 found 总数）" },
+        "exact": { "type": "boolean", "description": "精确匹配（默认 false=包含，忽略大小写）" },
+        "within": { "type": "string", "description": "限定容器选择器（可选）" },
+        "visible_only": { "type": "boolean", "description": "只保留可见元素（默认 true）" },
+        "pierce": { "type": "boolean", "description": "穿透开放 shadow root（默认 false）" },
+        "frames": { "type": "array", "description": "同源 iframe 下钻路径（数组：数字=第 N 个，字符串=选择器）" },
+        "tab_id": { "type": "string", "description": "目标标签 id（可选）" }
       }),
       vec![],
       Risk::Read,
@@ -179,9 +201,10 @@ pub(super) fn defs() -> Vec<ToolDef> {
     // 截图只采集页面像素、不改变任何状态——按 Read 管理（与历史只读闸门行为一致）
     tool(
       "screenshot",
-      "截取标签页可见区域，PNG 落盘，返回文件路径。可选 id（标签 id）；缺省为活动标签。",
+      "截取标签页可见区域，PNG 落盘，返回文件路径。可选 tab_id（标签 id，与其他命令统一；id 为旧别名仍可用）；缺省为活动标签。",
       json!({
-        "id": { "type": "string", "description": "标签 id（可选；缺省为活动标签，先 list_tabs 获取）" }
+        "tab_id": { "type": "string", "description": "标签 id（可选；缺省为活动标签，先 list_tabs 获取）" },
+        "id": { "type": "string", "description": "tab_id 的旧别名（向后兼容；两者都给时 tab_id 优先）" }
       }),
       vec![],
       Risk::Read,

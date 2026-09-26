@@ -7,6 +7,7 @@
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
+use super::page::bool_arg;
 use crate::error::AppError;
 
 /// 交互总开关（默认关）：settings.api_agent_actions == "true"
@@ -40,6 +41,25 @@ async fn eval_action(
     let Some(wv) = app.get_webview(&label) else {
         return Err(AppError::internal("找不到标签 webview").error_json());
     };
+    // 扩展参数（缺口 1/2/4/5）：全部可选、缺省关闭；校验失败直接回 validation 错误
+    let frames = frames_literal(req)?;
+    let modifiers = modifiers_literal(req)?;
+    let expect = expect_literal(req)?;
+    // text 不可 trim：action/type 输入首尾空格必须保留（find 侧由 JS 归一化）
+    let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("");
+    if text.chars().count() > 4096 {
+        return Err(AppError::validation("text 过长（>4096 字符）").error_json());
+    }
+    let text = text.to_string();
+    let role = str_arg(req, "role", 64)?;
+    let name = str_arg(req, "name", 256)?;
+    let within = str_arg(req, "within", 1024)?;
+    let nth = req.get("nth").and_then(|v| v.as_i64()).unwrap_or(0);
+    let quiet_ms = req
+        .get("quiet_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(500)
+        .min(10_000);
     let script = include_str!("../../page_action.js")
         .replace("__ACTION__", action)
         .replace("__SELECTOR__", &crate::api::js_escape(selector))
@@ -48,7 +68,26 @@ async fn eval_action(
         .replace("__DIRECTION__", direction)
         .replace("__AMOUNT__", &amount.to_string())
         .replace("__CONDITION__", condition)
-        .replace("__KEY__", &crate::api::js_escape(key));
+        .replace("__KEY__", &crate::api::js_escape(key))
+        .replace(
+            "__PIERCE__",
+            if bool_arg(req, "pierce") { "1" } else { "0" },
+        )
+        .replace("__FRAMES__", &frames)
+        .replace("__MODIFIERS__", &modifiers)
+        .replace("__TEXT__", &crate::api::js_escape(&text))
+        .replace("__ROLE__", &crate::api::js_escape(&role))
+        .replace("__NAME__", &crate::api::js_escape(&name))
+        .replace("__NTH__", &nth.to_string())
+        .replace("__EXACT__", if bool_arg(req, "exact") { "1" } else { "0" })
+        .replace("__WITHIN__", &crate::api::js_escape(&within))
+        .replace(
+            "__VISIBLE_ONLY__",
+            if visible_only_arg(req) { "1" } else { "0" },
+        )
+        .replace("__EXPECT__", &expect)
+        .replace("__QUIET_MS__", &quiet_ms.to_string())
+        .replace("__CLEAR__", if bool_arg(req, "clear") { "1" } else { "0" });
     let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
     let dispatched = wv.with_webview(move |pwv| {
         crate::engine::webview::eval_js_with(&pwv.inner(), &script, move |res| {
@@ -113,11 +152,23 @@ pub(super) async fn wait_for(app: &AppHandle, req: &Value) -> Value {
         .get("condition")
         .and_then(|v| v.as_str())
         .unwrap_or("appear");
-    if !matches!(condition, "appear" | "gone" | "load") {
-        return AppError::validation("condition 可选 appear / gone / load").error_json();
+    if !matches!(
+        condition,
+        "appear" | "gone" | "load" | "text" | "enabled" | "idle"
+    ) {
+        return AppError::validation("condition 可选 appear/gone/load/text/enabled/idle").error_json();
     }
-    if condition != "load" && selector.trim().is_empty() {
-        return AppError::validation("condition=appear/gone 时 selector 必填").error_json();
+    if matches!(condition, "appear" | "gone" | "text" | "enabled") && selector.trim().is_empty() {
+        return AppError::validation(format!("condition={condition} 时 selector 必填")).error_json();
+    }
+    // text 条件必须带合法 expect（预检在 Rust 侧完成，非法直接拒，不进轮询）
+    if condition == "text" {
+        if let Err(resp) = expect_literal(req) {
+            return resp;
+        }
+        if req.get("expect").is_none() {
+            return AppError::validation("condition=text 时 expect 必填（{op, value}）").error_json();
+        }
     }
     let timeout_ms = req
         .get("timeout")
@@ -128,7 +179,12 @@ pub(super) async fn wait_for(app: &AppHandle, req: &Value) -> Value {
     loop {
         match eval_action(app, req, "check", &selector, 0, "", "down", 0, condition, "", 5).await {
             Ok(v) => {
+                // 脚本级致命错误（如非法正则）直接透传，不再盲等
+                if v.get("action_error").is_some() {
+                    return wrap(v);
+                }
                 if v.get("met").and_then(|b| b.as_bool()).unwrap_or(false) {
+                    idle_cleanup(app, req, condition).await;
                     return json!({"ok": true, "data": {
                         "met": true,
                         "waited_ms": start.elapsed().as_millis() as u64,
@@ -136,16 +192,29 @@ pub(super) async fn wait_for(app: &AppHandle, req: &Value) -> Value {
                     }});
                 }
             }
-            Err(resp) => return resp,
+            Err(resp) => {
+                idle_cleanup(app, req, condition).await;
+                return resp;
+            }
         }
         let waited = start.elapsed().as_millis() as u64;
         if waited >= timeout_ms {
+            idle_cleanup(app, req, condition).await;
             return json!({"ok": true, "data": {
                 "met": false, "waited_ms": waited, "hint": "等待超时"
             }});
         }
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
+}
+
+/// idle 条件结束后清理页面级计数器（恢复 fetch/XHR 原函数、断开 MutationObserver）。
+/// 尽力而为：失败不影响主结果。非 idle 条件直接跳过。
+async fn idle_cleanup(app: &AppHandle, req: &Value, condition: &str) {
+    if condition != "idle" {
+        return;
+    }
+    let _ = eval_action(app, req, "check", "", 0, "", "down", 0, "idle_cleanup", "", 2).await;
 }
 
 /// `action/scroll`：滚动（up/down/top/bottom）。
@@ -261,6 +330,38 @@ pub(super) async fn key(app: &AppHandle, req: &Value) -> Value {
     }
 }
 
+/// `action/type`（缺口 5）：逐字符输入（纯字符串，不执行）。
+/// 可选 selector（+index/pierce/frames）：定位、聚焦、输入在同一脚本同步完成；
+/// 不传 selector 时作用于当前焦点。input/textarea 走 native setter + InputEvent；
+/// contenteditable 走 Selection/Range。密码框拒绝（password_refused）。Risk=Write，受双闸门。
+pub(super) async fn type_text(app: &AppHandle, req: &Value) -> Value {
+    if !agent_actions_enabled(app).await {
+        return gated();
+    }
+    let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("");
+    if text.is_empty() && !bool_arg(req, "clear") {
+        return AppError::validation("缺少 text（或显式 clear:true）").error_json();
+    }
+    if text.chars().count() > 4096 {
+        return AppError::validation("text 过长（>4096 字符）").error_json();
+    }
+    // selector 可选（≤1024）；不传则向当前焦点输入
+    let selector = req
+        .get("selector")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if selector.chars().count() > 1024 {
+        return AppError::validation("selector 过长（>1024 字符）").error_json();
+    }
+    let index = req.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
+    match eval_action(app, req, "type", &selector, index, "", "down", 0, "", "", 10).await {
+        Ok(v) => wrap(v),
+        Err(resp) => resp,
+    }
+}
+
 /// selector 校验（同 read_page：非空 + ≤1024 字符）
 fn required_selector(req: &Value) -> Result<String, Value> {
     let s = req
@@ -276,4 +377,222 @@ fn required_selector(req: &Value) -> Result<String, Value> {
         return Err(AppError::validation("selector 过长（>1024 字符）").error_json());
     }
     Ok(s)
+}
+
+/// `action/find`（缺口 2/6）：只读定位——text / role+name / selector 三种瞄准，
+/// 返回稳定 selector + 坐标；找不到附 diagnose（nearby/same_text/in_iframe，限量截断）。
+/// Risk=Read：只读、不改页面，不挂 api_agent_actions（只读模式下脑也必须能"找"）。
+pub(super) async fn find(app: &AppHandle, req: &Value) -> Value {
+    let selector = req
+        .get("selector")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if selector.chars().count() > 1024 {
+        return AppError::validation("selector 过长（>1024 字符）").error_json();
+    }
+    let has_text = req
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    let has_role = req
+        .get("role")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    if selector.is_empty() && !has_text && !has_role {
+        return AppError::validation("需 text / role / selector 至少其一").error_json();
+    }
+    match eval_action(app, req, "find", &selector, 0, "", "down", 0, "", "", 10).await {
+        Ok(v) => wrap(v),
+        Err(resp) => resp,
+    }
+}
+
+/// 扩展参数解析：字符串参数（trim + 字符数硬顶）
+fn str_arg(req: &Value, key: &str, max_chars: usize) -> Result<String, Value> {
+    let s = req
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if s.chars().count() > max_chars {
+        return Err(AppError::validation(format!("{key} 过长（>{max_chars} 字符）")).error_json());
+    }
+    Ok(s)
+}
+
+/// 扩展参数解析：visible_only 缺省 true（与 find 语义一致；其余动作不传此参数，无影响）
+fn visible_only_arg(req: &Value) -> bool {
+    match req.get("visible_only") {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Number(n)) => n.as_i64().unwrap_or(1) != 0,
+        Some(Value::String(s)) => matches!(s.as_str(), "1" | "true" | "yes"),
+        _ => true,
+    }
+}
+
+/// frames 参数校验并序列化为 JS 数组字面量（数字=第 N 个 iframe，字符串=选择器；≤4 层）。
+/// serde_json 序列化保证字符串转义安全，无注入面。
+fn frames_literal(req: &Value) -> Result<String, Value> {
+    let mut out: Vec<Value> = Vec::new();
+    if let Some(f) = req.get("frames") {
+        let arr = f.as_array().ok_or_else(|| {
+            AppError::validation("frames 必须是数组（数字=第 N 个 iframe，字符串=选择器）").error_json()
+        })?;
+        if arr.len() > 4 {
+            return Err(AppError::validation("frames 层级过深（>4）").error_json());
+        }
+        for item in arr {
+            match item {
+                Value::Number(n) => {
+                    let i = n.as_u64().ok_or_else(|| {
+                        AppError::validation("frames 数字元素必须是非负整数").error_json()
+                    })?;
+                    if i > 99 {
+                        return Err(AppError::validation("frames 序号过大（>99）").error_json());
+                    }
+                    out.push(json!(i));
+                }
+                Value::String(s) => {
+                    if s.chars().count() > 256 {
+                        return Err(
+                            AppError::validation("frames 选择器元素过长（>256 字符）").error_json()
+                        );
+                    }
+                    out.push(json!(s));
+                }
+                _ => {
+                    return Err(
+                        AppError::validation("frames 元素只支持数字或字符串").error_json()
+                    )
+                }
+            }
+        }
+    }
+    Ok(serde_json::to_string(&out).unwrap_or_else(|_| "[]".into()))
+}
+
+/// modifiers 参数校验并序列化为 JS 数组字面量（仅白名单四键）
+fn modifiers_literal(req: &Value) -> Result<String, Value> {
+    const ALLOWED: &[&str] = &["Control", "Shift", "Alt", "Meta"];
+    let mut out: Vec<String> = Vec::new();
+    if let Some(m) = req.get("modifiers") {
+        let arr = m.as_array().ok_or_else(|| {
+            AppError::validation("modifiers 必须是数组（如 [\"Control\",\"Shift\"]）").error_json()
+        })?;
+        for item in arr {
+            let s = item.as_str().ok_or_else(|| {
+                AppError::validation("modifiers 元素必须是字符串").error_json()
+            })?;
+            if !ALLOWED.contains(&s) {
+                return Err(AppError::validation(format!(
+                    "modifiers 仅支持 Control/Shift/Alt/Meta，收到: {s}"
+                ))
+                .error_json());
+            }
+            out.push(s.to_string());
+        }
+    }
+    Ok(serde_json::to_string(&out).unwrap_or_else(|_| "[]".into()))
+}
+
+/// wait_for text 条件的 expect 参数：{op: contains/equals/regex, value: string}。
+/// 非 text 条件或未传时返回 null（JS 侧不用）。
+fn expect_literal(req: &Value) -> Result<String, Value> {
+    let Some(e) = req.get("expect") else {
+        return Ok("null".into());
+    };
+    let obj = e
+        .as_object()
+        .ok_or_else(|| AppError::validation("expect 必须是对象 {op, value}").error_json())?;
+    let op = obj
+        .get("op")
+        .and_then(|v| v.as_str())
+        .unwrap_or("contains");
+    if !matches!(op, "contains" | "equals" | "regex") {
+        return Err(AppError::validation("expect.op 可选 contains/equals/regex").error_json());
+    }
+    let value = obj
+        .get("value")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::validation("expect.value 必填（字符串）").error_json())?;
+    if value.chars().count() > 512 {
+        return Err(AppError::validation("expect.value 过长（>512 字符）").error_json());
+    }
+    Ok(serde_json::to_string(&json!({"op": op, "value": value})).unwrap_or_else(|_| "null".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn frames_literal_rejects_non_array() {
+        let req = json!({"frames": "0"});
+        assert!(frames_literal(&req).is_err());
+    }
+
+    #[test]
+    fn frames_literal_accepts_mixed_path() {
+        let req = json!({"frames": [0, "#login-box"]});
+        assert_eq!(frames_literal(&req).unwrap(), "[0,\"#login-box\"]");
+    }
+
+    #[test]
+    fn frames_literal_rejects_deep_nesting() {
+        let req = json!({"frames": [0, 1, 2, 3, 4]});
+        assert!(frames_literal(&req).is_err());
+    }
+
+    #[test]
+    fn frames_literal_escapes_strings() {
+        let req = json!({"frames": ["a'b\"c"]});
+        let lit = frames_literal(&req).unwrap();
+        assert_eq!(lit, "[\"a'b\\\"c\"]");
+    }
+
+    #[test]
+    fn frames_literal_default_empty() {
+        assert_eq!(frames_literal(&json!({})).unwrap(), "[]");
+    }
+
+    #[test]
+    fn modifiers_literal_whitelist() {
+        assert_eq!(
+            modifiers_literal(&json!({"modifiers": ["Control", "Shift"]})).unwrap(),
+            "[\"Control\",\"Shift\"]"
+        );
+        assert!(modifiers_literal(&json!({"modifiers": ["Win"]})).is_err());
+        assert!(modifiers_literal(&json!({"modifiers": "Control"})).is_err());
+        assert_eq!(modifiers_literal(&json!({})).unwrap(), "[]");
+    }
+
+    #[test]
+    fn expect_literal_validation() {
+        assert_eq!(expect_literal(&json!({})).unwrap(), "null");
+        let ok = expect_literal(&json!({"expect": {"op": "regex", "value": "¥\\d+"}})).unwrap();
+        assert!(ok.contains("\"op\":\"regex\""));
+        assert!(expect_literal(&json!({"expect": {"op": "bad", "value": "x"}})).is_err());
+        assert!(expect_literal(&json!({"expect": {"op": "contains"}})).is_err());
+        assert!(expect_literal(&json!({"expect": "x"})).is_err());
+    }
+
+    #[test]
+    fn visible_only_defaults_true() {
+        assert!(visible_only_arg(&json!({})));
+        assert!(visible_only_arg(&json!({"visible_only": true})));
+        assert!(!visible_only_arg(&json!({"visible_only": false})));
+        assert!(!visible_only_arg(&json!({"visible_only": 0})));
+    }
+
+    #[test]
+    fn str_arg_caps_length() {
+        assert!(str_arg(&json!({"role": "button"}), "role", 64).is_ok());
+        assert!(str_arg(&json!({"role": "x".repeat(65)}), "role", 64).is_err());
+    }
 }

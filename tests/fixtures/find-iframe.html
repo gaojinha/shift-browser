@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>fixture: iframe</title></head>
+<body>
+  <h1>同源 iframe 穿透验收</h1>
+  <p>下面 iframe 内有表单控件（验收 frames 穿透用）：</p>
+  <iframe id="login-box" src="find-iframe-inner.html" style="width:400px;height:200px"></iframe>
+  <!-- 跨源 iframe：只应报 frame_cross_origin，不谎报可点 -->
+  <iframe id="cross" src="https://example.com/" style="width:400px;height:100px"></iframe>
+</body>
+</html>

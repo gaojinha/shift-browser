@@ -64,10 +64,12 @@ pub(super) fn defs() -> Vec<ToolDef> {
     ),
     tool(
       "action/click",
-      "点击元素（预检 not_found/not_visible/disabled 后 click）。参数：selector（必填）、index（默认 0）、tab_id（可选）。返回 navigated/url_after。受 api_agent_actions 开关约束。",
+      "点击元素（预检 not_found/not_visible/disabled 后 click）。参数：selector（必填）、index（默认 0）、pierce（穿透开放 shadow root，默认 false）、frames（同源 iframe 下钻路径数组：数字=第 N 个，字符串=选择器，≤4 层；跨源返回 frame_cross_origin:true 不谎报）、tab_id（可选）。返回 navigated/url_after。受 api_agent_actions 开关约束。",
       json!({
-        "selector": { "type": "string", "description": "CSS 选择器（必填）" },
+        "selector": { "type": "string", "description": "CSS 选择器（必填；可喂 action/find 返回的稳定 selector）" },
         "index": { "type": "integer", "description": "第几个匹配元素（默认 0）" },
+        "pierce": { "type": "boolean", "description": "穿透开放 shadow root（默认 false）" },
+        "frames": { "type": "array", "description": "同源 iframe 下钻路径（数组：数字=第 N 个，字符串=选择器）" },
         "tab_id": { "type": "string", "description": "目标标签 id（可选）" }
       }),
       vec!["selector"],
@@ -75,11 +77,13 @@ pub(super) fn defs() -> Vec<ToolDef> {
     ),
     tool(
       "action/fill",
-      "填写表单（预检后设 value 并触发 input/change；值只落字符串、不执行）。参数：selector（必填）、value、index（默认 0）、tab_id（可选）。受 api_agent_actions 开关约束。",
+      "填写表单（预检后设 value 并触发 input/change；值只落字符串、不执行）。参数：selector（必填）、value、index（默认 0）、pierce、frames（同 action/click）、tab_id（可选）。受 api_agent_actions 开关约束。",
       json!({
         "selector": { "type": "string", "description": "CSS 选择器（必填）" },
         "value": { "type": "string", "description": "填入的字符串（不执行）" },
         "index": { "type": "integer", "description": "第几个匹配元素（默认 0）" },
+        "pierce": { "type": "boolean", "description": "穿透开放 shadow root（默认 false）" },
+        "frames": { "type": "array", "description": "同源 iframe 下钻路径（数组：数字=第 N 个，字符串=选择器）" },
         "tab_id": { "type": "string", "description": "目标标签 id（可选）" }
       }),
       vec!["selector"],
@@ -96,10 +100,12 @@ pub(super) fn defs() -> Vec<ToolDef> {
     ),
     tool(
       "action/hover",
-      "悬停元素（派发 mouseover/mouseenter/mousemove）——用于 hover 展开的菜单。参数：selector（必填）、index（默认 0）、tab_id（可选）。受 api_agent_actions 开关约束。",
+      "悬停元素（派发 mouseover/mouseenter/mousemove）——用于 hover 展开的菜单。参数：selector（必填）、index（默认 0）、pierce、frames（同 action/click）、tab_id（可选）。受 api_agent_actions 开关约束。",
       json!({
         "selector": { "type": "string", "description": "CSS 选择器（必填）" },
         "index": { "type": "integer", "description": "第几个匹配元素（默认 0）" },
+        "pierce": { "type": "boolean", "description": "穿透开放 shadow root（默认 false）" },
+        "frames": { "type": "array", "description": "同源 iframe 下钻路径（数组：数字=第 N 个，字符串=选择器）" },
         "tab_id": { "type": "string", "description": "目标标签 id（可选）" }
       }),
       vec!["selector"],
@@ -107,14 +113,32 @@ pub(super) fn defs() -> Vec<ToolDef> {
     ),
     tool(
       "action/key",
-      "派发键盘事件（如 Enter/Escape/Tab/ArrowDown）。参数：key（必填）、selector（可选，先聚焦命中元素，缺省作用于当前焦点）、index、tab_id（可选）。受 api_agent_actions 开关约束。",
+      "派发键盘事件（如 Enter/Escape/Tab/ArrowDown）。参数：key（必填）、modifiers（组合键数组，仅 Control/Shift/Alt/Meta；只对页面 JS 监听器有效，对浏览器原生快捷键无效）、selector（可选，先聚焦命中元素，缺省作用于当前焦点）、index、pierce、frames（同 action/click）、tab_id（可选）。受 api_agent_actions 开关约束。",
       json!({
         "key": { "type": "string", "description": "键名（如 Enter/Escape/Tab/ArrowDown）" },
+        "modifiers": { "type": "array", "items": { "type": "string", "enum": ["Control", "Shift", "Alt", "Meta"] }, "description": "组合键（如 [\"Control\"]）" },
         "selector": { "type": "string", "description": "先聚焦的元素（可选）" },
         "index": { "type": "integer", "description": "第几个匹配元素（默认 0）" },
+        "pierce": { "type": "boolean", "description": "穿透开放 shadow root（默认 false）" },
+        "frames": { "type": "array", "description": "同源 iframe 下钻路径（数组：数字=第 N 个，字符串=选择器）" },
         "tab_id": { "type": "string", "description": "目标标签 id（可选）" }
       }),
       vec!["key"],
+      Risk::Write,
+    ),
+    tool(
+      "action/type",
+      "逐字符输入文本（纯字符串，不执行）。可选 selector（+index/pierce/frames）：直接定位输入元素，聚焦与输入同步完成（推荐，不受跨调用焦点丢失影响）；不传 selector 时作用于当前焦点（先 action/click 聚焦）。input/textarea 用原生 value setter + InputEvent（Vue/React 受控组件正确更新）；contenteditable 用 Selection/Range 插入。参数：text（必填；或 clear:true 单独清空）、clear（先清空，默认 false）、tab_id（可选）。密码框拒绝（password_refused）。受 api_agent_actions 开关约束。",
+      json!({
+        "text": { "type": "string", "description": "要输入的文本（必填；纯字符串，不执行）" },
+        "selector": { "type": "string", "description": "目标输入元素 CSS 选择器（可选；不传则作用于当前焦点）" },
+        "index": { "type": "integer", "description": "第几个匹配元素（默认 0）" },
+        "pierce": { "type": "boolean", "description": "穿透开放 shadow root（默认 false）" },
+        "frames": { "type": "array", "description": "同源 iframe 下钻路径（数组：数字=第 N 个，字符串=选择器）" },
+        "clear": { "type": "boolean", "description": "输入前清空当前内容（默认 false）" },
+        "tab_id": { "type": "string", "description": "目标标签 id（可选）" }
+      }),
+      vec![],
       Risk::Write,
     ),
     // ===== 标签与窗口控制 =====

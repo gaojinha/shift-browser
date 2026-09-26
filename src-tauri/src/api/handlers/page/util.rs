@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager};
 use crate::error::AppError;
 
 /// 取布尔参数（true/false、"true"/"1"、数字 1 均可；缺省 false）
-pub(super) fn bool_arg(req: &Value, key: &str) -> bool {
+pub(crate) fn bool_arg(req: &Value, key: &str) -> bool {
     match req.get(key) {
         Some(Value::Bool(b)) => *b,
         Some(Value::Number(n)) => n.as_i64().unwrap_or(0) != 0,

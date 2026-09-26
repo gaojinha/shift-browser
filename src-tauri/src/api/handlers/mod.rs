@@ -67,6 +67,7 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     ("content/snapshot", |a, r| Box::pin(content::snapshot(a, r))),
     ("action/dismiss", |a, r| Box::pin(page::dismiss(a, r))),
     // 页面交互（P2）：受 api_agent_actions 开关约束（默认关）
+    ("action/find", |a, r| Box::pin(actions::find(a, r))), // 只读定位，不挂交互闸门
     ("action/wait_for", |a, r| Box::pin(actions::wait_for(a, r))),
     ("action/scroll", |a, r| Box::pin(actions::scroll(a, r))),
     ("action/click", |a, r| Box::pin(actions::click(a, r))),
@@ -74,6 +75,7 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     ("action/back", |a, r| Box::pin(actions::back(a, r))),
     ("action/hover", |a, r| Box::pin(actions::hover(a, r))),
     ("action/key", |a, r| Box::pin(actions::key(a, r))),
+    ("action/type", |a, r| Box::pin(actions::type_text(a, r))),
     // MCP 工具网关
     ("tools", |a, r| Box::pin(tools::list_tools(a, r))),
     ("tool_call", |a, r| Box::pin(tools::call_tool(a, r))),
