@@ -40,6 +40,10 @@ mod tls;
 mod useragent;
 mod translate;
 mod tray;
+// P2（2026-09-26）：网页随手问 —— Rust 代理连本机 opencode，浏览器只做手/入口。
+// pub：tests/webqa_live.rs 真机验收直接调 SseAccumulator/fold_event/build_prompt
+// 验证真实 IO 路径，而不是用 Python 复刻逻辑（复刻验证不了 Rust 代码本身）。
+pub mod webqa;
 // R2-1b 拆分（2026-09-24）：锁屏对话框独立成子模块
 #[path = "ui/lock_dialog.rs"]
 mod lock_dialog;
@@ -283,6 +287,10 @@ pub fn run() {
       ai::ai_chat_stream,
       ai::ai_cancel_stream,
       ai::ai_list_providers,
+      // P2：网页随手问（本机 opencode 代理）
+      webqa::opencode_probe,
+      webqa::opencode_ask,
+      webqa::opencode_cancel,
       // 页面理解层（阶段 1.1）
       content_cmd::content_snapshot,
       content_cmd::content_extract,
