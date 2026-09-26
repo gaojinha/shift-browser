@@ -38,7 +38,7 @@ pub(crate) fn target_label(app: &AppHandle, req: &Value) -> Result<String, Value
 }
 
 /// 在给定 webview 上执行脚本并取回解析后的 JSON（lazy 滚动扫掠用）。
-pub(super) async fn eval_value(
+pub(crate) async fn eval_value(
     wv: &tauri::Webview,
     script: &str,
     timeout_secs: u64,

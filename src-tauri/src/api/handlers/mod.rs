@@ -11,6 +11,12 @@ mod actions;
 // P3 桥接（2026-09-26）：webqa::read_page_selection 要复用 selection 的实现，
 // 故从 mod content 提到 pub(crate) mod content。仍在 crate 内部，不对外暴露。
 pub(crate) mod content;
+
+// 整页汉化（webzh.rs）要复用这两样，加 crate 内出口；不改 api.sock 的对外协议。
+pub(crate) use page::eval_value as eval_value_public;
+pub(crate) fn target_label_public(app: &AppHandle, req: &Value) -> Result<String, Value> {
+    page::target_label(app, req)
+}
 mod data;
 mod page;
 mod plugins;
@@ -69,6 +75,17 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     ("content/snapshot", |a, r| Box::pin(content::snapshot(a, r))),
     // 选区采集（P1 上下文采集）：纯只读，给「网页随手问 AI」当嘴
     ("read_selection", |a, r| Box::pin(content::selection(a, r))),
+    // 整页汉化（P3b）：收集只读、写回归 Write（受只读闸门约束）。
+    // 暴露到 api.sock 是为了自动化验收能驱动真机——Tauri invoke 和 api.sock
+    // 是两条不通的路，光有 Tauri 命令就只能靠手点，测不了。
+    (
+        "page_collect_translatable",
+        |a, r| Box::pin(crate::webzh::collect_for_api(a, r)),
+    ),
+    (
+        "page_apply_translation",
+        |a, r| Box::pin(crate::webzh::apply_for_api(a, r)),
+    ),
     ("action/dismiss", |a, r| Box::pin(page::dismiss(a, r))),
     // 页面交互（P2）：受 api_agent_actions 开关约束（默认关）
     ("action/find", |a, r| Box::pin(actions::find(a, r))), // 只读定位，不挂交互闸门

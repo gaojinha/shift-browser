@@ -44,6 +44,7 @@ mod tray;
 // pub：tests/webqa_live.rs 真机验收直接调 SseAccumulator/fold_event/build_prompt
 // 验证真实 IO 路径，而不是用 Python 复刻逻辑（复刻验证不了 Rust 代码本身）。
 pub mod webqa;
+pub mod webzh;
 // R2-1b 拆分（2026-09-24）：锁屏对话框独立成子模块
 #[path = "ui/lock_dialog.rs"]
 mod lock_dialog;
@@ -292,6 +293,11 @@ pub fn run() {
       webqa::opencode_probe,
       webqa::opencode_ask,
       webqa::opencode_cancel,
+      // 整页汉化（webzh）
+      webzh::page_collect_translatable,
+      webzh::page_apply_translation,
+      webzh::opencode_translate_batch,
+      webzh::plan_translate_batches,
       // 页面理解层（阶段 1.1）
       content_cmd::content_snapshot,
       content_cmd::content_extract,

@@ -33,14 +33,14 @@ const SSE_MAX_SECS: u64 = 120;
 const PRIVACY_L2: &str = "L2（问题 + 选区/段落 + 页面标题/网址）";
 
 /// 默认 agent：`plan` 在 opencode 侧禁用一切编辑工具，正合适"只读问答"。
-const DEFAULT_AGENT: &str = "plan";
+pub const DEFAULT_AGENT: &str = "plan";
 
 // ───────────────────────── 凭据 ─────────────────────────
 
 /// opencode serve 的 Basic 认证凭据。仅内存持有。
-struct Credentials {
-    username: String,
-    password: String,
+pub struct Credentials {
+    pub username: String,
+    pub password: String,
 }
 
 impl std::fmt::Debug for Credentials {
@@ -771,6 +771,152 @@ async fn drive(run: AskRun<'_>, sse: reqwest::Response) -> CommandResult<()> {
 }
 
 // ───────────────────────── 单测 ─────────────────────────
+// ================================================================
+// 整页汉化（webzh.rs）的公共出口
+//
+// 汉化要的是「非流式、拿结构化结果」，跟随手问的聊天流式协议不是一回事，
+// 但底层三样东西完全共用：凭据发现、HTTP 客户端、会话管理。
+// 这里开 pub 出口给 webzh 用，避免那边把同一套逻辑抄第二遍。
+// 抄第二遍的代价不是"多几行"——是以后改凭据发现方式要改两处，漏一处就出玄学问题。
+// ================================================================
+
+/// 供 webzh：解析 opencode 凭据（从 /proc 扫 serve 进程，不落盘）。
+pub async fn resolve_credentials_pub(
+    db: tauri::State<'_, crate::db::Db>,
+) -> CommandResult<Credentials> {
+    resolve_credentials(db).await
+}
+
+/// 供 webzh：构造 HTTP 客户端（共享连接池）。
+pub fn client_pub(creds: &Credentials) -> Result<reqwest::Client, AppError> {
+    client(creds)
+}
+
+/// 供 webzh：opencode 基址。
+pub fn base_url_pub() -> String {
+    base_url()
+}
+
+/// 供 webzh：确保会话可用，返回 (session_id, baseline 消息 id 列表)。
+///
+/// 第二个参数是会话标题：汉化会话单独起名，便于事后在 opencode 界面里认出来。
+pub async fn ensure_session_pub(
+    http: &reqwest::Client,
+    existing: Option<&str>,
+    title: &str,
+) -> Result<(String, Vec<String>), AppError> {
+    if let Some(sid) = existing.filter(|s| !s.trim().is_empty()) {
+        let ok = http
+            .get(format!("{}/session/{}", base_url(), sid))
+            .send()
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false);
+        if ok {
+            let baseline = baseline_ids(http, sid).await.unwrap_or_default();
+            return Ok((sid.to_string(), baseline));
+        }
+        log::info!("[webqa] 会话 {sid} 已失效，改建新会话");
+    }
+    let resp = http
+        .post(format!("{}/session", base_url()))
+        .json(&json!({ "title": title }))
+        .send()
+        .await
+        .map_err(|e| AppError::net(format!("建 opencode 会话失败：{e}")))?;
+    if !resp.status().is_success() {
+        return Err(AppError::net(format!(
+            "建 opencode 会话失败：HTTP {}",
+            resp.status()
+        )));
+    }
+    let v: Value = resp
+        .json()
+        .await
+        .map_err(|e| AppError::net(format!("解析建会话响应失败：{e}")))?;
+    let sid = v
+        .pointer("/id")
+        .or_else(|| v.get("id"))
+        .and_then(|x| x.as_str())
+        .ok_or_else(|| AppError::internal("opencode 建会话未返回 id"))?
+        .to_string();
+    let baseline = baseline_ids(http, &sid).await.unwrap_or_default();
+    Ok((sid, baseline))
+}
+
+/// 供 webzh：非流式发一轮 prompt，拿回完整文本。
+///
+/// 复用随手问那套 SSE 订阅 + `fold_event` 累积，但**不往前端发任何事件**：
+/// 汉化要的是"这一批全部译完的一次性结果"，中间增量对写回 DOM 没用。
+///
+/// 先订阅后发问：反了会漏掉开头的事件，答案变残缺。
+pub async fn ask_once(
+    http: &reqwest::Client,
+    base: &str,
+    sid: &str,
+    agent: &str,
+    prompt: &str,
+    timeout_secs: u64,
+) -> Result<String, AppError> {
+    let sse = http
+        .get(format!("{base}/event"))
+        .send()
+        .await
+        .map_err(|e| AppError::net(format!("订阅 opencode 事件流失败：{e}")))?;
+
+    let resp = http
+        .post(format!("{base}/session/{sid}/prompt_async"))
+        .json(&json!({ "agent": agent, "parts": [{ "type": "text", "text": prompt }] }))
+        .send()
+        .await
+        .map_err(|e| AppError::net(format!("发翻译请求失败：{e}")))?;
+    if !resp.status().is_success() {
+        return Err(AppError::net(format!(
+            "opencode 拒收翻译请求：HTTP {}",
+            resp.status()
+        )));
+    }
+
+    let baseline = baseline_ids(http, sid).await.unwrap_or_default();
+    let mut stream = sse.bytes_stream();
+    let mut acc = SseAccumulator::new();
+    let mut target_msg: Option<String> = None;
+    let mut buf = String::new();
+
+    let res: Result<Result<(), AppError>, tokio::time::error::Elapsed> =
+        tokio::time::timeout(Duration::from_secs(timeout_secs), async {
+            while let Some(chunk) = stream.next().await {
+                let bytes = chunk.map_err(|e| AppError::net(format!("读事件流失败：{e}")))?;
+                for data in acc.push(&bytes) {
+                    let Ok(ev) = serde_json::from_str::<Value>(&data) else {
+                        continue;
+                    };
+                    if let Some((delta, done)) = fold_event(&ev, sid, &mut target_msg, &baseline) {
+                        if let Some(d) = delta {
+                            buf.push_str(&d);
+                        }
+                        if done {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            Err(AppError::net(format!(
+                "翻译事件流提前断开（已收到 {} 字）",
+                buf.chars().count()
+            )))
+        })
+        .await;
+
+    match res {
+        Ok(inner) => inner.map(|_| buf),
+        Err(_) => Err(AppError::net(format!(
+            "翻译超时（{} 秒内未完成，已收到 {} 字）",
+            timeout_secs,
+            buf.chars().count()
+        ))),
+    }
+}
 
 #[cfg(test)]
 mod tests {

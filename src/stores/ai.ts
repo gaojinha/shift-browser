@@ -65,6 +65,17 @@ interface AIState {
   webqaProbe: OpencodeProbe | null
   /** 「网页随手问」模式：走本机 opencode，不走 AGNES 云端 */
   webqaMode: boolean
+  // ── 整页汉化（webzh）：本机 opencode 翻译，直接改 DOM ──
+  /** 汉化进行中（整页要跑几十秒，全程占状态） */
+  zhBusy: boolean
+  /** 汉化进度：已翻/总段数、已翻/总批次、当前批次文本预览 */
+  zhProgress: { done: number; total: number; batch: number; batches: number; preview: string } | null
+  /** 该标签是否已汉化（决定按钮显示"汉化"还是"还原"） */
+  zhApplied: boolean
+  /** 取消汉化的开关：置 true 后当前批次做完就停 */
+  zhCancel: boolean
+  /** 汉化会话 id：多批复用同一个 opencode 会话 */
+  zhSessionId: string | null
 }
 
 export const useAIStore = defineStore('ai', {
@@ -81,6 +92,11 @@ export const useAIStore = defineStore('ai', {
     webqaSessionId: null,
     webqaProbe: null,
     webqaMode: false,
+    zhBusy: false,
+    zhProgress: null,
+    zhApplied: false,
+    zhCancel: false,
+    zhSessionId: null,
   }),
 
   actions: {
@@ -277,14 +293,178 @@ export const useAIStore = defineStore('ai', {
       )
     },
 
-    /** 快捷操作：翻译当前页标题/简介 */
-    async translatePage() {
-      const ctx = this.pageContext
-      if (!ctx) {
-        this.messages.push({ role: 'assistant', content: '当前没有可翻译的页面。' })
-        return
+    /**
+     * 快捷操作：整页汉化（翻译直接长在页面上，不是译到对话框里）
+     *
+     * 编排逻辑放前端而不是 Rust：分批大小、并发、进度节奏都得随页面大小和
+     * 实测速度调，写死后端每次调整都要重新出包。
+     *
+     * 三步：收集 → 分批翻译 → 写回。中间任何一批失败都**继续往下走**，
+     * 不整页回滚——已经翻好的部分留在页面上，剩下的保留原文，比全白费强。
+     */
+    async translatePage(tabId?: string) {
+      if (this.zhBusy) return
+      this.error = null
+      this.zhBusy = true
+      this.zhCancel = false
+      this.zhProgress = null
+      // 每次汉化开新会话：上一轮的翻译历史留着只会拖慢、串味
+      this.zhSessionId = null
+
+      try {
+        // ---- 1. 收集 ----
+        const col = await invokeOk<{
+          segments: Array<{ id: string; kind: string; text: string; chars: number }>
+          attrs: Array<{ id: string; attr: string; orig: string }>
+          total: number
+          attrTotal: number
+          skipped: number
+          title: string
+        }>('page_collect_translatable', { tab_id: tabId ?? null })
+
+        const segs = col.segments || []
+        const attrs = col.attrs || []
+        if (segs.length === 0 && attrs.length === 0) {
+          this.error = '这页没找到需要翻译的文字（可能已经是中文，或是纯代码/数字页面）。'
+          return
+        }
+
+        // ---- 2. 分批（后端算分批方案，前后端口径一致）----
+        const items = [
+          ...segs.map((s) => ({ id: s.id, text: s.text })),
+          // 属性条目用 x 前缀 id，跟文本节点区分开；写回时分开处理
+          ...attrs.map((a) => ({ id: a.id, text: a.orig })),
+        ]
+        // data 是**批次的数组的数组**：Array<Array<条目>>。
+        // 写成 Array<条目[]> 读起来像前者、实际也是前者，但容易误改成后者，
+        // 后面 batches[bi] 就会拿到 undefined 而静默什么都不翻。这里写全。
+        const plan = await invokeOk<{ data: Array<Array<{ id: string; text: string }>> }>(
+          'plan_translate_batches',
+          { req: { items, page_title: col.title } },
+        )
+        const batches = plan.data || []
+        this.zhProgress = { done: 0, total: items.length, batch: 0, batches: batches.length, preview: '' }
+
+        // ---- 3. 逐批翻译 ----
+        const pairs: Array<{ id: string; orig: string; translated: string }> = []
+        const attrPairs: Array<{ attr: string; orig: string; translated: string }> = []
+        const origById = new Map(items.map((i) => [i.id, i.text]))
+        const attrMeta = new Map(attrs.map((a) => [a.id, a]))
+        // 超长段在分批时被切成 `原id.序号` 子块，先按整段 id 攒起译文，
+        // 等全部批次跑完再拼成整段写回（page_apply.js 仍按原 id 整段替换）
+        const textChunk = new Map<string, string>()
+        const attrChunk = new Map<string, string>()
+        let failed = 0
+
+        for (let bi = 0; bi < batches.length; bi++) {
+          if (this.zhCancel) break
+          this.zhProgress = {
+            ...this.zhProgress!,
+            batch: bi + 1,
+            preview: batches[bi][0]?.text?.slice(0, 40) || '',
+          }
+          let res: {
+            data: Array<{ id: string; text: string }> | null
+            msg: string | null
+            session_id?: string | null
+          }
+          try {
+            res = await invokeOk('opencode_translate_batch', {
+              req: {
+                items: batches[bi],
+                page_title: col.title,
+                session_id: this.zhSessionId,
+              },
+            })
+          } catch (e) {
+            // 网络/凭据层面的硬错：重试也是白试，直接中止
+            this.error = `第 ${bi + 1}/${batches.length} 批翻译失败：${String(e)}`
+            failed = batches.length
+            break
+          }
+          if (res.session_id) this.zhSessionId = res.session_id
+          const got = res.data || []
+          if (got.length === 0) failed++
+          for (const g of got) {
+            // 超长段在分批时被切成 `原id.序号` 的子块，这里按子块收，
+            // 稍后统一拼回整段。
+            const dot = g.id.lastIndexOf('.')
+            const baseId = dot === -1 ? g.id : g.id.slice(0, dot)
+            const orig = origById.get(baseId)
+            if (orig === undefined) continue
+            // 模型偶尔把译文写成原文（尤其短词），白改一遍还可能把
+            // 页面搞得更难看（长度变化引起重排）。原样跳过。
+            if (g.text.trim() === orig.trim()) continue
+            const meta = attrMeta.get(baseId)
+            if (meta) {
+              attrChunk.set(baseId, (attrChunk.get(baseId) || '') + g.text.trim())
+            } else {
+              textChunk.set(baseId, (textChunk.get(baseId) || '') + g.text.trim())
+            }
+          }
+          this.zhProgress = { ...this.zhProgress!, done: this.zhProgress!.done + got.length }
+        }
+
+        // 超长段的子块译文已在循环里按整段 id 拼好，这里取出成 pairs。
+        // 拼接顺序 == 翻译请求里的顺序 == 原文顺序。
+        for (const [id, translated] of textChunk) {
+          pairs.push({ id, orig: origById.get(id)!, translated })
+        }
+        for (const [id, translated] of attrChunk) {
+          const meta = attrMeta.get(id)!
+          attrPairs.push({ attr: meta.attr, orig: meta.orig, translated })
+        }
+
+        // ---- 4. 写回页面 ----
+        if (pairs.length > 0 || attrPairs.length > 0) {
+          const ap = await invokeOk<{ applied: number; mismatched: number }>(
+            'page_apply_translation',
+            { tab_id: tabId ?? null, mode: 'apply', payload: { pairs, attrs: attrPairs } },
+          )
+          this.zhApplied = (ap.applied || 0) > 0
+          const skippedNote = ap.mismatched ? `（${ap.mismatched} 处页面已变动，跳过）` : ''
+          this.messages.push({
+            role: 'assistant',
+            content:
+              `已汉化本页：${ap.applied} 处${skippedNote}。` +
+              (failed ? `另有 ${failed} 批没翻出来，保留原文。` : '') +
+              (this.zhCancel ? '已按你的要求停下。' : ''),
+          })
+        } else {
+          this.error = '这批一句都没翻出来，页面保持原样。多半是页面本身没问题。'
+        }
+      } catch (e) {
+        this.error = `整页汉化失败：${String(e)}`
+      } finally {
+        this.zhBusy = false
+        this.zhProgress = null
+        this.zhCancel = false
       }
-      await this.sendMessage(`请把当前页面「${ctx.title}」的标题和核心内容翻译成中文。`)
+    },
+
+    /** 还原当前页原文（DOM 改回去了） */
+    async restorePage(tabId?: string) {
+      if (this.zhBusy) return
+      try {
+        const r = await invokeOk<{ restored: number }>('page_apply_translation', {
+          tab_id: tabId ?? null,
+          mode: 'restore',
+          payload: null,
+        })
+        this.zhApplied = false
+        this.zhSessionId = null
+        this.messages.push({
+          role: 'assistant',
+          content: `已还原原文 ${r.restored} 处。`,
+        })
+      } catch (e) {
+        this.error = `还原失败：${String(e)}`
+      }
+    },
+
+    /** 停止汉化：当前批次跑完就停，不丢已翻好的部分 */
+    stopTranslate() {
+      this.zhCancel = true
     },
 
     /** 快捷操作：解释当前页 */

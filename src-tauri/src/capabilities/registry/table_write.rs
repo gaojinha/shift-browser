@@ -211,5 +211,21 @@ pub(super) fn defs() -> Vec<ToolDef> {
       vec![],
       Risk::Write,
     ),
+    // 整页汉化 · 写回/还原（P3b）：**改别人的页面**，故归 Write、受只读闸门约束。
+    // apply  按收集阶段打在节点上的 __sbId 写回译文（原文存在节点上）
+    // restore 从备份恢复原文
+    // 安全：只改「当前文本仍等于收集时原文」的节点；页面自己更新过的（轮播、
+    // 虚拟列表）跳过不覆盖（计入 mismatched），避免拿译文盖掉新内容。
+    tool(
+      "page_apply_translation",
+      "把译文写回当前标签页面（mode=apply）或还原原文（mode=restore）。会真实修改页面 DOM，故归写类。参数：tab_id（可选，缺省活动标签）、mode（apply|restore，必填）、payload（apply 时必填 {pairs:[{id,orig,translated}], attrs:[{attr,orig,translated}]}；restore 时传 null）。返回 applied（实际改动处数）、mismatched（页面已变动而跳过的处数）、restored（restore 时的还原数）。限制：翻译质量由模型决定，写回前会逐条核对原文；核对不上就跳过，不会拿译文盖掉页面新内容。",
+      json!({
+        "tab_id": { "type": "string", "description": "目标标签 id（可选，缺省活动标签）" },
+        "mode": { "type": "string", "description": "apply 写回译文 / restore 还原原文" },
+        "payload": { "type": "object", "description": "apply 时为 {pairs,attrs}；restore 时为 null" }
+      }),
+      vec!["mode"],
+      Risk::Write,
+    ),
   ]
 }

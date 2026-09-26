@@ -153,6 +153,21 @@ pub(super) fn defs() -> Vec<ToolDef> {
       vec![],
       Risk::Read,
     ),
+    // 整页汉化 · 收集（P3b）：扫 DOM 收集待译文本。**纯只读**——只读 textContent
+    // 和 title/placeholder/aria-label/alt，不改页面、不派发事件。给「汉化本页」
+    // 当嘴。参数：tab_id（可选，缺省活动标签）。返回 segments[{id,kind,text,chars}]
+    // / attrs[{id,attr,orig}] / total / attrTotal / skipped。
+    // 已在页面上给每个待译节点打了 __sbId 标记（自定义属性，不影响渲染和
+    // 页面逻辑；写回/还原阶段要用，刷新页面即消失）。
+    tool(
+      "page_collect_translatable",
+      "扫当前标签 DOM，收集「值得翻译」的文本片段，供整页汉化使用（纯只读，不改页面）。会自动滤掉代码块、纯数字/日期、标识符、已含汉字的片段——中文页返回空数组是正确行为，不是故障。参数：tab_id（可选，缺省活动标签）。返回 segments（文本节点，按长度升序，短段先翻）、attrs（title/placeholder/aria-label/alt）、total、attrTotal、skipped、url、title。",
+      json!({
+        "tab_id": { "type": "string", "description": "目标标签 id（可选，缺省活动标签）" }
+      }),
+      vec![],
+      Risk::Read,
+    ),
     // 审计查询（K/O3）：读 AI 操作记录（只含 url/命令/结果码，无内容）。Read。
     tool(
       "audit/reads",

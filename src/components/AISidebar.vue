@@ -28,6 +28,13 @@ const topOffset = computed(() => {
   return LAYOUT.tabBar + LAYOUT.addressBar + bookmarkH
 })
 
+/** 汉化进度百分比：按批次算（批次大小不均，按段数算会跳） */
+const zhPercent = computed(() => {
+  const p = aiStore.zhProgress
+  if (!p || p.batches === 0) return 0
+  return Math.min(100, Math.round(((p.batch - 1) / p.batches) * 100))
+})
+
 // 打开/关闭：分屏模式——不隐藏 webview，而是让 webview 让出右侧 AI_PANEL_WIDTH，
 // 页面保持可见可交互（对话时能看着页面描述）；关闭时恢复全宽
 watch(
@@ -184,7 +191,7 @@ onUnmounted(() => {
 function runSkill(id: string) {
   const handlers: Record<string, () => void> = {
     summarize_page: () => aiStore.summarizePage(),
-    translate_page: () => aiStore.translatePage(),
+    translate_page: () => aiStore.translatePage(tabsStore.activeTabId ?? undefined),
     explain_page: () => aiStore.explainPage(),
     page_qa: () => inputRef.value?.focus(),
   }
@@ -214,9 +221,44 @@ function onOverlaySelf() {
 
       <!-- 快捷操作 -->
       <div class="ai-actions">
-        <button v-for="s in SKILLS" :key="s.id" class="ai-action" :title="s.desc" @click="runSkill(s.id)">
+        <button
+          v-for="s in SKILLS"
+          :key="s.id"
+          class="ai-action"
+          :title="s.desc"
+          :disabled="s.id === 'translate_page' && aiStore.zhBusy"
+          @click="runSkill(s.id)"
+        >
           {{ s.icon }} {{ s.name }}
         </button>
+      </div>
+
+      <!-- 整页汉化：进度 + 还原 -->
+      <div v-if="aiStore.zhBusy || aiStore.zhApplied" class="zh-panel">
+        <template v-if="aiStore.zhBusy && aiStore.zhProgress">
+          <div class="zh-row">
+            <span class="zh-text">
+              汉化中…第 {{ aiStore.zhProgress.batch }}/{{ aiStore.zhProgress.batches }} 批，已翻
+              {{ aiStore.zhProgress.done }}/{{ aiStore.zhProgress.total }} 处
+            </span>
+            <button class="zh-stop" @click="aiStore.stopTranslate()">停止</button>
+          </div>
+          <div class="zh-bar">
+            <div
+              class="zh-bar-fill"
+              :style="{ width: zhPercent + '%' }"
+            ></div>
+          </div>
+          <div v-if="aiStore.zhProgress.preview" class="zh-preview">
+            正在处理：{{ aiStore.zhProgress.preview }}…
+          </div>
+        </template>
+        <div v-else-if="aiStore.zhApplied" class="zh-row">
+          <span class="zh-text">本页已汉化，原文已备份在页面里</span>
+          <button class="zh-restore" @click="aiStore.restorePage(tabsStore.activeTabId ?? undefined)">
+            还原原文
+          </button>
+        </div>
       </div>
 
       <!-- 对话区 -->
@@ -380,6 +422,68 @@ function onOverlaySelf() {
   transition: background 0.15s;
 }
 .ai-action:hover {
+  background: var(--bg-hover);
+}
+.ai-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 整页汉化进度面板 */
+.zh-panel {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--bg-secondary);
+  background: var(--bg-secondary);
+}
+.zh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.zh-text {
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+.zh-bar {
+  margin-top: 6px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-color);
+  overflow: hidden;
+}
+.zh-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+.zh-preview {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zh-stop,
+.zh-restore {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--bg-primary);
+  background: var(--accent);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.zh-restore {
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--border-color);
+}
+.zh-restore:hover {
   background: var(--bg-hover);
 }
 .ai-list {
