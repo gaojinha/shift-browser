@@ -3,6 +3,49 @@
   if (window.__shiftPrivacyInstalled) return;
   window.__shiftPrivacyInstalled = true;
 
+  // ---- 0) 跨域子框架一律零修改（风控/验证码 iframe 兼容，2026-09-26 Upwork 事故）----
+  // 本脚本经 AllFrames 注入，会跑进第三方跨域 iframe；而 Cloudflare Turnstile /
+  // reCAPTCHA / hCaptcha 的挑战代码恰恰运行在这种 iframe 里，专门检测原生 API
+  // 有没有被钩（Function.prototype.toString、原型链、跨帧一致性）。任何
+  // defineProperty / 包装构造函数都会让安全检查直接判负——Upwork 的 Cloudflare
+  // managed challenge（cf-mitigated: challenge，挑战跑在 challenges.cloudflare.com
+  // 跨域 iframe）就因此永远过不去。跨域帧读 top.location 会抛 SecurityError，
+  // 用它识别"跨域子框架"；同源子框架仍照常防护。
+  var crossSubframe = (function () {
+    try {
+      if (window.top === window.self) return false; // 顶层框架
+      void window.top.location;                    // 跨域时抛 SecurityError
+      return false;                                // 同源子框架
+    } catch (e) {
+      return true;
+    }
+  })();
+  if (crossSubframe) return;
+
+  // ---- 0.5) 白名单 = 完全兼容模式（不再只是"跳过加噪"）----
+  // 命中白名单的顶层/同源帧：不安装任何指纹伪装，连 GPC 也不设，整帧保持
+  // 浏览器原生环境——风控站（Upwork 等 Cloudflare 站点）、在线设计/地图类加这里。
+  // 注意：第三方挑战 iframe 由上面的跨域判定自动豁免，**不要**把
+  // challenges.cloudflare.com 之类加进白名单（iframe 里 hostname 是对方域名，
+  // 且挑战域名会变；真正要加的是 upwork.com 这种顶层站点）。
+  var WL = window.__SHIFT_PRIVACY_WHITELIST__ || [];
+  var WL_HIT = (function () {
+    var h = String(location.hostname || '').toLowerCase();
+    for (var i = 0; i < WL.length; i++) {
+      var d = String(WL[i] || '').toLowerCase().replace(/^\*\./, '').replace(/^https?:\/\//, '').replace(/\/.*$/, '').trim();
+      if (!d) continue;
+      if (h === d || (h.length > d.length && h.slice(-(d.length + 1)) === '.' + d)) return true;
+    }
+    return false;
+  })();
+  if (WL_HIT) {
+    try {
+      window.__shiftNoiseOn = false;
+      window.__shiftPrivacyBypass = true; // STRICT_PRIVACY_JS 见此标记也整体跳过
+    } catch (e) {}
+    return;
+  }
+
   // ---- 1) GPC：全球隐私控制（W3C 规范信号，2027 起加州强制）----
   try {
     Object.defineProperty(navigator, 'globalPrivacyControl', {
@@ -31,19 +74,11 @@
     return (x % 1000) / 1000;
   }
 
-  // ---- 1.5) 加噪白名单：命中则跳过"加噪类"防护（保留 GPC/WebRTC/归一化等不破坏功能的项）----
-  // 注入时由 Rust 侧在脚本前拼 window.__SHIFT_PRIVACY_WHITELIST__ = [...]
-  var WL = window.__SHIFT_PRIVACY_WHITELIST__ || [];
-  var NOISE_ON = (function () {
-    var h = String(location.hostname || '').toLowerCase();
-    for (var i = 0; i < WL.length; i++) {
-      var d = String(WL[i] || '').toLowerCase().replace(/^\*\./, '').replace(/^https?:\/\//, '').replace(/\/.*$/, '').trim();
-      if (!d) continue;
-      if (h === d || (h.length > d.length && h.slice(-(d.length + 1)) === '.' + d)) return false;
-    }
-    return true;
-  })();
-  try { window.__shiftNoiseOn = NOISE_ON; } catch (e) {}
+  // ---- 1.5) 加噪开关 ----
+  // 走到这里说明既不是跨域 iframe（0 已 return）、也没命中白名单（0.5 已 return），
+  // 故加噪恒开；保留 __shiftNoiseOn 标记供隐私自测读取。
+  var NOISE_ON = true;
+  try { window.__shiftNoiseOn = true; } catch (e) {}
 
   // ---- 1.6) 反指纹模式（阶段 2 · 反指纹 2.0）----
   // noise   = 加噪（默认）：同源稳定、跨源不同的确定性噪声

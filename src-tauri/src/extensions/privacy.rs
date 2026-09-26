@@ -144,8 +144,17 @@ pub fn build_privacy_selftest(
     }
 
     // 2) GPC 信号
+    // 白名单 = 完全兼容模式：privacy.js 在装任何防护前整体 return（含 GPC），
+    // 故白名单帧 GPC 缺失是预期行为，标 skip 而非 fail。
     if off {
         checks.push(mk_check("gpc", "GPC 隐私信号", "skip", skip_reason));
+    } else if whitelisted {
+        checks.push(mk_check(
+            "gpc",
+            "GPC 隐私信号",
+            "skip",
+            "当前站点在白名单（兼容模式），整帧保持浏览器原生",
+        ));
     } else if has("gpc") {
         checks.push(mk_check(
             "gpc",
@@ -166,7 +175,12 @@ pub fn build_privacy_selftest(
         if off {
             checks.push(mk_check(id, label, "skip", skip_reason));
         } else if whitelisted {
-            checks.push(mk_check(id, label, "skip", "当前站点在白名单，已跳过加噪"));
+            checks.push(mk_check(
+                id,
+                label,
+                "skip",
+                "当前站点在白名单（兼容模式），整帧保持浏览器原生",
+            ));
         } else if has(id) {
             checks.push(mk_check(id, label, "pass", "已启用"));
         } else {
@@ -174,7 +188,7 @@ pub fn build_privacy_selftest(
         }
     }
 
-    // 6-9) 常开归一化类
+    // 6-9) 常开归一化类（白名单兼容模式下同样整体不装，标 skip）
     for (id, label) in [
         ("hardware", "硬件信息归一化"),
         ("webrtc", "WebRTC 内网 IP 防泄露"),
@@ -183,6 +197,13 @@ pub fn build_privacy_selftest(
     ] {
         if off {
             checks.push(mk_check(id, label, "skip", skip_reason));
+        } else if whitelisted {
+            checks.push(mk_check(
+                id,
+                label,
+                "skip",
+                "当前站点在白名单（兼容模式），整帧保持浏览器原生",
+            ));
         } else if has(id) {
             checks.push(mk_check(id, label, "pass", "已启用"));
         } else {

@@ -54,7 +54,7 @@ async function onChangeFpMode(e: Event) {
   }
 }
 
-/** 加噪白名单：这些站点不做加噪（Canvas 敏感站点可加进来），域名按行分隔 */
+/** 兼容白名单：这些站点完全不装指纹防护（风控/Canvas 敏感站点），域名按行分隔 */
 const whitelistText = ref('')
 async function loadWhitelist() {
   try {
@@ -181,14 +181,15 @@ onMounted(() => {
       </div>
       <div class="kw-block" v-if="privacyLevel !== 'off'">
         <div class="kw-hint">
-          <b>加噪白名单</b>：下列站点<strong>不做加噪</strong>（Canvas 敏感的在线地图、设计工具、
-          视频剪辑等可加进来）。每行一个域名，子域名自动包含。
+          <b>兼容白名单</b>：下列站点<strong>完全不装指纹防护</strong>，整页保持浏览器原生环境
+          （过不了 Cloudflare / Turnstile 等安全检查的站点，如 upwork.com，以及在线地图、设计工具、
+          视频剪辑等加这里）。每行一个域名，子域名自动包含；第三方验证 iframe 会自动豁免，无需添加。
         </div>
         <textarea
           class="kw-textarea"
           v-model="whitelistText"
           rows="4"
-          placeholder="ditu.amap.com&#10;www.figma.com"
+          placeholder="upwork.com&#10;ditu.amap.com&#10;www.figma.com"
           spellcheck="false"
         ></textarea>
         <button class="mini-btn primary" @click="saveWhitelist">保存白名单</button>
@@ -220,7 +221,7 @@ onMounted(() => {
           <b>{{ privacySelfTest.fp_mode === 'uniform' ? '统一化' : '加噪' }}</b> · 站点
           <b>{{ privacySelfTest.hostname || '(未知)' }}</b> · 通过
           <b>{{ privacySelfTest.passed }}/{{ privacySelfTest.total }}</b>
-          <span v-if="privacySelfTest.whitelisted">（白名单站点，加噪已跳过）</span>
+          <span v-if="privacySelfTest.whitelisted">（白名单站点，兼容模式：防护整体跳过）</span>
         </div>
         <div v-if="privacySelfTest" class="ps-list">
           <div

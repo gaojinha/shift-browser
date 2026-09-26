@@ -25,17 +25,31 @@ fn privacy_selftest_standard_all_pass() {
 }
 
 #[test]
-fn privacy_selftest_whitelist_skips_noise_only() {
-    let page = r#"{"installed":true,"features":{"gpc":true,"canvas":false,"webgl":false,"audio":false,"hardware":true,"webrtc":true,"webgpu":true,"misc":true}}"#;
-    let r = build_privacy_selftest("standard", "example.com", true, page);
-    assert_eq!(r.passed, 6, "白名单下加噪三项跳过，其余 6 项通过");
+fn privacy_selftest_whitelist_is_full_compat_bypass() {
+    // 2026-09-26 起白名单 = 完全兼容模式：privacy.js 装任何防护前整体 return，
+    // 页面上报的 features 应全为 false；自测只能有 inject 一项 pass，其余 8 项
+    // 全部 skip（不能出现 fail，否则用户会以为防护坏了）。
+    let page = r#"{"installed":true,"features":{"gpc":false,"canvas":false,"webgl":false,"audio":false,"hardware":false,"webrtc":false,"webgpu":false,"misc":false}}"#;
+    let r = build_privacy_selftest("standard", "upwork.com", true, page);
+    assert_eq!(r.total, 9);
+    assert_eq!(r.passed, 1, "兼容模式仅 inject 通过");
+    assert!(
+        r.checks
+            .iter()
+            .all(|c| c.status != "fail"),
+        "白名单帧不得有 fail 项：{:?}",
+        r.checks
+    );
     let skip: Vec<&str> = r
         .checks
         .iter()
         .filter(|c| c.status == "skip")
         .map(|c| c.id.as_str())
         .collect();
-    assert_eq!(skip, vec!["canvas", "webgl", "audio"]);
+    assert_eq!(
+        skip,
+        vec!["gpc", "canvas", "webgl", "audio", "hardware", "webrtc", "webgpu", "misc"]
+    );
 }
 
 #[test]

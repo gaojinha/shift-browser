@@ -3,6 +3,15 @@
 (function () {
   if (window.__shiftAdblockInstalled) return;
   window.__shiftAdblockInstalled = true;
+  // 跨域子框架零介入（2026-09-26 Upwork/Cloudflare）：广告 iframe 无需扫，
+  // 风控 iframe（Turnstile 等）里挂 MutationObserver 等于自报自动化痕迹。
+  try {
+    if (window.top !== window.self) {
+      void window.top.location; // 读到这里说明同源；跨域会抛 SecurityError
+    }
+  } catch (e) {
+    return;
+  }
   if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
   var keywords = __SB_KEYWORDS__;
   var HIDDEN = 'data-sb-hidden';

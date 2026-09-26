@@ -1,6 +1,23 @@
 
 (function () {
   if (window.__shiftPrivacyStrict) return;
+
+  // ---- 0) 风控 iframe / 白名单兼容帧：零修改（与 privacy.js 同策略，2026-09-26）----
+  // ① 白名单帧 privacy.js 已置 __shiftPrivacyBypass，严格档一并整体跳过；
+  // ② 跨域子框架（Cloudflare Turnstile / reCAPTCHA / hCaptcha iframe）保持原生——
+  //    performance.now 量化、字体/传感器 API 抹除全是风控负分信号。
+  if (window.__shiftPrivacyBypass === true) return;
+  var __strictCross = (function () {
+    try {
+      if (window.top === window.self) return false;
+      void window.top.location; // 跨域时抛 SecurityError
+      return false;
+    } catch (e) {
+      return true;
+    }
+  })();
+  if (__strictCross) return;
+
   window.__shiftPrivacyStrict = true;
 
   // ---- 1) 移除高危设备 API（既是强指纹源，也是攻击面）----
