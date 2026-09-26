@@ -383,7 +383,41 @@ pub fn fold_event(
     }
 }
 
-// ───────────────────────── 命令 ─────────────────────────
+// ───────────────────────── 前端桥接命令 ─────────────────────────
+
+/// 前端读当前选区（Tauri command）。
+///
+/// 为什么不直接在前端 `invoke('read_selection')`：`read_selection` 是
+/// **api.sock 的 handler**（`api/handlers/mod.rs` 的 HANDLERS），只对 MCP
+/// 客户端和 api.sock 生效，不是 Tauri command，前端 invoke 调不到。
+/// 这里做个桥：复用同一套 `webqa::read_selection` 实现，不重复逻辑、
+/// 也不把它塞进 `invoke_handler`（那会让"开放 API 工具"和"前端内部命令"混在一起）。
+///
+/// 键名保持下划线（`tab_id`/`max_chars`）：与 api handler 一致，少一层转换。
+/// 注意前端那边是 `invoke`，没有 Tauri 的 camelCase 自动转换。
+#[tauri::command]
+pub async fn read_page_selection(
+    app: tauri::AppHandle,
+    tab_id: Option<String>,
+    expand: Option<bool>,
+    max_chars: Option<u64>,
+) -> CommandResult<serde_json::Value> {
+    // 构造与 api handler 相同形状的请求体，复用唯一实现
+    let mut req = serde_json::Map::new();
+    if let Some(t) = tab_id {
+        req.insert("tab_id".into(), Value::String(t));
+    }
+    if let Some(e) = expand {
+        req.insert("expand".into(), Value::Bool(e));
+    }
+    if let Some(m) = max_chars {
+        req.insert("max_chars".into(), Value::Number(m.into()));
+    }
+    let out = crate::api::handlers::content::selection(&app, &Value::Object(req)).await;
+    // api handler 用 E_* 结构表达业务结果（rejected/无选区不算故障），
+    // 这里原样透传，前端按字段判断，不转换。
+    Ok(out)
+}
 
 /// 连通性探测：凭据能否用、opencode 是否活着、有哪些 agent。
 /// 不回显任何凭据。

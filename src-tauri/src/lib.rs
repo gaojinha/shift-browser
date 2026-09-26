@@ -287,7 +287,8 @@ pub fn run() {
       ai::ai_chat_stream,
       ai::ai_cancel_stream,
       ai::ai_list_providers,
-      // P2：网页随手问（本机 opencode 代理）
+      // P2/P3：网页随手问（本机 opencode 代理）
+      webqa::read_page_selection,
       webqa::opencode_probe,
       webqa::opencode_ask,
       webqa::opencode_cancel,

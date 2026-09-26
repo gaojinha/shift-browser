@@ -324,8 +324,9 @@ export const useAIStore = defineStore('ai', {
      */
     async captureSelection(tabId?: string) {
       try {
-        const args: Record<string, unknown> = { expand: true }
-        if (tabId !== undefined) args.tabId = tabId
+        // read_page_selection 是 Tauri command 桥（read_selection 本身只是
+        // api.sock handler，前端 invoke 调不到）。键名是下划线：invoke 没有
+        // Tauri 那套 camelCase 自动转换，写成 tabId 会静默失效。
         const r = await invokeOk<{
           has_selection: boolean
           text?: string
@@ -333,12 +334,16 @@ export const useAIStore = defineStore('ai', {
           url?: string
           rejected?: boolean
           hibernated?: boolean
-          hints?: string
-        }>('read_selection', args)
+          /** 后端给的是数组（可能多条），别当字符串用 */
+          hints?: string[]
+        }>('read_page_selection', {
+          tab_id: tabId ?? null,
+          expand: true,
+        })
 
         if (r.hibernated) {
           this.selection = null
-          this.error = r.hints || '标签已休眠，切回该标签后可再读选区'
+          this.error = r.hints?.join('；') || '标签已休眠，切回该标签后可再读选区'
           return
         }
         if (r.rejected) {

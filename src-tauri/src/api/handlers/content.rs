@@ -127,7 +127,7 @@ fn selection_args(req: &Value) -> (bool, u64) {
 ///
 /// 安全：选区落在密码/敏感区域**一律拒绝**且不返回任何内容（铁律 1.4），
 /// 以 `rejected=true` + `code="secret_region"` 表达，属业务结果而非故障。
-pub(super) async fn selection(app: &AppHandle, req: &Value) -> Value {
+pub(crate) async fn selection(app: &AppHandle, req: &Value) -> Value {
     let (expand, max_chars) = selection_args(req);
     let label = match super::page::target_label(app, req) {
         Ok(l) => l,

@@ -8,7 +8,9 @@
 //!    （否则本模块防漂移测试失败——只读闸门风险分类与命令表同源）。
 
 mod actions;
-mod content;
+// P3 桥接（2026-09-26）：webqa::read_page_selection 要复用 selection 的实现，
+// 故从 mod content 提到 pub(crate) mod content。仍在 crate 内部，不对外暴露。
+pub(crate) mod content;
 mod data;
 mod page;
 mod plugins;

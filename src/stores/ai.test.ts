@@ -265,7 +265,7 @@ describe('网页随手问：askPage 走本机 opencode', () => {
   it('按结构体传参并回传选区上下文', async () => {
     mockDefaultInvoke()
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === 'read_selection')
+      if (cmd === 'read_page_selection')
         return Promise.resolve({
           has_selection: true,
           text: '选中的正文',
@@ -324,7 +324,7 @@ describe('网页随手问：askPage 走本机 opencode', () => {
   it('敏感区 rejected：明确报错且不带入任何选区内容', async () => {
     mockDefaultInvoke()
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === 'read_selection')
+      if (cmd === 'read_page_selection')
         return Promise.resolve({ has_selection: false, rejected: true, code: 'secret_region' })
       return Promise.resolve(undefined)
     })
@@ -337,8 +337,8 @@ describe('网页随手问：askPage 走本机 opencode', () => {
   it('hibernated：提示唤醒，不当成"用户没选东西"', async () => {
     mockDefaultInvoke()
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === 'read_selection')
-        return Promise.resolve({ has_selection: false, hibernated: true, hints: '标签已休眠，切回可再读' })
+      if (cmd === 'read_page_selection')
+        return Promise.resolve({ has_selection: false, hibernated: true, hints: ['标签已休眠，切回可再读'] })
       return Promise.resolve(undefined)
     })
     const ai = useAIStore()
@@ -350,7 +350,7 @@ describe('网页随手问：askPage 走本机 opencode', () => {
   it('真无选区：不报错（正常情形）', async () => {
     mockDefaultInvoke()
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === 'read_selection')
+      if (cmd === 'read_page_selection')
         return Promise.resolve({ has_selection: false, hibernated: false })
       return Promise.resolve(undefined)
     })

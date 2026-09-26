@@ -27,7 +27,12 @@ function collectFiles(dir: string, out: string[] = []): string[] {
 /** 提取前端所有 invoke('xxx') 的命令名 */
 function frontendCommands(): Set<string> {
   const names = new Set<string>()
-  const re = /invoke(?:<[^>]*>)?\(\s*['"]([a-z_]+)['"]/g
+  // 同时抓 invoke() 和 invokeOk()：invokeOk 才是业务代码的实际入口
+  // （P3 踩过：只匹配 invoke 时，invokeOk('read_selection') 这种
+  //   "调了 Rust 未注册命令"的漂移会整批逃过本守卫）
+  // 泛型参数里可能含 >/< 和换行（如 invokeOk<{a: string}>('cmd', {...})），
+  // 用 [\s\S]*? 跨行匹配到第一个 '('，再取其后的引号命令名。
+  const re = /(?:invoke|invokeOk)(?:<[\s\S]*?>)?\(\s*['"]([a-z_]+)['"]/g
   for (const f of collectFiles(join(ROOT, 'src'))) {
     const s = readFileSync(f, 'utf-8')
     let m: RegExpExecArray | null

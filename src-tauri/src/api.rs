@@ -17,7 +17,9 @@
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
 
 // R2-1c 拆分（2026-09-24）：命令分发（原 handle() 的 match）独立成子模块
-mod handlers;
+// P3 桥接（2026-09-26）：webqa::read_page_selection 要复用 handlers::content::selection，
+// 故提到 pub(crate)。仍在 crate 内部，不改变 api.sock 的对外协议。
+pub(crate) mod handlers;
 // R2-1c 拆分（2026-09-24）：状态面板 + 模型网关独立成子模块
 pub(crate) mod dashboard;
 // R2-1c 拆分（2026-09-24）：token/限速/IP 白名单等鉴权辅助独立成子模块
