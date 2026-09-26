@@ -65,6 +65,8 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     ("reader/extract", |a, r| Box::pin(content::reader_extract(a, r))),
     ("translate", |a, r| Box::pin(content::translate(a, r))),
     ("content/snapshot", |a, r| Box::pin(content::snapshot(a, r))),
+    // 选区采集（P1 上下文采集）：纯只读，给「网页随手问 AI」当嘴
+    ("read_selection", |a, r| Box::pin(content::selection(a, r))),
     ("action/dismiss", |a, r| Box::pin(page::dismiss(a, r))),
     // 页面交互（P2）：受 api_agent_actions 开关约束（默认关）
     ("action/find", |a, r| Box::pin(actions::find(a, r))), // 只读定位，不挂交互闸门

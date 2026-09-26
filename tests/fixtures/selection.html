@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>fixture: selection</title></head>
+<body>
+  <h1>read_selection 验收</h1>
+  <p>本页按 <code>?case=</code> 在加载后自造选区，供真机验收自动化使用。
+     手工验收也可直接鼠标拖选。用例：none / para / li / td / long / password / quote / pre</p>
+
+  <h2>1. 普通段落（测 expand 扩到段落全文）</h2>
+  <p id="p-normal">这一段是验收用的普通段落。把鼠标在段落中间<span id="sel-para">拖选这几个字</span>，
+  而 block_text 应扩到整段全文——因为随手问 AI 时问的是"这段说的啥"，碎片没有语境。</p>
+
+  <h2>2. 列表项 / 表格单元（测 blockOf 覆盖 li/td，且不越界）</h2>
+  <ul>
+    <li id="li-1">列表项一，<span id="sel-li">选中这里</span>应扩到整个 li，不溢出到 ul。</li>
+    <li>列表项二，用来验证 nearest('li') 不会贪心吞掉上一项。</li>
+  </ul>
+  <table border="1" cellpadding="4">
+    <tr><td id="td-1">单元格甲，<span id="sel-td">选中这里</span>。</td><td>单元格乙</td></tr>
+  </table>
+
+  <h2>3. 长段落（配合 max_chars 测硬顶与 truncated 标记）</h2>
+  <p id="p-long"><span id="sel-long">开头选中这几个字</span>，后面是重复内容用于把长度顶过 max_chars。
+    重复内容用于把长度顶过 max_chars。重复内容用于把长度顶过 max_chars。
+    重复内容用于把长度顶过 max_chars。重复内容用于把长度顶过 max_chars。
+    重复内容用于把长度顶过 max_chars。重复内容用于把长度顶过 max_chars。
+    重复内容用于把长度顶过 max_chars。重复内容用于把长度顶过 max_chars。
+    重复内容用于把长度顶过 max_chars。重复内容用于把长度顶过 max_chars。
+    重复内容用于把长度顶过 max_chars。重复内容用于把长度顶过 max_chars。</p>
+
+  <h2>4. 敏感区域（测拒绝：必须 rejected=true 且不返回内容）</h2>
+  <input id="secret-input" type="password" value="不应被读到的密码" placeholder="密码框">
+  <div class="password" id="secret-div">这是 <span id="sel-pw">.password 容器内的文字</span>，不应被读到。</div>
+  <div class="normal" id="ok-div">这是普通容器，<span id="sel-ok">选中它</span>应当正常返回，不得误拒。</div>
+
+  <h2>5. 引用块 / 代码块</h2>
+  <blockquote id="bq">引用块里的<span id="sel-bq">这段文字</span>，应扩到整个 blockquote。</blockquote>
+  <pre id="pre">代码块里的<span id="sel-pre">这段文字</span>，应扩到整个 pre。</pre>
+
+  <script>
+    // 按 ?case= 自造真实 Selection（Range + addRange，走标准 Selection API，
+    // 采集脚本读到的 getSelection()/anchorNode/toString 与鼠标拖选完全同构）
+    (function () {
+      var CASE_SEL = {
+        para: 'sel-para', li: 'sel-li', td: 'sel-td', long: 'sel-long',
+        password: 'sel-pw', none: null, quote: 'sel-bq', pre: 'sel-pre', ok: 'sel-ok'
+      };
+      var c = new URLSearchParams(location.search).get('case') || 'none';
+      var id = Object.prototype.hasOwnProperty.call(CASE_SEL, c) ? CASE_SEL[c] : null;
+
+      function run() {
+        // none：故意不造选区，验"无选区不报错"；其余造真实 Selection
+        if (id) {
+          var el = document.getElementById(id);
+          if (el) {
+            var r = document.createRange();
+            r.selectNodeContents(el);
+            var s = window.getSelection();
+            s.removeAllRanges();
+            s.addRange(r);
+          }
+        }
+        document.title = 'ready:' + c;   // 供外部确认已就绪（none 也须置位）
+      }
+      if (document.readyState === 'complete') { run(); }
+      else { window.addEventListener('load', run); }
+    })();
+  </script>
+</body>
+</html>

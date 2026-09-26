@@ -141,6 +141,18 @@ pub(super) fn defs() -> Vec<ToolDef> {
       vec![],
       Risk::Read,
     ),
+    // 选区采集（P1 上下文采集）：纯只读，不改页面/不派发事件。给「网页随手问 AI」当嘴。
+    tool(
+      "read_selection",
+      "取当前标签的选中文本（纯只读，不改页面、不派发事件、不聚焦）。用于「网页随手问 AI」上下文采集：无选区属常态，如实返回 has_selection=false 而不报错。参数：tab_id（可选，缺省活动标签）、expand（默认 true，把选区碎片扩到所属段落全文——问「这段说的啥」需要段落语境）、max_chars（默认 4000，硬顶 20000）。返回 has_selection / text / text_chars / block_text / block_chars / tag / truncated / rejected / code / reject_reason / url / title。安全：选区落在密码或敏感区域一律拒绝、不返回任何内容，以 rejected=true + code=secret_region 表达（铁律 1.4）。限制：只取主文档选区，跨源 iframe 内选区取不到（同源策略），此时 has_selection=false，不谎报。",
+      json!({
+        "tab_id": { "type": "string", "description": "目标标签 id（可选，缺省活动标签）" },
+        "expand": { "type": "boolean", "description": "扩展到所属段落全文（默认 true）" },
+        "max_chars": { "type": "integer", "description": "单段最大字符数（默认 4000，硬顶 20000）" }
+      }),
+      vec![],
+      Risk::Read,
+    ),
     // 审计查询（K/O3）：读 AI 操作记录（只含 url/命令/结果码，无内容）。Read。
     tool(
       "audit/reads",
