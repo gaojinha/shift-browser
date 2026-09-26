@@ -283,13 +283,15 @@ function onOverlaySelf() {
         <button class="ai-clear" @click="aiStore.clearConversation()">清空对话</button>
         <button
           v-if="!aiStore.webqaMode"
-          class="ai-clear"
-          title="用本机 opencode 回答，只带上你选中的内容"
+          class="ai-clear ai-webqa"
+          title="用本机 opencode 回答，只带上你选中的内容（不出本机）"
           @click="enterWebqa"
         >
           网页随手问
         </button>
-        <button v-else class="ai-clear" @click="aiStore.exitWebqa()">退出随手问</button>
+        <button v-else class="ai-clear ai-webqa on" @click="aiStore.exitWebqa()">
+          退出随手问
+        </button>
         <span class="ai-hint">
           <template v-if="aiStore.webqaMode">
             <template v-if="aiStore.webqaProbe?.askAgentFallbackRisk">
@@ -597,7 +599,9 @@ function onOverlaySelf() {
 .ai-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
+  /* 网页随手问状态提示可能较长（选了区 + 隐私档），单行会挤爆按钮 */
+  flex-wrap: wrap;
   padding: 6px 12px 10px;
 }
 .ai-clear {
@@ -606,13 +610,31 @@ function onOverlaySelf() {
   color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
+  white-space: nowrap;
 }
 .ai-clear:hover {
   color: var(--danger);
 }
+/* 随手问入口是主动作，给个可点的样子，别和"清空对话"一样灰 */
+.ai-webqa {
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 2px 8px;
+  color: var(--accent, #4a9eff);
+}
+.ai-webqa:hover {
+  border-color: var(--accent, #4a9eff);
+  color: var(--accent, #4a9eff);
+}
+.ai-webqa.on {
+  background: var(--bg-primary);
+}
 .ai-hint {
   color: var(--text-muted);
   font-size: 11px;
+  /* 状态提示可换行，按钮不跟着挪位置 */
+  flex: 1 1 100%;
+  text-align: right;
 }
 /* Agent 动作确认卡片（阶段 1.4） */
 .agent-confirm {
