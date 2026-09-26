@@ -67,9 +67,33 @@ async function onSend() {
   const text = input.value
   if (!text.trim()) return
   input.value = ''
-  await aiStore.sendMessage(text)
+  // 网页随手问模式走本机 opencode，否则走 AGNES 云端
+  if (aiStore.webqaMode) {
+    await aiStore.askPage(text)
+  } else {
+    await aiStore.sendMessage(text)
+  }
   // 发送失败把原文填回，用户不用重打
   if (aiStore.error) input.value = text
+}
+
+/** 进入「网页随手问」：探测本机 opencode + 抓当前选区 */
+async function enterWebqa() {
+  aiStore.webqaMode = true
+  aiStore.messages = []
+  aiStore.error = null
+  await aiStore.probeOpencode()
+  await aiStore.captureSelection(tabsStore.activeTab?.id)
+  nextTick(() => inputRef.value?.focus())
+}
+
+/** 停止：按当前模式调对应的取消命令 */
+function onStop() {
+  if (aiStore.webqaMode) {
+    aiStore.stopWebqa()
+  } else {
+    aiStore.stopStreaming()
+  }
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -248,21 +272,40 @@ function onOverlaySelf() {
           ref="inputRef"
           v-model="input"
           class="ai-input"
-          placeholder="输入问题，Enter 发送，Shift+Enter 换行"
+          :placeholder="aiStore.webqaMode ? '问本机 opencode：Enter 发送，Shift+Enter 换行' : '输入问题，Enter 发送，Shift+Enter 换行'"
           rows="1"
           @keydown="onKeydown"
         ></textarea>
-        <button v-if="aiStore.loading" class="ai-stop" @click="aiStore.stopStreaming()">
-          停止
-        </button>
-        <button v-else class="ai-send" :disabled="!input.trim()" @click="onSend">
-          发送
-        </button>
+        <button v-if="aiStore.loading" class="ai-stop" @click="onStop">停止</button>
+        <button v-else class="ai-send" :disabled="!input.trim()" @click="onSend">发送</button>
       </div>
       <div class="ai-footer">
         <button class="ai-clear" @click="aiStore.clearConversation()">清空对话</button>
+        <button
+          v-if="!aiStore.webqaMode"
+          class="ai-clear"
+          title="用本机 opencode 回答，只带上你选中的内容"
+          @click="enterWebqa"
+        >
+          网页随手问
+        </button>
+        <button v-else class="ai-clear" @click="aiStore.exitWebqa()">退出随手问</button>
         <span class="ai-hint">
-          {{ aiStore.tools.length > 0 ? `🔧 ${aiStore.tools.length} 个工具可用` : '由 AGNES AI 驱动' }}
+          <template v-if="aiStore.webqaMode">
+            <template v-if="aiStore.webqaProbe?.askAgentFallbackRisk">
+              ⚠ 只读 agent 不可用，已拦下发问
+            </template>
+            <template v-else-if="aiStore.selection">
+              📎 已带上选区（{{ aiStore.selection.text.length }} 字）· {{ aiStore.webqaProbe?.privacy }}
+            </template>
+            <template v-else-if="aiStore.webqaProbe">
+              🏠 本机 opencode · {{ aiStore.webqaProbe.model }}
+            </template>
+            <template v-else> 🏠 本机 opencode 未连通 </template>
+          </template>
+          <template v-else>
+            {{ aiStore.tools.length > 0 ? `🔧 ${aiStore.tools.length} 个工具可用` : '由 AGNES AI 驱动' }}
+          </template>
         </span>
       </div>
     </div>

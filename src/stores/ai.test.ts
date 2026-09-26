@@ -253,3 +253,147 @@ describe('pendingPrompt 暂存', () => {
     expect(ai.pendingPrompt).toBeNull()
   })
 })
+
+// ── 网页随手问（P3）：本机 opencode 链路 ──
+// 契约覆盖：
+//  - opencode_ask 按结构体传参（req.xxx），与 AGNES 的位置参数路径互不干扰
+//  - session 事件回收 sessionId 并用于后续追问（多轮上下文）
+//  - delta 增量追加、done 用 full 权威兜底
+//  - captureSelection 三态：有选区 / rejected 敏感区 / hibernated 休眠
+//  - probe 报"只读 agent 不可用"时前端能看见（后端已拦下发问，这里只管透传）
+describe('网页随手问：askPage 走本机 opencode', () => {
+  it('按结构体传参并回传选区上下文', async () => {
+    mockDefaultInvoke()
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'read_selection')
+        return Promise.resolve({
+          has_selection: true,
+          text: '选中的正文',
+          title: '页面标题',
+          url: 'https://example.com/a',
+          hibernated: false,
+        })
+      if (cmd === 'opencode_ask') return Promise.resolve(undefined)
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    await ai.captureSelection('tab-1')
+    expect(ai.selection?.text).toBe('选中的正文')
+
+    await ai.askPage('这段讲了什么')
+    const call = invokeMock.mock.calls.find((c) => c[0] === 'opencode_ask')
+    expect(call).toBeTruthy()
+    const args = call![1] as { req: Record<string, unknown>; onEvent: unknown }
+    expect(args.req.question).toBe('这段讲了什么')
+    expect(args.req.context).toBe('选中的正文')
+    expect(args.req.pageTitle).toBe('页面标题')
+    expect(args.req.pageUrl).toBe('https://example.com/a')
+    expect(args.onEvent).toBeTruthy()
+  })
+
+  it('session 事件回收 sessionId，后续追问带上它（多轮上下文）', async () => {
+    mockDefaultInvoke()
+    const ai = useAIStore()
+    // 先手动收尾第一问（真实运行里由 done/error 事件驱动，测试里只关注 sessionId 回收）
+    const p1 = ai.askPage('第一问')
+    lastChannel?.onmessage?.({ type: 'session', sessionId: 'ses_abc' })
+    expect(ai.webqaSessionId).toBe('ses_abc')
+    lastChannel?.onmessage?.({ type: 'done', full: '答', sessionId: 'ses_abc' })
+    await p1
+
+    await ai.askPage('第二问')
+    const calls = invokeMock.mock.calls.filter((c) => c[0] === 'opencode_ask')
+    const args = calls[calls.length - 1][1] as { req: Record<string, unknown> }
+    expect(args.req.sessionId).toBe('ses_abc')
+  })
+
+  it('delta 增量追加、done 以 full 权威覆盖', async () => {
+    mockDefaultInvoke()
+    const ai = useAIStore()
+    await ai.askPage('问')
+    lastChannel?.onmessage?.({ type: 'delta', content: '前半' })
+    lastChannel?.onmessage?.({ type: 'delta', content: '后半' })
+    expect(ai.messages[ai.messages.length - 1].content).toBe('前半后半')
+    // full 是权威值（delta 可能重复到达）
+    lastChannel?.onmessage?.({ type: 'done', full: '前半后半（修正）', sessionId: 'ses_x' })
+    expect(ai.messages[ai.messages.length - 1].content).toBe('前半后半（修正）')
+    expect(ai.loading).toBe(false)
+    expect(ai.webqaSessionId).toBe('ses_x')
+  })
+
+  it('敏感区 rejected：明确报错且不带入任何选区内容', async () => {
+    mockDefaultInvoke()
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'read_selection')
+        return Promise.resolve({ has_selection: false, rejected: true, code: 'secret_region' })
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    await ai.captureSelection('tab-1')
+    expect(ai.selection).toBeNull()
+    expect(ai.error).toContain('敏感')
+  })
+
+  it('hibernated：提示唤醒，不当成"用户没选东西"', async () => {
+    mockDefaultInvoke()
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'read_selection')
+        return Promise.resolve({ has_selection: false, hibernated: true, hints: '标签已休眠，切回可再读' })
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    await ai.captureSelection('tab-1')
+    expect(ai.selection).toBeNull()
+    expect(ai.error).toContain('休眠')
+  })
+
+  it('真无选区：不报错（正常情形）', async () => {
+    mockDefaultInvoke()
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'read_selection')
+        return Promise.resolve({ has_selection: false, hibernated: false })
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    await ai.captureSelection('tab-1')
+    expect(ai.selection).toBeNull()
+    expect(ai.error).toBeNull()
+  })
+
+  it('probe 结果透传：只读 agent 缺失时前端能看见风险标记', async () => {
+    mockDefaultInvoke()
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'opencode_probe')
+        return Promise.resolve({
+          ok: true,
+          baseUrl: 'http://127.0.0.1:4096',
+          model: 'opencode/big-pickle',
+          defaultAgent: '个人助手',
+          askAgent: 'plan',
+          askAgentPresent: false,
+          askAgentFallbackRisk: true,
+          agents: ['build', '个人助手'],
+          privacy: 'L2（问题 + 选区/段落 + 页面标题/网址）',
+        })
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    await ai.probeOpencode()
+    expect(ai.webqaProbe?.askAgent).toBe('plan')
+    expect(ai.webqaProbe?.askAgentFallbackRisk).toBe(true)
+  })
+
+  it('exitWebqa 清会话与选区（下次提问开独立会话）', async () => {
+    mockDefaultInvoke()
+    const ai = useAIStore()
+    const p = ai.askPage('问')
+    lastChannel?.onmessage?.({ type: 'session', sessionId: 'ses_1' })
+    await p
+    ai.webqaMode = true
+    ai.exitWebqa()
+    expect(ai.webqaMode).toBe(false)
+    expect(ai.webqaSessionId).toBeNull()
+    expect(ai.selection).toBeNull()
+    expect(ai.messages).toHaveLength(0)
+  })
+})

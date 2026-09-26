@@ -19,6 +19,29 @@ interface StreamEvent {
   message?: string
 }
 
+/** 网页随手问：本机 opencode 事件（与 webqa.rs WebqaEvent 对应） */
+interface WebqaEvent {
+  type: 'session' | 'delta' | 'done' | 'error'
+  sessionId?: string
+  content?: string
+  full?: string
+  message?: string
+}
+
+/** opencode 探测结果（后端 opencode_probe） */
+export interface OpencodeProbe {
+  ok: boolean
+  baseUrl: string
+  model: string
+  defaultAgent: string
+  askAgent: string
+  /** askAgent 是否真的存在。false = 会被静默回退到有编辑权限的默认 agent */
+  askAgentPresent: boolean
+  askAgentFallbackRisk: boolean
+  agents: string[]
+  privacy: string
+}
+
 interface AIState {
   messages: AIMessage[]
   loading: boolean
@@ -33,6 +56,15 @@ interface AIState {
   toolsLoaded: boolean
   /** 命令栏「问 AI」暂存的提问：AI 侧栏打开时消费（阶段 3.1） */
   pendingPrompt: string | null
+  // ── 网页随手问（P2/P3）：本机 opencode ──
+  /** 选区/段落正文（来自 read_selection，L2 隐私档的"上下文"） */
+  selection: { text: string; title: string; url: string } | null
+  /** opencode 会话 id：多轮追问靠它保持上下文；空则首次提问时新建 */
+  webqaSessionId: string | null
+  /** opencode 连通性探测结果 */
+  webqaProbe: OpencodeProbe | null
+  /** 「网页随手问」模式：走本机 opencode，不走 AGNES 云端 */
+  webqaMode: boolean
 }
 
 export const useAIStore = defineStore('ai', {
@@ -45,6 +77,10 @@ export const useAIStore = defineStore('ai', {
     tools: [],
     toolsLoaded: false,
     pendingPrompt: null,
+    selection: null,
+    webqaSessionId: null,
+    webqaProbe: null,
+    webqaMode: false,
   }),
 
   actions: {
@@ -261,6 +297,154 @@ export const useAIStore = defineStore('ai', {
       await this.sendMessage(
         `请用通俗易懂的方式解释当前页面「${ctx.title}」（${ctx.url}）讲的是什么、对用户有什么价值。`,
       )
+    },
+
+    // ── 网页随手问（P2/P3）：本机 opencode ──
+
+    /**
+     * 探测本机 opencode 连通性。
+     * 面板每次打开时调一次：不可达就别让用户白等流式空转。
+     */
+    async probeOpencode() {
+      try {
+        this.webqaProbe = await invokeOk<OpencodeProbe>('opencode_probe')
+      } catch (e) {
+        this.webqaProbe = null
+        this.error = errText(e)
+      }
+    },
+
+    /**
+     * 取当前标签的选区（L2 隐私档的"上下文"）。
+     *
+     * 三种情形都要处理，不能当成"用户没选东西"：
+     * - 正常有选区 → 用它
+     * - rejected（密码框等敏感区）→ 明确告知，绝不静默当成没选
+     * - hibernated（标签已休眠）→ 提示切回标签唤醒
+     */
+    async captureSelection(tabId?: string) {
+      try {
+        const args: Record<string, unknown> = { expand: true }
+        if (tabId !== undefined) args.tabId = tabId
+        const r = await invokeOk<{
+          has_selection: boolean
+          text?: string
+          title?: string
+          url?: string
+          rejected?: boolean
+          hibernated?: boolean
+          hints?: string
+        }>('read_selection', args)
+
+        if (r.hibernated) {
+          this.selection = null
+          this.error = r.hints || '标签已休眠，切回该标签后可再读选区'
+          return
+        }
+        if (r.rejected) {
+          this.selection = null
+          this.error = '选区在密码/敏感区域，已拒绝读取（不会发给 AI）'
+          return
+        }
+        if (!r.has_selection) {
+          this.selection = null
+          return
+        }
+        this.selection = {
+          text: r.text || '',
+          title: r.title || this.pageContext?.title || '',
+          url: r.url || this.pageContext?.url || '',
+        }
+      } catch (e) {
+        this.selection = null
+        this.error = errText(e)
+      }
+    },
+
+    /**
+     * 「网页随手问」：把问题 + 选区上下文交给本机 opencode，流式回字。
+     *
+     * 与 sendMessage 的区别：走回环地址的 opencode 而非 AGNES 云端，
+     * 且自带选区上下文（不必用户自己粘贴）。
+     */
+    async askPage(question: string) {
+      const text = question.trim()
+      if (!text || this.loading) return
+
+      this.error = null
+      this.loading = true
+      this.messages.push({ role: 'user', content: text })
+      this.messages.push({ role: 'assistant', content: '' })
+
+      const requestId = `webqa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      this.streamingId = requestId
+
+      const channel = new Channel<WebqaEvent>()
+      channel.onmessage = (event) => {
+        if (event.type === 'session' && event.sessionId) {
+          this.webqaSessionId = event.sessionId
+        } else if (event.type === 'delta' && event.content) {
+          const last = this.messages[this.messages.length - 1]
+          if (last && last.role === 'assistant') last.content += event.content
+        } else if (event.type === 'done') {
+          // full 是权威值（delta 可能重复到达）
+          const last = this.messages[this.messages.length - 1]
+          if (last && last.role === 'assistant' && event.full) {
+            last.content = event.full
+          }
+          if (event.sessionId) this.webqaSessionId = event.sessionId
+          this.loading = false
+          this.streamingId = null
+        } else if (event.type === 'error') {
+          if (event.message !== '已停止生成') {
+            this.error = event.message || '本机 opencode 请求失败'
+          }
+          this.dropEmptyAssistant()
+          this.loading = false
+          this.streamingId = null
+        }
+      }
+
+      try {
+        await invokeOk('opencode_ask', {
+          req: {
+            requestId,
+            question: text,
+            context: this.selection?.text,
+            pageTitle: this.selection?.title || this.pageContext?.title,
+            pageUrl: this.selection?.url || this.pageContext?.url,
+            sessionId: this.webqaSessionId,
+          },
+          onEvent: channel,
+        })
+      } catch (e) {
+        this.error = errText(e)
+        this.dropEmptyAssistant()
+        this.loading = false
+        this.streamingId = null
+      }
+    },
+
+    /** 停止网页随手问的流式生成 */
+    async stopWebqa() {
+      if (!this.streamingId) return
+      const id = this.streamingId
+      this.streamingId = null
+      try {
+        await invoke('opencode_cancel', { requestId: id })
+      } catch {
+        // 忽略取消失败：后端流式循环会在超时/断开后自行退出
+      }
+      this.loading = false
+    },
+
+    /** 退出网页随手问：清会话与选区（下次提问重新开独立会话） */
+    exitWebqa() {
+      this.webqaMode = false
+      this.webqaSessionId = null
+      this.selection = null
+      this.messages = []
+      this.error = null
     },
 
     /** 清空对话 */
