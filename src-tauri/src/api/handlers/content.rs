@@ -134,6 +134,27 @@ pub(super) async fn selection(app: &AppHandle, req: &Value) -> Value {
         Err(resp) => return resp,
     };
     let Some(wv) = app.get_webview(&label) else {
+        // 休眠标签：webview 已被销毁。这是**状态**不是故障——如实回报，
+        // 绝不能让侧边栏把"标签睡着了"误报成"你没选东西"（随手问最易命中休眠标签）。
+        // 范式对齐 read_status：ok:true + 机器可判的 hibernated + 可操作 hints。
+        if let Some(st) = app.try_state::<crate::tabs::TabManager>() {
+            if let Some(t) = st
+                .all_tabs()
+                .iter()
+                .find(|t| format!("tab-{}", t.id) == label)
+            {
+                if t.hibernated {
+                    return json!({"ok": true, "data": {
+                        "has_selection": false, "text": "", "text_chars": 0,
+                        "block_text": "", "block_chars": 0, "tag": "", "truncated": false,
+                        "expanded": expand, "rejected": false, "reject_reason": "",
+                        "url": t.url, "title": t.title, "in_iframe": false,
+                        "hibernated": true,
+                        "hints": ["标签已休眠，webview 已销毁；切回该标签唤醒后可再读取选区"]
+                    }});
+                }
+            }
+        }
         return AppError::internal("找不到标签 webview").error_json();
     };
     // 固定脚本 + 占位符（EXPAND/MAX_CHARS 为数字，无 js_escape 面）

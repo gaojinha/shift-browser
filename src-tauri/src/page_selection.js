@@ -98,7 +98,10 @@
       reject_reason: '',
       url: '',
       title: '',
-      in_iframe: false
+      in_iframe: false,
+      // 休眠标签无 webview，Rust 侧另行回填 true 并附 hints（见 content.rs::selection）。
+      // 此处置 false，保证"未休眠"时该字段恒存在，调用方形状稳定。
+      hibernated: false
     };
 
     try { base.url = location.href || ''; } catch (e) { base.url = ''; }
