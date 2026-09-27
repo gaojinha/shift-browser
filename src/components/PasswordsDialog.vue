@@ -70,11 +70,15 @@ async function onReveal(id: number) {
     return
   }
   // 按 id 查（同域名多账号时精确定位），不再按域名 LIMIT 1
+  // 安全：后端仅允许查看当前网站的密码（防页面脚本枚举 id 捞全表），
+  // 跨站查看被拒时给提示，让用户先到该站再查看
   try {
     const entry = await passwordsStore.getPasswordById(id)
     if (entry) {
       revealId.value = id
       revealPassword.value = entry.password
+    } else {
+      toastStore.show('仅允许查看当前网站的密码（请先打开该网站）', 'info')
     }
   } catch (e) {
     console.error('[passwords] 查看密码失败:', e)

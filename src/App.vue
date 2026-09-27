@@ -113,6 +113,20 @@ interface WebProcessCrash {
   autoReload?: boolean
 }
 const permReq = ref<PermissionRequest | null>(null)
+// 权限请求队列：连续两个请求时旧方案直接覆盖丢弃，页面永久挂起。这里排队逐个处理
+const permQueue = ref<PermissionRequest[]>([])
+function pushPermReq(req: PermissionRequest) {
+  // 同一 id 去重（后端重发时），否则入队
+  if (permReq.value?.id === req.id || permQueue.value.some((q) => q.id === req.id)) return
+  if (!permReq.value) {
+    permReq.value = req
+  } else {
+    permQueue.value.push(req)
+  }
+}
+function shiftPermReq() {
+  permReq.value = permQueue.value.shift() ?? null
+}
 const tlsError = ref<TlsErrorInfo | null>(null)
 
 function openPanel(name: 'translate' | 'sessions' | 'history' | 'passwords' | 'groups' | 'downloads' | 'settings' | 'ai' | 'bookmarks' | 'userscripts') {
@@ -158,7 +172,10 @@ function anyDialogOpen() {
     showSessions.value ||
     showBookmarks.value ||
     showCommandPalette.value ||
-    showUserscripts.value
+    showUserscripts.value ||
+    showCerts.value ||
+    tlsError.value !== null ||
+    permReq.value !== null
   )
 }
 
@@ -569,9 +586,9 @@ onMounted(async () => {
     tlsError.value = ev.payload
   })
 
-  // 权限请求（安全 #2 · Rust 侧 perms::attach emit）→ 弹权限提示
+  // 权限请求（安全 #2 · Rust 侧 perms::attach emit）→ 排队弹权限提示，防覆盖丢失
   onEvent<PermissionRequest>(EVENTS.PERMISSION_REQUEST, (ev) => {
-    permReq.value = ev.payload
+    if (ev.payload) pushPermReq(ev.payload)
   })
 
   // Web 进程崩溃（视频崩溃修复 · Rust 侧 connect_web_process_terminated emit）→ 提示
@@ -677,7 +694,7 @@ watch(
     <UserscriptsDialog :show="showUserscripts" @close="showUserscripts = false" />
     <CertificatesDialog :show="showCerts" @close="showCerts = false" />
     <CertWarning :info="tlsError" @close="tlsError = null" />
-    <PermissionPrompt :info="permReq" @close="permReq = null" />
+    <PermissionPrompt :info="permReq" @close="shiftPermReq" />
     <CommandPalette
       :show="showCommandPalette"
       @close="showCommandPalette = false"

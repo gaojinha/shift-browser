@@ -97,6 +97,19 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     app.manage(db);
     log::info!("[ShiftBrowser] 数据库初始化成功");
 
+    // 下载重启扫尾：上次进程退出时未完成的下载，其 WebKit 对象已消失，
+    // 置为 interrupted，避免重启后永久“下载中”僵尸（前端给重新下载入口）
+    {
+        let db_state = app.state::<crate::db::Db>();
+        match tauri::async_runtime::block_on(crate::db::downloads::sweep_interrupted_downloads(
+            &db_state.pool,
+        )) {
+            Ok(0) => {}
+            Ok(n) => log::info!("[ShiftBrowser] 下载扫尾：{} 条中断记录已标记", n),
+            Err(e) => log::warn!("[ShiftBrowser] 下载扫尾失败（不阻断启动）: {}", e),
+        }
+    }
+
     // 密码库空闲自动锁定守护（R1）：默认 15 分钟无解锁活动即清除内存主密钥，
     // 设置 vault_idle_lock_minutes 可调，0 关闭
     crate::db::vault::spawn_idle_lock_watchdog(app.handle().clone());

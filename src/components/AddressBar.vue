@@ -11,6 +11,7 @@ import SpaceSwitcher from './SpaceSwitcher.vue'
 import AppIcon from './AppIcon.vue'
 // 搜索引擎 URL 模板（单一来源，与设置弹窗/新标签页/开放 API 同源）
 import { SEARCH_URLS } from '../constants'
+import { setWebviewVisible } from '../utils/webview'
 
 const tabsStore = useTabsStore()
 const settingsStore = useSettingsStore()
@@ -112,6 +113,11 @@ function closeSuggestions() {
   suggestions.value = []
   selectedIndex.value = -1
 }
+
+// 联想下拉是 HTML 层，会伸进网页区：显示时隐藏 GTK 网页，关闭时恢复（参与全局计数）
+watch(showSuggestions, (v) => {
+  setWebviewVisible(!v, 'address-suggest').catch(() => {})
+})
 
 /** 键盘导航：↓ 上移 ↑ 下移 Enter 打开选中 Esc 关闭 */
 function onKeydown(e: KeyboardEvent) {
@@ -488,7 +494,7 @@ async function onReader() {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-pop);
-  z-index: var(--z-sticky);
+  z-index: var(--z-dropdown);
   overflow: hidden;
   max-height: 320px;
   overflow-y: auto;

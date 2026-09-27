@@ -26,12 +26,30 @@ describe("批 2 新增设置控件绑定的 8 个键", () => {
     }
   });
 
-  it("休眠数量阈值存在且 kind=int、默认 0（关闭阈值）", () => {
+  it("休眠数量阈值存在且 kind=int、默认 8（超 8 个后台标签提前休眠）", () => {
     for (const k of intKeys) {
       const def = SETTINGS_SCHEMA[k];
       expect(def, `缺少契约定义: ${k}`).toBeTruthy();
       expect(def.kind).toBe("int");
     }
-    expect(SETTINGS_SCHEMA.tab_hibernate_count.default).toBe("0");
+    expect(SETTINGS_SCHEMA.tab_hibernate_count.default).toBe("8");
+  });
+});
+
+// 本机 opencode 作为可选推理 Provider（2026-09-26）：契约键防漂移。
+// ai_provider 必须可持久化（白名单），opencode_model 默认空=跟随 serve 默认模型。
+describe("本机 opencode 推理 Provider 设置键", () => {
+  it("ai_provider 默认 agnes 且为字符串键", () => {
+    const def = SETTINGS_SCHEMA.ai_provider;
+    expect(def).toBeTruthy();
+    expect(def.kind).toBe("str");
+    expect(def.default).toBe("agnes");
+  });
+
+  it("opencode_model 默认空串（跟随 opencode 默认模型）", () => {
+    const def = SETTINGS_SCHEMA.opencode_model;
+    expect(def).toBeTruthy();
+    expect(def.kind).toBe("str");
+    expect(def.default).toBe("");
   });
 });

@@ -49,6 +49,9 @@ pub(crate) fn show_startup_lock(app: &tauri::App, db_state: &crate::db::Db) -> b
         .get_window("main")
         .and_then(|w| w.gtk_window().ok());
 
+    // 跨轮状态：上一轮失败提示（红字回显）+ 用户名回填（免得每次重输）
+    let mut err_msg = String::new();
+    let mut last_username = String::new();
     loop {
         let dialog = gtk::Dialog::builder()
             .title("Shift Browser 已锁定")
@@ -71,6 +74,9 @@ pub(crate) fn show_startup_lock(app: &tauri::App, db_state: &crate::db::Db) -> b
 
         let user_entry = gtk::Entry::new();
         user_entry.set_placeholder_text(Some("用户名"));
+        if !last_username.is_empty() {
+            user_entry.set_text(&last_username);
+        }
         content.add(&user_entry);
 
         let pass_entry = gtk::Entry::new();
@@ -78,6 +84,19 @@ pub(crate) fn show_startup_lock(app: &tauri::App, db_state: &crate::db::Db) -> b
         pass_entry.set_placeholder_text(Some("密码"));
         pass_entry.set_activates_default(true);
         content.add(&pass_entry);
+
+        // 上一轮失败原因（红字提示）：错了让用户知道错哪，还剩几次，锁多久
+        if !err_msg.is_empty() {
+            let err_label = gtk::Label::new(Some(err_msg.as_str()));
+            // GTK 主题无语义色保证，用内联样式兜底
+            let provider = gtk::CssProvider::new();
+            let _ = provider.load_from_data(b"label { color: #ff6b6b; }");
+            err_label
+                .style_context()
+                .add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+            err_label.set_line_wrap(true);
+            content.add(&err_label);
+        }
 
         dialog.add_button("退出", gtk::ResponseType::Cancel);
         dialog.add_button("解锁", gtk::ResponseType::Ok);
@@ -89,6 +108,7 @@ pub(crate) fn show_startup_lock(app: &tauri::App, db_state: &crate::db::Db) -> b
 
         let username = user_entry.text().to_string();
         let password = pass_entry.text().to_string();
+        last_username = username.clone();
 
         dialog.close();
 
@@ -97,11 +117,25 @@ pub(crate) fn show_startup_lock(app: &tauri::App, db_state: &crate::db::Db) -> b
             std::process::exit(0);
         }
 
+        // 防爆破（与登录同口径：5 次错锁 30 秒）：锁住时不验证，直接提示剩余秒数
+        {
+            use crate::db::users::{guard_get, now_ms};
+            let (_, locked_until) = guard_get(username.trim());
+            let now = now_ms();
+            if locked_until > now {
+                let remain = (locked_until - now) / 1000 + 1;
+                err_msg = format!("尝试次数过多，请 {} 秒后再试", remain);
+                log::warn!("[ShiftBrowser] 启动锁屏命中防爆破锁定，剩余 {} 秒", remain);
+                continue;
+            }
+        }
+
         match tauri::async_runtime::block_on(crate::db::users::verify_password(
             db_state, &username, &password,
         )) {
             Ok(true) => {
                 log::info!("[ShiftBrowser] 启动锁屏验证通过: {}", username);
+                crate::db::users::guard_clear(username.trim());
                 // 验证通过后清除会话：启动锁屏只验证身份，不自动登录个人中心
                 if let Err(e) = tauri::async_runtime::block_on(crate::db::users::clear_session(db_state))
                 {
@@ -123,9 +157,20 @@ pub(crate) fn show_startup_lock(app: &tauri::App, db_state: &crate::db::Db) -> b
             }
             Ok(false) => {
                 log::warn!("[ShiftBrowser] 启动锁屏密码错误，重新输入");
+                // 记一次失败：5 次后锁 30 秒（与登录同口径），并把剩余次数告诉用户
+                crate::db::users::guard_record_failure(username.trim());
+                let (fails, locked_until) =
+                    crate::db::users::guard_get(username.trim());
+                if locked_until > crate::db::users::now_ms() {
+                    err_msg = "密码错误次数过多，已锁定 30 秒".to_string();
+                } else {
+                    let left = crate::db::users::MAX_LOGIN_FAILURES.saturating_sub(fails);
+                    err_msg = format!("用户名或密码错误（还剩 {} 次机会）", left);
+                }
             }
             Err(e) => {
                 log::error!("[ShiftBrowser] 启动锁屏验证出错: {}", e);
+                err_msg = "验证出错，请重试".to_string();
             }
         }
     }

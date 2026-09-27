@@ -93,15 +93,27 @@ pub async fn load_last_session(
         .await?
     };
 
-    Ok(
-        row.map(|(id, name, workspace_id, data, created_at)| Session {
-            id,
-            name,
-            workspace_id,
-            data,
-            created_at,
-        }),
-    )
+    let session = row.map(|(id, name, workspace_id, data, created_at)| Session {
+        id,
+        name,
+        workspace_id,
+        data,
+        created_at,
+    });
+
+    // 快照损坏防护：data 不是合法标签数组时视为无会话，避免前端清空后恢复一半
+    // （坏快照在前端 JSON.parse 才爆，那时旧标签已清空找不回来）
+    if let Some(ref s) = session {
+        if serde_json::from_str::<Vec<SessionTab>>(&s.data).is_err() {
+            log::warn!(
+                "[sessions] 快照损坏已跳过: id={} workspace_id={:?}",
+                s.id,
+                s.workspace_id
+            );
+            return Ok(None);
+        }
+    }
+    Ok(session)
 }
 
 /// 列出所有会话

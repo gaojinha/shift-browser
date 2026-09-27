@@ -26,11 +26,12 @@ const busy = ref(false)
 const advanced = ref(false) // 是否已展开"高级"细节
 
 // child webview 是 GTK 部件盖在 Vue UI 上：警告出现时隐藏之，关闭时恢复
+// 安全警告必须压住所有业务浮层，用统一来源标识参与全局计数
 watch(
   () => props.info,
   async (v) => {
     try {
-      await setWebviewVisible(!v)
+      await setWebviewVisible(!v, 'cert-warning')
     } catch (e) {
       console.warn('[cert] webview 显隐失败:', e)
     }
@@ -65,7 +66,7 @@ async function proceed() {
 async function goBack() {
   // 关闭警告并复位到启动页（不加载失败站点）
   try {
-    await setWebviewVisible(true)
+    await setWebviewVisible(true, 'cert-warning')
   } catch {
     /* ignore */
   }
@@ -114,7 +115,7 @@ async function goBack() {
 .warn-mask {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: var(--z-security);
   display: flex;
   align-items: center;
   justify-content: center;

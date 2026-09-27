@@ -44,6 +44,9 @@ mod tray;
 // pub：tests/webqa_live.rs 真机验收直接调 SseAccumulator/fold_event/build_prompt
 // 验证真实 IO 路径，而不是用 Python 复刻逻辑（复刻验证不了 Rust 代码本身）。
 pub mod webqa;
+// 侧边栏聊天的本机 opencode 推理 Provider（provider id：opencode）
+// pub：tests/opencode_chat_live.rs 真机验收直接跑 OpencodeProvider 全链路
+pub mod opencode_chat;
 pub mod webzh;
 // R2-1b 拆分（2026-09-24）：锁屏对话框独立成子模块
 #[path = "ui/lock_dialog.rs"]
@@ -293,6 +296,8 @@ pub fn run() {
       webqa::opencode_probe,
       webqa::opencode_ask,
       webqa::opencode_cancel,
+      // 本机 opencode 作为侧边栏推理 Provider：设置页模型下拉
+      opencode_chat::models::opencode_list_models,
       // 整页汉化（webzh）
       webzh::page_collect_translatable,
       webzh::page_apply_translation,

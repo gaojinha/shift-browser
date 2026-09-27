@@ -95,10 +95,27 @@ pub async fn update_workspace_inner(
 /// 删除工作区
 #[tauri::command]
 pub async fn delete_workspace(db: tauri::State<'_, Db>, id: i64) -> DbResult<()> {
-    sqlx::query("DELETE FROM workspaces WHERE id = ?")
+    delete_workspace_inner(&db.pool, id).await
+}
+
+/// 删除工作区核心逻辑（pool 级，便于测试）
+/// 同一事务内先清该工作区的会话再删工作区，避免孤儿会话导致“一切换标签全丢且回不来”。
+pub async fn delete_workspace_inner(pool: &sqlx::SqlitePool, id: i64) -> DbResult<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM sessions WHERE workspace_id = ?")
         .bind(id)
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await?;
+    let res = sqlx::query("DELETE FROM workspaces WHERE id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    // 假成功防护：id 不存在如实上报，前端可提示
+    if res.rows_affected() == 0 {
+        tx.rollback().await?;
+        return Err(crate::db::DbError::Other(format!("工作区 {} 不存在", id)));
+    }
+    tx.commit().await?;
     Ok(())
 }
 
@@ -130,6 +147,18 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        sqlx::query(
+            "CREATE TABLE sessions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              workspace_id INTEGER,
+              data TEXT NOT NULL,
+              created_at TEXT DEFAULT (datetime('now'))
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         (dir, pool)
     }
 
@@ -153,5 +182,34 @@ mod tests {
                 .unwrap();
         assert_eq!(name, "工作区A");
         assert_eq!(sort_order, 0);
+    }
+
+    #[tokio::test]
+    async fn delete_workspace_cleans_orphan_sessions() {
+        let (_dir, pool) = temp_pool().await;
+        let id = sqlx::query("INSERT INTO workspaces (name, sort_order) VALUES ('待删', 0)")
+            .execute(&pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        sqlx::query("INSERT INTO sessions (name, workspace_id, data) VALUES ('自动保存', ?, '[]')")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        super::delete_workspace_inner(&pool, id).await.unwrap();
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE workspace_id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 0);
+    }
+
+    #[tokio::test]
+    async fn delete_missing_workspace_reports_error() {
+        let (_dir, pool) = temp_pool().await;
+        let err = super::delete_workspace_inner(&pool, 999).await.unwrap_err();
+        assert!(err.to_string().contains("不存在"));
     }
 }

@@ -216,6 +216,15 @@ pub fn list_providers() -> Vec<ProviderInfo> {
             configured: false,
             description: "Ollama/llama.cpp 接口预留，暂缓实现（2026-09-19 决策）".to_string(),
         },
+        ProviderInfo {
+            id: "opencode".to_string(),
+            name: "本机 opencode".to_string(),
+            // 凭据能否发现要异步读 db/扫进程，同步列表里无法判定；
+            // 真实可用性由设置页探活（opencode_probe）与发问时报错体现。
+            configured: false,
+            description: "本机 opencode serve（127.0.0.1:4096），模型在下方选择；凭据自动发现"
+                .to_string(),
+        },
     ]
 }
 
@@ -278,9 +287,10 @@ mod tests {
     }
 
     #[test]
-    fn list_has_agnes_and_local() {
+    fn list_has_known_providers() {
         let l = list_providers();
         assert!(l.iter().any(|p| p.id == "agnes"));
         assert!(l.iter().any(|p| p.id == "local"));
+        assert!(l.iter().any(|p| p.id == "opencode"));
     }
 }

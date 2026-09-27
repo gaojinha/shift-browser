@@ -41,14 +41,35 @@ async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
             .unwrap_or_default()
     };
     crate::net_guard::set_allowlist(&allowlist);
-    if crate::net_guard::host_permitted(&host) {
-        Ok(())
-    } else {
-        Err(AppError::permission(format!(
+    if !crate::net_guard::host_permitted(&host) {
+        return Err(AppError::permission(format!(
             "内网 / 私有地址默认拒绝：{host}（如确需读取，请在 api_allowed_ips 白名单中显式放行）"
         ))
-        .error_json())
+        .error_json());
     }
+    // DNS 解析复核（与 reader/fetch.rs 同口径）：域名恒放行是字符串检查的盲区，
+    // 双答 DNS（公网+内网混答）或解析后翻转会绕过。解析全部结果逐一校验，
+    // 任一落内网或解析失败直接拒绝（fail-closed）。
+    // 注意：WebKit 加载时还会自行解析（浏览器导航无法像 reqwest/curl 那样 pin 死），
+    // 入口 + 最终 URL 双次复核把窗口压到最小，残余风险见 net_guard.rs 模块注释。
+    if host.parse::<std::net::IpAddr>().is_err() {
+        let port = parsed.port_or_known_default().unwrap_or(80);
+        let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
+            .await
+            .map(|it| it.collect())
+            .map_err(|_| {
+                AppError::permission(format!("域名解析失败，已拒绝：{host}")).error_json()
+            })?;
+        if let Err(e) = crate::ai::check_resolved_ips(
+            &host,
+            addrs.iter().map(|s| s.ip()),
+            port,
+        ) {
+            log::warn!("[open_and_read] SSRF 拦截域名解析: {}", e);
+            return Err(AppError::permission(e).error_json());
+        }
+    }
+    Ok(())
 }
 
 /// 打开 URL 并读取页面（P0 杀招命令 · 方案 §4.1）。

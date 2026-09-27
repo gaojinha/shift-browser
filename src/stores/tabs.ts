@@ -568,28 +568,38 @@ export const useTabsStore = defineStore('tabs', {
       }
     },
 
-    /** 保存当前会话（标签页快照，含分组归属），workspaceId = 所属工作区（null = 默认） */
-    async saveCurrentSession(workspaceId: number | null = null) {
+    /** 保存当前会话（标签页快照，含分组归属），workspaceId = 所属工作区（null = 默认）
+     * 返回是否保存成功：无标签视为成功（无需保存）；有标签但写库失败返回 false，
+     * 调用方（工作区切换）应中止切换，避免旧标签清空后找不回来 */
+    async saveCurrentSession(workspaceId: number | null = null): Promise<boolean> {
       const tabs: SessionTab[] = this.tabs.map((t) => ({
         url: t.url,
         title: t.title,
         // 自动分组 id 为负（仅内存存在），不落会话快照，避免恢复时引用失效
         groupId: t.groupId != null && t.groupId > 0 ? t.groupId : null,
       }))
-      if (tabs.length === 0) return
+      if (tabs.length === 0) return true
       try {
         await invoke<number>('save_session', {
           name: '自动保存',
           workspaceId,
           tabs,
         })
+        return true
       } catch (e) {
         console.error('[tabs] 保存会话失败:', e)
+        return false
       }
     },
 
-    /** 关闭全部标签（切换工作区时清空用） */
-    async clearAllTabs() {
+    /** 关闭全部标签（切换工作区时清空用）
+     * 返回清空前的内存快照：恢复目标失败时调用方可按快照重建，不丢标签 */
+    async clearAllTabs(): Promise<SessionTab[]> {
+      const snapshot: SessionTab[] = this.tabs.map((t) => ({
+        url: t.url,
+        title: t.title,
+        groupId: t.groupId,
+      }))
       try {
         await invokeOk('close_all_tabs')
       } catch (e) {
@@ -597,6 +607,7 @@ export const useTabsStore = defineStore('tabs', {
       }
       this.tabs = []
       this.activeTabId = null
+      return snapshot
     },
 
     /** 从 Rust 侧同步标签状态（事件驱动 + 低频兜底调用） */
@@ -675,7 +686,7 @@ export const useTabsStore = defineStore('tabs', {
         }
         // 每 8 轮（≈64s）触发一次"空闲标签休眠"检查：销毁久未激活标签的 webview
         // 回收渲染进程内存（WebKitGTK 默认不主动回收，多标签内存线性增长）。
-        // 阈值由 settings.tab_hibernate_minutes 控制（默认 30 分钟，0=关闭）
+        // 阈值由 settings.tab_hibernate_minutes 控制（默认 10 分钟，0=关闭）
         if (++hibernateTick >= 8) {
           hibernateTick = 0
           invokeOk('hibernate_idle_tabs').catch((e) => {

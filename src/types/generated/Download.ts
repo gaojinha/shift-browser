@@ -2,6 +2,6 @@
 
 export type Download = { id: number, filename: string, url: string | null, path: string | null, total_bytes: number, received_bytes: number, 
 /**
- * in_progress / completed / failed / cancelled
+ * in_progress / completed / failed / cancelled / interrupted（中断：进程退出时未完成）
  */
 state: string, created_at: string, };

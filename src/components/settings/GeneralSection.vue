@@ -132,7 +132,7 @@ onMounted(loadDefaultBrowser)
             v-for="h in HIBERNATE_OPTIONS"
             :key="h.v"
             class="seg-btn"
-            :class="{ active: (settingsStore.get('tab_hibernate_minutes') || '30') === h.v }"
+            :class="{ active: (settingsStore.get('tab_hibernate_minutes') || '10') === h.v }"
             @click="onSet('tab_hibernate_minutes', h.v)"
           >
             {{ h.label }}
@@ -149,7 +149,7 @@ onMounted(loadDefaultBrowser)
           class="task-num hibernate-count"
           type="number"
           min="0"
-          :value="settingsStore.get('tab_hibernate_count') || '0'"
+          :value="settingsStore.get('tab_hibernate_count') || '8'"
           @change="onSet('tab_hibernate_count', ($event.target as HTMLInputElement).value)"
         />
         <span class="field-desc">

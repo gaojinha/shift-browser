@@ -116,7 +116,10 @@ fn credentials_from_pid(proc_dir: &Path) -> Option<Credentials> {
 }
 
 /// 拿凭据：先看用户是否显式配置过，没有再自动发现。
-async fn resolve_credentials(db: tauri::State<'_, crate::db::Db>) -> CommandResult<Credentials> {
+///
+/// 收 `&Db` 而非 tauri::State：State 不是 Copy，业务调用点拿到凭据后往往
+/// 还要继续用 db，借用形式不夺走所有权。
+async fn resolve_credentials(db: &crate::db::Db) -> CommandResult<Credentials> {
     // 显式设置优先（高哥手动配过就以他的为准）。走 settings_cache 内存缓存，不打库。
     let username = crate::db::settings_cache::get(&db.pool, "opencode_username").await;
     let password = crate::db::settings_cache::get(&db.pool, "opencode_password").await;
@@ -425,7 +428,7 @@ pub async fn read_page_selection(
 pub async fn opencode_probe(
     db: tauri::State<'_, crate::db::Db>,
 ) -> CommandResult<serde_json::Value> {
-    let creds = resolve_credentials(db).await?;
+    let creds = resolve_credentials(&db).await?;
     let http = client(&creds)?;
     let resp = http
         .get(format!("{}/config", base_url()))
@@ -551,7 +554,7 @@ pub async fn opencode_ask(
         session_id,
         agent,
     } = req;
-    let creds = match resolve_credentials(db).await {
+    let creds = match resolve_credentials(&db).await {
         Ok(c) => c,
         Err(e) => {
             on_event
@@ -780,10 +783,8 @@ async fn drive(run: AskRun<'_>, sse: reqwest::Response) -> CommandResult<()> {
 // 抄第二遍的代价不是"多几行"——是以后改凭据发现方式要改两处，漏一处就出玄学问题。
 // ================================================================
 
-/// 供 webzh：解析 opencode 凭据（从 /proc 扫 serve 进程，不落盘）。
-pub async fn resolve_credentials_pub(
-    db: tauri::State<'_, crate::db::Db>,
-) -> CommandResult<Credentials> {
+/// 供 webzh / opencode_chat：解析 opencode 凭据（从 /proc 扫 serve 进程，不落盘）。
+pub async fn resolve_credentials_pub(db: &crate::db::Db) -> CommandResult<Credentials> {
     resolve_credentials(db).await
 }
 
@@ -795,6 +796,15 @@ pub fn client_pub(creds: &Credentials) -> Result<reqwest::Client, AppError> {
 /// 供 webzh：opencode 基址。
 pub fn base_url_pub() -> String {
     base_url()
+}
+
+/// 供 opencode_chat（侧边栏 Provider）：确认只读 agent 存在。
+/// 未知 agent 会被静默回退成有编辑权限的默认 agent，所以缺失时直接拒绝。
+pub async fn ensure_agent_exists_pub(
+    http: &reqwest::Client,
+    agent: &str,
+) -> CommandResult<()> {
+    ensure_agent_exists(http, agent).await
 }
 
 /// 供 webzh：确保会话可用，返回 (session_id, baseline 消息 id 列表)。

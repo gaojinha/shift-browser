@@ -60,6 +60,30 @@ fn cancel_flags() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     CANCEL_FLAGS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// 运行时解析 provider。
+///
+/// `opencode` 与 agnes/local 不同：它的凭据要异步发现（设置项 → /proc 扫
+/// serve 进程），模型也来自独立设置项，所以同步纯函数 resolve_provider
+/// 装不下，在这里特判分支；其余 id 仍走 engine 的同步解析。
+async fn resolve_runtime_provider(
+    db: &tauri::State<'_, crate::db::Db>,
+    provider_id: &str,
+    base_url: Option<String>,
+    api_key: Option<String>,
+) -> Result<Box<dyn crate::engine::ai_provider::AiProvider>, crate::error::AppError> {
+    if provider_id == "opencode" {
+        let model_ref = crate::db::settings_cache::get(&db.pool, "opencode_model")
+            .await
+            .unwrap_or_default();
+        let creds = crate::webqa::resolve_credentials_pub(db).await?;
+        return Ok(Box::new(crate::opencode_chat::OpencodeProvider::new(
+            creds,
+            &model_ref,
+        )));
+    }
+    crate::engine::ai_provider::resolve_provider(provider_id, base_url, api_key)
+}
+
 /// 取消指定 request_id 的流式请求（前端"停止生成"按钮调用）
 #[tauri::command]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -88,7 +112,8 @@ pub async fn ai_chat(
     api_key: Option<String>,
 ) -> crate::error::CommandResult<String> {
     let provider_id = provider.unwrap_or_default();
-    let provider = crate::engine::ai_provider::resolve_provider(&provider_id, base_url, api_key)?;
+    let provider =
+        resolve_runtime_provider(&db, &provider_id, base_url, api_key).await?;
     let model = model.unwrap_or_else(|| "agnes-2.0-flash".to_string());
 
     // 工具层（阶段 1.3/1.4）：MCP 工具（有启用时）+ Agent 浏览器动作（总是带上）。
@@ -208,8 +233,11 @@ pub async fn ai_chat(
 /// AI 对话（流式，SSE 逐块推送）——经 Provider 抽象路由（默认 AGNES）
 /// 前端点"停止"时调 ai_cancel_stream(request_id)，本命令检测到取消标志后提前返回。
 #[tauri::command]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+// db 是新增的第 8 个参数（opencode 凭据发现要用）；Tauri 命令按名注入，
+// 不宜打包结构体，沿用命令式 allow。
+#[allow(clippy::too_many_arguments, clippy::unwrap_used, clippy::expect_used)]
 pub async fn ai_chat_stream(
+    db: tauri::State<'_, crate::db::Db>,
     request_id: String,
     provider: Option<String>,
     messages: Vec<ChatMessage>,
@@ -220,7 +248,7 @@ pub async fn ai_chat_stream(
 ) -> crate::error::CommandResult<()> {
     let provider_id = provider.unwrap_or_default();
     let provider =
-        match crate::engine::ai_provider::resolve_provider(&provider_id, base_url, api_key) {
+        match resolve_runtime_provider(&db, &provider_id, base_url, api_key).await {
             Ok(p) => p,
             Err(e) => {
                 // StreamEvent::Error.message 保持纯消息字符串（渠道内契约不变）

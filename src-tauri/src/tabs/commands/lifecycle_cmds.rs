@@ -176,12 +176,23 @@ pub async fn close_tab(
 }
 
 /// 关闭全部标签（切换工作区时清空用）
+/// 返回清空前的标签快照：前端切换失败时可用快照重建，避免“清空后恢复失败丢标签”。
+/// 快照只含内存状态（id/url/标题等），不含 webview 句柄；重建走正常 create 流程。
 #[tauri::command]
 pub async fn close_all_tabs(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
-) -> CommandResult<()> {
+) -> CommandResult<Vec<Tab>> {
     log::info!("[tabs] close_all_tabs");
+    // 先快照再清空：快照在锁内一次性取出，清空不可逆时调用方有料可回滚
+    let snapshot: Vec<Tab> = {
+        let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
+        let order = state.order.lock().unwrap_or_else(|e| e.into_inner());
+        order
+            .iter()
+            .filter_map(|id| tabs.get(id).cloned())
+            .collect()
+    };
     let ids: Vec<String> = {
         let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
         let mut order = state.order.lock().unwrap_or_else(|e| e.into_inner());
@@ -196,7 +207,7 @@ pub async fn close_all_tabs(
     for id in ids {
         TabManager::destroy_webview(&app, &id);
     }
-    Ok(())
+    Ok(snapshot)
 }
 
 /// 切换标签页
@@ -267,19 +278,19 @@ pub async fn switch_tab(
 
 /// 空闲标签休眠：销毁长时间未激活的标签 webview，回收其渲染进程内存
 /// （WebKitGTK 默认不主动回收，实测 9 标签合计 3.75GB）。
-/// 返回本次休眠的标签数。超时分钟数来自 settings.tab_hibernate_minutes（0 = 关闭）。
+/// 返回本次休眠的标签数。超时分钟数来自 settings.tab_hibernate_minutes（0 = 关闭，默认 10）。
 #[tauri::command]
 pub async fn hibernate_idle_tabs(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
     db: tauri::State<'_, Db>,
 ) -> CommandResult<u32> {
-    // 读取超时配置（默认 30 分钟；0 表示关闭该功能）
+    // 读取超时配置（默认 10 分钟；0 表示关闭该功能）
     // 性能 P0：走 settings 缓存
     let minutes: i64 = crate::db::settings_cache::get(&db.pool, "tab_hibernate_minutes")
         .await
         .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(30);
+        .unwrap_or(10);
     if minutes <= 0 {
         return Ok(0);
     }

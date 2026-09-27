@@ -4,7 +4,9 @@
 //! - `api/handlers/page.rs`：`open_and_read` 入口 + 最终 URL 复核（异步，查库取白名单）
 //! - `engine/webview.rs`：GTK `decide-policy` 逐跳导航拦截（同步回调，读进程内白名单缓存）
 //!
-//! 域名解析到内网（DNS rebinding）需解析后 IP 复核，留待后续。
+//! 域名解析到内网（DNS rebinding）：`open_and_read` 的 guard 已接 `ai::check_resolved_ips`
+//! 做解析后复核（fail-closed）；WebKit 导航自身会二次解析，残余窗口靠入口 + 最终 URL
+//! 双次复核压窄，彻底 pin 死需浏览器层支持，暂接受此口径。
 
 use std::net::IpAddr;
 use std::sync::{OnceLock, RwLock};

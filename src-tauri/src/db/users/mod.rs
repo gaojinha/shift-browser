@@ -102,6 +102,8 @@ pub(crate) use db_try;
 mod import_export;
 mod profile;
 mod security;
+// 锁屏对话框（crate::ui::lock_dialog）复用登录防爆破计数，需跨模块可见
+pub(crate) use security::{guard_clear, guard_get, guard_record_failure, now_ms, MAX_LOGIN_FAILURES};
 mod session;
 
 pub use import_export::*;

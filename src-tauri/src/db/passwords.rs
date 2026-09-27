@@ -20,6 +20,13 @@ pub async fn save_password(
     password: String,
     notes: Option<String>,
 ) -> DbResult<i64> {
+    // 脏数据防护：空域名/空密码拒绝入库（空 domain 会污染唯一索引与查询语义）
+    if domain.trim().is_empty() {
+        return Err(crate::db::DbError::Other("域名不能为空".to_string()));
+    }
+    if password.is_empty() {
+        return Err(crate::db::DbError::Other("密码不能为空".to_string()));
+    }
     let key = get_master_key(&db).await?;
     let encrypted = encrypt(&key, &password)?;
 
@@ -92,10 +99,22 @@ pub async fn get_password(
     }))
 }
 
+/// 从活动标签取 host（小写）。空 = 无活动页面/内部页，调用方应拒绝明文出口
+fn active_host(tabs: &crate::tabs::TabManager) -> String {
+    tabs.active_url()
+        .and_then(|u| url::Url::parse(&u).ok())
+        .and_then(|u| u.host_str().map(|s| s.to_ascii_lowercase()))
+        .unwrap_or_default()
+}
+
 /// 按 id 获取单条密码（解密返回）。同域名多账号时前端用 id 精确定位
+/// 安全：与 get_password 同口径——条目 domain 必须匹配当前活动标签 host，
+/// 否则拒绝。防止页面脚本枚举 id（1..N）捞走全表明文。
+/// 密码管理器跨站查看会受限（需先到该站再查看），安全优先。
 #[tauri::command]
 pub async fn get_password_by_id(
     db: tauri::State<'_, Db>,
+    tabs: tauri::State<'_, crate::tabs::TabManager>,
     id: i64,
 ) -> DbResult<Option<PasswordEntry>> {
     let row = sqlx::query_as::<_, (i64, String, Option<String>, String, Option<String>, String, String)>(
@@ -108,6 +127,16 @@ pub async fn get_password_by_id(
     let Some((id, domain, username, encrypted, notes, created_at, updated_at)) = row else {
         return Ok(None);
     };
+    let host = active_host(&tabs);
+    if host.is_empty() || !domain.eq_ignore_ascii_case(&host) {
+        log::warn!(
+            "[passwords] get_password_by_id 拒绝：id={} domain={} 与活动标签 host={} 不符",
+            id,
+            domain,
+            host
+        );
+        return Ok(None);
+    }
     let key = get_master_key(&db).await?;
     let plaintext = decrypt(&key, &encrypted)?;
     Ok(Some(PasswordEntry {
@@ -122,15 +151,34 @@ pub async fn get_password_by_id(
 }
 
 /// 获取某域名下所有密码记录（解密）
+/// 安全：domain 必须非空且匹配当前活动标签 host；LIKE 通配符转义，空串直接拒
+/// （旧实现空串变 LIKE '%%' 全表捞明文）。
 #[tauri::command]
 pub async fn get_passwords_for_domain(
     db: tauri::State<'_, Db>,
+    tabs: tauri::State<'_, crate::tabs::TabManager>,
     domain: String,
 ) -> DbResult<Vec<PasswordEntry>> {
+    let domain = domain.trim().to_string();
+    if domain.is_empty() {
+        log::warn!("[passwords] get_passwords_for_domain 拒绝：空 domain");
+        return Ok(vec![]);
+    }
+    let host = active_host(&tabs);
+    if host.is_empty() || !domain.eq_ignore_ascii_case(&host) {
+        log::warn!(
+            "[passwords] get_passwords_for_domain 拒绝：domain={} 与活动标签 host={} 不符",
+            domain,
+            host
+        );
+        return Ok(vec![]);
+    }
+    // LIKE 转义：\、%、_ 按字面量匹配，加 ESCAPE 子句
+    let escaped = domain.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
     let rows = sqlx::query_as::<_, (i64, String, Option<String>, String, Option<String>, String, String)>(
-        "SELECT id, domain, username, password, notes, created_at, updated_at FROM passwords WHERE domain LIKE ? ORDER BY id",
+        "SELECT id, domain, username, password, notes, created_at, updated_at FROM passwords WHERE domain LIKE ? ESCAPE '\\' ORDER BY id",
     )
-    .bind(format!("%{}%", domain))
+    .bind(format!("%{}%", escaped))
     .fetch_all(&db.pool)
     .await?;
 

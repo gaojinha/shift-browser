@@ -17,12 +17,29 @@ describe("setWebviewVisible", () => {
 
   it("seq 单调递增并透传参数", async () => {
     const { setWebviewVisible: swv } = await import("./webview");
-    await swv(true, "test");
-    await swv(false, "test");
+    await swv(false, "test-a");
+    await swv(false, "test-b");
+    // 第二个隐藏请求仍会下发（保持隐藏，刷新 seq）
     const calls = vi.mocked(invoke).mock.calls;
     expect(calls).toHaveLength(2);
-    expect(calls[0][1]).toMatchObject({ visible: true, seq: 1, source: "test" });
-    expect(calls[1][1]).toMatchObject({ visible: false, seq: 2, source: "test" });
+    expect(calls[0][1]).toMatchObject({ visible: false, seq: 1, source: "test-a" });
+    expect(calls[1][1]).toMatchObject({ visible: false, seq: 2, source: "test-b" });
+  });
+
+  it("引用计数：还有覆盖层时关闭一个不恢复显示", async () => {
+    const mod = await import("./webview");
+    mod.resetWebviewHiders();
+    vi.mocked(invoke).mockClear();
+    await mod.setWebviewVisible(false, "a");
+    await mod.setWebviewVisible(false, "b");
+    await mod.setWebviewVisible(true, "a");
+    // a 关了但 b 还压着，不应发 visible:true
+    const calls = vi.mocked(invoke).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(mod.webviewHiderCount()).toBe(1);
+    await mod.setWebviewVisible(true, "b");
+    expect(vi.mocked(invoke).mock.calls).toHaveLength(3);
+    expect(mod.webviewHiderCount()).toBe(0);
   });
 
   it("invoke 失败时静默吞掉（不抛异常）", async () => {

@@ -27,7 +27,7 @@ watch(
   async (v) => {
     remember.value = false
     try {
-      await setWebviewVisible(!v)
+      await setWebviewVisible(!v, 'permission-prompt')
     } catch (e) {
       console.warn('[perm] webview 显隐失败:', e)
     }
@@ -87,7 +87,7 @@ async function answer(allow: boolean) {
 .perm-mask {
   position: fixed;
   inset: 0;
-  z-index: 85;
+  z-index: var(--z-security);
   display: flex;
   align-items: center;
   justify-content: center;

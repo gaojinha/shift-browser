@@ -104,7 +104,12 @@ export const useWorkspacesStore = defineStore('workspaces', {
         // 删除成功后，若删的是当前工作区 → 保存当前标签到默认工作区，清空标签，恢复默认会话
         if (this.currentId === id) {
           const tabs = useTabsStore()
-          await tabs.saveCurrentSession(null)
+          const saved = await tabs.saveCurrentSession(null)
+          if (!saved) {
+            useToastStore().error('保存标签失败，已中止删除后的切换')
+            await this.loadWorkspaces()
+            return
+          }
           await tabs.clearAllTabs()
           this.currentId = null
           await tabs.restoreLastSession(null)
@@ -119,8 +124,8 @@ export const useWorkspacesStore = defineStore('workspaces', {
     /**
      * 切换到目标工作区
      * 流程：保存当前标签到当前工作区 → 清空全部标签 → 恢复目标工作区标签
-     * currentId 在恢复完成后才提交（restoreLastSession 内部已容错），
-     * 失败时回滚到原工作区，避免空快照覆盖目标工作区会话
+     * 安全顺序：保存失败（有标签但写库失败）直接中止，不清空；清空后恢复失败用内存
+     * 快照重建，再不行回滚原工作区。currentId 在恢复完成后才提交。
      */
     async switchWorkspace(id: number | null) {
       if (this.switching || id === this.currentId) return
@@ -128,12 +133,42 @@ export const useWorkspacesStore = defineStore('workspaces', {
       const prev = this.currentId
       try {
         const tabs = useTabsStore()
-        // 1. 保存当前标签到当前工作区（内部容错，失败不阻断）
-        await tabs.saveCurrentSession(this.currentId)
-        // 2. 清空全部标签
-        await tabs.clearAllTabs()
-        // 3. 恢复目标工作区标签（内部容错）
-        await tabs.restoreLastSession(id)
+        // 1. 保存当前标签到当前工作区：失败直接中止（旧标签还在内存，不丢）
+        const saved = await tabs.saveCurrentSession(this.currentId)
+        if (!saved) {
+          useToastStore().error('保存当前工作区失败，已中止切换')
+          return
+        }
+        // 2. 清空全部标签（返回内存快照供回滚）
+        const snapshot = await tabs.clearAllTabs()
+        // 3. 恢复目标工作区标签
+        const ok = await tabs.restoreLastSession(id)
+        if (!ok) {
+          // 目标无会话或恢复失败：用快照重建当前页，不算切换失败（新工作区本就空的常见）
+          // 快照为空（原工作区本无标签）则无需重建
+          if (snapshot.length > 0) {
+            let rebuilt = 0
+            for (const t of snapshot) {
+              if (t.url) {
+                const tab = await tabs.createTab(t.url, undefined, true).catch(() => null)
+                if (tab) {
+                  if (t.groupId != null) tabs.assignTabToGroup(tab.id, t.groupId)
+                  rebuilt++
+                }
+              }
+            }
+            // 快照一个没重建出来且目标也空：回滚原工作区
+            if (rebuilt === 0) {
+              await tabs.restoreLastSession(prev).catch((e) => {
+                console.error('[workspaces] 回滚恢复会话失败:', e)
+              })
+              this.currentId = prev
+              useToastStore().error('切换工作区失败，已回滚')
+              return
+            }
+            // 快照重建成功 = 目标工作区是空的，留在目标（标签是原样的，不丢）
+          }
+        }
         // 4. 恢复完成后才提交 currentId
         this.currentId = id
       } catch (e) {

@@ -228,6 +228,11 @@ impl Db {
                 "translate_memory",
                 include_str!("../../migrations/20260927000000_translate_memory.sql"),
             ),
+            (
+                18,
+                "hibernate_defaults",
+                include_str!("../../migrations/20260928000000_hibernate_defaults.sql"),
+            ),
         ];
 
         for (version, name, sql) in migrations {

@@ -16,7 +16,7 @@ pub struct Download {
     pub total_bytes: i64,
     #[ts(type = "number")]
     pub received_bytes: i64,
-    /// in_progress / completed / failed / cancelled
+    /// in_progress / completed / failed / cancelled / interrupted（中断：进程退出时未完成）
     pub state: String,
     pub created_at: String,
 }
@@ -156,11 +156,21 @@ pub async fn update_download_progress(
     Ok(())
 }
 
+/// 启动扫尾：上次进程退出时仍是 in_progress 的记录，其 WebKit 下载对象已随进程消失，
+/// 进度回调再也不会来。全部置为 interrupted，避免重启后永久显示“下载中”僵尸。
+/// 返回本次扫尾的条数（0 = 无残留）。在 Db 就绪后、锁屏前调用一次即可。
+pub async fn sweep_interrupted_downloads(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
+    let res = sqlx::query("UPDATE downloads SET state = 'interrupted' WHERE state = 'in_progress'")
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected())
+}
+
 /// 获取所有下载记录
 #[tauri::command]
 pub async fn get_downloads(db: tauri::State<'_, Db>) -> DbResult<Vec<Download>> {
     let rows = sqlx::query_as::<_, (i64, String, Option<String>, Option<String>, i64, i64, String, String)>(
-        "SELECT id, filename, url, path, total_bytes, received_bytes, state, created_at FROM downloads ORDER BY id DESC LIMIT 100",
+        "SELECT id, filename, url, path, total_bytes, received_bytes, state, created_at FROM downloads ORDER BY id DESC LIMIT 200",
     )
     .fetch_all(&db.pool)
     .await?;
@@ -284,5 +294,31 @@ mod tests {
             count, 505,
             "活动记录不能被清理裁剪（否则进度回调会静默丢失）"
         );
+    }
+
+    #[tokio::test]
+    async fn test_sweep_interrupted_marks_stale_in_progress() {
+        let (_dir, pool) = temp_pool().await;
+        insert_download(&pool, "a.bin", Some("https://e.com/a"), None, 100)
+            .await
+            .unwrap();
+        insert_download(&pool, "b.bin", Some("https://e.com/b"), None, 100)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE downloads SET state = 'completed' WHERE filename = 'b.bin'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let swept = super::sweep_interrupted_downloads(&pool).await.unwrap();
+        assert_eq!(swept, 1, "只有 in_progress 的 a.bin 被扫尾");
+        let state: String =
+            sqlx::query_scalar("SELECT state FROM downloads WHERE filename = 'a.bin'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(state, "interrupted");
+        // completed 的不受影响；二次扫尾为 0（幂等）
+        let swept2 = super::sweep_interrupted_downloads(&pool).await.unwrap();
+        assert_eq!(swept2, 0);
     }
 }

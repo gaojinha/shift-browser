@@ -144,14 +144,14 @@ function severityClass(s: string) {
   return s === 'danger' ? 'sev-danger' : s === 'warn' ? 'sev-warn' : 'sev-info'
 }
 
-// 弹窗显示时隐藏所有标签 webview，关闭时恢复
+// 弹窗显示时隐藏所有标签 webview，关闭时恢复（参与全局计数）
 let seq = 0
 watch(
   () => props.show,
   async (v) => {
     const my = ++seq
     try {
-      await setWebviewVisible(!v)
+      await setWebviewVisible(!v, 'certs-dialog')
     } catch (e) {
       console.warn('[cert] webview 显隐失败:', e)
     }

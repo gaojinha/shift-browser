@@ -62,9 +62,11 @@ pub mod settings {
         SettingDef { key: "weather_city", default: "", kind: Kind::Str, sensitive: false, desc: "天气城市（空=自动定位）" },
         SettingDef { key: "lock_enabled", default: "true", kind: Kind::Bool, sensitive: false, desc: "启动锁屏" },
         // ---- AI ----
+        SettingDef { key: "ai_provider", default: "agnes", kind: Kind::Str, sensitive: false, desc: "推理服务（agnes/opencode）" },
         SettingDef { key: "ai_model", default: "agnes-2.0-flash", kind: Kind::Str, sensitive: false, desc: "AI 模型" },
         SettingDef { key: "ai_base_url", default: "https://apihub.agnes-ai.com/v1", kind: Kind::Str, sensitive: false, desc: "AI API 地址" },
         SettingDef { key: "ai_api_key", default: "", kind: Kind::Str, sensitive: false, desc: "AI API Key（留空用环境变量；掩码存储）" },
+        SettingDef { key: "opencode_model", default: "", kind: Kind::Str, sensitive: false, desc: "本机 opencode 模型引用（providerID/modelID；空=跟随 opencode 默认）" },
         // ---- 隐私 / 拦截 ----
         SettingDef { key: "adblock_enabled", default: "true", kind: Kind::Bool, sensitive: false, desc: "广告拦截" },
         SettingDef { key: "adblock_keywords", default: "", kind: Kind::Str, sensitive: false, desc: "自定义拦截关键词（换行分隔）" },
@@ -75,8 +77,8 @@ pub mod settings {
         SettingDef { key: "net_block_rules", default: "", kind: Kind::Str, sensitive: false, desc: "网络层拦截规则（每行一个 URL 子串）" },
         SettingDef { key: "net_headers", default: "", kind: Kind::Str, sensitive: false, desc: "自定义请求头（每行 Name: Value）" },
         // ---- 性能 ----
-        SettingDef { key: "tab_hibernate_minutes", default: "30", kind: Kind::Int, sensitive: false, desc: "空闲标签休眠超时（分钟，0=关）" },
-        SettingDef { key: "tab_hibernate_count", default: "0", kind: Kind::Int, sensitive: false, desc: "空闲标签休眠数量阈值（0=关）" },
+        SettingDef { key: "tab_hibernate_minutes", default: "10", kind: Kind::Int, sensitive: false, desc: "空闲标签休眠超时（分钟，0=关）" },
+        SettingDef { key: "tab_hibernate_count", default: "8", kind: Kind::Int, sensitive: false, desc: "空闲标签休眠数量阈值（0=关）" },
         // ---- 翻译 ----
         SettingDef { key: "translate_engine", default: "google", kind: Kind::Str, sensitive: false, desc: "翻译源（google/bing）" },
         SettingDef { key: "translate_target", default: "zh-CN", kind: Kind::Str, sensitive: false, desc: "翻译目标语言" },

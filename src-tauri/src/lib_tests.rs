@@ -54,6 +54,8 @@ mod tests {
             include_str!("ai.rs"),
             // P2（2026-09-26）：网页随手问，本机 opencode 代理
             include_str!("webqa.rs"),
+            include_str!("opencode_chat.rs"),
+            include_str!("opencode_chat/models.rs"),
             include_str!("webzh.rs"),
             include_str!("api.rs"),
             include_str!("api/dashboard.rs"),

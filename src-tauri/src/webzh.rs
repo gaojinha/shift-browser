@@ -219,7 +219,7 @@ pub async fn opencode_translate_batch(
         });
     }
 
-    let creds = crate::webqa::resolve_credentials_pub(db).await?;
+    let creds = crate::webqa::resolve_credentials_pub(&db).await?;
     let http = crate::webqa::client_pub(&creds)?;
     let base = crate::webqa::base_url_pub();
     let agent = req.agent.unwrap_or_else(|| crate::webqa::DEFAULT_AGENT.to_string());
@@ -275,7 +275,7 @@ pub async fn opencode_translate_batch(
 pub async fn opencode_translate_model(
     db: tauri::State<'_, crate::db::Db>,
 ) -> crate::error::CommandResult<String> {
-    let creds = crate::webqa::resolve_credentials_pub(db).await?;
+    let creds = crate::webqa::resolve_credentials_pub(&db).await?;
     let http = crate::webqa::client_pub(&creds)?;
     let base = crate::webqa::base_url_pub();
     let resp = http
@@ -350,7 +350,7 @@ pub async fn opencode_translate_warmup(
     want: Option<usize>,
 ) -> crate::error::CommandResult<Vec<String>> {
     let n = want.unwrap_or(3).clamp(1, 3);
-    let creds = crate::webqa::resolve_credentials_pub(db).await?;
+    let creds = crate::webqa::resolve_credentials_pub(&db).await?;
     let http = crate::webqa::client_pub(&creds)?;
     let mut set = tokio::task::JoinSet::new();
     for _ in 0..n {

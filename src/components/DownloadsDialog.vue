@@ -7,6 +7,7 @@ import { listen } from '@tauri-apps/api/event'
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener'
 import { setWebviewVisible } from '../utils/webview'
 import { useDownloadsStore } from '../stores/downloads'
+import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
 import { EVENTS } from '../constants'
 
@@ -75,8 +76,22 @@ function stateInfo(state: string): { text: string; cls: string } {
       return { text: '失败', cls: 'state-fail' }
     case 'cancelled':
       return { text: '已取消', cls: 'state-cancel' }
+    case 'interrupted':
+      return { text: '已中断（重启）', cls: 'state-fail' }
     default:
       return { text: '下载中', cls: 'state-run' }
+  }
+}
+
+/** 重新下载：中断/失败且有来源链接时，新标签打开原链接触发新的下载 */
+async function onRetry(url: string | null) {
+  if (!url) return
+  try {
+    await useTabsStore().createTab(url)
+    emit('close')
+  } catch (e) {
+    console.error('[downloads] 重新下载失败:', e)
+    useToastStore().error('重新下载失败')
   }
 }
 
@@ -138,6 +153,9 @@ async function onReveal(path: string | null) {
               <template v-if="d.state === 'completed' && d.path">
                 <button class="mini-btn" @click="onOpen(d.path)">打开</button>
                 <button class="mini-btn" @click="onReveal(d.path)">文件夹</button>
+              </template>
+              <template v-else-if="(d.state === 'interrupted' || d.state === 'failed') && d.url">
+                <button class="mini-btn" @click="onRetry(d.url)">重新下载</button>
               </template>
               <button class="mini-btn danger" @click="onDelete(d.id)">删除</button>
             </div>
