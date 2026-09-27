@@ -261,7 +261,31 @@ pub async fn execute_agent_action(
             let wv = window
                 .get_webview(&label)
                 .ok_or_else(|| "活动标签的 webview 不存在".to_string())?;
+            // Agent 导航守卫（非用户直驱，必须设防）：scheme 白名单 + 内网拒绝。
+            // 用户标签页自己逛内网不管（路由器后台要能开），但 AI 驱使的跳转走三件套，
+            // 与 open_and_read 的 guard_url 同口径，防“导航+读取”内网链。
             let parsed = url::Url::parse(&url).map_err(|e| format!("网址不合法: {}", e))?;
+            match parsed.scheme() {
+                "http" | "https" | "shift" => {}
+                _ => return Err(format!("Agent 不允许导航到该地址类型: {}", parsed.scheme())),
+            }
+            let host = parsed.host_str().unwrap_or("").to_string();
+            if !host.is_empty() && !crate::net_guard::host_permitted(&host) {
+                return Err(format!("Agent 不允许导航到内网地址：{host}"));
+            }
+            if host.parse::<std::net::IpAddr>().is_err() && !host.is_empty() {
+                let port = parsed.port_or_known_default().unwrap_or(80);
+                let sock: Vec<std::net::SocketAddr> =
+                    tokio::net::lookup_host((host.as_str(), port))
+                        .await
+                        .map_err(|_| format!("域名解析失败，已拒绝：{host}"))?
+                        .collect();
+                crate::ai::check_resolved_ips(
+                    &host,
+                    sock.iter().map(|s| s.ip()),
+                    port,
+                )?;
+            }
             wv.navigate(parsed)
                 .map_err(|e| format!("导航失败: {}", e))?;
             return Ok(format!("已跳转到 {}", url));

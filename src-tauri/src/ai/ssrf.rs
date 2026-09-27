@@ -28,7 +28,9 @@ pub(crate) fn validate_base_url(base_url: &str) -> Result<String, String> {
     Ok(base_url.to_string())
 }
 
-fn is_private_host(host: &str) -> bool {
+/// 主机是否为本机/内网（统一口径入口：net_guard 的导航守卫与 open_and_read 共用，
+/// 避免各处私有判定漂移）。覆盖标准 IP、IPv4 混淆写法、IPv4-mapped IPv6、内网域名后缀。
+pub(crate) fn is_private_host(host: &str) -> bool {
     // url crate 的 host_str() 对 IPv6 返回带方括号的 "[::1]"，先去掉再判断
     let host = host.trim().trim_start_matches('[').trim_end_matches(']');
     // 1. 标准 IP 字面量（含 IPv4-mapped IPv6 的映射回判）
@@ -79,6 +81,8 @@ fn is_private_v4(v4: std::net::Ipv4Addr) -> bool {
         || v4.is_unspecified()
         || v4.is_multicast()
         || v4.is_broadcast()
+        || v4.is_documentation()
+        || v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64 // 100.64.0.0/10 运营商级 NAT，跨用户可达
 }
 
 /// 解析 IPv4 混淆写法（浏览器/系统解析器支持，标准 IpAddr::parse 不认）：

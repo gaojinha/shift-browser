@@ -4,10 +4,12 @@
 import { describe, it, expect } from "vitest";
 import { SETTINGS_SCHEMA } from "./constants";
 
+type SchemaKey = keyof typeof SETTINGS_SCHEMA;
+
 describe("批 2 新增设置控件绑定的 8 个键", () => {
-  const boolKeys = ["show_lunar", "show_quote", "show_weather", "api_readonly", "api_agent_actions"];
-  const strKeys = ["theme_color", "wallpaper", "weather_city"];
-  const intKeys = ["tab_hibernate_count"];
+  const boolKeys: SchemaKey[] = ["show_lunar", "show_quote", "show_weather", "api_readonly", "api_agent_actions"];
+  const strKeys: SchemaKey[] = ["theme_color", "wallpaper", "weather_city"];
+  const intKeys: SchemaKey[] = ["tab_hibernate_count"];
 
   it("布尔键存在且 kind=bool、默认值合法", () => {
     for (const k of boolKeys) {

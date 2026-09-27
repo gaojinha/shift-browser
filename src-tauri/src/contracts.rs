@@ -42,6 +42,10 @@ pub mod settings {
     /// 敏感键（即使误加进 SETTINGS 也必须拒绝返回/写入前端）
     pub const SENSITIVE_KEYS: &[&str] = &["master_key"];
 
+    /// 凭据键（可写可配，但读一律只给掩码，防接口批量捞明文）
+    /// ai_api_key 沿用旧掩码契约；opencode_password 同理（用户名 opencode_username 非秘密，保持明文可读）
+    pub const MASKED_KEYS: &[&str] = &["ai_api_key", "opencode_password"];
+
     /// 全部设置键（**唯一来源**：后端白名单与前端默认值都从这里派生）
     pub const SETTINGS: &[SettingDef] = &[
         // ---- 基础 ----
@@ -67,6 +71,8 @@ pub mod settings {
         SettingDef { key: "ai_base_url", default: "https://apihub.agnes-ai.com/v1", kind: Kind::Str, sensitive: false, desc: "AI API 地址" },
         SettingDef { key: "ai_api_key", default: "", kind: Kind::Str, sensitive: false, desc: "AI API Key（留空用环境变量；掩码存储）" },
         SettingDef { key: "opencode_model", default: "", kind: Kind::Str, sensitive: false, desc: "本机 opencode 模型引用（providerID/modelID；空=跟随 opencode 默认）" },
+        SettingDef { key: "opencode_username", default: "", kind: Kind::Str, sensitive: false, desc: "本机 opencode serve 认证用户名（空=自动从进程发现）" },
+        SettingDef { key: "opencode_password", default: "", kind: Kind::Str, sensitive: false, desc: "本机 opencode serve 认证密码（读只给掩码）" },
         // ---- 隐私 / 拦截 ----
         SettingDef { key: "adblock_enabled", default: "true", kind: Kind::Bool, sensitive: false, desc: "广告拦截" },
         SettingDef { key: "adblock_keywords", default: "", kind: Kind::Str, sensitive: false, desc: "自定义拦截关键词（换行分隔）" },
@@ -101,6 +107,11 @@ pub mod settings {
     /// 是否为敏感设置键
     pub fn is_sensitive(key: &str) -> bool {
         SENSITIVE_KEYS.contains(&key)
+    }
+
+    /// 是否为凭据键（读只给掩码）
+    pub fn is_masked(key: &str) -> bool {
+        MASKED_KEYS.contains(&key)
     }
 
     /// 是否为允许读写的设置键

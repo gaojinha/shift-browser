@@ -32,20 +32,107 @@ fn load_sources() -> Vec<(String, String, String)> {
         .collect()
 }
 
+/// 单跳建连：先解析校验公网，再把地址 pin 死（防校验后 DNS 翻转）。
+///
+/// - IP 字面量：判公网后直连（无 DNS 面可翻转）
+/// - 域名：只解析这一次，全部结果校验后 pin 给 reqwest，建连不再二次解析
+///
+/// 与 reader/fetch.rs 的 curl --resolve 同口径，ai 网关的 resolve_to_addrs 同机制。
+async fn pinned_client_for(url: &str) -> Result<reqwest::Client, String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("只支持 http/https 订阅源".to_string());
+    }
+    let parsed = url::Url::parse(url).map_err(|_| "URL 不合法".to_string())?;
+    let raw = parsed.host_str().ok_or_else(|| "URL 缺少主机名".to_string())?;
+    let host = raw.trim_start_matches('[').trim_end_matches(']').to_string();
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            crate::contracts::timeout::FEED_FETCH_SECS,
+        ))
+        .user_agent(format!(
+            "ShiftBrowser/{} (RSS reader)",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .redirect(reqwest::redirect::Policy::none());
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        if crate::ai::is_private_ip(ip) {
+            return Err(format!("订阅源指向内网/保留地址，已拦截：{}", host));
+        }
+    } else {
+        let sock: Vec<std::net::SocketAddr> =
+            tokio::net::lookup_host((host.as_str(), port))
+                .await
+                .map_err(|e| format!("DNS 解析失败: {} ({})", host, e))?
+                .collect();
+        let addrs =
+            crate::ai::check_resolved_ips(&host, sock.iter().map(|s| s.ip()), port)?;
+        builder = builder.resolve_to_addrs(&host, &addrs);
+    }
+    builder
+        .build()
+        .map_err(|e| format!("HTTP 客户端创建失败: {}", e))
+}
+
 /// 抓单个源并入库；返回条目数
 async fn fetch_one(
-    client: &reqwest::Client,
     db: &Db,
     source: &str,
     url: &str,
     category: &str,
 ) -> usize {
-    let resp = match client.get(url).send().await {
-        Ok(r) => r,
-        Err(e) => {
-            log::error!("[feed] {} 请求失败: {}", source, e);
+    // 手动跟随重定向（最多 5 跳）：reqwest 自动跟随会在复核前把请求打到内网，
+    // 这里每跳先建 pin 死的连接再发请求，内网跳转连第一个字节都发不出去
+    let mut cur = url.to_string();
+    let mut hops = 0u8;
+    let resp = loop {
+        let hop_client = match pinned_client_for(&cur).await {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("[feed] {} SSRF 拦截: {}", source, e);
+                return 0;
+            }
+        };
+        let r = match hop_client.get(&cur).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                log::error!("[feed] {} 请求失败: {}", source, e);
+                return 0;
+            }
+        };
+        let status = r.status().as_u16();
+        if (300..400).contains(&status) {
+            let loc = r
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            if loc.is_empty() {
+                log::warn!("[feed] {} 重定向无 Location: HTTP {}", source, status);
+                return 0;
+            }
+            match url::Url::parse(&cur).ok().and_then(|base| base.join(&loc).ok()) {
+                Some(next) => {
+                    hops += 1;
+                    if hops > 5 {
+                        log::warn!("[feed] {} 重定向过多，中止", source);
+                        return 0;
+                    }
+                    cur = next.to_string();
+                    continue;
+                }
+                None => {
+                    log::warn!("[feed] {} 重定向地址非法: {}", source, loc);
+                    return 0;
+                }
+            }
+        }
+        if !(200..300).contains(&status) {
+            log::error!("[feed] {} 抓取失败: HTTP {}", source, status);
             return 0;
         }
+        break r;
     };
     // 先取响应头 charset（bytes() 会消费 resp）
     let charset = resp
@@ -132,20 +219,13 @@ async fn fetch_one(
 /// 全量刷新（并发抓取，单请求 15s 超时）
 /// 并发限流：信号量压到 16 路——62 源全开 + 失败重试翻倍会与 UI 命令抢 SQLite
 /// 连接池（5 连接）和写锁，导致启动后半小时内历史/会话保存偶发卡顿
+/// 连接说明：每跳自建 pin 死的客户端（见 pinned_client_for），无共享连接池——
+/// 订阅 30 分钟一轮，跨轮复用池子早已空闲回收，同轮同 host 复用收益极小，不值得为此留自动跟随
 pub async fn refresh_all(db: &Db) -> usize {
     let sources = load_sources();
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(crate::contracts::timeout::FEED_FETCH_SECS))
-        .user_agent(format!(
-            "ShiftBrowser/{} (RSS reader)",
-            env!("CARGO_PKG_VERSION")
-        ))
-        .build()
-        .unwrap_or_default();
     let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(16));
     let mut set = tokio::task::JoinSet::new();
     for (name, url, category) in sources {
-        let client = client.clone();
         let feed_pool = db.feed_pool.clone();
         let sem = sem.clone();
         set.spawn(async move {
@@ -161,13 +241,13 @@ pub async fn refresh_all(db: &Db) -> usize {
                 vault_path: std::path::PathBuf::new(),
                 master_key: tokio::sync::Mutex::new(None),
             };
-            let n = fetch_one(&client, &db_owned, &name, &url, &category).await;
+            let n = fetch_one(&db_owned, &name, &url, &category).await;
             if n == 0 {
                 // 失败重试一次：anyfeeder 偶发限流/网络抖动会让单个源整轮丢失，
                 // 等 30 分钟下一轮太久，延迟 2 秒补抓一次
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 log::warn!("[feed] {} 首次抓取失败，2 秒后重试", name);
-                fetch_one(&client, &db_owned, &name, &url, &category).await
+                fetch_one(&db_owned, &name, &url, &category).await
             } else {
                 n
             }
@@ -217,3 +297,33 @@ pub fn start_scheduler(app: &AppHandle) {
     });
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// pin 建连内网直接拒（无网络也测：字面量走纯本地判定）
+    #[tokio::test]
+    async fn pinned_client_rejects_intranet_literals() {
+        for url in [
+            "http://127.0.0.1/",
+            "http://10.0.0.5/rss",
+            "http://192.168.1.1:8080/feed",
+            "http://169.254.169.254/latest",
+            "http://[::1]/",
+        ] {
+            assert!(
+                pinned_client_for(url).await.is_err(),
+                "{url} 必须被拦截"
+            );
+        }
+    }
+
+    /// 非 http/https 直接拒
+    #[tokio::test]
+    async fn pinned_client_rejects_non_http() {
+        assert!(pinned_client_for("ftp://example.com/rss").await.is_err());
+        assert!(pinned_client_for("file:///etc/passwd").await.is_err());
+        assert!(pinned_client_for("not-a-url").await.is_err());
+    }
+}

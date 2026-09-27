@@ -162,6 +162,15 @@ pub(crate) fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
         let state = event.state();
         let ctrl = state.contains(gtk::gdk::ModifierType::CONTROL_MASK);
         let shift = state.contains(gtk::gdk::ModifierType::SHIFT_MASK);
+        // 前端 matchShortcut 明确要求无 Alt/Meta（见 App.vue），GTK 层同口径：
+        // Alt+Ctrl+T 这类组合键不转发，否则页面持焦与 UI 持焦行为不一致
+        let alt_or_meta = state.contains(gtk::gdk::ModifierType::MOD1_MASK)
+            || state.contains(gtk::gdk::ModifierType::META_MASK)
+            || state.contains(gtk::gdk::ModifierType::SUPER_MASK)
+            || state.contains(gtk::gdk::ModifierType::HYPER_MASK);
+        if alt_or_meta {
+          return gtk::glib::Propagation::Proceed;
+        }
 
         let Some(sc) = SHORTCUTS.iter().find(|s| {
           (key == s.gdk_keyval || key == s.gdk_keyval_shift)

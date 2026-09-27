@@ -5,10 +5,12 @@ import { setWebviewVisible } from '../utils/webview'
 import { useBookmarksStore } from '../stores/bookmarks'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
+import { useConfirmDelete } from '../composables/useConfirmDelete'
 import type { Bookmark } from '../types/bookmark'
 
 const bookmarksStore = useBookmarksStore()
 const tabsStore = useTabsStore()
+const confirmDelete = useConfirmDelete()
 
 const emit = defineEmits<{ (e: 'open-manager'): void }>()
 
@@ -83,8 +85,9 @@ function onClickBookmark(url: string) {
   if (active) tabsStore.navigateTab(active.id, url)
 }
 
-/** 删除书签 */
+/** 删除书签（悬停叉极易误触：二次点击确认） */
 async function onDeleteBookmark(id: number) {
+  if (!confirmDelete.arm(id)) return
   await bookmarksStore.removeBookmark(id)
 }
 
@@ -219,7 +222,13 @@ async function onSaveEdit() {
         @contextmenu.stop="onContextMenu($event, b)"
       >
         {{ b.title }}
-        <span class="bm-del" title="删除书签" @click.stop="onDeleteBookmark(b.id)">×</span>
+        <span
+          class="bm-del"
+          :class="{ armed: confirmDelete.isPending(b.id) }"
+          :title="confirmDelete.isPending(b.id) ? '再点一次确认删除' : '删除书签'"
+          @click.stop="onDeleteBookmark(b.id)"
+          >{{ confirmDelete.isPending(b.id) ? '?' : '×' }}</span
+        >
       </button>
     </div>
     <button class="action-btn" title="收藏当前页" @click="onBookmark">☆</button>
@@ -415,6 +424,12 @@ async function onSaveEdit() {
 }
 .bm-del:hover {
   color: var(--danger);
+}
+/* 二次确认待命态：常显危险色（触屏无 hover 也看得见） */
+.bm-del.armed {
+  display: inline;
+  color: var(--danger);
+  font-weight: 700;
 }
 .empty {
   justify-content: flex-end;

@@ -18,8 +18,19 @@ pub struct AiAuditEntry {
     pub origin: String,
 }
 
+/// 审计保留上限：只留最近 5000 条，高频调用场景下表不无限增长
+pub const AUDIT_KEEP: i64 = 5000;
+
 /// 记一条审计（尽力而为：失败只记日志，绝不打断主流程）。
+/// 写入与裁剪同一事务：只保留最近 AUDIT_KEEP 条。
 pub async fn record(pool: &SqlitePool, cmd: &str, url: &str, tab_id: &str, ok: bool, error_code: &str) {
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            log::warn!("[ai_audit] 记录失败: {}", e);
+            return;
+        }
+    };
     if let Err(e) = sqlx::query(
         "INSERT INTO ai_audit (cmd, url, tab_id, ok, error_code) VALUES (?, ?, ?, ?, ?)",
     )
@@ -28,10 +39,24 @@ pub async fn record(pool: &SqlitePool, cmd: &str, url: &str, tab_id: &str, ok: b
     .bind(tab_id)
     .bind(if ok { 1i64 } else { 0i64 })
     .bind(error_code)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     {
         log::warn!("[ai_audit] 记录失败: {}", e);
+        return;
+    }
+    if let Err(e) = sqlx::query(
+        "DELETE FROM ai_audit WHERE id NOT IN (SELECT id FROM ai_audit ORDER BY id DESC LIMIT ?)",
+    )
+    .bind(AUDIT_KEEP)
+    .execute(&mut *tx)
+    .await
+    {
+        log::warn!("[ai_audit] 裁剪失败: {}", e);
+        return;
+    }
+    if let Err(e) = tx.commit().await {
+        log::warn!("[ai_audit] 提交失败: {}", e);
     }
 }
 
@@ -105,5 +130,31 @@ mod tests {
             record(&pool, "read_status", &format!("https://x/{i}"), "", true, "").await;
         }
         assert_eq!(recent(&pool, 3).await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn record_trims_to_keep_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = test_pool(dir.path()).await;
+        // 直插超限旧记录，再记一条触发裁剪
+        for i in 0..(AUDIT_KEEP + 5) {
+            sqlx::query("INSERT INTO ai_audit (cmd, url) VALUES ('x', ?)")
+                .bind(format!("https://old/{i}"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        record(&pool, "read_page", "https://new/1", "", true, "").await;
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ai_audit")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, AUDIT_KEEP);
+        // 留的是最新的
+        let newest: String = sqlx::query_scalar("SELECT url FROM ai_audit ORDER BY id DESC LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(newest, "https://new/1");
     }
 }

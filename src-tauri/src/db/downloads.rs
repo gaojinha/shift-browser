@@ -21,6 +21,27 @@ pub struct Download {
     pub created_at: String,
 }
 
+/// 合法下载状态白名单。sweep 只认 in_progress，写脏状态会导致记录永不被扫尾/统计，
+/// 因此两个状态入口（内部回调与前端命令）统一校验，非法直接拒。
+pub const VALID_STATES: &[&str] = &[
+    "in_progress",
+    "completed",
+    "failed",
+    "cancelled",
+    "interrupted",
+];
+
+fn check_state(state: &str) -> Result<(), crate::db::DbError> {
+    if VALID_STATES.contains(&state) {
+        Ok(())
+    } else {
+        Err(crate::db::DbError::Other(format!(
+            "非法下载状态: {}（仅允许 {:?}）",
+            state, VALID_STATES
+        )))
+    }
+}
+
 /// 插入下载记录（内部共用：WebKit 下载信号与 create_download 命令走同一入口，避免 SQL 双写）
 /// 插入后顺带清理：只保留最近 500 条记录，防止下载历史无限增长
 pub async fn insert_download(
@@ -86,7 +107,8 @@ pub async fn update_download_state(
     id: i64,
     state: &str,
     received_bytes: Option<i64>,
-) -> Result<(), sqlx::Error> {
+) -> DbResult<()> {
+    check_state(state)?;
     sqlx::query(
         "UPDATE downloads SET state = ?, received_bytes = COALESCE(?, received_bytes) WHERE id = ?",
     )
@@ -128,6 +150,10 @@ pub async fn update_download_progress(
     state: Option<String>,
     total_bytes: Option<i64>,
 ) -> DbResult<()> {
+    // 脏状态防护：白名单外直接拒，避免记录永不被扫尾/统计
+    if let Some(ref s) = state {
+        check_state(s)?;
+    }
     let res = if let Some(total) = total_bytes {
         sqlx::query(
             "UPDATE downloads SET received_bytes = ?, state = COALESCE(?, state),
@@ -320,5 +346,27 @@ mod tests {
         // completed 的不受影响；二次扫尾为 0（幂等）
         let swept2 = super::sweep_interrupted_downloads(&pool).await.unwrap();
         assert_eq!(swept2, 0);
+    }
+
+    #[tokio::test]
+    async fn test_invalid_state_rejected() {
+        let (_dir, pool) = temp_pool().await;
+        let id = insert_download(&pool, "c.bin", None, None, 100)
+            .await
+            .unwrap();
+        // 脏状态直接拒，库里保持原值
+        assert!(super::update_download_state(&pool, id, "done!!!", None)
+            .await
+            .is_err());
+        let state: String = sqlx::query_scalar("SELECT state FROM downloads WHERE id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(state, "in_progress");
+        // 白名单内照常
+        super::update_download_state(&pool, id, "failed", None)
+            .await
+            .unwrap();
     }
 }

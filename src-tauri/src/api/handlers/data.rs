@@ -50,7 +50,17 @@ pub(super) async fn bookmarks(app: &AppHandle, _req: &Value) -> Value {
 pub(super) async fn list_downloads(app: &AppHandle, _req: &Value) -> Value {
     let db = app.state::<crate::db::Db>();
     match crate::db::downloads::get_downloads(db).await {
-        Ok(v) => json!({"ok": true, "data": v}),
+        // 本地绝对路径不出接口：持令牌者无权知道文件落盘位置（前端经 invoke 拿全量不受影响）
+        Ok(v) => {
+            let scrubbed: Vec<_> = v
+                .into_iter()
+                .map(|mut d| {
+                    d.path = None;
+                    d
+                })
+                .collect();
+            json!({"ok": true, "data": scrubbed})
+        }
         Err(e) => AppError::db(e.to_string()).error_json(),
     }
 }
@@ -115,6 +125,13 @@ pub(super) async fn get_setting(app: &AppHandle, req: &Value) -> Value {
     if key.is_empty() {
         return AppError::validation("缺少 key").error_json();
     }
+    // 只读模式下凭据/敏感键一律拒绝（连掩码都不给，防令牌持有者探存量）
+    if (crate::contracts::settings::is_masked(&key)
+        || crate::contracts::settings::is_sensitive(&key))
+        && is_api_readonly(app).await
+    {
+        return AppError::permission(format!("只读模式下设置 {} 被拒绝", key)).error_json();
+    }
     let db = app.state::<crate::db::Db>();
     match crate::db::settings::get_setting(db, key).await {
         Ok(v) => json!({"ok": true, "data": v}),
@@ -125,9 +142,32 @@ pub(super) async fn get_setting(app: &AppHandle, req: &Value) -> Value {
 pub(super) async fn list_settings(app: &AppHandle, _req: &Value) -> Value {
     let db = app.state::<crate::db::Db>();
     match crate::db::settings::get_all_settings(db).await {
-        Ok(v) => json!({"ok": true, "data": v}),
+        Ok(v) => {
+            // 只读模式下凭据键整项剔除（掩码也不给）
+            if is_api_readonly(app).await {
+                let filtered: Vec<_> = v
+                    .into_iter()
+                    .filter(|s| !crate::contracts::settings::is_masked(&s.key))
+                    .collect();
+                json!({"ok": true, "data": filtered})
+            } else {
+                json!({"ok": true, "data": v})
+            }
+        }
         Err(e) => AppError::db(e.to_string()).error_json(),
     }
+}
+
+/// 开放接口侧只读判断（与 api.rs 主闸门同口径：settings.api_readonly == "true"）
+async fn is_api_readonly(app: &AppHandle) -> bool {
+    let db = app.state::<crate::db::Db>();
+    sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = 'api_readonly'")
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false)
 }
 
 /// AI 读取审计查询（K 类 / O3 持久化）：返回最近 N 条 AI 操作记录。

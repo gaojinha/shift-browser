@@ -108,6 +108,8 @@ function onStop() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // 组字中按 Enter 是选词，不是发送
+  if (e.isComposing) return
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     onSend()
@@ -368,7 +370,8 @@ function onOverlaySelf() {
   inset: 0;
   /* 分屏模式：遮罩透明，页面（webview 让出右侧后）保持可见可交互 */
   background: transparent;
-  z-index: 1000;
+  /* 右侧面板层：高于弹窗（弹窗与侧栏互斥，不叠加），与翻译面板同层， ordering 不再靠挂载顺序碰运气 */
+  z-index: var(--z-sidepanel);
   height: 100vh;
   min-height: 100vh;
 }

@@ -52,6 +52,8 @@ export const SETTINGS_SCHEMA = {
   ai_base_url: { default: 'https://apihub.agnes-ai.com/v1', kind: 'str', sensitive: false, desc: 'AI API 地址' },
   ai_api_key: { default: '', kind: 'str', sensitive: false, desc: 'AI API Key（留空用环境变量；掩码存储）' },
   opencode_model: { default: '', kind: 'str', sensitive: false, desc: '本机 opencode 模型引用（providerID/modelID；空=跟随 opencode 默认）' },
+  opencode_username: { default: '', kind: 'str', sensitive: false, desc: '本机 opencode serve 认证用户名（空=自动从进程发现）' },
+  opencode_password: { default: '', kind: 'str', sensitive: false, desc: '本机 opencode serve 认证密码（读只给掩码）' },
   adblock_enabled: { default: 'true', kind: 'bool', sensitive: false, desc: '广告拦截' },
   adblock_keywords: { default: '', kind: 'str', sensitive: false, desc: '自定义拦截关键词（换行分隔）' },
   privacy_shield: { default: 'true', kind: 'bool', sensitive: false, desc: '隐私防护（旧布尔开关，兼容）' },

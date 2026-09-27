@@ -125,6 +125,8 @@ function flashCopied() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // 组字中：Esc 退组字、Ctrl+Enter 非发送意图，全交给输入法
+  if (e.isComposing) return
   // Ctrl+Enter 翻译；Esc 关闭
   if (e.key === 'Escape') {
     e.preventDefault()
@@ -224,7 +226,7 @@ const charCount = (s: string) => s.length
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
-  z-index: 9000;
+  z-index: var(--z-sidepanel);
   display: flex;
   justify-content: flex-end;
 }

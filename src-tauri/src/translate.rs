@@ -21,14 +21,18 @@ const CHROME_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
 /// 值来自设置 translate_timeout（默认 15 秒，可在设置界面调整）
 static CLIENT: OnceLock<Client> = OnceLock::new();
 
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+/// reqwest 客户端（共享连接池，全局单例）
+/// 初始化失败不崩进程：降级用默认客户端（请求级 timeout 照常生效）
 fn client() -> &'static Client {
     CLIENT.get_or_init(|| {
         Client::builder()
             .user_agent(CHROME_UA)
             .timeout(std::time::Duration::from_secs(crate::contracts::timeout::TRANSLATE_SECS))
             .build()
-            .expect("reqwest client 初始化失败")
+            .unwrap_or_else(|e| {
+                log::error!("[translate] reqwest client 初始化失败，用默认客户端兜底: {}", e);
+                Client::new()
+            })
     })
 }
 
@@ -64,13 +68,15 @@ pub async fn translate_google(text: &str, target: &str, timeout: u64) -> Result<
         .map_err(|e| format!("翻译请求失败: {}", e))?;
 
     let status = resp.status();
+    // 先判状态码再解析：上游限流/故障返回 HTML 错误页时，直接报 HTTP 状态，
+    // 而不是"解析失败"掩盖真实原因（与 Bing 侧一致）
+    if !status.is_success() {
+        return Err(format!("翻译服务返回 HTTP {}", status));
+    }
     let body: serde_json::Value = resp
         .json()
         .await
         .map_err(|e| format!("翻译响应解析失败: {}", e))?;
-    if !status.is_success() {
-        return Err(format!("翻译服务返回 HTTP {}", status));
-    }
 
     // 返回格式：[[["译文","原文",null,null,1],...],null,null,null,...]
     let segs = body

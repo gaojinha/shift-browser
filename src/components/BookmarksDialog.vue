@@ -8,6 +8,7 @@ import { setWebviewVisible } from '../utils/webview'
 import { useBookmarksStore } from '../stores/bookmarks'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
+import { useConfirmDelete } from '../composables/useConfirmDelete'
 import type { Bookmark } from '../types/bookmark'
 
 const props = defineProps<{ show: boolean }>()
@@ -16,6 +17,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const bookmarksStore = useBookmarksStore()
 const tabsStore = useTabsStore()
 const toastStore = useToastStore()
+const confirmDelete = useConfirmDelete()
 
 const query = ref('')
 const folders = ref<{ id: number; name: string }[]>([])
@@ -81,6 +83,8 @@ function onOpen(url: string) {
 }
 
 async function onDelete(b: Bookmark) {
+  // 单条书签删了找不回：二次点击确认（文件夹删除已有确认 overlay，不动）
+  if (!confirmDelete.arm(b.id)) return
   const ok = await bookmarksStore.removeBookmark(b.id)
   if (ok) toastStore.success('书签已删除')
 }
@@ -257,7 +261,14 @@ async function onExport() {
               <div class="bm-ops">
                 <button class="op-btn" title="打开" @click="onOpen(b.url)">↗</button>
                 <button class="op-btn" title="编辑" @click="onEdit(b)">✏</button>
-                <button class="op-btn danger" title="删除" @click="onDelete(b)">✕</button>
+                <button
+                  class="op-btn danger"
+                  :class="{ armed: confirmDelete.isPending(b.id) }"
+                  :title="confirmDelete.isPending(b.id) ? '再点一次确认删除' : '删除'"
+                  @click="onDelete(b)"
+                >
+                  {{ confirmDelete.isPending(b.id) ? '!' : '✕' }}
+                </button>
               </div>
             </div>
           </div>
@@ -555,6 +566,11 @@ async function onExport() {
 }
 .op-btn.danger:hover {
   color: var(--danger);
+}
+/* 二次确认待命态：常显危险色 */
+.op-btn.danger.armed {
+  color: var(--danger);
+  font-weight: 700;
 }
 .bm-edit-dialog {
   width: min(360px, calc(100vw - 32px));

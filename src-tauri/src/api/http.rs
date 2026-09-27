@@ -32,6 +32,18 @@ pub(crate) use req::{find_header_end, HTTP_MAX_BODY};
 
 const HTTP_PORT: u16 = 19701;
 
+/// 开放接口侧只读判断（与 api.rs 主闸门同口径：settings.api_readonly == "true"）
+async fn is_readonly(app: &AppHandle) -> bool {
+    let db = app.state::<crate::db::Db>();
+    sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = 'api_readonly'")
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false)
+}
+
 /// dashboard 页面安全响应头：禁被嵌入任意框架（点击劫持），CSP 收紧到无脚本/无外联
 const DASHBOARD_HEADERS: &str = "X-Frame-Options: DENY\r\n\
 Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'\r\n\
@@ -147,10 +159,25 @@ pub(crate) fn spawn_http(app: AppHandle, tokens: auth::ApiTokenShared) {
                 // 模型网关（阶段4）：POST /v1/chat/completions → 转发到配置的 provider
                 if path.starts_with("/v1/chat/completions") {
                     let (status, reason, extra, payload) = if bearer_ok {
-                        guard.record_success(&peer_ip);
-                        let s = serde_json::to_string(&dashboard::model_gateway(&app, &body).await)
-                            .unwrap_or_else(|_| "{}".into());
-                        (200u16, "OK", String::new(), s)
+                        // 只读模式同样约束网关：网关携带 key 调上游（花钱+外联），属写/外联原语，
+                        // 不能因为不在 HANDLERS 表里就漏网（与 api.rs 主闸门同口径）
+                        if is_readonly(&app).await {
+                            guard.record_failure(&peer_ip, Instant::now());
+                            log::warn!("[api] 模型网关只读模式拒绝 peer={peer_ip}");
+                            (
+                                403,
+                                "Forbidden",
+                                String::new(),
+                                AppError::permission("只读模式已开启，模型网关被拒绝")
+                                    .gateway_error_json()
+                                    .to_string(),
+                            )
+                        } else {
+                            guard.record_success(&peer_ip);
+                            let s = serde_json::to_string(&dashboard::model_gateway(&app, &body).await)
+                                .unwrap_or_else(|_| "{}".into());
+                            (200u16, "OK", String::new(), s)
+                        }
                     } else {
                         let retry = guard.record_failure(&peer_ip, Instant::now());
                         log::warn!("[api] 模型网关未授权 peer={peer_ip}（封禁 {retry}s）");

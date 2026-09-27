@@ -156,6 +156,8 @@ function execute(item?: Item) {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // 组字中：方向键/Enter/Esc 交给输入法候选框，不抢跑
+  if (e.isComposing) return
   if (e.key === 'ArrowDown') {
     e.preventDefault()
     e.stopPropagation()

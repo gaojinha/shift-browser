@@ -233,6 +233,11 @@ impl Db {
                 "hibernate_defaults",
                 include_str!("../../migrations/20260928000000_hibernate_defaults.sql"),
             ),
+            (
+                19,
+                "perf_indexes",
+                include_str!("../../migrations/20260928000001_perf_indexes.sql"),
+            ),
         ];
 
         for (version, name, sql) in migrations {

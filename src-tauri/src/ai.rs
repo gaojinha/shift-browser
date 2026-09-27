@@ -11,7 +11,7 @@ use tauri::{ipc::Channel, Manager};
 // R2-1 拆分（2026-09-24）：SSRF 防护独立成子模块
 #[path = "ai/ssrf.rs"]
 pub(crate) mod ssrf;
-pub(crate) use ssrf::{check_resolved_ips, is_private_ip, resolve_pin_for_https, validate_base_url};
+pub(crate) use ssrf::{check_resolved_ips, is_private_host, is_private_ip, resolve_pin_for_https, validate_base_url};
 // R1 拆分（2026-09-25）：AGNES 非流式/SSE 两条 HTTP 管线实现
 #[path = "ai/agnes.rs"]
 mod agnes;
@@ -85,10 +85,14 @@ async fn resolve_runtime_provider(
 }
 
 /// 取消指定 request_id 的流式请求（前端"停止生成"按钮调用）
+/// 毒化容错：持有锁线程 panic 后锁毒化也照常用，不崩进程
 #[tauri::command]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub fn ai_cancel_stream(request_id: String) {
-    if let Some(flag) = cancel_flags().lock().unwrap().get(&request_id) {
+    if let Some(flag) = cancel_flags()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&request_id)
+    {
         flag.store(true, Ordering::Relaxed);
         log::info!("[ai] 已请求取消流式请求 {}", request_id);
     }
@@ -268,11 +272,11 @@ pub async fn ai_chat_stream(
         tools: None,
     };
 
-    // 注册取消标志（请求结束无论成败都移除）
+    // 注册取消标志（请求结束无论成败都移除；锁毒化时照常用，不崩进程）
     let cancel = Arc::new(AtomicBool::new(false));
     cancel_flags()
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .insert(request_id.clone(), cancel.clone());
 
     let result = provider
@@ -290,7 +294,10 @@ pub async fn ai_chat_stream(
         )
         .await;
 
-    cancel_flags().lock().unwrap().remove(&request_id);
+    cancel_flags()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&request_id);
 
     match result {
         Ok(full) => {

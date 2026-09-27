@@ -161,7 +161,7 @@ async function remove(u: Userscript) {
 .us-overlay {
   position: fixed;
   inset: 0;
-  z-index: 3500;
+  z-index: var(--z-overlay);
   background: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;

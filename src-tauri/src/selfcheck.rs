@@ -114,7 +114,11 @@ fn check_versions(app: &tauri::AppHandle) -> Vec<CheckItem> {
 /// 数据层：数据库可读写、表数量、关键表行数
 async fn check_storage(app: &tauri::AppHandle) -> Vec<CheckItem> {
     let mut items = Vec::new();
-    let db = app.state::<Db>();
+    // 软着陆：Db 尚未注册（启动极早/单测）时报不健康，不崩进程（与 check_runtime 同口径）
+    let Some(db) = app.try_state::<Db>() else {
+        items.push(CheckItem::bad("数据库", "状态未注册"));
+        return items;
+    };
 
     // 连通性（最基础，先查）
     match sqlx::query_scalar::<_, i64>("SELECT 1")
@@ -221,8 +225,7 @@ fn check_runtime(app: &tauri::AppHandle) -> Vec<CheckItem> {
 /// 能力状态：广告拦截（内容过滤器）、隐私档位、扩展
 async fn check_capabilities(app: &tauri::AppHandle) -> Vec<CheckItem> {
     let mut items = Vec::new();
-    let db = app.state::<Db>();
-
+    // 内容过滤器状态不依赖 Db，先报；Db 未注册时后半段软着陆
     // 网络层内容过滤器（广告拦截 2.0）
     let cf = crate::engine::content_filter::status();
     let ready = cf["ready"].as_bool().unwrap_or(false);
@@ -238,6 +241,12 @@ async fn check_capabilities(app: &tauri::AppHandle) -> Vec<CheckItem> {
     } else {
         CheckItem::bad("内容过滤器", "已开启但尚未编译完成")
     });
+
+    // Db 未注册时后半段查不了，报不健康不崩进程
+    let Some(db) = app.try_state::<Db>() else {
+        items.push(CheckItem::bad("设置存储", "状态未注册"));
+        return items;
+    };
 
     // 广告拦截开关
     let adblock: Option<String> =

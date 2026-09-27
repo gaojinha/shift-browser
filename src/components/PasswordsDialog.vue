@@ -6,12 +6,14 @@ import { ref, watch } from 'vue'
 import { setWebviewVisible } from '../utils/webview'
 import { usePasswordsStore } from '../stores/passwords'
 import { useToastStore } from '../stores/toast'
+import { useConfirmDelete } from '../composables/useConfirmDelete'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const passwordsStore = usePasswordsStore()
 const toastStore = useToastStore()
+const confirmDelete = useConfirmDelete()
 
 // 弹窗显示时隐藏所有标签 webview（child 盖在 Vue UI 上），关闭时恢复
 // 注意：不能用 onMounted——组件在 App.vue 里始终挂载，onMounted 只在应用启动时执行一次
@@ -86,6 +88,8 @@ async function onReveal(id: number) {
 }
 
 async function onDelete(id: number) {
+  // 不可恢复：二次点击确认，防误触一点即删
+  if (!confirmDelete.arm(id)) return
   await passwordsStore.deletePassword(id)
   if (revealId.value === id) {
     revealId.value = null
@@ -130,7 +134,13 @@ async function onDelete(id: number) {
               <button class="mini-btn" @click="onReveal(p.id)">
                 {{ revealId === p.id ? '隐藏' : '查看' }}
               </button>
-              <button class="mini-btn danger" @click="onDelete(p.id)">删除</button>
+              <button
+                class="mini-btn danger"
+                :class="{ armed: confirmDelete.isPending(p.id) }"
+                @click="onDelete(p.id)"
+              >
+                {{ confirmDelete.isPending(p.id) ? '确认删除' : '删除' }}
+              </button>
             </div>
           </div>
         </div>
@@ -250,6 +260,11 @@ async function onDelete(id: number) {
   background: var(--text-secondary);
 }
 .mini-btn.danger:hover {
+  background: #5c2b2b;
+  color: #ff8a8a;
+}
+/* 二次确认待命态：常显危险色，不依赖 hover（触屏无 hover 也看得见） */
+.mini-btn.danger.armed {
   background: #5c2b2b;
   color: #ff8a8a;
 }

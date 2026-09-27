@@ -4,48 +4,18 @@
 //! - `api/handlers/page.rs`：`open_and_read` 入口 + 最终 URL 复核（异步，查库取白名单）
 //! - `engine/webview.rs`：GTK `decide-policy` 逐跳导航拦截（同步回调，读进程内白名单缓存）
 //!
-//! 域名解析到内网（DNS rebinding）：`open_and_read` 的 guard 已接 `ai::check_resolved_ips`
-//! 做解析后复核（fail-closed）；WebKit 导航自身会二次解析，残余窗口靠入口 + 最终 URL
-//! 双次复核压窄，彻底 pin 死需浏览器层支持，暂接受此口径。
+//! 判定口径唯一来源：`ai::ssrf`（与模型网关/阅读器同源）。
+//! 本模块只做白名单缓存与放行组装，不再手写第二套私有判定。
+//! 域名解析后复核（DNS rebinding）由 `open_and_read` 的 guard 做，导航守卫只做字符串级判定。
 
-use std::net::IpAddr;
 use std::sync::{OnceLock, RwLock};
 
-/// 内网 / 私有主机判定（IP 字面量 + localhost）。域名返回 false（不做解析级判定）。
+/// 内网 / 私有主机判定（统一口径：委托 ai::ssrf，与模型网关/阅读器同源）。
+/// 覆盖：localhost 及内网域名后缀、标准 IP 字面量、IPv4 混淆写法
+/// （0x7f000001/2130706433/127.1 等）、IPv4-mapped IPv6。
+/// 域名返回 false（不做解析级判定，解析复核由调用方做）。
 pub fn host_is_private(host: &str) -> bool {
-    let h = host
-        .trim()
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .to_ascii_lowercase();
-    if h == "localhost" || h.ends_with(".localhost") {
-        return true;
-    }
-    match h.parse::<IpAddr>() {
-        Ok(ip) => ip_is_private(ip),
-        Err(_) => false,
-    }
-}
-
-/// IP 是否属于私有 / 内网 / 特殊用途网段
-pub fn ip_is_private(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_private()
-                || v4.is_loopback()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || v4.is_documentation()
-                || v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64 // 100.64.0.0/10 CGNAT
-        }
-        IpAddr::V6(v6) => {
-            v6.is_loopback()
-                || v6.is_unspecified()
-                || (v6.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 ULA
-                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
-        }
-    }
+    crate::ai::is_private_host(host)
 }
 
 /// 取 URL 主机（小写）
@@ -119,6 +89,32 @@ mod tests {
         ] {
             assert!(!host_is_private(h), "{h} 不应判定为内网");
         }
+    }
+
+    #[test]
+    fn blocks_obfuscated_and_mapped_bypass() {
+        // IPv4 混淆写法（浏览器会解析，旧字符串判定直接放行）
+        for h in [
+            "0x7f000001",
+            "0X7F000001",
+            "2130706433",
+            "017700000001",
+            "127.1",
+            "127.0.1",
+            "0xC0.0xA8.0x1.0x1",
+        ] {
+            assert!(host_is_private(h), "{h} 应判定为内网/私有");
+        }
+        // IPv4-mapped IPv6 按 v4 判定
+        for h in ["::ffff:127.0.0.1", "::ffff:192.168.1.1", "[::ffff:10.0.0.1]"] {
+            assert!(host_is_private(h), "{h} 应判定为内网/私有");
+        }
+        // 组播 / 废弃站点本地 / 运营商内网 / 文档地址
+        for h in ["ff02::1", "224.0.0.1", "fec0::1", "100.64.0.1", "192.0.2.1"] {
+            assert!(host_is_private(h), "{h} 应判定为内网/私有");
+        }
+        // 公网混淆写法不误伤
+        assert!(!host_is_private("0x08080808"));
     }
 
     #[test]

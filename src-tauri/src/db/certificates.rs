@@ -294,6 +294,9 @@ pub async fn has_exception(pool: &SqlitePool, host: &str, port: i64, fp: &str) -
 
 // ---------------- 事件流 ----------------
 
+/// 事件保留上限：只留最近 1000 条，证书事件低频但长期运行只增不减
+pub const EVENTS_KEEP: i64 = 1000;
+
 pub async fn add_event(
     pool: &SqlitePool,
     host: &str,
@@ -302,7 +305,7 @@ pub async fn add_event(
     severity: &str,
     detail: &str,
 ) {
-    let _ = sqlx::query(
+    if sqlx::query(
         "INSERT INTO cert_events (host, port, kind, severity, detail) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(host)
@@ -310,6 +313,17 @@ pub async fn add_event(
     .bind(kind)
     .bind(severity)
     .bind(detail)
+    .execute(pool)
+    .await
+    .is_err()
+    {
+        return;
+    }
+    // 尽力裁剪：失败不影响主流程
+    let _ = sqlx::query(
+        "DELETE FROM cert_events WHERE id NOT IN (SELECT id FROM cert_events ORDER BY id DESC LIMIT ?)",
+    )
+    .bind(EVENTS_KEEP)
     .execute(pool)
     .await;
 }
@@ -339,4 +353,53 @@ pub async fn list_events(pool: &SqlitePool, limit: i64) -> Result<Vec<CertEvent>
 pub async fn clear_events(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM cert_events").execute(pool).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_pool() -> (tempfile::TempDir, SqlitePool) {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+        let dir = tempfile::tempdir().unwrap();
+        let options = SqliteConnectOptions::new()
+            .filename(dir.path().join("cert_test.db"))
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../migrations/20260922000000_certificates.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        (dir, pool)
+    }
+
+    #[tokio::test]
+    async fn add_event_trims_to_keep_limit() {
+        let (_dir, pool) = test_pool().await;
+        for i in 0..(EVENTS_KEEP + 5) {
+            sqlx::query("INSERT INTO cert_events (host, kind) VALUES (?, 'info')")
+                .bind(format!("old-{i}.example.com"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        add_event(&pool, "new.example.com", 443, "first_seen", "info", "").await;
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cert_events")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, EVENTS_KEEP);
+        let newest: String =
+            sqlx::query_scalar("SELECT host FROM cert_events ORDER BY id DESC LIMIT 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(newest, "new.example.com");
+    }
 }

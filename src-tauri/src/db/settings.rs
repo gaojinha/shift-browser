@@ -16,6 +16,11 @@ fn is_sensitive(key: &str) -> bool {
     crate::contracts::settings::is_sensitive(key)
 }
 
+/// 是否为凭据键（读只给掩码，写拦掩码回写）
+fn is_masked(key: &str) -> bool {
+    crate::contracts::settings::is_masked(key)
+}
+
 /// 是否为白名单允许的键
 fn is_allowed(key: &str) -> bool {
     crate::contracts::settings::is_allowed(key)
@@ -42,13 +47,17 @@ pub async fn get_setting(db: tauri::State<'_, Db>, key: String) -> DbResult<Opti
     if is_sensitive(&key) {
         return Ok(None);
     }
+    // 未知键直接拒（读侧白名单：库里若有来路不明的键也不外露，fail-closed）
+    if !is_allowed(&key) {
+        return Ok(None);
+    }
     let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?")
         .bind(&key)
         .fetch_optional(&db.pool)
         .await?;
-    // 与 get_all_settings 的脱敏契约一致：ai_api_key 返回掩码，明文 key 不出库
+    // 脱敏契约：凭据键返回掩码，明文不出库（ai_api_key / opencode_password）
     Ok(row.map(|r| {
-        if key == "ai_api_key" && !r.0.is_empty() {
+        if is_masked(&key) && !r.0.is_empty() {
             mask_api_key(&r.0)
         } else {
             r.0
@@ -77,10 +86,11 @@ pub async fn get_all_settings(db: tauri::State<'_, Db>) -> DbResult<Vec<Setting>
     );
     Ok(rows
         .into_iter()
-        .filter(|(key, _)| !is_sensitive(key))
+        // 敏感键不出库；未知键（白名单外）也不出库，防来路不明的键外泄
+        .filter(|(key, _)| !is_sensitive(key) && is_allowed(key))
         .map(|(key, value)| Setting {
             key: key.clone(),
-            value: if key == "ai_api_key" && !value.is_empty() {
+            value: if is_masked(&key) && !value.is_empty() {
                 mask_api_key(&value)
             } else {
                 value
@@ -107,10 +117,10 @@ pub async fn set_setting(db: tauri::State<'_, Db>, key: String, value: String) -
         )));
     }
     // 掩码防御：前端把"****xxxx"这类掩码回写会盖掉真实密钥/令牌。
-    // 前端读到的敏感值是掩码（get_all_settings 里已 mask），回写黑洞会毁掉真实值。
-    // master_key 走上面的 is_sensitive 早拒；ai_api_key 是"前端可写+读回掩码"，
-    // 必须在入库前拦掉掩码——否则前端整表回写 settings 就让真实 key 变成 "sk-****"。
-    if (is_sensitive(&key) || key == "ai_api_key") && value.contains("****") {
+    // 前端读到的凭据值是掩码（get_all_settings 里已 mask），回写黑洞会毁掉真实值。
+    // master_key 走上面的 is_sensitive 早拒；凭据键（ai_api_key / opencode_password）
+    // 必须在入库前拦掉掩码——否则前端整表回写 settings 就让真实值变成掩码串。
+    if (is_sensitive(&key) || is_masked(&key)) && value.contains("****") {
         return Err(crate::db::DbError::Other(format!(
             "设置 {} 收到掩码回写（含 ****），已拒绝。真实值不会写库，请重新输入完整值",
             key
@@ -176,10 +186,10 @@ async fn set_settings_bulk_inner(db: &Db, settings: Vec<Setting>) -> DbResult<()
         if !is_allowed(&s.key) {
             continue;
         }
-        // 掩码回写防护（与 set_setting 一致）：ai_api_key 收到掩码形态（读回值）
-        // 时跳过——防止"读全部→改→整表存"把真实 key 覆盖成 "sk-****"。
+        // 掩码回写防护（与 set_setting 一致）：凭据键收到掩码形态（读回值）
+        // 时跳过——防止"读全部→改→整表存"把真实值覆盖成掩码串。
         // 批量场景静默跳过（不整批失败），单键 set 才报错。
-        if s.key == "ai_api_key" && s.value.contains("****") {
+        if is_masked(&s.key) && s.value.contains("****") {
             continue;
         }
         sqlx::query(
@@ -288,6 +298,22 @@ mod tests {
         assert_eq!(mask_api_key("sk-1234567890abcd"), "sk-1****abcd");
         // 中文/多字节：不应 panic
         assert_eq!(mask_api_key("密钥密钥密钥密钥密钥"), "密钥密钥****密钥密钥");
+    }
+
+    /// 凭据键分类：master_key 敏感不可读，ai_api_key/opencode_password 读掩码，
+    /// opencode_username 普通可读，未知键不在白名单
+    #[test]
+    fn test_credential_key_classes() {
+        assert!(is_sensitive("master_key"));
+        assert!(!is_sensitive("opencode_password"));
+        assert!(is_masked("ai_api_key"));
+        assert!(is_masked("opencode_password"));
+        assert!(!is_masked("opencode_username"));
+        assert!(!is_masked("homepage"));
+        assert!(is_allowed("opencode_username"));
+        assert!(is_allowed("opencode_password"));
+        assert!(!is_allowed("__evil__"));
+        assert!(!is_allowed("master_key"));
     }
 
     /// P1-2：批量写入遇 ai_api_key 掩码形态必须跳过（读回→整表存会覆盖真实 key）

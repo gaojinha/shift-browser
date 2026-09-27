@@ -9,12 +9,14 @@ import { setWebviewVisible } from '../utils/webview'
 import { useDownloadsStore } from '../stores/downloads'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
+import { useConfirmDelete } from '../composables/useConfirmDelete'
 import { EVENTS } from '../constants'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const downloadsStore = useDownloadsStore()
+const confirmDelete = useConfirmDelete()
 
 // 监听 Rust 侧下载事件（下载开始/进度/完成/失败），弹窗打开时实时刷新
 let unlisten: (() => void) | null = null
@@ -96,6 +98,8 @@ async function onRetry(url: string | null) {
 }
 
 async function onDelete(id: number) {
+  // 记录删了找不回：二次点击确认
+  if (!confirmDelete.arm(id)) return
   await downloadsStore.deleteDownload(id)
 }
 
@@ -157,7 +161,13 @@ async function onReveal(path: string | null) {
               <template v-else-if="(d.state === 'interrupted' || d.state === 'failed') && d.url">
                 <button class="mini-btn" @click="onRetry(d.url)">重新下载</button>
               </template>
-              <button class="mini-btn danger" @click="onDelete(d.id)">删除</button>
+              <button
+                class="mini-btn danger"
+                :class="{ armed: confirmDelete.isPending(d.id) }"
+                @click="onDelete(d.id)"
+              >
+                {{ confirmDelete.isPending(d.id) ? '确认删除' : '删除' }}
+              </button>
             </div>
           </div>
         </div>
@@ -273,6 +283,11 @@ async function onReveal(path: string | null) {
   background: var(--text-secondary);
 }
 .mini-btn.danger:hover {
+  background: #5c2b2b;
+  color: #ff8a8a;
+}
+/* 二次确认待命态：常显危险色，不依赖 hover */
+.mini-btn.danger.armed {
   background: #5c2b2b;
   color: #ff8a8a;
 }

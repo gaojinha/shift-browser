@@ -128,6 +128,22 @@ function shiftPermReq() {
   permReq.value = permQueue.value.shift() ?? null
 }
 const tlsError = ref<TlsErrorInfo | null>(null)
+// 证书警告队列：多标签同时报 TLS 错误时旧方案直接覆盖，先到的警告永久丢失。
+// 与权限队列同机制排队逐个处理，去重按 tabId+指纹（同站重报不堆积）
+const tlsQueue = ref<TlsErrorInfo[]>([])
+function pushTlsError(info: TlsErrorInfo) {
+  const key = (t: TlsErrorInfo) => `${t.tabId}|${t.fingerprint}`
+  if (tlsError.value && key(tlsError.value) === key(info)) return
+  if (tlsQueue.value.some((q) => key(q) === key(info))) return
+  if (!tlsError.value) {
+    tlsError.value = info
+  } else {
+    tlsQueue.value.push(info)
+  }
+}
+function shiftTlsError() {
+  tlsError.value = tlsQueue.value.shift() ?? null
+}
 
 function openPanel(name: 'translate' | 'sessions' | 'history' | 'passwords' | 'groups' | 'downloads' | 'settings' | 'ai' | 'bookmarks' | 'userscripts') {
   showTranslate.value = name === 'translate'
@@ -305,6 +321,10 @@ function matchShortcut(e: KeyboardEvent, combo: string): boolean {
 }
 
 function onGlobalKeydown(e: KeyboardEvent) {
+  // 输入法组字中（拼音候选态）：所有全局快捷键一律放行，让候选框先处理。
+  // 否则组字时按 Enter/上下/Esc 会误导航、误关弹窗（与 Chrome 行为一致：组字优先）。
+  // 非组字态的输入框内保持浏览器级优先（同 Chrome：Ctrl+W 照关标签）。
+  if (e.isComposing) return
   // F12 / Ctrl+Shift+I：打开当前标签的开发者工具（Web Inspector）
   if (matchShortcut(e, SHORTCUTS.DEVTOOLS) || matchShortcut(e, SHORTCUTS.DEVTOOLS_ALT)) {
     e.preventDefault()
@@ -374,6 +394,7 @@ function onGlobalKeydown(e: KeyboardEvent) {
   }
 
   if (e.key !== 'Escape') return
+  // Esc 关闭链：安全警告（证书/权限）必须明确二选一，Esc 不关（有意为之，防误点放行）
   if (showCommandPalette.value) {
     showCommandPalette.value = false
   } else if (showTranslate.value) {
@@ -394,6 +415,10 @@ function onGlobalKeydown(e: KeyboardEvent) {
     showSessions.value = false
   } else if (showUserscripts.value) {
     showUserscripts.value = false
+  } else if (showBookmarks.value) {
+    showBookmarks.value = false
+  } else if (showCerts.value) {
+    showCerts.value = false
   }
 }
 
@@ -581,9 +606,9 @@ onMounted(async () => {
     openPanel('passwords')
   })
 
-  // 证书错误（P2 · Rust 侧 on_tls_error emit）→ 弹"危险站点"拦截页
+  // 证书错误（P2 · Rust 侧 on_tls_error emit）→ 排队弹"危险站点"拦截页，防覆盖丢失
   onEvent<TlsErrorInfo>(EVENTS.TLS_ERROR, (ev) => {
-    tlsError.value = ev.payload
+    if (ev.payload) pushTlsError(ev.payload)
   })
 
   // 权限请求（安全 #2 · Rust 侧 perms::attach emit）→ 排队弹权限提示，防覆盖丢失
@@ -693,7 +718,7 @@ watch(
     <SessionDialog :show="showSessions" @close="showSessions = false" />
     <UserscriptsDialog :show="showUserscripts" @close="showUserscripts = false" />
     <CertificatesDialog :show="showCerts" @close="showCerts = false" />
-    <CertWarning :info="tlsError" @close="tlsError = null" />
+    <CertWarning :info="tlsError" @close="shiftTlsError" />
     <PermissionPrompt :info="permReq" @close="shiftPermReq" />
     <CommandPalette
       :show="showCommandPalette"

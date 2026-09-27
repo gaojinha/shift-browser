@@ -79,6 +79,9 @@ pub async fn lookup(
 ///
 /// 同一原文再次出现（新译文）时覆盖 target 并累加 hits——以最新一次模型输出
 /// 为准，比"首译永远生效"更能反映模型/prompt 改进后的质量。
+///
+/// 记忆保留上限：总量超限时优先保留高命中、最近使用的条目
+pub const MEMORY_KEEP: i64 = 5000;
 pub async fn remember(
     pool: &SqlitePool,
     model: &str,
@@ -116,6 +119,17 @@ pub async fn remember(
             Ok(_) => written += 1,
             Err(e) => log::warn!("[translate_memory] 写入失败（本次翻译不受影响）: {e}"),
         }
+    }
+    // 总量裁剪：优先保留高命中、最近使用的条目，其余淘汰（防无限增长）
+    if let Err(e) = sqlx::query(
+        "DELETE FROM translate_memory WHERE (model, source) NOT IN \
+         (SELECT model, source FROM translate_memory ORDER BY hits DESC, updated_at DESC LIMIT ?)",
+    )
+    .bind(MEMORY_KEEP)
+    .execute(&mut *tx)
+    .await
+    {
+        log::warn!("[translate_memory] 裁剪失败（本次翻译不受影响）: {e}");
     }
     if let Err(e) = tx.commit().await {
         log::warn!("[translate_memory] 提交失败（本次翻译不受影响）: {e}");
@@ -204,6 +218,38 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(hits, 2);
+    }
+
+    #[tokio::test]
+    async fn 超限裁剪保留高命中条目() {
+        let dir = tempfile_like_dir();
+        let pool = test_pool(&dir).await;
+        // 直插超限旧条目，其中一条刷高命中
+        for i in 0..(super::MEMORY_KEEP + 5) {
+            sqlx::query("INSERT INTO translate_memory (model, source, target) VALUES ('m', ?, 'x')")
+                .bind(format!("old-{i}"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query("UPDATE translate_memory SET hits = 99 WHERE source = 'old-0'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        // 记一条触发裁剪
+        remember(&pool, "m", &[("New".to_string(), "新".to_string())]).await;
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM translate_memory")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, super::MEMORY_KEEP);
+        // 高命中与新条目保留
+        let kept: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM translate_memory WHERE source IN ('old-0', 'New')")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(kept, 2);
     }
 
     #[tokio::test]

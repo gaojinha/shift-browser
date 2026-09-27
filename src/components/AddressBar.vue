@@ -121,6 +121,8 @@ watch(showSuggestions, (v) => {
 
 /** 键盘导航：↓ 上移 ↑ 下移 Enter 打开选中 Esc 关闭 */
 function onKeydown(e: KeyboardEvent) {
+  // 组字中（拼音候选态）：方向键翻候选、Enter 选词、Esc 退组字，全交给输入法
+  if (e.isComposing) return
   if (showSuggestions.value && suggestions.value.length > 0) {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
