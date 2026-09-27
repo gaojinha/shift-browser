@@ -2,7 +2,7 @@
 // 移植自原版 Electron（/home/gao/ShiftBrowser/electron/main.ts）：
 // - 读 /proc/net/dev 计算实时下行/上行速度（排除 lo）
 // - ping 223.5.5.5 测延迟与在线状态
-// - 每 2 秒推送一次 net-status-updated 到状态栏
+// - 每 5 秒推送一次 net-status-updated 到状态栏（2026-09-18 起，原 2 秒太频繁）
 use serde::Serialize;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -61,6 +61,91 @@ async fn measure_ping() -> i32 {
     }
 }
 
+/// 四层诊断结果（每层一句话结论由调用方按字段组装，见 system_prompts::net_diagnose）
+#[derive(Serialize, Clone)]
+pub struct NetDiagnosis {
+    /// 非 lo 网卡是否存在（第 1 层：本机网卡）
+    pub iface_ok: bool,
+    /// 默认网关地址（第 2 层目标；空 = 没找到网关）
+    pub gateway: String,
+    /// 网关是否 ping 通（第 2 层）
+    pub gateway_ok: bool,
+    /// 域名是否解得出（第 3 层：DNS）
+    pub dns_ok: bool,
+    /// 出网延迟毫秒（第 4 层；-1 = 不通）
+    pub remote_ms: i32,
+}
+
+/// 从 /proc/net/route 解析默认网关（Destination 全 0 的那条，Gateway 列 hex 小端序）
+fn parse_default_gateway(text: &str) -> Option<String> {
+    for line in text.lines().skip(1) {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() < 3 || f[1] != "00000000" {
+            continue;
+        }
+        let raw = u32::from_str_radix(f[2], 16).ok()?;
+        let ip = std::net::Ipv4Addr::new(
+            (raw & 0xFF) as u8,
+            ((raw >> 8) & 0xFF) as u8,
+            ((raw >> 16) & 0xFF) as u8,
+            ((raw >> 24) & 0xFF) as u8,
+        );
+        if !ip.is_unspecified() {
+            return Some(ip.to_string());
+        }
+    }
+    None
+}
+
+/// 读默认网关（失败返回空串，不抛错）
+fn default_gateway() -> String {
+    std::fs::read_to_string("/proc/net/route")
+        .ok()
+        .and_then(|t| parse_default_gateway(&t))
+        .unwrap_or_default()
+}
+
+/// ping 指定目标（网关复用，超时 2 秒），成功返回 true
+async fn ping_once(target: &str) -> bool {
+    tokio::process::Command::new("ping")
+        .args(["-c", "1", "-W", "2", target])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+        .map(|st| st.success())
+        .unwrap_or(false)
+}
+
+/// 四层断网诊断：网卡 → 网关 → DNS → 出网。只读不改状态，失败逐层记 false。
+#[tauri::command]
+pub async fn net_diagnose() -> NetDiagnosis {
+    let data = std::fs::read_to_string("/proc/net/dev").unwrap_or_default();
+    let iface_ok = data.lines().skip(2).any(|line| {
+        line.find(':')
+            .map(|idx| line[..idx].trim() != "lo")
+            .unwrap_or(false)
+    });
+    let gateway = default_gateway();
+    let gateway_ok = if gateway.is_empty() {
+        false
+    } else {
+        ping_once(&gateway).await
+    };
+    let dns_ok = tokio::net::lookup_host(("www.bing.com", 443))
+        .await
+        .map(|mut it| it.next().is_some())
+        .unwrap_or(false);
+    let remote_ms = measure_ping().await;
+    NetDiagnosis {
+        iface_ok,
+        gateway,
+        gateway_ok,
+        dns_ok,
+        remote_ms,
+    }
+}
+
 /// 启动网络状态监测：每 5 秒推送速度，每 10 秒重测一次 ping
 /// （2026-09-18 性能优化：原为每 2 秒推送 —— 每次都要读 /proc/net/dev 并 emit
 /// 事件到所有 webview、前端再更新 DOM。2 秒粒度对"看个网速"属于过度频繁，
@@ -114,5 +199,19 @@ mod tests {
         let s = read_net_dev();
         // rx/tx 是 u64，无符号类型——只验证解析不 panic、字段可读即可
         let _ = (s.rx, s.tx);
+    }
+
+    #[test]
+    fn parse_default_gateway_小端序转回点分() {
+        // 典型路由表：默认路由网关 0101A8C0 小端 = 192.168.1.1
+        let text = "Iface\tDestination\tGateway\tFlags\neth0\t00000000\t0101A8C0\t0003\neth0\t00A8C0\t00000000\t0001\n";
+        assert_eq!(parse_default_gateway(text).as_deref(), Some("192.168.1.1"));
+    }
+
+    #[test]
+    fn parse_default_gateway_无默认路由返回空() {
+        let text = "Iface\tDestination\tGateway\tFlags\neth0\t00A8C0\t00000000\t0001\n";
+        assert!(parse_default_gateway(text).is_none());
+        assert!(parse_default_gateway("").is_none());
     }
 }

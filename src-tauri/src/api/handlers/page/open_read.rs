@@ -43,7 +43,7 @@ async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
     crate::net_guard::set_allowlist(&allowlist);
     if !crate::net_guard::host_permitted(&host) {
         return Err(AppError::permission(format!(
-            "内网 / 私有地址默认拒绝：{host}（如确需读取，请在 api_allowed_ips 白名单中显式放行）"
+            "内网 / 私有地址默认拒绝：{host}（命中规则：私有地址字符串判定；如确需读取，请在 api_allowed_ips 白名单中显式放行，例如 192.168.1.0/24）"
         ))
         .error_json());
     }

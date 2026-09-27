@@ -140,6 +140,8 @@ pub mod events {
     pub const TRANSLATE_PROGRESS: &str = "translate-progress";
     pub const TRAY_OPEN_DOWNLOADS: &str = "tray-open-downloads";
     pub const TRAY_OPEN_PASSWORDS: &str = "tray-open-passwords";
+    /// 首次缩到托盘（只发一次，供前端提示"没退出，点托盘可恢复"）
+    pub const TRAY_FIRST_MINIMIZE: &str = "tray-first-minimize";
     pub const AGENT_ACTION_REQUEST: &str = "agent-action-request";
     pub const AGENT_MULTI_STEP_REQUEST: &str = "agent-multi-step-request";
     pub const NET_STATUS_UPDATED: &str = "net-status-updated";
@@ -162,6 +164,7 @@ pub mod events {
         ("TRANSLATE_PROGRESS", TRANSLATE_PROGRESS),
         ("TRAY_OPEN_DOWNLOADS", TRAY_OPEN_DOWNLOADS),
         ("TRAY_OPEN_PASSWORDS", TRAY_OPEN_PASSWORDS),
+        ("TRAY_FIRST_MINIMIZE", TRAY_FIRST_MINIMIZE),
         ("VAULT_AUTO_LOCKED", VAULT_AUTO_LOCKED),
         ("AGENT_ACTION_REQUEST", AGENT_ACTION_REQUEST),
         ("AGENT_MULTI_STEP_REQUEST", AGENT_MULTI_STEP_REQUEST),

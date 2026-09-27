@@ -98,6 +98,7 @@ export const EVENTS = {
   TRANSLATE_PROGRESS: 'translate-progress',
   TRAY_OPEN_DOWNLOADS: 'tray-open-downloads',
   TRAY_OPEN_PASSWORDS: 'tray-open-passwords',
+  TRAY_FIRST_MINIMIZE: 'tray-first-minimize',
   VAULT_AUTO_LOCKED: 'vault-auto-locked',
   AGENT_ACTION_REQUEST: 'agent-action-request',
   AGENT_MULTI_STEP_REQUEST: 'agent-multi-step-request',

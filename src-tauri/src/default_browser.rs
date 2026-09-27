@@ -45,7 +45,7 @@ fn xdg_settings(args: &[&str]) -> Result<String, String> {
     let out = std::process::Command::new("xdg-settings")
         .args(args)
         .output()
-        .map_err(|e| format!("xdg-settings 执行失败: {}", e))?;
+        .map_err(xdg_spawn_err)?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {
@@ -54,6 +54,15 @@ fn xdg_settings(args: &[&str]) -> Result<String, String> {
             args,
             String::from_utf8_lossy(&out.stderr).trim()
         ))
+    }
+}
+
+/// xdg-settings 起不来的原因翻译：缺命令直说装啥，别让用户猜
+fn xdg_spawn_err(e: std::io::Error) -> String {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        "系统缺少 xdg-settings（请安装 xdg-utils 后重试）".to_string()
+    } else {
+        format!("xdg-settings 执行失败: {}", e)
     }
 }
 
@@ -121,4 +130,23 @@ pub fn set_default_browser() -> Result<DefaultBrowserStatus, String> {
     xdg_settings(&["set", "default-web-browser", DESKTOP_ID])?;
     log::info!("[default-browser] 已设为默认浏览器");
     Ok(default_browser_status())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xdg_缺命令直说装啥() {
+        let e = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
+        assert!(xdg_spawn_err(e).contains("xdg-utils"));
+    }
+
+    #[test]
+    fn xdg_其他错误透出原文() {
+        let e = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let m = xdg_spawn_err(e);
+        assert!(m.contains("执行失败"));
+        assert!(!m.contains("xdg-utils"));
+    }
 }

@@ -16,7 +16,7 @@ use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-/// 默认 UA（Chrome 131 · 2026-09 主流版本；WebKitGTK 2.52 引擎足以支撑现代站点）
+/// 默认 UA（Chrome 142 · 2026-09 主流版本；WebKitGTK 2.52 引擎足以支撑现代站点）
 pub const DEFAULT_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
 
 /// 从 UA 里解析 Chrome 主版本号（用于 Client Hints brands 对齐）

@@ -41,6 +41,18 @@ async function resetUa() {
   uaInput.value = uaConfig.value.default
   await saveUa()
 }
+/** 三预设：点名要系统/端别的站，按顺序试，不用手写 */
+function applyUaPreset(k: string) {
+  if (k === 'windows') {
+    uaInput.value =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
+  } else if (k === 'mobile') {
+    uaInput.value =
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36'
+  } else {
+    uaInput.value = uaConfig.value.default
+  }
+}
 async function saveUaOverride() {
   if (!uaSiteHost.value.trim()) {
     uaMsg.value = '请填站点域名'
@@ -111,6 +123,12 @@ onMounted(loadUa)
       <div class="ua-body">
         <div class="field-desc">
           部分网站按 UA 版本判定「浏览器不受支持」，可在此升级/自定义（也是一种身份伪装手段）
+        </div>
+        <div class="ua-presets">
+          <button class="mini-btn" @click="applyUaPreset('default')">默认</button>
+          <button class="mini-btn" @click="applyUaPreset('windows')">Windows 版</button>
+          <button class="mini-btn" @click="applyUaPreset('mobile')">移动版</button>
+          <span class="field-desc">不会手写就点预设，再按保存（清空即回默认）</span>
         </div>
         <input class="ua-input" v-model="uaInput" placeholder="留空 = 使用默认 UA" />
         <div class="history-actions">

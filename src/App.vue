@@ -611,6 +611,11 @@ onMounted(async () => {
     openPanel('passwords')
   })
 
+  // 首次缩托盘（Rust 侧 delete-event 只发一次）→ 告诉用户没退出
+  onEvent(EVENTS.TRAY_FIRST_MINIMIZE, () => {
+    useToastStore().show('已缩到托盘（没退出），点托盘图标可恢复；真退出走托盘菜单', 'info', 6000)
+  })
+
   // 证书错误（P2 · Rust 侧 on_tls_error emit）→ 排队弹"危险站点"拦截页，防覆盖丢失
   onEvent<TlsErrorInfo>(EVENTS.TLS_ERROR, (ev) => {
     if (ev.payload) pushTlsError(ev.payload)

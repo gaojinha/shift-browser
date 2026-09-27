@@ -9,6 +9,7 @@ import { listen } from '@tauri-apps/api/event'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { useTabsStore } from '../stores/tabs'
 import { useSettingsStore } from '../stores/settings'
+import { useToastStore } from '../stores/toast'
 import { EVENTS } from '../constants'
 
 const tabsStore = useTabsStore()
@@ -182,6 +183,33 @@ function openHelp() {
     console.error('[status] 打开帮助失败:', e)
   })
 }
+
+// 四层断网诊断（网卡→网关→DNS→出网）：点网络胶囊触发，每层一句话
+const diagnosing = ref(false)
+async function diagnoseNet() {
+  if (diagnosing.value) return
+  diagnosing.value = true
+  try {
+    const r = await invoke<{
+      iface_ok: boolean
+      gateway: string
+      gateway_ok: boolean
+      dns_ok: boolean
+      remote_ms: number
+    }>('net_diagnose')
+    const lines = [
+      '网卡：' + (r.iface_ok ? '正常' : '无可用网卡'),
+      '网关' + (r.gateway ? `（${r.gateway}）：` : '：') + (r.gateway_ok ? '通' : '不通'),
+      '域名解析：' + (r.dns_ok ? '正常' : '失败'),
+      '出网：' + (r.remote_ms >= 0 ? r.remote_ms + 'ms' : '不通'),
+    ]
+    useToastStore().show('断网诊断｜' + lines.join('｜'), 'info', 8000)
+  } catch (e) {
+    useToastStore().show('诊断失败：' + String(e), 'error')
+  } finally {
+    diagnosing.value = false
+  }
+}
 </script>
 
 <template>
@@ -199,7 +227,7 @@ function openHelp() {
     </button>
 
     <span class="status-right">
-      <span class="net-status" :class="netClass" :title="netTitle">{{ netIcon }} {{ netPing }} {{ netSpeed }}</span>
+      <span class="net-status" :class="netClass" :title="netTitle + '（点击诊断断在哪一层）'" @click="diagnoseNet">{{ netIcon }} {{ netPing }} {{ netSpeed }}</span>
       <button class="status-btn dl-btn" title="下载管理" @click="emit('openDownloads')">
         📥<span v-if="activeDownloads > 0" class="dl-badge">{{ activeDownloads }}</span>
       </button>
@@ -352,7 +380,7 @@ function openHelp() {
   font-family: inherit;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  cursor: default;
+  cursor: pointer;
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
 }

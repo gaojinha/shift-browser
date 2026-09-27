@@ -12,6 +12,8 @@ mod constants;
 mod content_cmd;
 #[allow(dead_code)]
 mod content_prompts;
+#[allow(dead_code)]
+mod system_prompts;
 /// 同上：契约源与 build.rs 共享，部分常量/方法仅服务 TS 生成
 #[allow(dead_code)]
 mod contracts;
@@ -181,6 +183,8 @@ pub fn run() {
       useragent::get_user_agent_config,
       useragent::set_user_agent,
       useragent::set_user_agent_override,
+      // 断网四层诊断（网卡/网关/DNS/出网，只读）
+      netmon::net_diagnose,
       // 一键清除浏览数据（隐私 · 2026-09-22）
       tabs::commands::clear_browsing_data,
       // 权限请求（安全 #2 · 2026-09-22）

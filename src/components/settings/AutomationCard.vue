@@ -5,6 +5,16 @@ import { useSettingsSet } from '../../composables/useSettingsSet'
 
 const settingsStore = useSettingsStore()
 const { onSet } = useSettingsSet()
+
+/** 三模板：点一下填进提示词框，用户改时间改字就行 */
+const TPLS: Record<string, string> = {
+  digest: '把今天订阅里最重要的3条资讯各用一句话说清，注明来源。',
+  summary: '看看当前页面讲了啥，总结三条要点，每条一句话。',
+  remind: '提醒我站起来活动一下，并说一句今天的日期和星期。',
+}
+function fillTpl(k: string) {
+  onSet('auto_agent_prompt', TPLS[k] ?? '')
+}
 </script>
 
 <template>
@@ -46,6 +56,12 @@ const { onSet } = useSettingsSet()
     <div class="kw-block">
       <div class="kw-hint">
         <b>Agent 定时提示词</b>（阶段3 编排）：到点自动发给 AI；AI 的多步动作仍走原有确认流程。
+        不会写就点模板改字，不用从零写。
+      </div>
+      <div class="tpl-row">
+        <button class="mini-btn" @click="fillTpl('digest')">资讯早报模板</button>
+        <button class="mini-btn" @click="fillTpl('summary')">页面总结模板</button>
+        <button class="mini-btn" @click="fillTpl('remind')">到点提醒模板</button>
       </div>
       <textarea
         class="net-rules"
@@ -60,5 +76,5 @@ const { onSet } = useSettingsSet()
 </template>
 
 <style scoped>
-.card { margin-bottom: 12px; }.card-title { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--text-primary); font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }.card-title .app-icon { color: var(--accent); }.field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }.field-desc { flex: 1; font-size: 12px; color: var(--text-secondary); }.field label { font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }.task-num { width: 72px; height: 28px; padding: 0 8px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font-size: 12px; outline: none; }.task-num:focus { border-color: var(--accent); }.kw-block { margin: 4px 0 12px 0; padding: 10px 12px; background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: 8px; }.kw-hint { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; line-height: 1.4; }.net-rules { width: 100%; box-sizing: border-box; min-height: 64px; padding: 8px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font-size: 12px; font-family: monospace; resize: vertical; outline: none; }.net-rules:focus { border-color: var(--accent); }
+.card { margin-bottom: 12px; }.card-title { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--text-primary); font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }.card-title .app-icon { color: var(--accent); }.field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }.field-desc { flex: 1; font-size: 12px; color: var(--text-secondary); }.field label { font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }.task-num { width: 72px; height: 28px; padding: 0 8px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font-size: 12px; outline: none; }.task-num:focus { border-color: var(--accent); }.kw-block { margin: 4px 0 12px 0; padding: 10px 12px; background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: 8px; }.kw-hint { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; line-height: 1.4; }.tpl-row { display: flex; gap: 8px; margin-bottom: 8px; }.net-rules { width: 100%; box-sizing: border-box; min-height: 64px; padding: 8px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font-size: 12px; font-family: monospace; resize: vertical; outline: none; }.net-rules:focus { border-color: var(--accent); }
 </style>

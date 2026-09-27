@@ -72,6 +72,18 @@ async function goBack() {
   }
   emit('close')
 }
+
+/** 各错误原因一句话研判：能不能进、怎么进最安全 */
+function verdictFor(reason: string): string {
+  if (reason.includes('过期')) return '证书过期了：内容可能被偷看，建议返回；自己的站且刚续费可继续。'
+  if (reason.includes('未知') || reason.includes('自签'))
+    return '自签或内网证书常见，公网大站出现就是异常，建议返回。'
+  if (reason.includes('不匹配')) return '证书和主机名对不上，极可能是钓鱼或劫持，建议返回。'
+  if (reason.includes('吊销')) return '证书已被签发者作废，不要继续。'
+  if (reason.includes('尚未生效')) return '证书还没到生效时间，先检查系统时间对不对。'
+  if (reason.includes('不安全')) return '加密算法强度不够，建议返回。'
+  return '原因不明，谨慎起见建议返回。'
+}
 </script>
 
 <template>
@@ -88,6 +100,11 @@ async function goBack() {
 
       <div class="warn-reasons">
         <div v-for="(r, i) in info.reasons" :key="i">· {{ r }}</div>
+      </div>
+
+      <div class="warn-verdicts">
+        <div v-for="(r, i) in info.reasons" :key="'v' + i">→ {{ verdictFor(r) }}</div>
+        <div class="warn-consequence">继续前往后，中间人能看到你的明文；放行记录进证书中心，可随时撤销。</div>
       </div>
 
       <div class="warn-actions">
@@ -160,6 +177,20 @@ async function goBack() {
   color: #ffb3b3;
   font-size: 13px;
   line-height: 1.8;
+}
+.warn-verdicts {
+  margin-top: 10px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(255, 177, 78, 0.08);
+  border: 1px solid rgba(255, 177, 78, 0.3);
+  color: #ffd9a0;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.warn-consequence {
+  margin-top: 6px;
+  color: #ff9d9d;
 }
 .warn-actions {
   display: flex;

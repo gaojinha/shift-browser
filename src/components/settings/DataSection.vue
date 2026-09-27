@@ -161,9 +161,12 @@ onMounted(() => {
             上次拉取：{{ syncStatus.last_pull_at }}
           </span>
         </div>
+        <div class="kw-hint">
+          建议每周推送一次；云端只存加密包，换机从云合并即回。
+        </div>
       </div>
       <div class="field">
-        <label>启动锁屏（每次启动输入账号密码解锁）</label>
+        <label>启动锁屏（每次启动输入账号密码解锁，数据不受影响）</label>
         <label class="switch">
           <input
             type="checkbox"

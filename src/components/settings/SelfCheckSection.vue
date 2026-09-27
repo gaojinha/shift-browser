@@ -50,6 +50,19 @@ onMounted(() => {
   runSelfCheck()
 })
 
+/** 红项一句话处置：按项名关键字匹配，修法只说真实存在的入口 */
+function fixFor(name: string): string {
+  if (name.includes('内容过滤器')) return '去「设置 → 隐私防护」开关一次广告拦截，等编译完成再查。'
+  if (name.includes('密码主密钥')) return '检查数据目录权限，或恢复主密钥备份；缺失则已存密码解不开。'
+  if (name.includes('数据库') || name.includes('数据表'))
+    return '先确认磁盘没满、数据目录可写，再重启浏览器重查。'
+  if (name.includes('数据目录')) return '确认主目录存在可写；snap/容器环境看挂载路径。'
+  if (name.includes('主窗口') || name.includes('标签管理器')) return '重启浏览器；仍红则看日志报上来。'
+  if (name.includes('隐私') || name.includes('广告拦截')) return '去「设置 → 隐私防护」核对开关档位。'
+  if (name.includes('扩展')) return '去扩展管理看哪家没启用。'
+  return '重启重查一次；仍红把这行原文报上来。'
+}
+
 </script>
 
 <template>
@@ -73,6 +86,9 @@ onMounted(() => {
                     <span class="selfcheck-mark">{{ it.ok ? '✅' : '❌' }}</span>
                     <span class="selfcheck-name">{{ it.name }}</span>
                     <span class="selfcheck-detail">{{ it.detail }}</span>
+                  </div>
+                  <div v-for="it in g.items.filter((x) => !x.ok)" :key="g.title + it.name + '-fix'" class="selfcheck-fix">
+                    → {{ it.name }}：{{ fixFor(it.name) }}
                   </div>
                 </div>
               </template>
@@ -160,6 +176,12 @@ onMounted(() => {
 .selfcheck-detail {
   color: var(--text-muted);
   word-break: break-all;
+}
+.selfcheck-fix {
+  font-size: 12px;
+  color: var(--warning);
+  padding: 2px 0 2px 24px;
+  line-height: 1.6;
 }
 .card-title {
   display: flex;

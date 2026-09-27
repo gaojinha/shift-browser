@@ -69,7 +69,7 @@ pub(crate) fn show_startup_lock(app: &tauri::App, db_state: &crate::db::Db) -> b
         content.set_spacing(8);
         content.set_margin(12);
 
-        let label = gtk::Label::new(Some("输入账号密码解锁浏览器"));
+        let label = gtk::Label::new(Some("输入账号密码解锁浏览器（数据都在，解开即回）"));
         content.add(&label);
 
         let user_entry = gtk::Entry::new();

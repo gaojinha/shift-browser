@@ -22,6 +22,38 @@ const toastStore = useToastStore()
 const busy = ref(false)
 const remember = ref(false)
 
+/** 各权限一句话用途+建议：用户看不懂英文 kind，必须翻成人话 */
+const KIND_ADVICE: Record<string, { use: string; advice: string }> = {
+  media: {
+    use: '网站能打开你的摄像头、麦克风，看到听到你这边。',
+    advice: '建议拒绝；视频会议等确实需要时再允许，用完在设置里删掉。',
+  },
+  geolocation: {
+    use: '网站能知道你的大概位置（城市级）。',
+    advice: '建议拒绝；地图导航确实需要时再允许。',
+  },
+  notification: {
+    use: '网站能给你推送消息通知。',
+    advice: '按需允许；不认识的站建议拒绝，免得广告轰炸。',
+  },
+  'pointer-lock': {
+    use: '网站能锁定鼠标指针（常见于网页游戏、全屏应用）。',
+    advice: '玩游戏时允许，平时拒绝。',
+  },
+  'device-info': {
+    use: '网站能读取设备信息，可能被用来追踪识别你。',
+    advice: '建议拒绝。',
+  },
+  other: {
+    use: '网站请求了一项不常见的权限。',
+    advice: '不认识就拒绝。',
+  },
+}
+
+function adviceFor(kind: string) {
+  return KIND_ADVICE[kind] ?? KIND_ADVICE.other
+}
+
 watch(
   () => props.info,
   async (v) => {
@@ -68,8 +100,9 @@ async function answer(allow: boolean) {
       <p class="perm-lead">
         <b class="mono">{{ info.host }}</b> 请求使用 <b class="hl">{{ info.kindZh }}</b>。
       </p>
+      <p class="perm-use">{{ adviceFor(info.kind).use }}</p>
       <p class="perm-tip">
-        仅在你信任该网站时才允许。默认拒绝，避免被静默授权。
+        {{ adviceFor(info.kind).advice }}默认拒绝，避免被静默授权。
       </p>
       <label class="perm-remember">
         <input v-model="remember" type="checkbox" />
@@ -132,6 +165,12 @@ async function answer(allow: boolean) {
   margin: 0 0 12px;
   font-size: 12px;
   color: #93a4bd;
+  line-height: 1.6;
+}
+.perm-use {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #c9d6e8;
   line-height: 1.6;
 }
 .perm-remember {

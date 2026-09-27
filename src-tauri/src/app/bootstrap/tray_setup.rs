@@ -38,6 +38,21 @@ pub(super) fn setup_tray(app: &tauri::App) {
                         let _ = win.hide();
                     }
                     log::info!("[tray] 窗口已缩到托盘（未退出）");
+                    // 首次缩托盘提示一次（标记文件落 app_data_dir）：用户常以为退出了。
+                    // 标记写失败不影响主流程，下回再提示一次即可。
+                    use tauri::Emitter;
+                    let need_hint = app_de
+                        .path()
+                        .app_data_dir()
+                        .map(|d| !d.join("tray_hint_shown").exists())
+                        .unwrap_or(false);
+                    if need_hint {
+                        let _ = app_de.emit(crate::contracts::events::TRAY_FIRST_MINIMIZE, ());
+                        if let Ok(dir) = app_de.path().app_data_dir() {
+                            let _ = std::fs::create_dir_all(&dir);
+                            let _ = std::fs::write(dir.join("tray_hint_shown"), "1");
+                        }
+                    }
                     gtk::glib::Propagation::Stop
                 }
             });

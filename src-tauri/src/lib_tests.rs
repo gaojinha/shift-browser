@@ -67,6 +67,7 @@ mod tests {
             include_str!("agent_cmd.rs"),
             include_str!("content_cmd.rs"),
             include_str!("default_browser.rs"),
+            include_str!("netmon.rs"),
             include_str!("db/bookmarks.rs"),
             include_str!("db/bookmarks_html.rs"),
             include_str!("db/history.rs"),
