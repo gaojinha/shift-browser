@@ -77,3 +77,115 @@ pub struct ContentExtract {
     pub content: String,
     pub text: String,
 }
+
+/// 阅读摘要提示词组装结果（只组文本，不调模型，由调用方经 ai_chat 发送）
+#[derive(Debug, serde::Serialize)]
+pub struct ContentSummaryPrompt {
+    pub title: String,
+    pub url: String,
+    pub prompt: String,
+    pub chars: usize,
+    pub truncated: bool,
+}
+
+/// 组装阅读摘要提示词：复用 reader 抓取管线（含 SSRF 防护），再套单源模板。
+/// 出网操作，调用方须确保用户已授权。中文阈值按字符数判定，避免字节口径误杀中文页。
+#[tauri::command]
+pub async fn content_summary_prompt(url: String) -> Result<ContentSummaryPrompt, String> {
+    let product = crate::reader::scrape_article_public(&url).await?;
+    // 正文优先用纯文本，缺失时退回净化后 HTML 去标签的粗提取
+    let raw = if product.text.trim().is_empty() {
+        product.content.clone()
+    } else {
+        product.text.clone()
+    };
+    let chars = raw.chars().count();
+    if chars < 100 {
+        return Err("提取内容太短，可能不是文章页".to_string());
+    }
+    let prompt = crate::content_prompts::reader_summary(&product.title, &url, &raw);
+    let truncated = chars > crate::content_prompts::SUMMARY_CHARS;
+    Ok(ContentSummaryPrompt {
+        title: product.title,
+        url: url.clone(),
+        prompt,
+        chars,
+        truncated,
+    })
+}
+
+/// 问答提示词组装结果（纯组装，不读页面，由调用方按选区→正文→快照三级提供内容）
+#[derive(Debug, serde::Serialize)]
+pub struct ContentQaPrompt {
+    pub prompt: String,
+    pub chars: usize,
+    pub truncated: bool,
+}
+
+/// 组装快照问答提示词：调用方按三级降级传内容（选区优先，其次正文全文，最后语义快照），
+/// 本命令只套单源模板并回传截断标记，前端据此显示来源与是否读全。
+/// source 取值建议：选区/正文全文/语义快照；coverage 如全文/已截断/含跨源读不到。
+#[tauri::command]
+pub async fn content_qa_prompt(
+    title: String,
+    url: String,
+    source: String,
+    coverage: String,
+    content: String,
+    question: String,
+) -> Result<ContentQaPrompt, String> {
+    if question.trim().is_empty() {
+        return Err("问题不能为空".to_string());
+    }
+    if content.trim().is_empty() {
+        return Err("页面数据为空，无法组装问答提示词".to_string());
+    }
+    let chars = content.chars().count();
+    let prompt = crate::content_prompts::snapshot_qa(&title, &url, &source, &coverage, &content, &question);
+    let truncated = chars > crate::content_prompts::CONTENT_BUDGET_CHARS;
+    Ok(ContentQaPrompt {
+        prompt,
+        chars,
+        truncated,
+    })
+}
+
+/// 订阅去重条目（调用方传 id/标题/来源，来自 feed_items 查询结果）
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct FeedDigestItem {
+    pub id: String,
+    pub title: String,
+    pub source: String,
+}
+
+/// 组装订阅去重提示词：纯组装，不读库，由调用方传最新条目（建议不超 50 条）。
+/// 调度器与启动页渲染不动，本命令只套单源模板，调用方经 ai_chat 发送。
+#[tauri::command]
+pub async fn feed_dedup_prompt(items: Vec<FeedDigestItem>) -> Result<String, String> {
+    if items.is_empty() {
+        return Err("订阅条目为空，无法组装去重提示词".to_string());
+    }
+    if items.len() > 50 {
+        return Err("单次去重最多 50 条，请分页".to_string());
+    }
+    let triples: Vec<(String, String, String)> = items
+        .into_iter()
+        .map(|i| (i.id, i.title, i.source))
+        .collect();
+    Ok(crate::content_prompts::feed_dedup(&triples))
+}
+
+/// 组装订阅一句话推荐提示词：纯组装，单条调用，调用方经 ai_chat 发送。
+#[tauri::command]
+pub async fn feed_recommend_prompt(
+    title: String,
+    source: String,
+    summary: String,
+) -> Result<String, String> {
+    if title.trim().is_empty() {
+        return Err("标题不能为空".to_string());
+    }
+    Ok(crate::content_prompts::feed_recommend(
+        &title, &source, &summary,
+    ))
+}

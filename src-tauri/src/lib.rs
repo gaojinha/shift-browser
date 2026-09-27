@@ -10,6 +10,8 @@ mod capabilities;
 #[allow(dead_code)]
 mod constants;
 mod content_cmd;
+#[allow(dead_code)]
+mod content_prompts;
 /// 同上：契约源与 build.rs 共享，部分常量/方法仅服务 TS 生成
 #[allow(dead_code)]
 mod contracts;
@@ -313,6 +315,10 @@ pub fn run() {
       // 页面理解层（阶段 1.1）
       content_cmd::content_snapshot,
       content_cmd::content_extract,
+      content_cmd::content_summary_prompt,
+      content_cmd::content_qa_prompt,
+      content_cmd::feed_dedup_prompt,
+      content_cmd::feed_recommend_prompt,
       content_cmd::ai_friendliness,
       // llms.txt 信号（阶段 1.5 标准跟踪 · Lighthouse Agentic 信号③/④落地；
       // 走 LlmsCache 会话缓存 + 每域限次 + 3s 超时 + 失败静默——Agent 导航用的"站点自述"）

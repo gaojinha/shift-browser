@@ -199,7 +199,7 @@ onUnmounted(() => {
 /** 技能分发：技能清单来自 constants.ts（源：contracts::skills），按钮由数据驱动 */
 function runSkill(id: string) {
   const handlers: Record<string, () => void> = {
-    summarize_page: () => aiStore.summarizePage(),
+    summarize_page: () => aiStore.summarizeWithContext(),
     translate_page: () => aiStore.translatePage(tabsStore.activeTabId ?? undefined),
     translate_selection: () => aiStore.translateSelection(tabsStore.activeTabId ?? undefined),
     explain_page: () => aiStore.explainPage(),
@@ -358,7 +358,8 @@ function onOverlaySelf() {
             <template v-else> 🏠 本机 opencode 未连通 </template>
           </template>
           <template v-else>
-            {{ aiStore.tools.length > 0 ? `🔧 ${aiStore.tools.length} 个工具可用` : '由 AGNES AI 驱动' }}
+            <template v-if="aiStore.qaSource">📄 本次上下文：{{ aiStore.qaSource }}</template>
+            <template v-else>{{ aiStore.tools.length > 0 ? `🔧 ${aiStore.tools.length} 个工具可用` : '由 AGNES AI 驱动' }}</template>
           </template>
         </span>
       </div>

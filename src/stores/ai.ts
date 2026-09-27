@@ -94,6 +94,8 @@ interface AIState {
   zhApplied: boolean
   /** 取消汉化的开关：置 true 后当前批次做完就停 */
   zhCancel: boolean
+  /** 问答上下文来源（选区/正文全文/语义快照），供界面显示“本次用啥问的” */
+  qaSource: string | null
 }
 
 export const useAIStore = defineStore('ai', {
@@ -115,6 +117,7 @@ export const useAIStore = defineStore('ai', {
     zhProgress: null,
     zhApplied: false,
     zhCancel: false,
+    qaSource: null,
   }),
 
   actions: {
@@ -146,8 +149,12 @@ export const useAIStore = defineStore('ai', {
       this.toolsLoaded = true
     },
 
-    /** 发送消息（流式：先占位空回复，逐块追加） */
-    async sendMessage(content: string) {
+    /**
+     * 发送消息（流式：先占位空回复，逐块追加）。
+     * actualPrompt：实际发给模型的最后一问。对话框和历史里仍存原文，
+     * 模型侧用组装好的提示词（带上下文模板），两边不互相污染。
+     */
+    async sendMessage(content: string, actualPrompt?: string) {
       const text = content.trim()
       if (!text || this.loading) return
       this.messages.push({ role: 'user', content: text })
@@ -216,6 +223,14 @@ ${AI_BEHAVIOR_RULES}`
         const realKey = apiKey.includes('****') ? '' : apiKey
         // 历史 = 去掉最后一条空占位，再取最近 20 条
         const history = this.messages.slice(0, -1).slice(-20)
+        // 模型侧历史：最后一问可用组装好的提示词替换（显示侧不变）
+        const actual = actualPrompt?.trim() || ''
+        const modelHistory =
+          actual && history.length > 0 && history[history.length - 1].role === 'user'
+            ? history.map((m, i) =>
+                i === history.length - 1 ? { role: m.role, content: actual } : m,
+              )
+            : history
 
         // 阶段 1.3（工具层）：有可用 MCP 工具时走非流式 ai_chat（function calling 多轮执行），
         // 无工具保持流式体验。工具场景需要多轮工具执行，流式反而卡顿。
@@ -225,7 +240,7 @@ ${AI_BEHAVIOR_RULES}`
             provider: settingsStore.get('ai_provider') || 'agnes',
             messages: [
               { role: 'system', content: system },
-              ...history.map((m) => ({ role: m.role, content: m.content })),
+              ...modelHistory.map((m) => ({ role: m.role, content: m.content })),
             ],
             model,
             baseUrl: baseUrl || undefined,
@@ -268,7 +283,7 @@ ${AI_BEHAVIOR_RULES}`
           provider: settingsStore.get('ai_provider') || 'agnes',
           messages: [
             { role: 'system', content: system },
-            ...history.map((m) => ({ role: m.role, content: m.content })),
+            ...modelHistory.map((m) => ({ role: m.role, content: m.content })),
           ],
           onEvent: channel,
           model,
@@ -313,6 +328,29 @@ ${AI_BEHAVIOR_RULES}`
       await this.sendMessage(
         `请总结当前页面「${ctx.title}」（${ctx.url}）的主要内容，用 5 条以内要点概括。`,
       )
+    },
+
+    /**
+     * 快捷操作：带上下文的总结（单源模板组装）。
+     * 正文经阅读管线抓取，比 800 字快照全；失败回退老一句，不让用户干等。
+     */
+    async summarizeWithContext() {
+      const ctx = this.pageContext
+      if (!ctx) {
+        this.messages.push({ role: 'assistant', content: '当前没有可分析的页面。' })
+        return
+      }
+      const display = `请总结当前页面「${ctx.title}」（${ctx.url}）的主要内容，用 5 条以内要点概括。`
+      try {
+        const r = await invokeOk<{ prompt: string }>('content_summary_prompt', {
+          url: ctx.url,
+        })
+        if (!r || !r.prompt.trim()) throw new Error('空提示词')
+        this.qaSource = '正文全文'
+        await this.sendMessage(display, r.prompt)
+      } catch {
+        await this.summarizePage()
+      }
     },
 
     /**
@@ -888,6 +926,108 @@ ${AI_BEHAVIOR_RULES}`
     },
 
     /**
+     * 问答上下文三级降级：选区 → 正文全文 → 语义快照。
+     *
+     * 只读不改页面，每级失败静默降下一级，全空返回 null。
+     * 返回的来源与覆盖标记供界面显示“本次用啥问的、读全没读全”。
+     */
+    async resolveQaContext(tabId?: string): Promise<{
+      source: string
+      coverage: string
+      content: string
+      title: string
+      url: string
+    } | null> {
+      // 第一级：选区（用户明确选中的，优先级最高）
+      await this.captureSelection(tabId)
+      const selText = this.selection?.text?.trim() || ''
+      if (selText) {
+        const content = selText.slice(0, 4000)
+        this.qaSource = '选区'
+        return {
+          source: '选区',
+          coverage: selText.length > 4000 ? '已截断' : '全文',
+          content,
+          title: this.selection?.title || this.pageContext?.title || '',
+          url: this.selection?.url || this.pageContext?.url || '',
+        }
+      }
+      const pageUrl = this.pageContext?.url || this.selection?.url || ''
+      const pageTitle = this.pageContext?.title || this.selection?.title || ''
+      // 第二级：正文全文（出网抓取，需用户已在页面授权语境下调用）
+      if (pageUrl) {
+        try {
+          const art = await invokeOk<{ title: string; text: string }>('content_extract', {
+            url: pageUrl,
+          })
+          const t = (art?.text || '').trim()
+          if (t) {
+            this.qaSource = '正文全文'
+            return {
+              source: '正文全文',
+              coverage: '全文',
+              content: t.slice(0, 8000),
+              title: art.title || pageTitle,
+              url: pageUrl,
+            }
+          }
+        } catch {
+          // 抓取失败降下一级，不打扰用户
+        }
+      }
+      // 第三级：语义快照（本地提取，不出网）
+      try {
+        const snap = await invokeOk<Snapshot>('content_snapshot')
+        const t = (snap?.text || '').trim()
+        if (t) {
+          this.qaSource = '语义快照'
+          return {
+            source: '语义快照',
+            coverage: '可能不全',
+            content: t.slice(0, 8000),
+            title: snap.title || pageTitle,
+            url: snap.url || pageUrl,
+          }
+        }
+      } catch {
+        // 快照失败则无上下文可用
+      }
+      this.qaSource = null
+      return null
+    },
+
+    /**
+     * 组装问答提示词：三级上下文 + 后端单源模板。
+     * 返回提示词与截断标记，调用方经现有 ai_chat 通道发送。
+     */
+    async buildQaPrompt(
+      question: string,
+      tabId?: string,
+    ): Promise<{ prompt: string; source: string; truncated: boolean } | null> {
+      const q = question.trim()
+      if (!q) return null
+      const ctx = await this.resolveQaContext(tabId)
+      if (!ctx) {
+        this.error = '当前页面没读到可用内容，切回标签等加载完再问。'
+        return null
+      }
+      try {
+        const r = await invokeOk<{ prompt: string; truncated: boolean }>('content_qa_prompt', {
+          title: ctx.title,
+          url: ctx.url,
+          source: ctx.source,
+          coverage: ctx.coverage,
+          content: ctx.content,
+          question: q,
+        })
+        return { prompt: r.prompt, source: ctx.source, truncated: !!r.truncated }
+      } catch (e) {
+        this.error = errText(e)
+        return null
+      }
+    },
+
+    /**
      * 「网页随手问」：把问题 + 选区上下文交给本机 opencode，流式回字。
      *
      * 与 sendMessage 的区别：走回环地址的 opencode 而非 AGNES 云端，
@@ -976,6 +1116,7 @@ ${AI_BEHAVIOR_RULES}`
       this.webqaSessionId = null
       this.webqaRounds = 0
       this.selection = null
+      this.qaSource = null
       this.messages = []
       this.error = null
     },
@@ -985,6 +1126,7 @@ ${AI_BEHAVIOR_RULES}`
       this.messages = []
       this.error = null
       this.streamingId = null
+      this.qaSource = null
     },
   },
 })

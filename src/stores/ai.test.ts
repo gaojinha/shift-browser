@@ -905,3 +905,186 @@ describe('翻译选中内容', () => {
     expect(invokeMock.mock.calls.map((c) => c[0])).not.toContain('opencode_translate_batch')
   })
 })
+
+// 问答上下文三级降级：选区 → 正文全文 → 语义快照
+describe('问答三级降级', () => {
+  it('有选区直接用选区，不碰后两级', async () => {
+    mockDefaultInvoke()
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'read_page_selection')
+        return Promise.resolve({
+          has_selection: true,
+          text: '选中的一段',
+          title: '页标题',
+          url: 'https://example.com/a',
+        })
+      if (cmd === 'content_qa_prompt')
+        return Promise.resolve({ prompt: 'PROMPT', chars: 5, truncated: false })
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    const r = await ai.buildQaPrompt('这段讲啥', 'tab-1')
+    expect(r?.source).toBe('选区')
+    expect(r?.prompt).toBe('PROMPT')
+    expect(ai.qaSource).toBe('选区')
+    const calls = invokeMock.mock.calls.map((c) => c[0])
+    expect(calls).not.toContain('content_extract')
+    expect(calls).not.toContain('content_snapshot')
+    // 组装参数透传来源与问题
+    const qa = invokeMock.mock.calls.find((c) => c[0] === 'content_qa_prompt')
+    expect(qa?.[1]).toMatchObject({ source: '选区', question: '这段讲啥' })
+  })
+
+  it('无选区时用正文全文', async () => {
+    mockDefaultInvoke()
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'read_page_selection') return Promise.resolve({ has_selection: false })
+      if (cmd === 'content_extract')
+        return Promise.resolve({ title: '文标题', text: '正文内容正文内容' })
+      if (cmd === 'content_qa_prompt')
+        return Promise.resolve({ prompt: 'P2', chars: 8, truncated: false })
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    ai.setPageContext('https://example.com/a', '页标题')
+    const r = await ai.buildQaPrompt('总结一下', 'tab-1')
+    expect(r?.source).toBe('正文全文')
+    expect(ai.qaSource).toBe('正文全文')
+  })
+
+  it('前两级都空时用语义快照并标可能不全', async () => {
+    mockDefaultInvoke()
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'read_page_selection') return Promise.resolve({ has_selection: false })
+      if (cmd === 'content_extract') return Promise.reject('抓取失败')
+      if (cmd === 'content_snapshot')
+        return Promise.resolve({
+          title: '快照页',
+          url: 'https://example.com/a',
+          text: '快照正文',
+          interactive: { links: 0, buttons: 0, inputs: 0 },
+          forms: [],
+          links: [],
+          webmcp_tools: [],
+          aria: [],
+        })
+      if (cmd === 'content_qa_prompt')
+        return Promise.resolve({ prompt: 'P3', chars: 4, truncated: false })
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    ai.setPageContext('https://example.com/a', '页标题')
+    const r = await ai.buildQaPrompt('问', 'tab-1')
+    expect(r?.source).toBe('语义快照')
+    const qa = invokeMock.mock.calls.find((c) => c[0] === 'content_qa_prompt')
+    expect(qa?.[1]).toMatchObject({ source: '语义快照', coverage: '可能不全' })
+  })
+
+  it('三级全空返回 null 并提示', async () => {
+    mockDefaultInvoke()
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'read_page_selection') return Promise.resolve({ has_selection: false })
+      if (cmd === 'content_extract') return Promise.reject('x')
+      if (cmd === 'content_snapshot') return Promise.reject('no tab')
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    ai.setPageContext('https://example.com/a', '页标题')
+    const r = await ai.buildQaPrompt('问', 'tab-1')
+    expect(r).toBeNull()
+    expect(ai.error).toContain('没读到可用内容')
+    expect(ai.qaSource).toBeNull()
+  })
+
+  it('空问题直接返回 null，不读任何上下文', async () => {
+    mockDefaultInvoke()
+    const ai = useAIStore()
+    const r = await ai.buildQaPrompt('   ', 'tab-1')
+    expect(r).toBeNull()
+    expect(invokeMock).not.toHaveBeenCalledWith('read_page_selection', expect.anything())
+  })
+})
+
+// 带上下文发送：显示存原文，模型侧用组装提示词；总结走阅读管线，失败回退老一句
+describe('带上下文发送', () => {
+  it('sendMessage 覆盖：ai_chat 收到组装提示词，对话框存原文', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'content_snapshot') return Promise.reject('x')
+      if (cmd === 'mcp_list_tools') {
+        return Promise.resolve([{ name: 't', serverName: 's', description: '' }])
+      }
+      if (cmd === 'ai_chat') return Promise.resolve('ok')
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    await ai.sendMessage('请总结', '组装好的长提示词')
+    const call = invokeMock.mock.calls.find((c) => c[0] === 'ai_chat')
+    const args = call![1] as { messages: Array<{ role: string; content: string }> }
+    // 模型侧最后一问是组装词
+    expect(args.messages[args.messages.length - 1]).toEqual({
+      role: 'user',
+      content: '组装好的长提示词',
+    })
+    // 显示侧仍是原文
+    expect(ai.messages[0]).toEqual({ role: 'user', content: '请总结' })
+  })
+
+  it('不传覆盖时行为不变：模型侧即原文', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'content_snapshot') return Promise.reject('x')
+      if (cmd === 'mcp_list_tools') {
+        return Promise.resolve([{ name: 't', serverName: 's', description: '' }])
+      }
+      if (cmd === 'ai_chat') return Promise.resolve('ok')
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    await ai.sendMessage('原文')
+    const call = invokeMock.mock.calls.find((c) => c[0] === 'ai_chat')
+    const args = call![1] as { messages: Array<{ role: string; content: string }> }
+    expect(args.messages[args.messages.length - 1].content).toBe('原文')
+  })
+
+  it('summarizeWithContext：走阅读管线组装，来源标正文全文', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'content_snapshot') return Promise.reject('x')
+      if (cmd === 'mcp_list_tools') {
+        return Promise.resolve([{ name: 't', serverName: 's', description: '' }])
+      }
+      if (cmd === 'content_summary_prompt')
+        return Promise.resolve({ title: 'T', url: 'U', prompt: '组装摘要提示词', chars: 10, truncated: false })
+      if (cmd === 'ai_chat') return Promise.resolve('ok')
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    ai.setPageContext('https://example.com/a', '页标题')
+    await ai.summarizeWithContext()
+    expect(invokeMock).toHaveBeenCalledWith('content_summary_prompt', {
+      url: 'https://example.com/a',
+    })
+    const call = invokeMock.mock.calls.find((c) => c[0] === 'ai_chat')
+    const args = call![1] as { messages: Array<{ role: string; content: string }> }
+    expect(args.messages[args.messages.length - 1].content).toBe('组装摘要提示词')
+    expect(ai.qaSource).toBe('正文全文')
+  })
+
+  it('summarizeWithContext：管线失败回退老一句，不抛给用户', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'content_snapshot') return Promise.reject('x')
+      if (cmd === 'mcp_list_tools') {
+        return Promise.resolve([{ name: 't', serverName: 's', description: '' }])
+      }
+      if (cmd === 'content_summary_prompt') return Promise.reject('抓取失败')
+      if (cmd === 'ai_chat') return Promise.resolve('ok')
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    ai.setPageContext('https://example.com/a', '页标题')
+    await ai.summarizeWithContext()
+    const call = invokeMock.mock.calls.find((c) => c[0] === 'ai_chat')
+    const args = call![1] as { messages: Array<{ role: string; content: string }> }
+    // 回退老一句：模型侧即显示原文
+    expect(args.messages[args.messages.length - 1].content).toContain('5 条以内')
+    expect(ai.error).toBeNull()
+  })
+})
