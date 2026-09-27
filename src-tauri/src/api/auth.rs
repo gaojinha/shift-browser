@@ -217,11 +217,7 @@ pub(crate) fn ip_allowed(ip: &str, allowlist: &str) -> bool {
         v4 => v4,
     };
     let peer_str = peer.to_string();
-    for raw in allow
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
+    for raw in allow.split(',').map(str::trim).filter(|s| !s.is_empty()) {
         if raw.contains('/') {
             match cidr_contains(peer, raw) {
                 Some(true) => return true,

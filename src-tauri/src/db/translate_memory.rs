@@ -36,11 +36,7 @@ fn storable(model: &str, source: &str, target: &str) -> bool {
 /// 批量查缓存：source（已归一化）→ target。查不到的 key 不出现在 map 里。
 ///
 /// 模型名为空时直接返回空 map（宁可全量重翻，也不能在"未知模型"键下错命中）。
-pub async fn lookup(
-    pool: &SqlitePool,
-    model: &str,
-    sources: &[String],
-) -> HashMap<String, String> {
+pub async fn lookup(pool: &SqlitePool, model: &str, sources: &[String]) -> HashMap<String, String> {
     let mut out = HashMap::new();
     if model.trim().is_empty() || sources.is_empty() {
         return out;
@@ -82,11 +78,7 @@ pub async fn lookup(
 ///
 /// 记忆保留上限：总量超限时优先保留高命中、最近使用的条目
 pub const MEMORY_KEEP: i64 = 5000;
-pub async fn remember(
-    pool: &SqlitePool,
-    model: &str,
-    pairs: &[(String, String)],
-) -> usize {
+pub async fn remember(pool: &SqlitePool, model: &str, pairs: &[(String, String)]) -> usize {
     if model.trim().is_empty() || pairs.is_empty() {
         return 0;
     }
@@ -109,9 +101,8 @@ pub async fn remember(
     {
         use sqlx::QueryBuilder;
         for window in clean.chunks(200) {
-            let mut qb: QueryBuilder<sqlx::Sqlite> = QueryBuilder::new(
-                "INSERT INTO translate_memory (model, source, target) ",
-            );
+            let mut qb: QueryBuilder<sqlx::Sqlite> =
+                QueryBuilder::new("INSERT INTO translate_memory (model, source, target) ");
             qb.push_values(window.iter(), |mut b, (source, target)| {
                 b.push_bind(model).push_bind(source).push_bind(target);
             });
@@ -190,7 +181,11 @@ mod tests {
         let got = lookup(
             &pool,
             "model-a",
-            &["Sign\n in".to_string(), "Settings".to_string(), "Missing".to_string()],
+            &[
+                "Sign\n in".to_string(),
+                "Settings".to_string(),
+                "Missing".to_string(),
+            ],
         )
         .await;
         assert_eq!(got.get("Sign in"), Some(&"登录".to_string()));
@@ -202,12 +197,20 @@ mod tests {
     async fn 模型隔离不串用() {
         let dir = tempfile_like_dir();
         let pool = test_pool(&dir).await;
-        remember(&pool, "model-a", &[("Save".to_string(), "保存".to_string())]).await;
+        remember(
+            &pool,
+            "model-a",
+            &[("Save".to_string(), "保存".to_string())],
+        )
+        .await;
         let other = lookup(&pool, "model-b", &["Save".to_string()]).await;
         assert!(other.is_empty(), "别的模型的记忆不能命中");
         // 空模型名直接 miss，不允许落到 "" 这种脏键
         assert!(lookup(&pool, "", &["Save".to_string()]).await.is_empty());
-        assert_eq!(remember(&pool, "", &[("Save".to_string(), "保存".to_string())]).await, 0);
+        assert_eq!(
+            remember(&pool, "", &[("Save".to_string(), "保存".to_string())]).await,
+            0
+        );
     }
 
     #[tokio::test]
@@ -217,11 +220,17 @@ mod tests {
         remember(&pool, "m", &[("Open".to_string(), "打开".to_string())]).await;
         remember(&pool, "m", &[("Open".to_string(), "开启".to_string())]).await;
         let got = lookup(&pool, "m", &["Open".to_string()]).await;
-        assert_eq!(got.get("Open"), Some(&"开启".to_string()), "新译文覆盖旧译文");
-        let hits: i64 = sqlx::query_scalar("SELECT hits FROM translate_memory WHERE model='m' AND source='Open'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        assert_eq!(
+            got.get("Open"),
+            Some(&"开启".to_string()),
+            "新译文覆盖旧译文"
+        );
+        let hits: i64 = sqlx::query_scalar(
+            "SELECT hits FROM translate_memory WHERE model='m' AND source='Open'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(hits, 2);
     }
 
@@ -231,11 +240,13 @@ mod tests {
         let pool = test_pool(&dir).await;
         // 直插超限旧条目，其中一条刷高命中
         for i in 0..(super::MEMORY_KEEP + 5) {
-            sqlx::query("INSERT INTO translate_memory (model, source, target) VALUES ('m', ?, 'x')")
-                .bind(format!("old-{i}"))
-                .execute(&pool)
-                .await
-                .unwrap();
+            sqlx::query(
+                "INSERT INTO translate_memory (model, source, target) VALUES ('m', ?, 'x')",
+            )
+            .bind(format!("old-{i}"))
+            .execute(&pool)
+            .await
+            .unwrap();
         }
         sqlx::query("UPDATE translate_memory SET hits = 99 WHERE source = 'old-0'")
             .execute(&pool)
@@ -249,11 +260,12 @@ mod tests {
             .unwrap();
         assert_eq!(count, super::MEMORY_KEEP);
         // 高命中与新条目保留
-        let kept: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM translate_memory WHERE source IN ('old-0', 'New')")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let kept: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM translate_memory WHERE source IN ('old-0', 'New')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(kept, 2);
     }
 

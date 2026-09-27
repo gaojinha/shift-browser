@@ -1,8 +1,8 @@
 // 下载记录管理
-use ts_rs::TS;
 use crate::db::{Db, DbResult};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use ts_rs::TS;
 
 #[derive(Debug, Serialize, Deserialize, Clone, TS)]
 #[ts(export, export_to = "../../src/types/generated/")]

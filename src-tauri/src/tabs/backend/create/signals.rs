@@ -7,8 +7,8 @@ use super::super::super::model::{now_ts, TabManager};
 use super::super::is_internal_newtab_url;
 use super::super::WEB_CRASH_COOLDOWN;
 
-use webkit2gtk::WebViewExt;
 use crate::engine::webview::WebViewBackend;
+use webkit2gtk::WebViewExt;
 
 /// 给新建 child webview 接 GTK 信号：加载失败 / TLS 错误 / 权限 / 崩溃恢复 / 标题同步。
 /// 监听 WebKit title 变化 → 实时同步标签标题（on_page_load 的 host 只是初始占位）
@@ -40,18 +40,10 @@ pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &s
         // 返回 true 阻止 WebKit 默认错误页，是否放行交给前端"继续前往"决定。
         let app_tls = app2.clone();
         let tab_id_tls = tab_id.clone();
-        wv.connect_load_failed_with_tls_errors(
-            move |_wv, failing_uri, certificate, flags| {
-                crate::tls::on_tls_error(
-                    &app_tls,
-                    &tab_id_tls,
-                    failing_uri,
-                    certificate,
-                    flags,
-                );
-                true
-            },
-        );
+        wv.connect_load_failed_with_tls_errors(move |_wv, failing_uri, certificate, flags| {
+            crate::tls::on_tls_error(&app_tls, &tab_id_tls, failing_uri, certificate, flags);
+            true
+        });
         // 权限请求处理（安全 #2 · 2026-09-22）：默认挂起 + 白名单放行 + 通知前端
         crate::perms::attach(app2.clone(), tab_id.clone(), &wv);
         // Web 进程终止恢复（视频崩溃修复 · 2026-09-22）：崩溃/内存超限时
@@ -65,7 +57,8 @@ pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &s
                 reason
             );
             let now = now_ts();
-            let map = WEB_CRASH_COOLDOWN.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+            let map = WEB_CRASH_COOLDOWN
+                .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
             let allow_reload = {
                 let mut m = map.lock().unwrap_or_else(|e| e.into_inner());
                 let last = m.get(&tab_id_crash).copied().unwrap_or(0);

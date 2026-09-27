@@ -34,10 +34,7 @@ pub fn parse_models(v: &Value) -> Vec<OcModelInfo> {
                     let pid = m.get("providerID")?.as_str()?;
                     let mid = m.get("id")?.as_str()?;
                     // enabled 缺省视为 true；显式 false 才剔除
-                    let enabled = m
-                        .get("enabled")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(true);
+                    let enabled = m.get("enabled").and_then(Value::as_bool).unwrap_or(true);
                     if !enabled {
                         return None;
                     }

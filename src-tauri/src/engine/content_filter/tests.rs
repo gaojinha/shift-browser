@@ -3,8 +3,7 @@ use super::*;
 #[test]
 fn rules_json_is_well_formed() {
     let json = build_rules();
-    let parsed: serde_json::Value =
-        serde_json::from_str(&json).expect("规则 JSON 必须能被解析");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("规则 JSON 必须能被解析");
     let arr = parsed.as_array().expect("规则必须是数组");
     assert_eq!(arr.len(), BUILTIN_URL_RULES.len());
     for item in arr {

@@ -12,38 +12,38 @@ use serde_json::Value;
 ///   每步已有人工确认，尚未并入本枚举）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Risk {
-  /// 只读（低风险）
-  Read,
-  /// 写操作（受 `api_readonly` 只读闸门约束）
-  Write,
-  /// Agent 浏览器动作（需人工确认；待接入）
-  #[allow(dead_code)]
-  Agent,
+    /// 只读（低风险）
+    Read,
+    /// 写操作（受 `api_readonly` 只读闸门约束）
+    Write,
+    /// Agent 浏览器动作（需人工确认；待接入）
+    #[allow(dead_code)]
+    Agent,
 }
 
 /// 内部能力定义（带风险等级）；MCP JSON 视图由门面 tool_defs 投影生成，
 /// API 只读闸门从 risk_of 查询——同一注册表，不再两处手写。
 pub(super) struct ToolDef {
-  pub(super) name: &'static str,
-  pub(super) description: &'static str,
-  pub(super) props: Value,
-  pub(super) required: Vec<&'static str>,
-  pub(super) risk: Risk,
+    pub(super) name: &'static str,
+    pub(super) description: &'static str,
+    pub(super) props: Value,
+    pub(super) required: Vec<&'static str>,
+    pub(super) risk: Risk,
 }
 
 /// 条目统一构造器（读/写两张表共用，避免各处重复结构体字面量）
 pub(super) fn tool(
-  name: &'static str,
-  description: &'static str,
-  props: Value,
-  required: Vec<&'static str>,
-  risk: Risk,
+    name: &'static str,
+    description: &'static str,
+    props: Value,
+    required: Vec<&'static str>,
+    risk: Risk,
 ) -> ToolDef {
-  ToolDef {
-    name,
-    description,
-    props,
-    required,
-    risk,
-  }
+    ToolDef {
+        name,
+        description,
+        props,
+        required,
+        risk,
+    }
 }

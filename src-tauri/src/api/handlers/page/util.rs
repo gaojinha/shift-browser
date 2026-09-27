@@ -29,10 +29,9 @@ pub(crate) fn target_label(app: &AppHandle, req: &Value) -> Result<String, Value
         Some(tid) if !tid.is_empty() => all.iter().find(|t| t.id == tid).ok_or_else(|| {
             AppError::validation(format!("标签不存在: {tid}（先 list_tabs 取 id）")).error_json()
         })?,
-        _ => all
-            .iter()
-            .find(|t| t.is_active)
-            .ok_or_else(|| AppError::validation("没有活动标签（可传 tab_id 指定标签）").error_json())?,
+        _ => all.iter().find(|t| t.is_active).ok_or_else(|| {
+            AppError::validation("没有活动标签（可传 tab_id 指定标签）").error_json()
+        })?,
     };
     Ok(format!("tab-{}", target.id))
 }

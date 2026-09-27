@@ -119,7 +119,12 @@ pub async fn record(pool: &SqlitePool, info: &CertInfo) -> Option<&'static str> 
             .bind(&chain)
             .execute(pool)
             .await;
-            log::info!("[cert] 首次记录 {}:{} fp={}", info.host, info.port, &info.fingerprint_sha256[..12.min(info.fingerprint_sha256.len())]);
+            log::info!(
+                "[cert] 首次记录 {}:{} fp={}",
+                info.host,
+                info.port,
+                &info.fingerprint_sha256[..12.min(info.fingerprint_sha256.len())]
+            );
             Some("first_seen")
         }
         Some(old_fp) if old_fp != info.fingerprint_sha256 => {
@@ -144,7 +149,13 @@ pub async fn record(pool: &SqlitePool, info: &CertInfo) -> Option<&'static str> 
             .bind(info.port as i64)
             .execute(pool)
             .await;
-            log::warn!("[cert] 证书指纹变更 {}:{} {} → {}", info.host, info.port, &old_fp[..12.min(old_fp.len())], &info.fingerprint_sha256[..12.min(info.fingerprint_sha256.len())]);
+            log::warn!(
+                "[cert] 证书指纹变更 {}:{} {} → {}",
+                info.host,
+                info.port,
+                &old_fp[..12.min(old_fp.len())],
+                &info.fingerprint_sha256[..12.min(info.fingerprint_sha256.len())]
+            );
             Some("cert_changed")
         }
         Some(_) => {
@@ -181,7 +192,11 @@ pub async fn list(pool: &SqlitePool) -> Result<Vec<CertRecord>, sqlx::Error> {
     Ok(rows.iter().map(row_to_record).collect())
 }
 
-pub async fn get(pool: &SqlitePool, host: &str, port: i64) -> Result<Option<CertRecord>, sqlx::Error> {
+pub async fn get(
+    pool: &SqlitePool,
+    host: &str,
+    port: i64,
+) -> Result<Option<CertRecord>, sqlx::Error> {
     let row = sqlx::query(
         "SELECT *, CAST(julianday(not_after) - julianday('now') AS INTEGER) AS days_left
          FROM certificates WHERE host=? AND port=?",

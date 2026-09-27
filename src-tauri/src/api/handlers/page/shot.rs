@@ -143,7 +143,12 @@ mod tests {
         names.sort();
         assert_eq!(
             names,
-            vec!["keep.txt", "shot-3000.png", "shot-4000.png", "shot-5000.png"],
+            vec![
+                "keep.txt",
+                "shot-3000.png",
+                "shot-4000.png",
+                "shot-5000.png"
+            ],
             "应淘汰最旧两张、保留无关文件"
         );
         let _ = std::fs::remove_dir_all(&dir);

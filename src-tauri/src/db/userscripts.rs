@@ -27,14 +27,16 @@ pub async fn list_userscripts(db: tauri::State<'_, Db>) -> DbResult<Vec<Userscri
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, name, matches, code, enabled, created_at)| Userscript {
-            id,
-            name,
-            matches,
-            code,
-            enabled: enabled != 0,
-            created_at,
-        })
+        .map(
+            |(id, name, matches, code, enabled, created_at)| Userscript {
+                id,
+                name,
+                matches,
+                code,
+                enabled: enabled != 0,
+                created_at,
+            },
+        )
         .collect())
 }
 

@@ -11,7 +11,9 @@ mod tests {
         // 本文件即 lib.rs，include_str! 取自源码
         let src = include_str!("lib.rs");
         // 提取 generate_handler! 块
-        let start = src.find("generate_handler![").expect("未找到 generate_handler");
+        let start = src
+            .find("generate_handler![")
+            .expect("未找到 generate_handler");
         let block_start = start + "generate_handler![".len();
         let rest = &src[block_start..];
         let end = rest.find("])").expect("generate_handler 未闭合");
@@ -21,7 +23,9 @@ mod tests {
             .split(',')
             .filter_map(|seg| {
                 let t = seg.trim();
-                if t.is_empty() { return None; }
+                if t.is_empty() {
+                    return None;
+                }
                 // 取最后一段（模块::函数）
                 let name = t.split("::").last()?.trim();
                 if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !name.is_empty() {
@@ -31,7 +35,11 @@ mod tests {
                 }
             })
             .collect();
-        assert!(registered.len() > 100, "注册命令数异常: {}", registered.len());
+        assert!(
+            registered.len() > 100,
+            "注册命令数异常: {}",
+            registered.len()
+        );
 
         // 收集全部源码里的 #[tauri::command] 定义（含子模块）
         let sources = [
@@ -151,9 +159,7 @@ mod tests {
 <script type=\"module\" crossorigin src=\"/assets/x.js\"></script></head>";
         let out = crate::proto_shift::inject_script_nonce(html, "abc123");
         assert!(out.contains("<script nonce=\"abc123\">var a=1;</script>"));
-        assert!(out.contains(
-            "<script type=\"module\" crossorigin src=\"/assets/x.js\"></script>"
-        ));
+        assert!(out.contains("<script type=\"module\" crossorigin src=\"/assets/x.js\"></script>"));
         // 只注入一次（闭合标签未被误匹配）
         assert_eq!(out.matches("nonce=\"abc123\"").count(), 1);
     }
@@ -204,6 +210,128 @@ mod tests {
             assert!(!s.contains(['"', '\'', '<', '>', ' ']));
         }
         assert_ne!(a, b, "nonce 不可重复");
+    }
+
+    /// 生成物与契约镜像一致性：改 contracts.rs 未重生成即红（P0-2）
+    #[test]
+    fn contract_mirror() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/constants.ts");
+        let text = std::fs::read_to_string(&path).expect("读取 src/constants.ts 失败");
+        // 头注释必须含自动生成标记
+        assert!(
+            text.contains("自动生成"),
+            "/constants.ts 头注释缺自动生成标记"
+        );
+        assert!(text.contains("请勿手改"), "constants.ts 头注释缺请勿手改");
+        // 事件名：键名与值双包含（单引号生成物转义不影响键名包含判断）
+        for (_, v) in crate::contracts::events::ALL {
+            assert!(text.contains(v), "constants.ts 缺事件值 {v}");
+        }
+        for (k, _) in crate::contracts::events::ALL {
+            assert!(text.contains(k), "constants.ts 缺事件键 {k}");
+        }
+        // 设置键：键名与默认值双包含（避免单引号转义误判整行）
+        for d in crate::contracts::settings::SETTINGS {
+            assert!(text.contains(d.key), "constants.ts 缺设置键 {}", d.key);
+            // 空默认值不强制断言（太宽泛易误判），非空才断
+            if !d.default.is_empty() {
+                assert!(
+                    text.contains(d.default),
+                    "constants.ts 缺设置默认值 {}={}",
+                    d.key,
+                    d.default
+                );
+            }
+        }
+        // 超时：前端 ALL 里的语义键必须出现（值在 ALL 表里已列，非裸数字）
+        for (k, _) in crate::contracts::timeout::ALL {
+            assert!(text.contains(k), "constants.ts 缺超时键 {k}");
+        }
+        // 快捷键：前端组合键串必须出现
+        for (_, v) in crate::contracts::shortcuts::ALL {
+            assert!(text.contains(v), "constants.ts 缺快捷键 {v}");
+        }
+        // 技能：id 必须出现
+        for s in crate::contracts::skills::SKILLS {
+            assert!(text.contains(s.id), "constants.ts 缺技能 {}", s.id);
+        }
+    }
+
+    /// 快捷键双写一致性：SHORTCUTS 结构体表派生组合键串必须与 ALL 表一一对应（P1-2 止血）
+    #[test]
+    fn shortcuts_all_derived_equals_manual() {
+        fn derive(s: &crate::contracts::shortcuts::Shortcut) -> String {
+            let mut parts: Vec<String> = Vec::new();
+            if s.ctrl {
+                parts.push("ctrl".to_string());
+            }
+            if s.shift {
+                parts.push("shift".to_string());
+            }
+            parts.push(s.key.to_string());
+            parts.join("+")
+        }
+        let derived: Vec<String> = crate::contracts::shortcuts::SHORTCUTS
+            .iter()
+            .map(derive)
+            .collect();
+        let manual: Vec<String> = crate::contracts::shortcuts::ALL
+            .iter()
+            .map(|(_, v)| v.to_string())
+            .collect();
+        assert_eq!(derived.len(), manual.len(), "快捷键数量不一致");
+        // 允许顺序不同但内容必须一致（当前顺序一致，若未来顺序调整也不误判为漂移）
+        let mut d = derived.clone();
+        let mut m = manual.clone();
+        d.sort();
+        m.sort();
+        assert_eq!(d, m, "SHORTCUTS 派生组合键与 ALL 表不一致");
+    }
+
+    /// 技能双写一致性：SKILLS 与 ALL 四元组前四字段必须一致（P1-3 止血，且 ALL 丢 uses 必现）
+    #[test]
+    fn skills_all_consistent() {
+        let from_struct: Vec<(&str, &str, &str, &str)> = crate::contracts::skills::SKILLS
+            .iter()
+            .map(|s| (s.id, s.name, s.icon, s.desc))
+            .collect();
+        let manual = crate::contracts::skills::ALL.to_vec();
+        assert_eq!(from_struct, manual, "SKILLS 与 ALL 四元组不一致");
+        // uses 字段必须非空（防止投影丢字段后未来加技能忘补 uses）
+        for s in crate::contracts::skills::SKILLS {
+            assert!(!s.uses.is_empty(), "技能 {} uses 为空", s.id);
+        }
+    }
+
+    /// gdk 大小写 keyval 派生校验：字母键大写为小写-0x20，功能键自身（P2-3 正确性兜底）
+    #[test]
+    fn gdk_keyval_shift_derived() {
+        for s in crate::contracts::shortcuts::SHORTCUTS {
+            let lower = s.gdk_keyval;
+            let upper = s.gdk_keyval_shift;
+            // 功能键 0xFF00 段：大小写相同
+            if (0xFF00..=0xFFFF).contains(&lower) {
+                assert_eq!(lower, upper, "功能键 {} 大小写应相同", s.id);
+                continue;
+            }
+            // 字母键：小写 0x61-0x7A，大写 0x41-0x5A，差 0x20
+            if (0x61..=0x7A).contains(&lower) {
+                assert_eq!(upper, lower - 0x20, "字母键 {} 大小写派生错", s.key);
+            } else if (0x41..=0x5A).contains(&lower) {
+                assert_eq!(upper, lower, "大写键 {} 不应再派生", s.key);
+            } else if lower == upper {
+                // Tab 等非字母键允许相同
+            } else {
+                // 其他键大写应为小写-0x20或相同，兜底断言两值在合理区间
+                assert!(
+                    (0x20..=0xFF).contains(&upper),
+                    "键 {} gdk 值异常: {:#x}/{:#x}",
+                    s.key,
+                    lower,
+                    upper
+                );
+            }
+        }
     }
 }
 

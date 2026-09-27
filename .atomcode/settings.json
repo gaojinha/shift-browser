@@ -16,6 +16,10 @@
           {
             "type": "command",
             "command": "bash .atomcode/hooks/format-front.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash .atomcode/hooks/rust-check.sh"
           }
         ]
       }

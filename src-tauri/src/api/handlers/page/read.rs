@@ -94,9 +94,7 @@ pub(crate) async fn read_page(app: &AppHandle, req: &Value) -> Value {
     .await
     {
         Ok(Ok(Ok(v))) => v,
-        Ok(Ok(Err(e))) => {
-            return AppError::internal(format!("采集脚本执行失败: {e}")).error_json()
-        }
+        Ok(Ok(Err(e))) => return AppError::internal(format!("采集脚本执行失败: {e}")).error_json(),
         Ok(Err(_)) => return AppError::internal("采集结果丢失").error_json(),
         Err(_) => {
             return AppError::timeout(format!(
@@ -140,16 +138,18 @@ pub(crate) async fn read_page(app: &AppHandle, req: &Value) -> Value {
         .await
         {
             Ok(Ok(Ok(p))) => p,
-            Ok(Ok(Err(e))) => {
-                return AppError::internal(format!("正文提取失败: {e}")).error_json()
-            }
+            Ok(Ok(Err(e))) => return AppError::internal(format!("正文提取失败: {e}")).error_json(),
             Ok(Err(_)) => return AppError::internal("正文提取线程异常").error_json(),
             Err(_) => return AppError::timeout("正文提取超时").error_json(),
         };
         if product.text.is_empty() && product.content.is_empty() {
             return AppError::validation("未提取到正文，页面可能不是文章页").error_json();
         }
-        let text = product.text.chars().take(max_chars as usize).collect::<String>();
+        let text = product
+            .text
+            .chars()
+            .take(max_chars as usize)
+            .collect::<String>();
         let content = product
             .content
             .chars()

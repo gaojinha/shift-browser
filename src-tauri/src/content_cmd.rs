@@ -35,7 +35,9 @@ pub async fn content_snapshot(app: AppHandle) -> Result<crate::engine::content::
     .map_err(|e| format!("提取失败: {}", e))?;
 
     let snap = rx
-        .recv_timeout(std::time::Duration::from_secs(crate::contracts::timeout::WEBVIEW_IPC_SECS))
+        .recv_timeout(std::time::Duration::from_secs(
+            crate::contracts::timeout::WEBVIEW_IPC_SECS,
+        ))
         .map_err(|e| format!("快照提取超时: {}", e))??;
 
     log::info!(
@@ -64,7 +66,9 @@ pub async fn content_extract(url: String) -> Result<ContentExtract, String> {
 
 /// 计算页面对 AI 的友好度（基于语义快照的无障碍树 + 表单可访问性）
 #[tauri::command]
-pub async fn ai_friendliness(app: AppHandle) -> Result<crate::engine::content::AiFriendlinessReport, String> {
+pub async fn ai_friendliness(
+    app: AppHandle,
+) -> Result<crate::engine::content::AiFriendlinessReport, String> {
     let snap = content_snapshot(app.clone()).await?;
     Ok(crate::engine::content::ai_friendliness(&snap))
 }
@@ -141,7 +145,8 @@ pub async fn content_qa_prompt(
         return Err("页面数据为空，无法组装问答提示词".to_string());
     }
     let chars = content.chars().count();
-    let prompt = crate::content_prompts::snapshot_qa(&title, &url, &source, &coverage, &content, &question);
+    let prompt =
+        crate::content_prompts::snapshot_qa(&title, &url, &source, &coverage, &content, &question);
     let truncated = chars > crate::content_prompts::CONTENT_BUDGET_CHARS;
     Ok(ContentQaPrompt {
         prompt,

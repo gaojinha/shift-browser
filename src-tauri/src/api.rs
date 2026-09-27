@@ -175,7 +175,13 @@ mod readonly_tests {
     fn write_command_denied_when_readonly_on() {
         // 写命令身份覆盖 EXTRA_RISK 全部写条目（含 plugins/set_enabled）：
         // 只读模式下逐条必拒
-        for cmd in ["eval", "tool_call", "plugins/set_enabled", "open_url", "navigate"] {
+        for cmd in [
+            "eval",
+            "tool_call",
+            "plugins/set_enabled",
+            "open_url",
+            "navigate",
+        ] {
             assert!(
                 readonly_denied(cmd, Some("true")),
                 "写命令 {cmd} 在只读模式必须被拒"
@@ -208,7 +214,7 @@ mod readonly_tests {
 /// 约定：**任何输入都不得 panic / 死循环**，只能返回结果码。
 #[cfg(any(test, feature = "fuzz"))]
 pub mod fuzz_helpers {
-    
+
     use std::net::IpAddr;
     use std::pin::Pin;
     use std::task::{Context, Poll};
@@ -304,4 +310,3 @@ pub mod fuzz_helpers {
         }
     }
 }
-

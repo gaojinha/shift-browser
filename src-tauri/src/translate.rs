@@ -27,10 +27,15 @@ fn client() -> &'static Client {
     CLIENT.get_or_init(|| {
         Client::builder()
             .user_agent(CHROME_UA)
-            .timeout(std::time::Duration::from_secs(crate::contracts::timeout::TRANSLATE_SECS))
+            .timeout(std::time::Duration::from_secs(
+                crate::contracts::timeout::TRANSLATE_SECS,
+            ))
             .build()
             .unwrap_or_else(|e| {
-                log::error!("[translate] reqwest client 初始化失败，用默认客户端兜底: {}", e);
+                log::error!(
+                    "[translate] reqwest client 初始化失败，用默认客户端兜底: {}",
+                    e
+                );
                 Client::new()
             })
     })
@@ -38,8 +43,9 @@ fn client() -> &'static Client {
 
 /// 当前翻译超时（秒）：settings.translate_timeout，默认 15，合法范围 5-120
 pub async fn current_timeout(db: &crate::db::Db) -> u64 {
-    let row: Option<(String,)> =
-        crate::db::settings_cache::get(&db.pool, "translate_timeout").await.map(|v| (v,));
+    let row: Option<(String,)> = crate::db::settings_cache::get(&db.pool, "translate_timeout")
+        .await
+        .map(|v| (v,));
     row.and_then(|r| r.0.parse::<u64>().ok())
         .filter(|v| *v >= 5 && *v <= 120)
         .unwrap_or(15)
@@ -139,7 +145,13 @@ async fn bing_session(timeout: u64) -> Result<BingSession, String> {
         let mut guard = cell.lock().await;
         if let Some((ig2, iid2, key2, token2, at2)) = guard.as_ref() {
             if bing_cache_fresh(*at2) {
-                return Ok((ig2.clone(), iid2.clone(), key2.clone(), token2.clone(), *at2));
+                return Ok((
+                    ig2.clone(),
+                    iid2.clone(),
+                    key2.clone(),
+                    token2.clone(),
+                    *at2,
+                ));
             }
         }
         let now = std::time::Instant::now();
@@ -310,15 +322,17 @@ pub async fn translate_with(
 
 /// 读取当前翻译源（settings.translate_engine，默认 google）
 pub async fn current_engine(db: &crate::db::Db) -> String {
-    let row: Option<(String,)> =
-        crate::db::settings_cache::get(&db.pool, "translate_engine").await.map(|v| (v,));
+    let row: Option<(String,)> = crate::db::settings_cache::get(&db.pool, "translate_engine")
+        .await
+        .map(|v| (v,));
     row.map(|r| r.0).unwrap_or_else(|| "google".to_string())
 }
 
 /// 当前翻译目标语言（设置 → 通用 → 翻译目标语言，默认 zh-CN）
 pub async fn current_target(db: &crate::db::Db) -> String {
-    let row: Option<(String,)> =
-        crate::db::settings_cache::get(&db.pool, "translate_target").await.map(|v| (v,));
+    let row: Option<(String,)> = crate::db::settings_cache::get(&db.pool, "translate_target")
+        .await
+        .map(|v| (v,));
     row.map(|r| r.0).unwrap_or_else(|| "zh-CN".to_string())
 }
 
@@ -365,9 +379,7 @@ mod tests {
         let now = std::time::Instant::now();
         // 刚抓的、1700 秒前的都新鲜
         assert!(bing_cache_fresh(now));
-        assert!(bing_cache_fresh(
-            now - std::time::Duration::from_secs(1700)
-        ));
+        assert!(bing_cache_fresh(now - std::time::Duration::from_secs(1700)));
         // 1900 秒前、3600 秒前的都过期（留足余量，不掐 1800 整点防抖动）
         assert!(!bing_cache_fresh(
             now - std::time::Duration::from_secs(1900)

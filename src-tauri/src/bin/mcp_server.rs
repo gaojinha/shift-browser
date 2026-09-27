@@ -57,11 +57,15 @@ fn call_browser(cmd: &str, params: &Value) -> Result<Value, String> {
         }
     }
     let line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-    stream.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+    stream
+        .write_all(line.as_bytes())
+        .map_err(|e| e.to_string())?;
     stream.write_all(b"\n").map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(stream);
     let mut resp_line = String::new();
-    reader.read_line(&mut resp_line).map_err(|e| e.to_string())?;
+    reader
+        .read_line(&mut resp_line)
+        .map_err(|e| e.to_string())?;
     let resp: Value = serde_json::from_str(&resp_line).map_err(|e| e.to_string())?;
     if resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
         Ok(resp.get("data").cloned().unwrap_or(Value::Null))
@@ -119,7 +123,11 @@ fn handle(msg: &Value) -> Option<Value> {
             // ——本进程零编译耦合；浏览器未运行/老版本无该字段时降级省略
             let instructions = call_browser("capabilities/list", &json!({}))
                 .ok()
-                .and_then(|v| v.get("instructions").and_then(|i| i.as_str()).map(|s| s.to_string()));
+                .and_then(|v| {
+                    v.get("instructions")
+                        .and_then(|i| i.as_str())
+                        .map(|s| s.to_string())
+                });
             let mut result = json!({
                 "protocolVersion": version,
                 "capabilities": { "tools": { "listChanged": false } },

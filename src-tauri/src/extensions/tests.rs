@@ -34,9 +34,7 @@ fn privacy_selftest_whitelist_is_full_compat_bypass() {
     assert_eq!(r.total, 9);
     assert_eq!(r.passed, 1, "兼容模式仅 inject 通过");
     assert!(
-        r.checks
-            .iter()
-            .all(|c| c.status != "fail"),
+        r.checks.iter().all(|c| c.status != "fail"),
         "白名单帧不得有 fail 项：{:?}",
         r.checks
     );
@@ -56,7 +54,10 @@ fn privacy_selftest_whitelist_is_full_compat_bypass() {
 fn privacy_selftest_off_all_skip() {
     let page = r#"{"installed":false,"features":{}}"#;
     let r = build_privacy_selftest("off", "example.com", false, page);
-    assert!(r.checks.iter().all(|c| c.status == "skip"), "关闭档应全部跳过");
+    assert!(
+        r.checks.iter().all(|c| c.status == "skip"),
+        "关闭档应全部跳过"
+    );
     assert_eq!(r.passed, 0);
 }
 

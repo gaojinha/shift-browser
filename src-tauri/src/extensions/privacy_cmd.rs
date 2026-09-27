@@ -35,8 +35,7 @@ pub async fn set_privacy_whitelist(
         "[extensions] set_privacy_whitelist: {} 个域名",
         cleaned.len()
     );
-    let json = serde_json::to_string(&cleaned)
-        .map_err(|e| AppError::internal(e.to_string()))?;
+    let json = serde_json::to_string(&cleaned).map_err(|e| AppError::internal(e.to_string()))?;
     sqlx::query(
         "INSERT INTO settings (key, value) VALUES ('privacy_whitelist', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -283,8 +282,7 @@ pub async fn set_adblock_keywords(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
-    let json = serde_json::to_string(&cleaned)
-        .map_err(|e| AppError::internal(e.to_string()))?;
+    let json = serde_json::to_string(&cleaned).map_err(|e| AppError::internal(e.to_string()))?;
     log::info!(
         "[extensions] set_adblock_keywords: {} 个自定义词",
         cleaned.len()
@@ -314,6 +312,10 @@ mod tests {
         }
         let err = parse_shield_level("paranoid").unwrap_err();
         assert_eq!(err.code, crate::error::E_VALIDATION);
-        assert!(err.message.contains("paranoid"), "消息应回显非法值: {}", err);
+        assert!(
+            err.message.contains("paranoid"),
+            "消息应回显非法值: {}",
+            err
+        );
     }
 }

@@ -33,19 +33,21 @@ use tauri::{AppHandle, Manager};
 use crate::error::AppError;
 
 /// 统一 handler 形态：接收应用句柄与请求 JSON，返回响应 JSON
-pub(super) type HandlerFn = for<'a> fn(
-    &'a AppHandle,
-    &'a Value,
-) -> Pin<Box<dyn Future<Output = Value> + Send + 'a>>;
+pub(super) type HandlerFn =
+    for<'a> fn(&'a AppHandle, &'a Value) -> Pin<Box<dyn Future<Output = Value> + Send + 'a>>;
 
 /// 命令分发表（命令名唯一；重复项在单测中断言）
 pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     // 元命令（能力/技能/插件清单；list 类不经 capabilities 风险表，见 META 白名单；
     // set_enabled 是写，走 EXTRA_RISK 受只读闸门约束）
-    ("capabilities/list", |a, r| Box::pin(system::capabilities_list(a, r))),
+    ("capabilities/list", |a, r| {
+        Box::pin(system::capabilities_list(a, r))
+    }),
     ("skills/list", |a, r| Box::pin(system::skills_list(a, r))),
     ("plugins/list", |a, r| Box::pin(plugins::list_plugins(a, r))),
-    ("plugins/set_enabled", |a, r| Box::pin(plugins::set_enabled(a, r))),
+    ("plugins/set_enabled", |a, r| {
+        Box::pin(plugins::set_enabled(a, r))
+    }),
     // 状态
     ("status", |a, r| Box::pin(system::status(a, r))),
     // 标签与窗口
@@ -61,8 +63,12 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     ("search", |a, r| Box::pin(tabs::search(a, r))),
     ("pin_tab", |a, r| Box::pin(tabs::pin_tab(a, r))),
     ("mute_tab", |a, r| Box::pin(tabs::mute_tab(a, r))),
-    ("minimize_window", |a, r| Box::pin(tabs::minimize_window(a, r))),
-    ("maximize_window", |a, r| Box::pin(tabs::maximize_window(a, r))),
+    ("minimize_window", |a, r| {
+        Box::pin(tabs::minimize_window(a, r))
+    }),
+    ("maximize_window", |a, r| {
+        Box::pin(tabs::maximize_window(a, r))
+    }),
     // 页面交互（截图 / JS 执行 / 页面读取）
     ("screenshot", |a, r| Box::pin(page::screenshot(a, r))),
     ("eval", |a, r| Box::pin(page::eval(a, r))),
@@ -71,7 +77,9 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     ("open_and_read", |a, r| Box::pin(page::open_and_read(a, r))),
     // 内容处理（P1a）：结构化提取 / 阅读模式正文 / 翻译 / 语义快照
     ("extract", |a, r| Box::pin(content::extract(a, r))),
-    ("reader/extract", |a, r| Box::pin(content::reader_extract(a, r))),
+    ("reader/extract", |a, r| {
+        Box::pin(content::reader_extract(a, r))
+    }),
     ("translate", |a, r| Box::pin(content::translate(a, r))),
     ("content/snapshot", |a, r| Box::pin(content::snapshot(a, r))),
     // 选区采集（P1 上下文采集）：纯只读，给「网页随手问 AI」当嘴
@@ -79,14 +87,12 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     // 整页汉化（P3b）：收集只读、写回归 Write（受只读闸门约束）。
     // 暴露到 api.sock 是为了自动化验收能驱动真机——Tauri invoke 和 api.sock
     // 是两条不通的路，光有 Tauri 命令就只能靠手点，测不了。
-    (
-        "page_collect_translatable",
-        |a, r| Box::pin(crate::webzh::collect_for_api(a, r)),
-    ),
-    (
-        "page_apply_translation",
-        |a, r| Box::pin(crate::webzh::apply_for_api(a, r)),
-    ),
+    ("page_collect_translatable", |a, r| {
+        Box::pin(crate::webzh::collect_for_api(a, r))
+    }),
+    ("page_apply_translation", |a, r| {
+        Box::pin(crate::webzh::apply_for_api(a, r))
+    }),
     ("action/dismiss", |a, r| Box::pin(page::dismiss(a, r))),
     // 页面交互（P2）：受 api_agent_actions 开关约束（默认关）
     ("action/find", |a, r| Box::pin(actions::find(a, r))), // 只读定位，不挂交互闸门
@@ -104,12 +110,18 @@ pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
     // 只读数据查询
     ("history", |a, r| Box::pin(data::history(a, r))),
     ("bookmarks", |a, r| Box::pin(data::bookmarks(a, r))),
-    ("list_downloads", |a, r| Box::pin(data::list_downloads(a, r))),
+    ("list_downloads", |a, r| {
+        Box::pin(data::list_downloads(a, r))
+    }),
     ("list_sessions", |a, r| Box::pin(data::list_sessions(a, r))),
     ("list_groups", |a, r| Box::pin(data::list_groups(a, r))),
     ("list_spaces", |a, r| Box::pin(data::list_spaces(a, r))),
-    ("list_userscripts", |a, r| Box::pin(data::list_userscripts(a, r))),
-    ("search_history", |a, r| Box::pin(data::search_history(a, r))),
+    ("list_userscripts", |a, r| {
+        Box::pin(data::list_userscripts(a, r))
+    }),
+    ("search_history", |a, r| {
+        Box::pin(data::search_history(a, r))
+    }),
     ("get_setting", |a, r| Box::pin(data::get_setting(a, r))),
     ("list_settings", |a, r| Box::pin(data::list_settings(a, r))),
     // 审计（K/O3）：AI 操作记录查询
@@ -134,7 +146,13 @@ pub(crate) async fn dispatch(app: &AppHandle, req: &Value, cmd: &str) -> Value {
 
 /// 中央审计（尽力而为）：跳过高频元命令与审计查询自身，避免噪声/自指。
 async fn record_audit(app: &AppHandle, req: &Value, cmd: &str, resp: &Value) {
-    const SKIP: &[&str] = &["capabilities/list", "skills/list", "tools", "audit/reads", "audit/egress"];
+    const SKIP: &[&str] = &[
+        "capabilities/list",
+        "skills/list",
+        "tools",
+        "audit/reads",
+        "audit/egress",
+    ];
     if SKIP.contains(&cmd) {
         return;
     }

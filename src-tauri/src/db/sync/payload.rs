@@ -262,7 +262,10 @@ pub(super) async fn import_payload(db: &Db, plain: &[u8]) -> DbResult<usize> {
             }
             let title = h.get("title").and_then(|x| x.as_str());
             let visit_count = h.get("visit_count").and_then(|x| x.as_i64()).unwrap_or(1);
-            let last_visit_at = h.get("last_visit_at").and_then(|x| x.as_str()).unwrap_or("");
+            let last_visit_at = h
+                .get("last_visit_at")
+                .and_then(|x| x.as_str())
+                .unwrap_or("");
             sqlx::query(
                 "INSERT INTO history (url, title, visit_count, last_visit_at)
                  VALUES (?, ?, ?, COALESCE(NULLIF(?, ''), datetime('now')))
@@ -369,11 +372,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cnt.0, 2);
-        let f: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM bookmark_folders WHERE name='工作'")
-                .fetch_one(&db.pool)
-                .await
-                .unwrap();
+        let f: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM bookmark_folders WHERE name='工作'")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
         assert_eq!(f.0, 1, "文件夹应按名字 find-or-create");
         let sc: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
             .fetch_one(&db.pool)

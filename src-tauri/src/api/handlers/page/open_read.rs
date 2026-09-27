@@ -60,11 +60,7 @@ async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
             .map_err(|_| {
                 AppError::permission(format!("域名解析失败，已拒绝：{host}")).error_json()
             })?;
-        if let Err(e) = crate::ai::check_resolved_ips(
-            &host,
-            addrs.iter().map(|s| s.ip()),
-            port,
-        ) {
+        if let Err(e) = crate::ai::check_resolved_ips(&host, addrs.iter().map(|s| s.ip()), port) {
             log::warn!("[open_and_read] SSRF 拦截域名解析: {}", e);
             return Err(AppError::permission(e).error_json());
         }
@@ -124,7 +120,7 @@ pub(crate) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
                 None,
                 None,
                 Some(true), // J6：AI 标签后台打开，不抢用户焦点
-                None, // AI 标签读内容不能等，不延迟（probe 紧接着读页）
+                None,       // AI 标签读内容不能等，不延迟（probe 紧接着读页）
             )
             .await
             {
@@ -229,10 +225,8 @@ pub(crate) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
                 .get("error")
                 .and_then(|v| v.as_str())
                 .unwrap_or("重定向到内网地址被拦截");
-            return AppError::permission(format!(
-                "重定向复核拦截（{final_url}）：{msg}"
-            ))
-            .error_json();
+            return AppError::permission(format!("重定向复核拦截（{final_url}）：{msg}"))
+                .error_json();
         }
     }
 
@@ -248,7 +242,10 @@ pub(crate) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
         obj.insert("cmd".to_string(), json!("read_page"));
     }
     let read_resp = read_page(app, &read_req).await;
-    let read_ok = read_resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    let read_ok = read_resp
+        .get("ok")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     // 4) 可选关闭
     if close_after {

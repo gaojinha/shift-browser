@@ -64,7 +64,6 @@ impl AgnesProvider {
     }
 }
 
-
 // ============================================================
 // P0-2 补完（2026-09-22）：打破 engine → ai 的反向依赖
 // ============================================================
@@ -78,16 +77,19 @@ pub type ChatFn = fn(
     base_url: String,
     api_key: String,
     req: ProviderRequest,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = CommandResult<ChatMessage>> + Send>>;
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = CommandResult<ChatMessage>> + Send>,
+>;
 
 /// 流式聊天实现签名（由 ai.rs 注册）
-pub type ChatStreamFn = fn(
-    base_url: String,
-    api_key: String,
-    req: ProviderRequest,
-    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    on_delta: Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = CommandResult<String>> + Send>>;
+pub type ChatStreamFn =
+    fn(
+        base_url: String,
+        api_key: String,
+        req: ProviderRequest,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        on_delta: Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = CommandResult<String>> + Send>>;
 
 static CHAT_IMPL: std::sync::OnceLock<ChatFn> = std::sync::OnceLock::new();
 static CHAT_STREAM_IMPL: std::sync::OnceLock<ChatStreamFn> = std::sync::OnceLock::new();
@@ -106,15 +108,18 @@ pub const OLLAMA_DEFAULT_BASE: &str = "http://127.0.0.1:11434/v1";
 pub type OllamaChatFn = fn(
     base_url: String,
     req: ProviderRequest,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = CommandResult<ChatMessage>> + Send>>;
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = CommandResult<ChatMessage>> + Send>,
+>;
 
 /// 本地流式聊天实现签名（由 ai.rs 注册）
-pub type OllamaChatStreamFn = fn(
-    base_url: String,
-    req: ProviderRequest,
-    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    on_delta: Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = CommandResult<String>> + Send>>;
+pub type OllamaChatStreamFn =
+    fn(
+        base_url: String,
+        req: ProviderRequest,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        on_delta: Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = CommandResult<String>> + Send>>;
 
 static OLLAMA_CHAT_IMPL: std::sync::OnceLock<OllamaChatFn> = std::sync::OnceLock::new();
 static OLLAMA_CHAT_STREAM_IMPL: std::sync::OnceLock<OllamaChatStreamFn> =

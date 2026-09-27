@@ -65,11 +65,12 @@ pub fn ua_for(host: &str) -> String {
 
 /// 启动时从 settings 载入
 pub async fn load(pool: &SqlitePool) {
-    let g: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'user_agent'")
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten();
+    let g: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'user_agent'")
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
     if let Some(v) = g {
         if !v.trim().is_empty() {
             if let Ok(mut s) = global_ua().lock() {
@@ -111,10 +112,7 @@ pub async fn get_user_agent_config() -> Result<UaConfig, String> {
 
 /// 设置全局 UA（空 = 恢复默认）
 #[tauri::command]
-pub async fn set_user_agent(
-    db: tauri::State<'_, crate::db::Db>,
-    ua: String,
-) -> Result<(), String> {
+pub async fn set_user_agent(db: tauri::State<'_, crate::db::Db>, ua: String) -> Result<(), String> {
     let val = ua.trim().to_string();
     {
         let mut s = global_ua().lock().map_err(|e| e.to_string())?;

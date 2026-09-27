@@ -127,9 +127,8 @@ pub(super) async fn get_master_key(db: &Db) -> DbResult<[u8; 32]> {
     // 主密码保护（阶段 2）：密钥只来自解锁会话（内存），绝不从磁盘明文读取。
     // 未解锁 → 直接拒绝，所有密码操作都会被拦在这里（单一闸门）。
     if crate::db::vault::is_protected(db) {
-        return crate::db::vault::unlocked_key().ok_or_else(|| {
-            DbError::Other("密码库已锁定，请先输入主密码解锁".to_string())
-        });
+        return crate::db::vault::unlocked_key()
+            .ok_or_else(|| DbError::Other("密码库已锁定，请先输入主密码解锁".to_string()));
     }
     // 串行化整段（含 await 点），防止并发首用各自生成不同密钥互相覆盖
     let mut cache = db.master_key.lock().await;

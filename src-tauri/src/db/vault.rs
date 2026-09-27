@@ -92,9 +92,7 @@ pub fn unlocked_key() -> Option<[u8; KEY_LEN]> {
 
 /// 记录解锁活动（刷新空闲自动锁定计时）
 fn touch_activity() {
-    *activity_cell()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now());
+    *activity_cell().lock().unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now());
 }
 
 /// 空闲判定纯函数：已解锁且有活动记录、空闲达到 timeout（分钟，0=关闭）即应锁定。
@@ -106,9 +104,7 @@ fn should_lock_idle(
     timeout_minutes: u64,
 ) -> bool {
     match (unlocked, last, timeout_minutes) {
-        (true, Some(last), t) if t > 0 => {
-            now.duration_since(last).as_secs() >= t * 60
-        }
+        (true, Some(last), t) if t > 0 => now.duration_since(last).as_secs() >= t * 60,
         _ => false,
     }
 }
@@ -172,7 +168,14 @@ pub async fn set_vault_idle_lock(db: State<'_, Db>, minutes: u64) -> Result<(), 
     .execute(&db.pool)
     .await
     .map_err(|e| e.to_string())?;
-    log::info!("[vault] 空闲自动锁定设置为 {} 分钟", if minutes == 0 { "关闭".to_string() } else { minutes.to_string() });
+    log::info!(
+        "[vault] 空闲自动锁定设置为 {} 分钟",
+        if minutes == 0 {
+            "关闭".to_string()
+        } else {
+            minutes.to_string()
+        }
+    );
     Ok(())
 }
 
@@ -185,15 +188,15 @@ pub fn spawn_idle_lock_watchdog(app: tauri::AppHandle) {
         tick.tick().await; // 首次 tick 立即返回，跳过
         loop {
             tick.tick().await;
-            let Some(db) = app.try_state::<Db>() else { continue };
+            let Some(db) = app.try_state::<Db>() else {
+                continue;
+            };
             // 未解锁直接跳过，不碰 DB
             if !is_unlocked() {
                 continue;
             }
             let timeout = idle_lock_minutes(&db).await;
-            let last = *activity_cell()
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let last = *activity_cell().lock().unwrap_or_else(|e| e.into_inner());
             if should_lock_idle(true, last, std::time::Instant::now(), timeout) {
                 lock();
                 log::info!("[vault] 空闲 {} 分钟，已自动锁定", timeout);
@@ -264,8 +267,7 @@ pub async fn remove_vault_password(db: State<'_, Db>, password: String) -> Resul
     }
     let encoded = read_vault_file(&db.vault_path).map_err(|e| e.to_string())?;
     let _ = unwrap_key_blocking(encoded, password).await?; // 验证主密码
-    std::fs::remove_file(&db.vault_path)
-        .map_err(|e| format!("删除主密码文件失败: {}", e))?;
+    std::fs::remove_file(&db.vault_path).map_err(|e| format!("删除主密码文件失败: {}", e))?;
     // 移除后主密钥回到文件模式，保持内存缓存可用
     lock();
     log::info!("[vault] 主密码已移除");

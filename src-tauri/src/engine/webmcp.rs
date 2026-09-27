@@ -65,5 +65,4 @@ mod tests {
         assert!(!WEBMCP_POLYFILL_JS.contains("executeTool"));
         assert!(!WEBMCP_POLYFILL_JS.contains("callTool"));
     }
-
 }

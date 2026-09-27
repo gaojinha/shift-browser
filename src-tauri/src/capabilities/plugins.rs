@@ -8,91 +8,91 @@
 /// 插件形态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginKind {
-  /// 用户脚本 / 样式（注入页面）
-  UserScript,
-  /// 内容过滤规则（广告拦截）
-  ContentFilter,
-  /// Web 扩展（网络层拦截，编译期 .so）
-  WebExtension,
-  /// MCP 外部工具服务器
-  McpServer,
+    /// 用户脚本 / 样式（注入页面）
+    UserScript,
+    /// 内容过滤规则（广告拦截）
+    ContentFilter,
+    /// Web 扩展（网络层拦截，编译期 .so）
+    WebExtension,
+    /// MCP 外部工具服务器
+    McpServer,
 }
 
 impl PluginKind {
-  /// 机器可读标识
-  pub fn as_str(&self) -> &'static str {
-    match self {
-      PluginKind::UserScript => "userscript",
-      PluginKind::ContentFilter => "content_filter",
-      PluginKind::WebExtension => "web_extension",
-      PluginKind::McpServer => "mcp_server",
+    /// 机器可读标识
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PluginKind::UserScript => "userscript",
+            PluginKind::ContentFilter => "content_filter",
+            PluginKind::WebExtension => "web_extension",
+            PluginKind::McpServer => "mcp_server",
+        }
     }
-  }
 
-  /// 中文标签（前端展示）
-  pub fn label(&self) -> &'static str {
-    match self {
-      PluginKind::UserScript => "用户脚本",
-      PluginKind::ContentFilter => "内容过滤",
-      PluginKind::WebExtension => "Web 扩展",
-      PluginKind::McpServer => "MCP 服务器",
+    /// 中文标签（前端展示）
+    pub fn label(&self) -> &'static str {
+        match self {
+            PluginKind::UserScript => "用户脚本",
+            PluginKind::ContentFilter => "内容过滤",
+            PluginKind::WebExtension => "Web 扩展",
+            PluginKind::McpServer => "MCP 服务器",
+        }
     }
-  }
 
-  /// 是否支持运行时启停（Web 扩展为编译期加载，暂不支持）
-  pub fn togglable(&self) -> bool {
-    !matches!(self, PluginKind::WebExtension)
-  }
+    /// 是否支持运行时启停（Web 扩展为编译期加载，暂不支持）
+    pub fn togglable(&self) -> bool {
+        !matches!(self, PluginKind::WebExtension)
+    }
 }
 
 /// 统一插件条目
 pub fn entry(
-  kind: PluginKind,
-  id: &str,
-  name: &str,
-  enabled: bool,
-  detail: &str,
+    kind: PluginKind,
+    id: &str,
+    name: &str,
+    enabled: bool,
+    detail: &str,
 ) -> serde_json::Value {
-  serde_json::json!({
-    "kind": kind.as_str(),
-    "kindLabel": kind.label(),
-    "togglable": kind.togglable(),
-    "id": id,
-    "name": name,
-    "enabled": enabled,
-    "detail": detail,
-  })
+    serde_json::json!({
+      "kind": kind.as_str(),
+      "kindLabel": kind.label(),
+      "togglable": kind.togglable(),
+      "id": id,
+      "name": name,
+      "enabled": enabled,
+      "detail": detail,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+    use super::*;
 
-  #[test]
-  fn plugin_kinds_have_labels() {
-    for k in [
-      PluginKind::UserScript,
-      PluginKind::ContentFilter,
-      PluginKind::WebExtension,
-      PluginKind::McpServer,
-    ] {
-      assert!(!k.as_str().is_empty() && !k.label().is_empty());
+    #[test]
+    fn plugin_kinds_have_labels() {
+        for k in [
+            PluginKind::UserScript,
+            PluginKind::ContentFilter,
+            PluginKind::WebExtension,
+            PluginKind::McpServer,
+        ] {
+            assert!(!k.as_str().is_empty() && !k.label().is_empty());
+        }
+        assert!(!PluginKind::WebExtension.togglable());
+        assert!(PluginKind::UserScript.togglable());
     }
-    assert!(!PluginKind::WebExtension.togglable());
-    assert!(PluginKind::UserScript.togglable());
-  }
 
-  #[test]
-  fn plugin_entry_shape() {
-    let e = entry(
-      PluginKind::UserScript,
-      "1",
-      "测试脚本",
-      true,
-      "匹配 example.com",
-    );
-    assert_eq!(e["kind"], "userscript");
-    assert_eq!(e["enabled"], true);
-    assert_eq!(e["togglable"], true);
-  }
+    #[test]
+    fn plugin_entry_shape() {
+        let e = entry(
+            PluginKind::UserScript,
+            "1",
+            "测试脚本",
+            true,
+            "匹配 example.com",
+        );
+        assert_eq!(e["kind"], "userscript");
+        assert_eq!(e["enabled"], true);
+        assert_eq!(e["togglable"], true);
+    }
 }

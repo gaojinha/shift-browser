@@ -16,7 +16,9 @@ pub(crate) fn front_log(msg: String) {
 
 /// 一键自检：汇总版本/存储/运行时/能力状态（只读，不修改任何状态）
 #[tauri::command]
-pub(crate) async fn selfcheck_cmd(app: tauri::AppHandle) -> Result<crate::selfcheck::SelfCheckReport, String> {
+pub(crate) async fn selfcheck_cmd(
+    app: tauri::AppHandle,
+) -> Result<crate::selfcheck::SelfCheckReport, String> {
     let report = crate::selfcheck::run(&app).await;
     log::info!(
         "[selfcheck] 健康={} 版本项={} 存储项={} 运行时项={} 能力项={}",

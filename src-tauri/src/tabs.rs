@@ -23,8 +23,8 @@ pub(crate) use util::clean_tracking_params;
 // R2-1 拆分（2026-09-24）：纯数据状态机独立成子模块
 #[path = "tabs/model.rs"]
 pub mod model;
-pub use model::{NavState, Tab, TabManager};
 pub(crate) use model::now_ts;
+pub use model::{NavState, Tab, TabManager};
 
 // R2-1 拆分（2026-09-24）：GTK/webview 后端实现独立成子模块
 #[path = "tabs/backend.rs"]

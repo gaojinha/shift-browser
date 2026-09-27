@@ -116,6 +116,13 @@ pub async fn set_setting(db: tauri::State<'_, Db>, key: String, value: String) -
             key
         )));
     }
+    // 内部键仅专用命令读写，通用入口拒绝直写（P1-1 暗键收编：白名单是"存在的键"，内部键是"存在的键"但不可通用写）
+    if crate::contracts::settings::is_internal(&key) {
+        return Err(crate::db::DbError::Other(format!(
+            "设置 {} 为内部键，仅专用命令可写",
+            key
+        )));
+    }
     // 掩码防御：前端把"****xxxx"这类掩码回写会盖掉真实密钥/令牌。
     // 前端读到的凭据值是掩码（get_all_settings 里已 mask），回写黑洞会毁掉真实值。
     // master_key 走上面的 is_sensitive 早拒；凭据键（ai_api_key / opencode_password）
@@ -146,6 +153,9 @@ fn check_deletable(key: &str) -> Result<(), String> {
     }
     if !is_allowed(key) {
         return Err(format!("设置 {} 不在白名单内，拒绝删除", key));
+    }
+    if crate::contracts::settings::is_internal(key) {
+        return Err(format!("设置 {} 为内部键，不允许通过前端删除", key));
     }
     Ok(())
 }
@@ -246,12 +256,13 @@ pub async fn sync_ext_rules(db: tauri::State<'_, Db>) -> DbResult<()> {
         "# ShiftBrowser 自定义请求头（由主程序写入，勿手改）\n# 每行 `Name: Value`，注入到每个出网请求；# 开头为注释\n",
     );
     // 网络层 GPC（开关化）：gpc_header != 'false' 时注入 Sec-GPC: 1
-    let gpc_on = sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'gpc_header'")
-        .fetch_optional(&db.pool)
-        .await?
-        .map(|(v,)| v)
-        .unwrap_or_else(|| "true".to_string())
-        != "false";
+    let gpc_on =
+        sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'gpc_header'")
+            .fetch_optional(&db.pool)
+            .await?
+            .map(|(v,)| v)
+            .unwrap_or_else(|| "true".to_string())
+            != "false";
     if gpc_on {
         hcontent.push_str("Sec-GPC: 1\n");
     }

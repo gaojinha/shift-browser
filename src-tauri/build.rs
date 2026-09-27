@@ -1,6 +1,6 @@
 //! 构建脚本：生成前端常量镜像 `src/constants.ts`
 //!
-//! 常量单一来源在 `src/constants.rs`（自包含、无 crate 依赖），这里 `include!`
+//! 常量单一来源在 `src-tauri/src/constants.rs` + `src-tauri/src/contracts.rs`（自包含、无 crate 依赖），这里 `include!`
 //! 后序列化成 TypeScript，保证前后端常量永远一致——彻底消除"注释写'与后端一致'"
 //! 的人肉同步（历史问题：布局高度、搜索引擎 URL、默认 favicon 都曾多处重复）。
 //!
@@ -22,20 +22,35 @@ fn main() {
 fn generate_ts_constants() {
     let mut s = String::new();
     s.push_str("// 本文件由 src-tauri/build.rs 自动生成，请勿手改！\n");
-    s.push_str("// 单一来源：src-tauri/src/constants.rs\n\n");
+    s.push_str("// 单一来源：src-tauri/src/constants.rs + src-tauri/src/contracts.rs\n\n");
 
     // ---- 布局尺寸 ----
     s.push_str("export const LAYOUT = {\n");
     s.push_str(&format!("  tabBar: {},\n", layout::TAB_BAR_HEIGHT as i32));
-    s.push_str(&format!("  addressBar: {},\n", layout::ADDRESS_BAR_HEIGHT as i32));
-    s.push_str(&format!("  bookmarksBar: {},\n", layout::BOOKMARKS_BAR_HEIGHT as i32));
-    s.push_str(&format!("  statusBar: {},\n", layout::STATUS_BAR_HEIGHT as i32));
-    s.push_str(&format!("  aiPanelWidth: {},\n", layout::AI_PANEL_WIDTH as i32));
+    s.push_str(&format!(
+        "  addressBar: {},\n",
+        layout::ADDRESS_BAR_HEIGHT as i32
+    ));
+    s.push_str(&format!(
+        "  bookmarksBar: {},\n",
+        layout::BOOKMARKS_BAR_HEIGHT as i32
+    ));
+    s.push_str(&format!(
+        "  statusBar: {},\n",
+        layout::STATUS_BAR_HEIGHT as i32
+    ));
+    s.push_str(&format!(
+        "  aiPanelWidth: {},\n",
+        layout::AI_PANEL_WIDTH as i32
+    ));
     s.push_str(&format!(
         "  verticalTabBarWidth: {},\n",
         layout::VERTICAL_TAB_BAR_WIDTH as i32
     ));
-    s.push_str(&format!("  splitLeftRatio: {},\n", layout::SPLIT_LEFT_RATIO));
+    s.push_str(&format!(
+        "  splitLeftRatio: {},\n",
+        layout::SPLIT_LEFT_RATIO
+    ));
     s.push_str(&format!(
         "  contentTopOffset: {},\n",
         layout::CONTENT_TOP_OFFSET as i32
@@ -49,7 +64,9 @@ fn generate_ts_constants() {
     // ---- 搜索引擎（地址栏 / 设置页 / 新标签页共用）----
     s.push_str("export const SEARCH_ENGINES = [\n");
     for (id, label, url) in search::ENGINES {
-        s.push_str(&format!("  {{ id: '{id}', label: '{label}', url: '{url}' }},\n"));
+        s.push_str(&format!(
+            "  {{ id: '{id}', label: '{label}', url: '{url}' }},\n"
+        ));
     }
     s.push_str("] as const\n\n");
     s.push_str("export const SEARCH_URLS: Record<string, string> = Object.fromEntries(\n");
@@ -58,9 +75,18 @@ fn generate_ts_constants() {
 
     // ---- UI 色板 / 默认图标 ----
     s.push_str("export const UI = {\n");
-    s.push_str(&format!("  groupColors: {},\n", ts_str_array(ui::GROUP_COLORS)));
-    s.push_str(&format!("  spaceColors: {},\n", ts_str_array(ui::SPACE_COLORS)));
-    s.push_str(&format!("  groupPalette: {},\n", ts_str_array(ui::GROUP_PALETTE)));
+    s.push_str(&format!(
+        "  groupColors: {},\n",
+        ts_str_array(ui::GROUP_COLORS)
+    ));
+    s.push_str(&format!(
+        "  spaceColors: {},\n",
+        ts_str_array(ui::SPACE_COLORS)
+    ));
+    s.push_str(&format!(
+        "  groupPalette: {},\n",
+        ts_str_array(ui::GROUP_PALETTE)
+    ));
     s.push_str(&format!("  defaultFavicon: '{}',\n", ui::DEFAULT_FAVICON));
     s.push_str("} as const\n\n");
 
@@ -122,14 +148,12 @@ fn generate_ts_constants() {
 
     // ---- AI 行为约定（AI 面板 system 消息；MCP initialize 的 instructions 同源）----
     s.push_str("export const AI_BEHAVIOR_RULES = ");
-    s.push_str(&format!(
-        "{:?}\n",
-        ai_behavior::BEHAVIOR_RULES.replace('\r', "\\r").replace('\n', "\\n")
-    ));
+    s.push_str(&format!("{:?}\n", ai_behavior::BEHAVIOR_RULES));
 
     let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/constants.ts");
     std::fs::write(&out, s).expect("生成 src/constants.ts 失败");
     println!("cargo:rerun-if-changed=src/constants.rs");
+    println!("cargo:rerun-if-changed=src/contracts.rs");
 }
 
 /// `&["a","b"]` → `['a', 'b']`
@@ -144,7 +168,10 @@ fn ts_str_array(items: &[&str]) -> String {
     )
 }
 
-/// 转义字符串里的单引号（描述文案里可能有 `'newtab'` 这类写法）
+/// 转义 TS 单引号字面量（契约生成物走 `'...'`，需覆盖反斜杠/单引号/换行）
 fn escape_single(s: &str) -> String {
-    s.replace('\'', "\\'")
+    s.replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }

@@ -48,15 +48,14 @@ pub(super) async fn list_plugins(app: &AppHandle, _req: &Value) -> Value {
     }
 
     // 内容过滤（广告拦截）
-    let adblock_on = sqlx::query_as::<_, (String,)>(
-        "SELECT value FROM settings WHERE key = 'adblock_enabled'",
-    )
-    .fetch_optional(&db.pool)
-    .await
-    .ok()
-    .flatten()
-    .map(|(v,)| v != "false")
-    .unwrap_or(true);
+    let adblock_on =
+        sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'adblock_enabled'")
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(v,)| v != "false")
+            .unwrap_or(true);
     list.push(entry(
         PluginKind::ContentFilter,
         "adblock",
@@ -124,9 +123,7 @@ pub(super) async fn set_enabled(app: &AppHandle, req: &Value) -> Value {
                          (server_id, server_name, tool_name, arguments, result_summary, success)
                          VALUES (NULL, 'plugin', 'set_enabled', ?, ?, 1)",
             )
-            .bind(
-                serde_json::json!({ "kind": kind, "id": id, "enabled": enabled }).to_string(),
-            )
+            .bind(serde_json::json!({ "kind": kind, "id": id, "enabled": enabled }).to_string())
             .bind(format!("affected={}", r.rows_affected()))
             .execute(&db.pool)
             .await;

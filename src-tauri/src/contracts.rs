@@ -104,7 +104,13 @@ pub mod settings {
         SettingDef { key: "api_readonly", default: "false", kind: Kind::Bool, sensitive: false, desc: "API 只读模式（禁写命令）" },
         SettingDef { key: "api_agent_actions", default: "false", kind: Kind::Bool, sensitive: false, desc: "允许 API 页面交互（click/fill/scroll/dismiss 等，默认关）" },
         SettingDef { key: "api_allowed_ips", default: "", kind: Kind::Str, sensitive: false, desc: "API IP 白名单（逗号分隔 IP/CIDR，如 192.168.1.0/24）" },
+        // ---- 内部键（仅专用命令读写，不开放通用 settings_set 直写）----
+        SettingDef { key: "vault_idle_lock_minutes", default: "15", kind: Kind::Int, sensitive: false, desc: "密码库空闲自动锁定（分钟，0=关）" },
+        SettingDef { key: "todos", default: "[]", kind: Kind::Str, sensitive: false, desc: "启动页待办清单（JSON 数组字符串）" },
     ];
+
+    /// 内部键（仅专用命令读写，通用 settings_set 应拒绝直写）
+    pub const INTERNAL_KEYS: &[&str] = &["vault_idle_lock_minutes", "todos"];
 
     /// 是否为敏感设置键
     pub fn is_sensitive(key: &str) -> bool {
@@ -114,6 +120,11 @@ pub mod settings {
     /// 是否为凭据键（读只给掩码）
     pub fn is_masked(key: &str) -> bool {
         MASKED_KEYS.contains(&key)
+    }
+
+    /// 是否为内部键（仅专用命令读写）
+    pub fn is_internal(key: &str) -> bool {
+        INTERNAL_KEYS.contains(&key)
     }
 
     /// 是否为允许读写的设置键
@@ -228,6 +239,8 @@ pub mod timeout {
     pub const FEED_FETCH_SECS: u64 = 15;
     /// RSS 后台循环间隔（30 分钟）
     pub const FEED_LOOP_SECS: u64 = 30 * 60;
+    /// RSS 首次调度前等待（6 秒，后端专用，不进前端契约）
+    pub const FEED_INITIAL_DELAY_SECS: u64 = 6;
     /// 多端同步请求
     pub const SYNC_REQUEST_SECS: u64 = 20;
     /// 翻译请求
@@ -292,19 +305,149 @@ pub mod shortcuts {
 
     /// 全部快捷键（**唯一来源**）
     pub const SHORTCUTS: &[Shortcut] = &[
-        Shortcut { id: "devtools", key: "f12", ctrl: false, shift: false, gdk_keyval: GDK_F12, gdk_keyval_shift: GDK_F12, gtk_fallback: true, gtk_always: true, desc: "开发者工具" },
-        Shortcut { id: "devtools", key: "i", ctrl: true, shift: true, gdk_keyval: 0x69, gdk_keyval_shift: 0x49, gtk_fallback: true, gtk_always: true, desc: "开发者工具（备用）" },
-        Shortcut { id: "next-tab", key: "tab", ctrl: true, shift: false, gdk_keyval: GDK_TAB, gdk_keyval_shift: GDK_TAB, gtk_fallback: true, gtk_always: false, desc: "下一个标签" },
-        Shortcut { id: "prev-tab", key: "tab", ctrl: true, shift: true, gdk_keyval: GDK_TAB, gdk_keyval_shift: GDK_TAB, gtk_fallback: true, gtk_always: false, desc: "上一个标签" },
-        Shortcut { id: "new-tab", key: "t", ctrl: true, shift: false, gdk_keyval: 0x74, gdk_keyval_shift: 0x54, gtk_fallback: true, gtk_always: false, desc: "新建标签" },
-        Shortcut { id: "translate-panel", key: "t", ctrl: true, shift: true, gdk_keyval: 0x74, gdk_keyval_shift: 0x54, gtk_fallback: true, gtk_always: false, desc: "翻译面板" },
-        Shortcut { id: "close-tab", key: "w", ctrl: true, shift: false, gdk_keyval: 0x77, gdk_keyval_shift: 0x57, gtk_fallback: true, gtk_always: false, desc: "关闭标签" },
-        Shortcut { id: "reload", key: "r", ctrl: true, shift: false, gdk_keyval: 0x72, gdk_keyval_shift: 0x52, gtk_fallback: true, gtk_always: false, desc: "刷新" },
-        Shortcut { id: "focus-address", key: "l", ctrl: true, shift: false, gdk_keyval: 0x6C, gdk_keyval_shift: 0x4C, gtk_fallback: true, gtk_always: false, desc: "聚焦地址栏" },
-        Shortcut { id: "history", key: "h", ctrl: true, shift: false, gdk_keyval: 0x48, gdk_keyval_shift: 0x68, gtk_fallback: true, gtk_always: false, desc: "历史记录" },
-        Shortcut { id: "command-palette", key: "k", ctrl: true, shift: false, gdk_keyval: 0x4B, gdk_keyval_shift: 0x6B, gtk_fallback: true, gtk_always: false, desc: "命令栏" },
-        Shortcut { id: "sessions", key: "s", ctrl: true, shift: true, gdk_keyval: 0x73, gdk_keyval_shift: 0x53, gtk_fallback: true, gtk_always: false, desc: "会话管理" },
-        Shortcut { id: "lock-vault", key: "l", ctrl: true, shift: true, gdk_keyval: 0x6C, gdk_keyval_shift: 0x4C, gtk_fallback: true, gtk_always: false, desc: "立即锁定密码库" },
+        Shortcut {
+            id: "devtools",
+            key: "f12",
+            ctrl: false,
+            shift: false,
+            gdk_keyval: GDK_F12,
+            gdk_keyval_shift: GDK_F12,
+            gtk_fallback: true,
+            gtk_always: true,
+            desc: "开发者工具",
+        },
+        Shortcut {
+            id: "devtools",
+            key: "i",
+            ctrl: true,
+            shift: true,
+            gdk_keyval: 0x69,
+            gdk_keyval_shift: 0x49,
+            gtk_fallback: true,
+            gtk_always: true,
+            desc: "开发者工具（备用）",
+        },
+        Shortcut {
+            id: "next-tab",
+            key: "tab",
+            ctrl: true,
+            shift: false,
+            gdk_keyval: GDK_TAB,
+            gdk_keyval_shift: GDK_TAB,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "下一个标签",
+        },
+        Shortcut {
+            id: "prev-tab",
+            key: "tab",
+            ctrl: true,
+            shift: true,
+            gdk_keyval: GDK_TAB,
+            gdk_keyval_shift: GDK_TAB,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "上一个标签",
+        },
+        Shortcut {
+            id: "new-tab",
+            key: "t",
+            ctrl: true,
+            shift: false,
+            gdk_keyval: 0x74,
+            gdk_keyval_shift: 0x54,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "新建标签",
+        },
+        Shortcut {
+            id: "translate-panel",
+            key: "t",
+            ctrl: true,
+            shift: true,
+            gdk_keyval: 0x74,
+            gdk_keyval_shift: 0x54,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "翻译面板",
+        },
+        Shortcut {
+            id: "close-tab",
+            key: "w",
+            ctrl: true,
+            shift: false,
+            gdk_keyval: 0x77,
+            gdk_keyval_shift: 0x57,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "关闭标签",
+        },
+        Shortcut {
+            id: "reload",
+            key: "r",
+            ctrl: true,
+            shift: false,
+            gdk_keyval: 0x72,
+            gdk_keyval_shift: 0x52,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "刷新",
+        },
+        Shortcut {
+            id: "focus-address",
+            key: "l",
+            ctrl: true,
+            shift: false,
+            gdk_keyval: 0x6C,
+            gdk_keyval_shift: 0x4C,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "聚焦地址栏",
+        },
+        Shortcut {
+            id: "history",
+            key: "h",
+            ctrl: true,
+            shift: false,
+            gdk_keyval: 0x68,
+            gdk_keyval_shift: 0x48,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "历史记录",
+        },
+        Shortcut {
+            id: "command-palette",
+            key: "k",
+            ctrl: true,
+            shift: false,
+            gdk_keyval: 0x6B,
+            gdk_keyval_shift: 0x4B,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "命令栏",
+        },
+        Shortcut {
+            id: "sessions",
+            key: "s",
+            ctrl: true,
+            shift: true,
+            gdk_keyval: 0x73,
+            gdk_keyval_shift: 0x53,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "会话管理",
+        },
+        Shortcut {
+            id: "lock-vault",
+            key: "l",
+            ctrl: true,
+            shift: true,
+            gdk_keyval: 0x6C,
+            gdk_keyval_shift: 0x4C,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "立即锁定密码库",
+        },
     ];
 
     /// 按 id 查找（取第一个匹配；同 id 多条为同一动作的不同按键）
@@ -344,17 +487,56 @@ pub mod skills {
     }
 
     pub const SKILLS: &[Skill] = &[
-        Skill { id: "summarize_page", name: "总结当前页", icon: "\u{1F4C4}", desc: "提炼页面要点，长文 30 秒看懂", uses: &["active_tab"] },
-        Skill { id: "translate_page", name: "翻译当前页", icon: "\u{1F310}", desc: "整页翻译为中文", uses: &["active_tab"] },
-        Skill { id: "explain_page", name: "解释当前页", icon: "\u{1F4A1}", desc: "用大白话讲解专业内容", uses: &["active_tab"] },
-        Skill { id: "page_qa", name: "页面问答", icon: "\u{1F4AC}", desc: "基于当前页内容提问", uses: &["active_tab"] },
+        Skill {
+            id: "summarize_page",
+            name: "总结当前页",
+            icon: "\u{1F4C4}",
+            desc: "提炼页面要点，长文 30 秒看懂",
+            uses: &["active_tab"],
+        },
+        Skill {
+            id: "translate_page",
+            name: "翻译当前页",
+            icon: "\u{1F310}",
+            desc: "整页翻译为中文",
+            uses: &["active_tab"],
+        },
+        Skill {
+            id: "explain_page",
+            name: "解释当前页",
+            icon: "\u{1F4A1}",
+            desc: "用大白话讲解专业内容",
+            uses: &["active_tab"],
+        },
+        Skill {
+            id: "page_qa",
+            name: "页面问答",
+            icon: "\u{1F4AC}",
+            desc: "基于当前页内容提问",
+            uses: &["active_tab"],
+        },
     ];
 
     /// (id, name, icon, desc) —— 供 build.rs 生成前端 `SKILLS`
     pub const ALL: &[(&str, &str, &str, &str)] = &[
-        ("summarize_page", "总结当前页", "\u{1F4C4}", "提炼页面要点，长文 30 秒看懂"),
-        ("translate_page", "翻译当前页", "\u{1F310}", "整页翻译为中文"),
-        ("explain_page", "解释当前页", "\u{1F4A1}", "用大白话讲解专业内容"),
+        (
+            "summarize_page",
+            "总结当前页",
+            "\u{1F4C4}",
+            "提炼页面要点，长文 30 秒看懂",
+        ),
+        (
+            "translate_page",
+            "翻译当前页",
+            "\u{1F310}",
+            "整页翻译为中文",
+        ),
+        (
+            "explain_page",
+            "解释当前页",
+            "\u{1F4A1}",
+            "用大白话讲解专业内容",
+        ),
         ("page_qa", "页面问答", "\u{1F4AC}", "基于当前页内容提问"),
     ];
 

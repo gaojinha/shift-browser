@@ -63,7 +63,10 @@ pub async fn warmup(pool: &SqlitePool) {
     // 占位符数量随 WHITELIST 动态生成，不硬编码 bind 数量——
     // 增删白名单键不会越界 panic，也不会漏预热。
     let placeholders = vec!["?"; WHITELIST.len()].join(", ");
-    let sql = format!("SELECT key, value FROM settings WHERE key IN ({})", placeholders);
+    let sql = format!(
+        "SELECT key, value FROM settings WHERE key IN ({})",
+        placeholders
+    );
     let mut query = sqlx::query_as::<_, (String, String)>(&sql);
     for k in WHITELIST {
         query = query.bind(*k);
@@ -77,7 +80,11 @@ pub async fn warmup(pool: &SqlitePool) {
     if let Ok(mut c) = cache().write() {
         *c = map;
     }
-    log::info!("[settings-cache] 白名单预热完成：{} 项（共 {})", n, WHITELIST.len());
+    log::info!(
+        "[settings-cache] 白名单预热完成：{} 项（共 {})",
+        n,
+        WHITELIST.len()
+    );
 }
 
 /// 读设置（白名单 → 缓存优先；非白名单 → 直接回源不缓存）

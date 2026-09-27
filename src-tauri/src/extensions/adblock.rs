@@ -180,7 +180,9 @@ pub async fn collect_enabled_items(
         }
     }
     // WebMCP polyfill 试验开关（阶段 1.5，默认关）
-    let webmcp_on = take("webmcp_polyfill").map(|v| v == "true").unwrap_or(false);
+    let webmcp_on = take("webmcp_polyfill")
+        .map(|v| v == "true")
+        .unwrap_or(false);
     if webmcp_on {
         log::info!("[extensions] WebMCP polyfill 试验已开启");
     }

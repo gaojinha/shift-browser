@@ -2,7 +2,8 @@
 // 对接 AGNES AI（Rust ai_chat_stream 流式命令，OpenAI 兼容）
 import { defineStore } from 'pinia'
 import { invoke, Channel } from '@tauri-apps/api/core'
-import { errText, invokeOk } from '../utils/invoke'
+import { invokeOk } from '../utils/invoke'
+import { shortcutSummarize, shortcutExplain, humanizeError } from '../frontend-prompts'
 import { AI_BEHAVIOR_RULES } from '../constants'
 import { useSettingsStore } from './settings'
 import type { Snapshot } from '../types/content'
@@ -268,9 +269,9 @@ ${AI_BEHAVIOR_RULES}`
             this.loading = false
             this.streamingId = null
           } else if (event.type === 'error') {
-            // 用户主动停止不算错误
+            // 用户主动停止不算错误；其余翻成人话
             if (event.message !== '已停止生成') {
-              this.error = event.message || 'AI 请求失败'
+              this.error = humanizeError(event.message || 'AI 请求失败')
             }
             this.dropEmptyAssistant()
             this.loading = false
@@ -291,7 +292,7 @@ ${AI_BEHAVIOR_RULES}`
           apiKey: realKey || undefined,
         })
       } catch (e) {
-        this.error = errText(e)
+        this.error = humanizeError(e)
         this.dropEmptyAssistant()
         this.loading = false
         this.streamingId = null
@@ -325,9 +326,7 @@ ${AI_BEHAVIOR_RULES}`
         this.messages.push({ role: 'assistant', content: '当前没有可分析的页面。' })
         return
       }
-      await this.sendMessage(
-        `请总结当前页面「${ctx.title}」（${ctx.url}）的主要内容，用 5 条以内要点概括。`,
-      )
+      await this.sendMessage(shortcutSummarize(ctx.title, ctx.url))
     },
 
     /**
@@ -340,7 +339,7 @@ ${AI_BEHAVIOR_RULES}`
         this.messages.push({ role: 'assistant', content: '当前没有可分析的页面。' })
         return
       }
-      const display = `请总结当前页面「${ctx.title}」（${ctx.url}）的主要内容，用 5 条以内要点概括。`
+      const display = shortcutSummarize(ctx.title, ctx.url)
       try {
         const r = await invokeOk<{ prompt: string }>('content_summary_prompt', {
           url: ctx.url,
@@ -853,9 +852,28 @@ ${AI_BEHAVIOR_RULES}`
         this.messages.push({ role: 'assistant', content: '当前没有可解释的页面。' })
         return
       }
-      await this.sendMessage(
-        `请用通俗易懂的方式解释当前页面「${ctx.title}」（${ctx.url}）讲的是什么、对用户有什么价值。`,
-      )
+      await this.sendMessage(shortcutExplain(ctx.title, ctx.url))
+    },
+
+    /**
+     * 快捷操作：带上下文的解释（三级降级组装，失败回退老一句）。
+     * 与 summarizeWithContext 同路：显示存原文，模型侧用组装提示词。
+     */
+    async explainWithContext(tabId?: string) {
+      const ctx = this.pageContext
+      if (!ctx) {
+        this.messages.push({ role: 'assistant', content: '当前没有可解释的页面。' })
+        return
+      }
+      const display = shortcutExplain(ctx.title, ctx.url)
+      try {
+        const built = await this.buildQaPrompt(display, tabId)
+        if (!built) throw new Error('无可用上下文')
+        this.qaSource = built.source
+        await this.sendMessage(display, built.prompt)
+      } catch {
+        await this.explainPage()
+      }
     },
 
     // ── 网页随手问（P2/P3）：本机 opencode ──
@@ -869,7 +887,7 @@ ${AI_BEHAVIOR_RULES}`
         this.webqaProbe = await invokeOk<OpencodeProbe>('opencode_probe')
       } catch (e) {
         this.webqaProbe = null
-        this.error = errText(e)
+        this.error = humanizeError(e)
       }
     },
 
@@ -921,7 +939,7 @@ ${AI_BEHAVIOR_RULES}`
         }
       } catch (e) {
         this.selection = null
-        this.error = errText(e)
+        this.error = humanizeError(e)
       }
     },
 
@@ -1022,7 +1040,7 @@ ${AI_BEHAVIOR_RULES}`
         })
         return { prompt: r.prompt, source: ctx.source, truncated: !!r.truncated }
       } catch (e) {
-        this.error = errText(e)
+        this.error = humanizeError(e)
         return null
       }
     },
@@ -1069,7 +1087,7 @@ ${AI_BEHAVIOR_RULES}`
           this.streamingId = null
         } else if (event.type === 'error') {
           if (event.message !== '已停止生成') {
-            this.error = event.message || '本机 opencode 请求失败'
+            this.error = humanizeError(event.message || '本机 opencode 请求失败')
           }
           this.dropEmptyAssistant()
           this.loading = false
@@ -1090,7 +1108,7 @@ ${AI_BEHAVIOR_RULES}`
           onEvent: channel,
         })
       } catch (e) {
-        this.error = errText(e)
+        this.error = humanizeError(e)
         this.dropEmptyAssistant()
         this.loading = false
         this.streamingId = null

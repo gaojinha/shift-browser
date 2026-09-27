@@ -63,7 +63,11 @@ pub(super) fn handle_page_load(
             host
         };
 
-        log::info!("[tabs] page_load_finished: tab={} host={}", tab_id, crate::redact_url(url.as_ref()));
+        log::info!(
+            "[tabs] page_load_finished: tab={} host={}",
+            tab_id,
+            crate::redact_url(url.as_ref())
+        );
 
         // 证书监测（P3 · 2026-09-22）：HTTPS 页面加载完成后采集并记录证书快照，
         // 指纹变更/校验失败自动落事件（延迟 700ms 等 TLS 信息就绪）

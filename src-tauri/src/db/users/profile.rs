@@ -2,9 +2,9 @@
 
 use crate::db::Db;
 
-use super::*;
 use super::security::*;
 use super::session::load_user;
+use super::*;
 
 /// 当前登录用户（未登录返回 ok=false，msg=未登录）
 #[tauri::command]
@@ -18,7 +18,6 @@ pub async fn user_get_current(db: tauri::State<'_, Db>) -> Result<UserResult, St
         None => Ok(UserResult::err("未登录")),
     }
 }
-
 
 /// 校验/清洗头像字段（防 HTML 注入，2026-09-19 安全修复）
 ///
@@ -49,7 +48,6 @@ pub(crate) fn sanitize_avatar(raw: &str) -> Result<String, String> {
         Ok(a.chars().take(20).collect())
     }
 }
-
 
 /// 更新个人资料（昵称/头像/签名）
 #[tauri::command]
@@ -98,7 +96,6 @@ pub async fn user_update_profile(
     }
 }
 
-
 /// 修改密码
 #[tauri::command]
 pub async fn user_change_password(
@@ -140,7 +137,6 @@ pub async fn user_change_password(
     log::info!("[users] 用户密码已修改");
     Ok(UserResult::ok("密码修改成功"))
 }
-
 
 /// 删除账号（需密码确认）
 #[tauri::command]
@@ -185,7 +181,6 @@ pub async fn user_delete(
     }))
 }
 
-
 /// 更新偏好（跟账号走，同时写入 settings 生效）
 #[tauri::command]
 pub async fn user_update_prefs(
@@ -227,5 +222,3 @@ pub async fn user_update_prefs(
         None => Ok(UserResult::err("保存失败")),
     }
 }
-
-

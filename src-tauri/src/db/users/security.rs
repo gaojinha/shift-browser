@@ -23,7 +23,6 @@ pub(crate) const LEGACY_PBKDF2_ITER: u32 = 100_000;
 /// 当前算法标记（写入 users.hash_algo）
 pub(crate) const HASH_ALGO_CURRENT: &str = "pbkdf2-sha512-210000";
 
-
 pub(crate) fn hash_password_with_iter(password: &str, salt: &str, iter: u32) -> String {
     use pbkdf2::pbkdf2_hmac;
     use sha2::Sha512;
@@ -32,12 +31,10 @@ pub(crate) fn hash_password_with_iter(password: &str, salt: &str, iter: u32) -> 
     hex::encode(out)
 }
 
-
 /// 按当前参数计算哈希（新注册/改密码用）
 pub(crate) fn hash_password(password: &str, salt: &str) -> String {
     hash_password_with_iter(password, salt, PBKDF2_ITER)
 }
-
 
 /// 从 hash_algo 解析校验所需迭代次数（未知值按历史参数兜底）
 pub(crate) fn iterations_for_algo(algo: &str) -> u32 {
@@ -46,14 +43,12 @@ pub(crate) fn iterations_for_algo(algo: &str) -> u32 {
         .unwrap_or(LEGACY_PBKDF2_ITER)
 }
 
-
 pub(crate) fn generate_salt() -> String {
     use rand::RngCore;
     let mut salt = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut salt);
     hex::encode(salt)
 }
-
 
 pub(crate) fn valid_username(name: &str) -> bool {
     let len = name.chars().count();
@@ -63,14 +58,11 @@ pub(crate) fn valid_username(name: &str) -> bool {
             .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
 }
 
-
 pub(crate) static LOGIN_GUARD: Mutex<Option<HashMap<String, (u32, u64)>>> = Mutex::new(None);
-
 
 pub(crate) const MAX_LOGIN_FAILURES: u32 = 5;
 
 pub(crate) const LOCK_MS: u64 = 30_000;
-
 
 pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -79,13 +71,11 @@ pub(crate) fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-
 pub(crate) fn guard_get(name: &str) -> (u32, u64) {
     let mut g = LOGIN_GUARD.lock().unwrap_or_else(|p| p.into_inner());
     let map = g.get_or_insert_with(HashMap::new);
     map.get(name).copied().unwrap_or((0, 0))
 }
-
 
 pub(crate) fn guard_record_failure(name: &str) {
     let mut g = LOGIN_GUARD.lock().unwrap_or_else(|p| p.into_inner());
@@ -99,7 +89,6 @@ pub(crate) fn guard_record_failure(name: &str) {
     }
 }
 
-
 pub(crate) fn guard_clear(name: &str) {
     let mut g = LOGIN_GUARD.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(map) = g.as_mut() {
@@ -108,7 +97,6 @@ pub(crate) fn guard_clear(name: &str) {
 }
 
 // ===== 数据库辅助 =====
-
 
 pub(crate) fn today_str() -> String {
     // 简单 YYYY-MM-DD（UTC 近似，够文件名用）
@@ -120,7 +108,6 @@ pub(crate) fn today_str() -> String {
     let (y, m, d) = civil_from_days(days as i64);
     format!("{:04}-{:02}-{:02}", y, m, d)
 }
-
 
 /// 天数 → 公历日期（Howard Hinnant 算法）
 pub(crate) fn civil_from_days(z: i64) -> (i64, i64, i64) {
@@ -135,5 +122,3 @@ pub(crate) fn civil_from_days(z: i64) -> (i64, i64, i64) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     (if m <= 2 { y + 1 } else { y }, (m as i64), (d as i64))
 }
-
-

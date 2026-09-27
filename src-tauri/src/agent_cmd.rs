@@ -68,7 +68,11 @@ pub fn agent_confirm_action(request_id: String, approved: bool) -> CommandResult
         .remove(&request_id)
         .ok_or_else(|| AppError::validation("确认请求不存在或已过期"))?;
     let _ = tx.send(approved);
-    log::info!("[agent] 用户确认动作: request={} approved={}", request_id, approved);
+    log::info!(
+        "[agent] 用户确认动作: request={} approved={}",
+        request_id,
+        approved
+    );
     Ok(())
 }
 
@@ -92,9 +96,19 @@ pub async fn request_multi_step_action(
             "steps": plan.steps.len(),
         }),
     );
-    log::info!("[agent] 请求多步动作确认: {} ({} 步, {})", description, plan.steps.len(), request_id);
+    log::info!(
+        "[agent] 请求多步动作确认: {} ({} 步, {})",
+        description,
+        plan.steps.len(),
+        request_id
+    );
 
-    match tokio::time::timeout(std::time::Duration::from_secs(crate::contracts::timeout::AGENT_STEP_SECS), rx).await {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(crate::contracts::timeout::AGENT_STEP_SECS),
+        rx,
+    )
+    .await
+    {
         Ok(Ok(approved)) => {
             log::info!("[agent] 多步动作确认结果: approved={}", approved);
             Ok(approved)
@@ -116,7 +130,11 @@ pub fn agent_confirm_multi_step(request_id: String, approved: bool) -> CommandRe
         .remove(&request_id)
         .ok_or_else(|| AppError::validation("多步确认请求不存在或已过期"))?;
     let _ = tx.send(approved);
-    log::info!("[agent] 用户确认多步动作: request={} approved={}", request_id, approved);
+    log::info!(
+        "[agent] 用户确认多步动作: request={} approved={}",
+        request_id,
+        approved
+    );
     Ok(())
 }
 
@@ -207,7 +225,11 @@ pub async fn agent_action_replay_or_retry(
         Ok(txt) => crate::engine::agent::record_action(&params, txt),
         Err(e) => crate::engine::agent::record_action(&params, &format!("失败: {}", e)),
     };
-    let verb = if retry_last.unwrap_or(false) { "重试" } else { "回放" };
+    let verb = if retry_last.unwrap_or(false) {
+        "重试"
+    } else {
+        "回放"
+    };
     match r {
         Ok(txt) => Ok(format!("{}第 {} 步（{}）→ {}", verb, step_no, action, txt)),
         Err(e) => Err(AppError::internal(format!(
@@ -247,8 +269,10 @@ pub async fn execute_agent_action(
     // 后端动作（不依赖页面 JS）
     match action {
         "wait" => {
-            tokio::time::sleep(std::time::Duration::from_millis(params.ms.unwrap_or(500).min(10000)))
-                .await;
+            tokio::time::sleep(std::time::Duration::from_millis(
+                params.ms.unwrap_or(500).min(10000),
+            ))
+            .await;
             return Ok(format!("已等待 {} 毫秒", params.ms.unwrap_or(500)));
         }
         "navigate" => {
@@ -280,11 +304,7 @@ pub async fn execute_agent_action(
                         .await
                         .map_err(|_| format!("域名解析失败，已拒绝：{host}"))?
                         .collect();
-                crate::ai::check_resolved_ips(
-                    &host,
-                    sock.iter().map(|s| s.ip()),
-                    port,
-                )?;
+                crate::ai::check_resolved_ips(&host, sock.iter().map(|s| s.ip()), port)?;
             }
             wv.navigate(parsed)
                 .map_err(|e| format!("导航失败: {}", e))?;
@@ -334,7 +354,9 @@ pub async fn execute_agent_action(
     .map_err(|e| format!("动作执行失败: {}", e))?;
 
     let raw = rx
-        .recv_timeout(std::time::Duration::from_secs(crate::contracts::timeout::WEBVIEW_IPC_SECS))
+        .recv_timeout(std::time::Duration::from_secs(
+            crate::contracts::timeout::WEBVIEW_IPC_SECS,
+        ))
         .map_err(|e| format!("动作执行超时: {}", e))?
         .map_err(|e| format!("页面脚本执行失败: {}", e))?;
     crate::engine::agent::parse_js_result(&raw)

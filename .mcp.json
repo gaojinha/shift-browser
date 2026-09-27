@@ -7,6 +7,10 @@
     "playwright": {
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest"]
+    },
+    "shift-browser": {
+      "command": "/home/gao/.local/bin/shift-browser-mcp",
+      "args": []
     }
   }
 }

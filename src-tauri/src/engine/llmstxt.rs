@@ -100,7 +100,11 @@ pub fn parse_host_for_llms(url: &str) -> Option<String> {
     let rest = url
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))?;
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("").to_lowercase();
+    let host = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("")
+        .to_lowercase();
     if host.is_empty() || host.contains(' ') {
         return None;
     }
@@ -113,8 +117,14 @@ mod tests {
 
     #[test]
     fn parse_host_llms() {
-        assert_eq!(parse_host_for_llms("https://example.com/page?a=1").as_deref(), Some("example.com"));
-        assert_eq!(parse_host_for_llms("http://sub.Example.ORG/x").as_deref(), Some("sub.example.org"));
+        assert_eq!(
+            parse_host_for_llms("https://example.com/page?a=1").as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            parse_host_for_llms("http://sub.Example.ORG/x").as_deref(),
+            Some("sub.example.org")
+        );
         assert_eq!(parse_host_for_llms("ftp://example.com"), None);
         assert_eq!(parse_host_for_llms("not a url"), None);
     }
@@ -127,7 +137,13 @@ mod tests {
             let mut e = c.entries.lock().unwrap();
             e.insert(
                 "example.com".into(),
-                CacheEntry { summary: Some(LlmsSummary { host: "example.com".into(), summary: "s".into() }), fetched_at: now },
+                CacheEntry {
+                    summary: Some(LlmsSummary {
+                        host: "example.com".into(),
+                        summary: "s".into(),
+                    }),
+                    fetched_at: now,
+                },
             );
         }
         // 未过期读得到
@@ -139,7 +155,13 @@ mod tests {
         {
             let mut e = c.entries.lock().unwrap();
             let old = Instant::now() - Duration::from_secs(600);
-            e.insert("gone.com".into(), CacheEntry { summary: None, fetched_at: old });
+            e.insert(
+                "gone.com".into(),
+                CacheEntry {
+                    summary: None,
+                    fetched_at: old,
+                },
+            );
         }
         c.purge_expired();
         {
@@ -205,19 +227,27 @@ pub async fn read_llmstxt_impl(url: &str) -> Option<crate::engine::llmstxt::Llms
         // 3s 短超时静默出网（铁律：llms.txt 是轻量线索，Fail→None 不拖快照）
         let cli = reqwest::Client::builder()
             .timeout(FETCH_TIMEOUT)
-            .build().ok()?;
+            .build()
+            .ok()?;
         let resp = cli.get(url).send().await.ok()?;
-        if !resp.status().is_success() { return None; }
+        if !resp.status().is_success() {
+            return None;
+        }
         let body = resp.text().await.ok()?;
         let body_text = body.chars().take(MAX_SUMMARY_CHARS).collect::<String>();
-        crate::engine::llmstxt::LlmsSummary { host: host.clone(), summary: body_text }
+        crate::engine::llmstxt::LlmsSummary {
+            host: host.clone(),
+            summary: body_text,
+        }
     };
     if let Ok(mut guard) = cache.entries.lock() {
-        guard.insert(host.clone(), CacheEntry {
-            summary: Some(summary.clone()),
-            fetched_at: now,
-        });
+        guard.insert(
+            host.clone(),
+            CacheEntry {
+                summary: Some(summary.clone()),
+                fetched_at: now,
+            },
+        );
     }
     Some(summary)
 }
-

@@ -6,7 +6,7 @@ use serde_json::json;
 use super::core::{tool, Risk, ToolDef};
 
 pub(super) fn defs() -> Vec<ToolDef> {
-  vec![
+    vec![
     // ===== 状态与数据查询（不改变浏览器状态）=====
     tool(
       "status",

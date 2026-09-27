@@ -27,10 +27,8 @@ pub(crate) fn is_locked() -> bool {
 pub(crate) fn show_startup_lock(app: &tauri::App, db_state: &crate::db::Db) -> bool {
     let lock_enabled: bool = {
         let row = tauri::async_runtime::block_on(
-            sqlx::query_as::<_, (String,)>(
-                "SELECT value FROM settings WHERE key = 'lock_enabled'",
-            )
-            .fetch_optional(&db_state.pool),
+            sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'lock_enabled'")
+                .fetch_optional(&db_state.pool),
         )
         .ok()
         .flatten();
@@ -45,9 +43,7 @@ pub(crate) fn show_startup_lock(app: &tauri::App, db_state: &crate::db::Db) -> b
     // 标记锁屏中：前端 is_locked 查到 true 后静默等待 app-unlocked，
     // 不再反复重试建标签（否则弹"创建标签页失败"toast）
     LOCKED.store(true, std::sync::atomic::Ordering::SeqCst);
-    let parent_win = app
-        .get_window("main")
-        .and_then(|w| w.gtk_window().ok());
+    let parent_win = app.get_window("main").and_then(|w| w.gtk_window().ok());
 
     // 跨轮状态：上一轮失败提示（红字回显）+ 用户名回填（免得每次重输）
     let mut err_msg = String::new();
@@ -137,7 +133,8 @@ pub(crate) fn show_startup_lock(app: &tauri::App, db_state: &crate::db::Db) -> b
                 log::info!("[ShiftBrowser] 启动锁屏验证通过: {}", username);
                 crate::db::users::guard_clear(username.trim());
                 // 验证通过后清除会话：启动锁屏只验证身份，不自动登录个人中心
-                if let Err(e) = tauri::async_runtime::block_on(crate::db::users::clear_session(db_state))
+                if let Err(e) =
+                    tauri::async_runtime::block_on(crate::db::users::clear_session(db_state))
                 {
                     log::warn!("[ShiftBrowser] 启动锁屏验证通过但会话清除失败: {}", e);
                 }
@@ -159,8 +156,7 @@ pub(crate) fn show_startup_lock(app: &tauri::App, db_state: &crate::db::Db) -> b
                 log::warn!("[ShiftBrowser] 启动锁屏密码错误，重新输入");
                 // 记一次失败：5 次后锁 30 秒（与登录同口径），并把剩余次数告诉用户
                 crate::db::users::guard_record_failure(username.trim());
-                let (fails, locked_until) =
-                    crate::db::users::guard_get(username.trim());
+                let (fails, locked_until) = crate::db::users::guard_get(username.trim());
                 if locked_until > crate::db::users::now_ms() {
                     err_msg = "密码错误次数过多，已锁定 30 秒".to_string();
                 } else {

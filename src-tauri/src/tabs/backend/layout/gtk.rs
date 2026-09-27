@@ -11,32 +11,32 @@ use crate::engine::layout::CONTENT_TOP_OFFSET;
 use crate::tabs::model::TabManager;
 use crate::tabs::util::sanitize_filename;
 
+use crate::engine::webview::WebViewBackend;
 use gtk::glib::translate::ToGlibPtr;
 use gtk::prelude::*;
 #[cfg(target_os = "linux")]
 use webkit2gtk::{DownloadExt, URIRequestExt, URIResponseExt, WebContextExt, WebViewExt};
-use crate::engine::webview::WebViewBackend;
 
 use super::super::{unique_download_path, UI_FOCUSED};
 
 impl TabManager {
-  /// Linux/GTK 布局修复：把 child webview reparent 到 GtkFixed 容器，定位到内容区
-  /// 结构：窗口 vbox → [GtkFixed] → 主 webview(0,0 全屏) + child webview(0,82 内容区)
-  /// with_webview 闭包在主线程执行；gtk 对象在闭包内创建/查找，不跨线程捕获
-  #[cfg(target_os = "linux")]
-  pub(crate) fn fix_gtk_layout(
-    child: &tauri::Webview,
-    w: f64,
-    h: f64,
-    db_pool: sqlx::SqlitePool,
-    app: AppHandle,
-  ) -> Result<(), String> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let child = child.clone();
-    // O1-b：逐跳 SSRF 守卫需按标签来源（origin=ai）判定，先取本 webview 的标签 id
-    let guard_tab_id = child.label().trim_start_matches("tab-").to_string();
+    /// Linux/GTK 布局修复：把 child webview reparent 到 GtkFixed 容器，定位到内容区
+    /// 结构：窗口 vbox → [GtkFixed] → 主 webview(0,0 全屏) + child webview(0,82 内容区)
+    /// with_webview 闭包在主线程执行；gtk 对象在闭包内创建/查找，不跨线程捕获
+    #[cfg(target_os = "linux")]
+    pub(crate) fn fix_gtk_layout(
+        child: &tauri::Webview,
+        w: f64,
+        h: f64,
+        db_pool: sqlx::SqlitePool,
+        app: AppHandle,
+    ) -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let child = child.clone();
+        // O1-b：逐跳 SSRF 守卫需按标签来源（origin=ai）判定，先取本 webview 的标签 id
+        let guard_tab_id = child.label().trim_start_matches("tab-").to_string();
 
-    child
+        child
       .with_webview(move |pwv| {
         let child_gtk = pwv.inner();
         // 从 parent 拿 vbox（不调 window 方法，避免主线程死锁）
@@ -318,7 +318,7 @@ impl TabManager {
       })
       .map_err(|e| format!("child webview 句柄获取失败: {}", e))?;
 
-    rx.recv().map_err(|e| format!("主线程布局失败: {}", e))?;
-    Ok(())
-  }
+        rx.recv().map_err(|e| format!("主线程布局失败: {}", e))?;
+        Ok(())
+    }
 }

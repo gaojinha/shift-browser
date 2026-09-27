@@ -23,7 +23,14 @@ pub const AUDIT_KEEP: i64 = 5000;
 
 /// 记一条审计（尽力而为：失败只记日志，绝不打断主流程）。
 /// 写入与裁剪同一事务：只保留最近 AUDIT_KEEP 条。
-pub async fn record(pool: &SqlitePool, cmd: &str, url: &str, tab_id: &str, ok: bool, error_code: &str) {
+pub async fn record(
+    pool: &SqlitePool,
+    cmd: &str,
+    url: &str,
+    tab_id: &str,
+    ok: bool,
+    error_code: &str,
+) {
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -71,16 +78,18 @@ pub async fn recent(pool: &SqlitePool, limit: i64) -> Result<Vec<AiAuditEntry>, 
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, ts, cmd, url, tab_id, ok, error_code, origin)| AiAuditEntry {
-            id,
-            ts,
-            cmd,
-            url,
-            tab_id,
-            ok: ok != 0,
-            error_code,
-            origin,
-        })
+        .map(
+            |(id, ts, cmd, url, tab_id, ok, error_code, origin)| AiAuditEntry {
+                id,
+                ts,
+                cmd,
+                url,
+                tab_id,
+                ok: ok != 0,
+                error_code,
+                origin,
+            },
+        )
         .collect())
 }
 
@@ -109,8 +118,24 @@ mod tests {
     async fn record_and_recent_roundtrip_no_content() {
         let dir = tempfile::tempdir().unwrap();
         let pool = test_pool(dir.path()).await;
-        record(&pool, "open_and_read", "https://example.com/a", "t1", true, "").await;
-        record(&pool, "read_page", "https://example.com/b", "t1", false, "E_VALIDATION").await;
+        record(
+            &pool,
+            "open_and_read",
+            "https://example.com/a",
+            "t1",
+            true,
+            "",
+        )
+        .await;
+        record(
+            &pool,
+            "read_page",
+            "https://example.com/b",
+            "t1",
+            false,
+            "E_VALIDATION",
+        )
+        .await;
         let items = recent(&pool, 10).await.unwrap();
         assert_eq!(items.len(), 2);
         // 倒序：最后记的在最前
@@ -127,7 +152,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let pool = test_pool(dir.path()).await;
         for i in 0..5 {
-            record(&pool, "read_status", &format!("https://x/{i}"), "", true, "").await;
+            record(
+                &pool,
+                "read_status",
+                &format!("https://x/{i}"),
+                "",
+                true,
+                "",
+            )
+            .await;
         }
         assert_eq!(recent(&pool, 3).await.unwrap().len(), 3);
     }
@@ -151,10 +184,11 @@ mod tests {
             .unwrap();
         assert_eq!(count, AUDIT_KEEP);
         // 留的是最新的
-        let newest: String = sqlx::query_scalar("SELECT url FROM ai_audit ORDER BY id DESC LIMIT 1")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let newest: String =
+            sqlx::query_scalar("SELECT url FROM ai_audit ORDER BY id DESC LIMIT 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(newest, "https://new/1");
     }
 }

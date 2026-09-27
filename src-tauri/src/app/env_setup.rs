@@ -11,12 +11,17 @@ fn read_setting_bool(key: &str, default: bool) -> bool {
                 .map(|h| std::path::PathBuf::from(h).join(".local/share"))
                 .unwrap_or_else(|_| std::path::PathBuf::from("."))
         });
-    let db_path = data_home.join("com.shiftbrowser.app").join("shift-browser.db");
+    let db_path = data_home
+        .join("com.shiftbrowser.app")
+        .join("shift-browser.db");
     if !db_path.exists() {
         return default;
     }
     // 临时单线程 runtime（此时主 runtime 尚未建立）
-    let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
         Ok(rt) => rt,
         Err(_) => return default,
     };
@@ -29,13 +34,12 @@ fn read_setting_bool(key: &str, default: bool) -> bool {
             Ok(p) => p,
             Err(_) => return default,
         };
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT value FROM settings WHERE key = ?")
-                .bind(key)
-                .fetch_optional(&pool)
-                .await
-                .ok()
-                .flatten();
+        let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten();
         pool.close().await;
         match row {
             Some((v,)) => v == "true",
@@ -122,9 +126,7 @@ pub(crate) fn apply() {
                     .map(|h| std::path::PathBuf::from(h).join(".local/share"))
                     .unwrap_or_else(|_| std::path::PathBuf::from("."))
             });
-        if let Some(cookie_path) =
-            crate::engine::platform::init_cookie_persistence(&data_home)
-        {
+        if let Some(cookie_path) = crate::engine::platform::init_cookie_persistence(&data_home) {
             // 安全：Cookie 库按 umask 落盘（常见 664），立即收紧到 600（另有周期重扫）
             if let Some(dir) = cookie_path.parent() {
                 crate::harden_sensitive_files(dir);

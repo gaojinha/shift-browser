@@ -14,10 +14,10 @@ use crate::error::{AppError, CommandResult};
 // 证书信息采集与解析（CertInfo / gio 对象转换），拆出以控制本文件行数
 #[path = "tls/cert.rs"]
 mod cert;
+use cert::parse_host_port;
 pub use cert::CertInfo;
 #[cfg(target_os = "linux")]
 use cert::{build_info, collect, flags_to_names};
-use cert::parse_host_port;
 
 #[cfg(target_os = "linux")]
 use gtk::gio;
@@ -79,7 +79,13 @@ pub async fn get_tls_info(
     if let Some(ref mut ci) = info {
         // P3 监测：记录 + 变更检测
         record_ci(&db.pool, ci).await;
-        ci.is_exception = crate::db::certificates::has_exception(&db.pool, &ci.host, ci.port as i64, &ci.fingerprint_sha256).await;
+        ci.is_exception = crate::db::certificates::has_exception(
+            &db.pool,
+            &ci.host,
+            ci.port as i64,
+            &ci.fingerprint_sha256,
+        )
+        .await;
     }
     Ok(info)
 }
@@ -88,12 +94,22 @@ pub async fn get_tls_info(
 async fn record_ci(pool: &sqlx::SqlitePool, ci: &CertInfo) {
     if let Some(kind) = crate::db::certificates::record(pool, ci).await {
         let (sev, detail) = match kind {
-            "first_seen" => ("info", format!("首次记录 {} 的证书（fp {}）", ci.host, ci.short_fp())),
-            "cert_changed" => ("warn", format!("证书指纹变更 → {}（疑似中间人/轮换）", ci.short_fp())),
-            "verify_error" => ("danger", format!("证书校验失败：{}", ci.error_flags.join("、"))),
+            "first_seen" => (
+                "info",
+                format!("首次记录 {} 的证书（fp {}）", ci.host, ci.short_fp()),
+            ),
+            "cert_changed" => (
+                "warn",
+                format!("证书指纹变更 → {}（疑似中间人/轮换）", ci.short_fp()),
+            ),
+            "verify_error" => (
+                "danger",
+                format!("证书校验失败：{}", ci.error_flags.join("、")),
+            ),
             _ => ("info", String::new()),
         };
-        crate::db::certificates::add_event(pool, &ci.host, ci.port as i64, kind, sev, &detail).await;
+        crate::db::certificates::add_event(pool, &ci.host, ci.port as i64, kind, sev, &detail)
+            .await;
     }
 }
 
@@ -107,9 +123,13 @@ pub async fn monitor(app: &tauri::AppHandle, id: &str) {
 
 #[cfg(target_os = "linux")]
 async fn read_webview_tls(app: &tauri::AppHandle, id: &str) -> Result<Option<CertInfo>, AppError> {
-    let window = app.get_window("main").ok_or_else(|| AppError::internal("主窗口不存在"))?;
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| AppError::internal("主窗口不存在"))?;
     let label = format!("tab-{}", id);
-    let wv = window.get_webview(&label).ok_or_else(|| AppError::internal("webview 不存在"))?;
+    let wv = window
+        .get_webview(&label)
+        .ok_or_else(|| AppError::internal("webview 不存在"))?;
     let (tx, rx) = tokio::sync::oneshot::channel::<Option<CertInfo>>();
     wv.with_webview(move |pwv| {
         let g = pwv.inner();
@@ -125,7 +145,10 @@ async fn read_webview_tls(app: &tauri::AppHandle, id: &str) -> Result<Option<Cer
 }
 
 #[cfg(not(target_os = "linux"))]
-async fn read_webview_tls(_app: &tauri::AppHandle, _id: &str) -> Result<Option<CertInfo>, AppError> {
+async fn read_webview_tls(
+    _app: &tauri::AppHandle,
+    _id: &str,
+) -> Result<Option<CertInfo>, AppError> {
     Err(AppError::validation("证书读取仅支持 Linux"))
 }
 
@@ -183,7 +206,15 @@ pub async fn delete_cert_exception(
     crate::db::certificates::delete_exception(&db.pool, &host, port, &fingerprint)
         .await
         .map_err(|e| AppError::db(e.to_string()))?;
-    crate::db::certificates::add_event(&db.pool, &host, port, "exception_removed", "info", "取消证书例外").await;
+    crate::db::certificates::add_event(
+        &db.pool,
+        &host,
+        port,
+        "exception_removed",
+        "info",
+        "取消证书例外",
+    )
+    .await;
     // 撤销后清理 WebKit 侧例外并重载（可能需要重新校验）
     #[cfg(target_os = "linux")]
     {
@@ -232,7 +263,11 @@ pub async fn scan_cert_expiry(
         };
         let detail = format!(
             "证书{}（剩 {} 天，{}）",
-            if c.days_left.unwrap_or(0) < 0 { "已过期" } else { "临期" },
+            if c.days_left.unwrap_or(0) < 0 {
+                "已过期"
+            } else {
+                "临期"
+            },
             c.days_left.unwrap_or(0),
             c.issuer.clone().unwrap_or_default()
         );
@@ -259,7 +294,15 @@ pub async fn accept_cert_exception(
     crate::db::certificates::add_exception(&db.pool, &host, port, &fingerprint, &reason)
         .await
         .map_err(|e| AppError::db(e.to_string()))?;
-    crate::db::certificates::add_event(&db.pool, &host, port, "accepted", "warn", &format!("用户放行证书例外：{}", reason)).await;
+    crate::db::certificates::add_event(
+        &db.pool,
+        &host,
+        port,
+        "accepted",
+        "warn",
+        &format!("用户放行证书例外：{}", reason),
+    )
+    .await;
 
     #[cfg(target_os = "linux")]
     {

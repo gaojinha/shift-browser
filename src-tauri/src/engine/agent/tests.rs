@@ -62,7 +62,10 @@ fn backend_actions_no_js() {
 
 #[test]
 fn parse_js_result_ok_and_err() {
-    assert_eq!(parse_js_result(r#"{"ok":true,"text":"你好"}"#).unwrap(), "你好");
+    assert_eq!(
+        parse_js_result(r#"{"ok":true,"text":"你好"}"#).unwrap(),
+        "你好"
+    );
     assert!(parse_js_result(r#"{"ok":false,"error":"元素未找到"}"#).is_err());
 }
 
@@ -91,7 +94,10 @@ fn failed_action_params_collects_failures() {
     };
     let step = record_action(&p, "失败: 元素未找到");
     let pairs = failed_action_params().expect("应有失败步");
-    assert!(pairs.iter().any(|(s, _)| *s == step), "整批重建应含刚记录的失败步");
+    assert!(
+        pairs.iter().any(|(s, _)| *s == step),
+        "整批重建应含刚记录的失败步"
+    );
 }
 
 #[test]
@@ -119,7 +125,10 @@ fn agent_tool_defs_include_both_tools() {
         .iter()
         .filter_map(|d| d["function"]["name"].as_str().map(|s| s.to_string()))
         .collect();
-    assert!(names.contains(&"browser_action".to_string()), "缺 browser_action");
+    assert!(
+        names.contains(&"browser_action".to_string()),
+        "缺 browser_action"
+    );
     assert!(
         names.contains(&"browser_action_plan".to_string()),
         "缺 browser_action_plan（多步计划工具必须注册进 AI 工具清单）"

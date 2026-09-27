@@ -3,9 +3,9 @@
 #[path = "bookmarks_html.rs"]
 pub(crate) mod bookmarks_html;
 
-use ts_rs::TS;
 use crate::db::{Db, DbResult};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 #[derive(Debug, Serialize, Deserialize, Clone, TS)]
 #[ts(export, export_to = "../../src/types/generated/")]

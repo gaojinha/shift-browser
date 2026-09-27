@@ -182,9 +182,8 @@ pub(crate) fn handle(
                 // 参照原版 Electron 的 translate-progress 事件：engine/pct/info/elapsed/eta/fails
                 // 节流：同一 webview 至少 300ms 一条，防高频上报刷爆 UI 事件通道
                 {
-                    let cell = PROGRESS_THROTTLE.get_or_init(|| {
-                        std::sync::Mutex::new(std::collections::HashMap::new())
-                    });
+                    let cell = PROGRESS_THROTTLE
+                        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
                     let mut map = cell.lock().unwrap_or_else(|e| e.into_inner());
                     let now = std::time::Instant::now();
                     let last = map.get(&webview_label).copied();
@@ -206,8 +205,7 @@ pub(crate) fn handle(
                         Some(db) => crate::translate::current_engine(db.inner()).await,
                         None => "google".to_string(),
                     };
-                    let num =
-                        |k: &str| p.get(k).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+                    let num = |k: &str| p.get(k).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
                     let payload = serde_json::json!({
                         "state": p.get("state").cloned().unwrap_or_else(|| "update".to_string()),
                         "engine": if engine == "bing" { "Bing" } else { "Google" },
@@ -256,7 +254,8 @@ pub(crate) fn handle(
                     let texts: Vec<String> = match serde_json::from_str(&texts_json) {
                         Ok(v) => v,
                         Err(e) => {
-                            let payload = serde_json::json!({ "error": format!("参数解析失败: {}", e) });
+                            let payload =
+                                serde_json::json!({ "error": format!("参数解析失败: {}", e) });
                             write_translate_result(&app_clone, &webview_label, &callback, &payload);
                             return;
                         }
@@ -264,8 +263,7 @@ pub(crate) fn handle(
                     // P2：批量限长——恶意页面可刷超大数组/超长文本放大翻译请求
                     // （每段翻一次外部网络调用，20 段×2000 字符已是整页翻译的合理上限）
                     if texts.len() > 20 || texts.iter().any(|t| t.len() > 2000) {
-                        let payload =
-                            serde_json::json!({ "error": "批量翻译参数超限（≤20 段、每段 ≤2000 字符）" });
+                        let payload = serde_json::json!({ "error": "批量翻译参数超限（≤20 段、每段 ≤2000 字符）" });
                         write_translate_result(&app_clone, &webview_label, &callback, &payload);
                         return;
                     }

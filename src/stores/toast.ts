@@ -16,14 +16,19 @@ interface ToastState {
 
 let nextId = 1
 
+/** 上限 3 条：超了挤掉最早的；同文重复不堆积（连点不刷屏） */
+const MAX_ITEMS = 3
+
 export const useToastStore = defineStore('toast', {
   state: (): ToastState => ({
     items: [],
   }),
   actions: {
     show(message: string, type: ToastType = 'info', duration = 3000) {
+      if (this.items.some((t) => t.type === type && t.message === message)) return
       const id = nextId++
       this.items.push({ id, type, message })
+      while (this.items.length > MAX_ITEMS) this.items.shift()
       setTimeout(() => {
         this.items = this.items.filter((t) => t.id !== id)
       }, duration)

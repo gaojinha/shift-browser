@@ -11,12 +11,12 @@ use crate::db::Db;
 use crate::error::{AppError, CommandResult};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-#[path = "newtab/wallpaper.rs"]
-mod wallpaper;
-#[path = "newtab/render.rs"]
-mod render;
 #[path = "newtab/quick_sites.rs"]
 mod quick_sites;
+#[path = "newtab/render.rs"]
+mod render;
+#[path = "newtab/wallpaper.rs"]
+mod wallpaper;
 
 // setup（app/bootstrap.rs）在锁屏前 spawn 壁纸后台刷新
 pub(crate) use wallpaper::refresh_wallpapers_background;
@@ -26,169 +26,176 @@ static GEN_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLo
 
 /// 新标签页文件路径（app_data_dir/newtab/index.html）
 pub fn newtab_path(app: &AppHandle) -> Option<std::path::PathBuf> {
-  let dir = app.path().app_data_dir().ok()?;
-  Some(dir.join("newtab").join("index.html"))
+    let dir = app.path().app_data_dir().ok()?;
+    Some(dir.join("newtab").join("index.html"))
 }
 
 /// 新标签页 URL（file:// 绝对路径），文件不存在则先生成
 pub async fn newtab_url(app: &AppHandle) -> Option<String> {
-  let path = newtab_path(app)?;
-  if !path.exists() {
-    let db = app.state::<Db>();
-    let _ = generate(&db, &path).await;
-  }
-  Some(format!("file://{}", path.display()))
+    let path = newtab_path(app)?;
+    if !path.exists() {
+        let db = app.state::<Db>();
+        let _ = generate(&db, &path).await;
+    }
+    Some(format!("file://{}", path.display()))
 }
 
 pub async fn generate(db: &Db, path: &std::path::Path) -> Result<String, AppError> {
-  // 并发生成去重：序列化 + 防抖（1.5s 内刚生成过则跳过）。
-  // 调用点：setup 异步生成 / newtab_url 兜底 / refresh_newtab 命令，可能并发触发。
-  let lock = GEN_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
-  let _guard = lock.lock().await;
-  if let Ok(meta) = std::fs::metadata(path) {
-    if let Ok(modified) = meta.modified() {
-      if modified
-        .elapsed()
-        .map(|d| d.as_millis() < 1500)
-        .unwrap_or(false)
-      {
-        log::debug!("[newtab] 文件刚生成过，跳过本次生成");
-        return Ok(path.display().to_string());
-      }
-    }
-  }
-
-  // ---- 数据：最近访问 ----
-  let recent: Vec<(String, String)> = sqlx::query_as(
-    "SELECT url, COALESCE(title, '') FROM history ORDER BY last_visit_at DESC LIMIT 30",
-  )
-  .fetch_all(&db.pool)
-  .await
-  .map_err(|e| AppError::db(e.to_string()))?;
-
-  // ---- 数据：书签（扁平列表）----
-  let bookmarks: Vec<(String, String)> =
-    sqlx::query_as("SELECT title, url FROM bookmarks ORDER BY sort_order, id")
-      .fetch_all(&db.pool)
-      .await
-      .map_err(|e| AppError::db(e.to_string()))?;
-
-  // ---- 数据：设置（搜索引擎 / 快捷访问）----
-  async fn setting(db: &Db, key: &str) -> Option<String> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?")
-      .bind(key)
-      .fetch_optional(&db.pool)
-      .await
-      .ok()
-      .flatten();
-    row.map(|r| r.0)
-  }
-  let search_engine = setting(db, "search_engine")
-    .await
-    .unwrap_or_else(|| crate::constants::search::DEFAULT_ENGINE.into());
-  // 搜索引擎 URL 模板来自 constants.rs（唯一来源，未知 id 自动回退默认引擎）
-  let search_url = crate::constants::search::url_template(&search_engine);
-  let quick_sites: Vec<(String, String, String)> = match setting(db, "quick_sites").await {
-    Some(j) => serde_json::from_str::<Vec<serde_json::Value>>(&j)
-      .map(|arr| {
-        arr
-          .iter()
-          .filter_map(|v| {
-            let icon = v.get("icon")?.as_str()?.to_string();
-            let name = v.get("name")?.as_str()?.to_string();
-            let url = v.get("url")?.as_str()?.to_string();
-            // P2：过滤危险 scheme（历史遗留/被篡改的 quick_sites 数据），
-            // 特权页面不允许渲染 javascript: 等
-            if !quick_sites::is_safe_web_url(&url) {
-              return None;
+    // 并发生成去重：序列化 + 防抖（1.5s 内刚生成过则跳过）。
+    // 调用点：setup 异步生成 / newtab_url 兜底 / refresh_newtab 命令，可能并发触发。
+    let lock = GEN_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
+    let _guard = lock.lock().await;
+    if let Ok(meta) = std::fs::metadata(path) {
+        if let Ok(modified) = meta.modified() {
+            if modified
+                .elapsed()
+                .map(|d| d.as_millis() < 1500)
+                .unwrap_or(false)
+            {
+                log::debug!("[newtab] 文件刚生成过，跳过本次生成");
+                return Ok(path.display().to_string());
             }
-            Some((icon, name, url))
-          })
-          .collect()
-      })
-      .unwrap_or_else(|_| render::default_quick_sites()),
-    None => render::default_quick_sites(),
-  };
+        }
+    }
 
-  // ---- 数据：资讯（内置源缓存最新 80 条）----
-  let feed_items = crate::feed::latest_items(db, 80).await;
-
-  // ---- 数据：动态背景开关（原版 showBg，默认开）----
-  let show_bg = setting(db, "show_bg")
+    // ---- 数据：最近访问 ----
+    let recent: Vec<(String, String)> = sqlx::query_as(
+        "SELECT url, COALESCE(title, '') FROM history ORDER BY last_visit_at DESC LIMIT 30",
+    )
+    .fetch_all(&db.pool)
     .await
-    .map(|v| v != "0" && v != "false")
-    .unwrap_or(true);
-  let wallpapers = if show_bg {
-    // 关键路径只读缓存（不拉网络）——网络由 refresh_wallpapers_background 后台做
-    let cache = path
-      .parent()
-      .map(|p| p.join("wallpapers.json"))
-      .unwrap_or_else(|| std::path::PathBuf::from("wallpapers.json"));
-    wallpaper::load_wallpapers_from_cache(&cache)
-  } else {
-    Vec::new()
-  };
+    .map_err(|e| AppError::db(e.to_string()))?;
 
-  // ---- 数据：字体大小（原版 fontSize，默认 14）----
-  let font_size: u32 = setting(db, "font_size")
-    .await
-    .and_then(|v| v.parse().ok())
-    .unwrap_or(14);
+    // ---- 数据：书签（扁平列表）----
+    let bookmarks: Vec<(String, String)> =
+        sqlx::query_as("SELECT title, url FROM bookmarks ORDER BY sort_order, id")
+            .fetch_all(&db.pool)
+            .await
+            .map_err(|e| AppError::db(e.to_string()))?;
 
-  // ---- 渲染 HTML（启动页 + 世界导航页）----
-  let html = render::render_html(
-    search_url,
-    &recent,
-    &bookmarks,
-    &quick_sites,
-    &feed_items,
-    &wallpapers,
-    show_bg,
-    font_size,
-  );
+    // ---- 数据：设置（搜索引擎 / 快捷访问）----
+    async fn setting(db: &Db, key: &str) -> Option<String> {
+        let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten();
+        row.map(|r| r.0)
+    }
+    let search_engine = setting(db, "search_engine")
+        .await
+        .unwrap_or_else(|| crate::constants::search::DEFAULT_ENGINE.into());
+    // 搜索引擎 URL 模板来自 constants.rs（唯一来源，未知 id 自动回退默认引擎）
+    let search_url = crate::constants::search::url_template(&search_engine);
+    let quick_sites: Vec<(String, String, String)> = match setting(db, "quick_sites").await {
+        Some(j) => serde_json::from_str::<Vec<serde_json::Value>>(&j)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| {
+                        let icon = v.get("icon")?.as_str()?.to_string();
+                        let name = v.get("name")?.as_str()?.to_string();
+                        let url = v.get("url")?.as_str()?.to_string();
+                        // P2：过滤危险 scheme（历史遗留/被篡改的 quick_sites 数据），
+                        // 特权页面不允许渲染 javascript: 等
+                        if !quick_sites::is_safe_web_url(&url) {
+                            return None;
+                        }
+                        Some((icon, name, url))
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|_| render::default_quick_sites()),
+        None => render::default_quick_sites(),
+    };
 
-  if let Some(parent) = path.parent() {
-    std::fs::create_dir_all(parent).map_err(|e| AppError::internal(e.to_string()))?;
-    render::atomic_write(&parent.join("world-nav.html"), &render::render_worldnav_html())
-      .map_err(|e| AppError::internal(e.to_string()))?;
-  }
-  render::atomic_write(path, &html).map_err(|e| AppError::internal(e.to_string()))?;
-  Ok(path.display().to_string())
+    // ---- 数据：资讯（内置源缓存最新 80 条）----
+    let feed_items = crate::feed::latest_items(db, 80).await;
+
+    // ---- 数据：动态背景开关（原版 showBg，默认开）----
+    let show_bg = setting(db, "show_bg")
+        .await
+        .map(|v| v != "0" && v != "false")
+        .unwrap_or(true);
+    let wallpapers = if show_bg {
+        // 关键路径只读缓存（不拉网络）——网络由 refresh_wallpapers_background 后台做
+        let cache = path
+            .parent()
+            .map(|p| p.join("wallpapers.json"))
+            .unwrap_or_else(|| std::path::PathBuf::from("wallpapers.json"));
+        wallpaper::load_wallpapers_from_cache(&cache)
+    } else {
+        Vec::new()
+    };
+
+    // ---- 数据：字体大小（原版 fontSize，默认 14）----
+    let font_size: u32 = setting(db, "font_size")
+        .await
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(14);
+
+    // ---- 渲染 HTML（启动页 + 世界导航页）----
+    let html = render::render_html(
+        search_url,
+        &recent,
+        &bookmarks,
+        &quick_sites,
+        &feed_items,
+        &wallpapers,
+        show_bg,
+        font_size,
+    );
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| AppError::internal(e.to_string()))?;
+        render::atomic_write(
+            &parent.join("world-nav.html"),
+            &render::render_worldnav_html(),
+        )
+        .map_err(|e| AppError::internal(e.to_string()))?;
+    }
+    render::atomic_write(path, &html).map_err(|e| AppError::internal(e.to_string()))?;
+    Ok(path.display().to_string())
 }
 
 /// 生成/刷新新标签页（改设置或数据变化后可调，前端也可定时刷）
 #[tauri::command]
 pub async fn refresh_newtab(db: State<'_, Db>, app: AppHandle) -> CommandResult<String> {
-  let path = newtab_path(&app).ok_or_else(|| AppError::internal("无法获取数据目录"))?;
-  generate(&db, &path).await.map_err(crate::error::CommandError::from)
+    let path = newtab_path(&app).ok_or_else(|| AppError::internal("无法获取数据目录"))?;
+    generate(&db, &path)
+        .await
+        .map_err(crate::error::CommandError::from)
 }
 
 /// 取新标签页 URL（不存在则先生成）
 #[tauri::command]
 pub async fn get_newtab_url(app: AppHandle) -> CommandResult<String> {
-  newtab_url(&app)
-    .await
-    .ok_or_else(|| AppError::internal("无法生成新标签页").into())
+    newtab_url(&app)
+        .await
+        .ok_or_else(|| AppError::internal("无法生成新标签页").into())
 }
 
 /// 启动页右侧栏按钮：通知主界面打开 AI 助手侧栏
 #[tauri::command]
 pub fn open_ai_from_newtab(app: AppHandle) {
-  let _ = app.emit(crate::contracts::events::OPEN_AI_FROM_NEWTAB, ());
+    let _ = app.emit(crate::contracts::events::OPEN_AI_FROM_NEWTAB, ());
 }
 
 /// 启动页右侧栏按钮：通知主界面打开设置弹窗
 #[tauri::command]
 pub fn open_settings_from_newtab(app: AppHandle) {
-  let _ = app.emit(crate::contracts::events::OPEN_SETTINGS_FROM_NEWTAB, ());
+    let _ = app.emit(crate::contracts::events::OPEN_SETTINGS_FROM_NEWTAB, ());
 }
 
 /// 启动页资讯点击：通知主界面在**当前标签右侧**新开标签打开该 URL（列表页保留）。
 /// 走事件而非直接建标签，是为了复用前端 createTab 的完整同步逻辑（顺序/激活/归组）。
 #[tauri::command]
 pub fn open_url_from_newtab(app: AppHandle, url: String) {
-  log::info!("[newtab] 资讯点击 → 右侧新标签: {}", crate::redact_url(&url));
-  let _ = app.emit(crate::contracts::events::OPEN_URL_FROM_NEWTAB, url);
+    log::info!(
+        "[newtab] 资讯点击 → 右侧新标签: {}",
+        crate::redact_url(&url)
+    );
+    let _ = app.emit(crate::contracts::events::OPEN_URL_FROM_NEWTAB, url);
 }
 
 /// 待办清单存储键（settings 表）
@@ -199,72 +206,74 @@ const TODO_KEY: &str = "todos";
 /// 与快捷访问一样改走 settings 表（IPC）持久化。
 #[tauri::command]
 pub async fn todo_list(db: State<'_, Db>) -> CommandResult<String> {
-  let row: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
-    .bind(TODO_KEY)
-    .fetch_optional(&db.pool)
-    .await
-    .map_err(|e| AppError::db(e.to_string()))?;
-  Ok(row.unwrap_or_else(|| "[]".to_string()))
+    let row: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
+        .bind(TODO_KEY)
+        .fetch_optional(&db.pool)
+        .await
+        .map_err(|e| AppError::db(e.to_string()))?;
+    Ok(row.unwrap_or_else(|| "[]".to_string()))
 }
 
 /// 保存待办清单（JSON 数组字符串）。
 /// P2 防御：限制体积（防滥用撑爆 DB），内容按 JSON 数组校验。
 #[tauri::command]
 pub async fn todo_save(db: State<'_, Db>, todos: String) -> CommandResult<()> {
-  if todos.len() > 100 * 1024 {
-    return Err(AppError::validation("待办数据过大").into());
-  }
-  // 必须是 JSON 数组
-  let parsed: serde_json::Value =
-    serde_json::from_str(&todos).map_err(|e| AppError::validation(format!("待办格式错误: {e}")))?;
-  if !parsed.is_array() {
-    return Err(AppError::validation("待办格式错误: 需为数组").into());
-  }
-  sqlx::query(
-    "INSERT INTO settings (key, value) VALUES (?, ?)
+    if todos.len() > 100 * 1024 {
+        return Err(AppError::validation("待办数据过大").into());
+    }
+    // 必须是 JSON 数组
+    let parsed: serde_json::Value = serde_json::from_str(&todos)
+        .map_err(|e| AppError::validation(format!("待办格式错误: {e}")))?;
+    if !parsed.is_array() {
+        return Err(AppError::validation("待办格式错误: 需为数组").into());
+    }
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES (?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-  )
-  .bind(TODO_KEY)
-  .bind(&todos)
-  .execute(&db.pool)
-  .await
-  .map_err(|e| AppError::db(e.to_string()))?;
-  Ok(())
+    )
+    .bind(TODO_KEY)
+    .bind(&todos)
+    .execute(&db.pool)
+    .await
+    .map_err(|e| AppError::db(e.to_string()))?;
+    Ok(())
 }
 
 /// 保存主区快捷访问（原版 quick-sites-set IPC 迁移）。
 /// 启动页编辑完成后调用，写入 settings.quick_sites，下次生成 HTML 时生效。
 #[tauri::command]
 pub async fn save_quick_sites(
-  db: State<'_, Db>,
-  app: AppHandle,
-  sites: Vec<serde_json::Value>,
+    db: State<'_, Db>,
+    app: AppHandle,
+    sites: Vec<serde_json::Value>,
 ) -> CommandResult<()> {
-  // P2：URL scheme 校验——新标签页是带 IPC 桥（invoke_key）的特权页面，
-  // 若允许 javascript: 等 scheme 渲染成 <a href>，点击即在特权上下文执行任意命令
-  let mut cleaned: Vec<serde_json::Value> = Vec::with_capacity(sites.len());
-  for site in &sites {
-    let mut s = site.clone();
-    let url = s
-      .get("url")
-      .and_then(|u| u.as_str())
-      .ok_or_else(|| AppError::validation("快捷站点缺少 url"))?;
-    let norm = quick_sites::normalize_quick_site_url(url).map_err(AppError::validation)?;
-    s["url"] = serde_json::Value::String(norm);
-    cleaned.push(s);
-  }
-  let json = serde_json::to_string(&cleaned).map_err(|e| AppError::internal(e.to_string()))?;
-  sqlx::query(
-    "INSERT INTO settings (key, value) VALUES ('quick_sites', ?)
+    // P2：URL scheme 校验——新标签页是带 IPC 桥（invoke_key）的特权页面，
+    // 若允许 javascript: 等 scheme 渲染成 <a href>，点击即在特权上下文执行任意命令
+    let mut cleaned: Vec<serde_json::Value> = Vec::with_capacity(sites.len());
+    for site in &sites {
+        let mut s = site.clone();
+        let url = s
+            .get("url")
+            .and_then(|u| u.as_str())
+            .ok_or_else(|| AppError::validation("快捷站点缺少 url"))?;
+        let norm = quick_sites::normalize_quick_site_url(url).map_err(AppError::validation)?;
+        s["url"] = serde_json::Value::String(norm);
+        cleaned.push(s);
+    }
+    let json = serde_json::to_string(&cleaned).map_err(|e| AppError::internal(e.to_string()))?;
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ('quick_sites', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-  )
-  .bind(&json)
-  .execute(&db.pool)
-  .await
-  .map_err(|e| AppError::db(e.to_string()))?;
-  log::info!("[newtab] 快捷访问已保存 {} 条", cleaned.len());
-  // 重新生成 HTML，让主区网格立即生效
-  let path = newtab_path(&app).ok_or_else(|| AppError::internal("无法获取数据目录"))?;
-  generate(&db, &path).await.map_err(crate::error::CommandError::from)?;
-  Ok(())
+    )
+    .bind(&json)
+    .execute(&db.pool)
+    .await
+    .map_err(|e| AppError::db(e.to_string()))?;
+    log::info!("[newtab] 快捷访问已保存 {} 条", cleaned.len());
+    // 重新生成 HTML，让主区网格立即生效
+    let path = newtab_path(&app).ok_or_else(|| AppError::internal("无法获取数据目录"))?;
+    generate(&db, &path)
+        .await
+        .map_err(crate::error::CommandError::from)?;
+    Ok(())
 }

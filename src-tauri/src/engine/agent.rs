@@ -19,8 +19,8 @@ pub use crate::capabilities::agent_actions::IDS as AGENT_ACTIONS;
 #[path = "agent/history.rs"]
 mod history;
 pub use history::{
-    action_history_list, batch_retry_plan, failed_action_params, last_failed_step,
-    rebuild_params, record_action, ActionHistoryItem,
+    action_history_list, batch_retry_plan, failed_action_params, last_failed_step, rebuild_params,
+    record_action, ActionHistoryItem,
 };
 
 /// 多步计划中的单步（AI 编排提示词的最小单元）
@@ -146,7 +146,11 @@ pub fn build_action_js(params: &AgentActionParams) -> Result<Option<String>, Str
             )))
         }
         "scroll" => {
-            let dy = if params.direction.as_deref() == Some("up") { "-600" } else { "600" };
+            let dy = if params.direction.as_deref() == Some("up") {
+                "-600"
+            } else {
+                "600"
+            };
             Ok(Some(format!(
                 "(() => {{ window.scrollBy({{top:{dy},behavior:'smooth'}}); return JSON.stringify({{ok:true}}); }})()",
                 dy = dy
@@ -176,9 +180,16 @@ pub fn build_action_js(params: &AgentActionParams) -> Result<Option<String>, Str
 pub fn parse_js_result(raw: &str) -> Result<String, String> {
     let v: Value = serde_json::from_str(raw).map_err(|_| format!("页面脚本返回异常: {}", raw))?;
     if v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false) {
-        Ok(v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string())
+        Ok(v.get("text")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string())
     } else {
-        Err(v.get("error").and_then(|e| e.as_str()).unwrap_or("动作执行失败").to_string())
+        Err(v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("动作执行失败")
+            .to_string())
     }
 }
 
@@ -186,9 +197,23 @@ pub fn parse_js_result(raw: &str) -> Result<String, String> {
 pub fn describe_action(params: &AgentActionParams) -> String {
     match params.action.as_str() {
         "click" => format!("点击元素「{}」", params.selector.as_deref().unwrap_or("?")),
-        "fill" => format!("在「{}」填写「{}」", params.selector.as_deref().unwrap_or("?"), params.value.as_deref().unwrap_or("")),
-        "scroll" => format!("页面{}滚动", if params.direction.as_deref() == Some("up") { "向上" } else { "向下" }),
-        "read" => format!("读取元素「{}」内容", params.selector.as_deref().unwrap_or("?")),
+        "fill" => format!(
+            "在「{}」填写「{}」",
+            params.selector.as_deref().unwrap_or("?"),
+            params.value.as_deref().unwrap_or("")
+        ),
+        "scroll" => format!(
+            "页面{}滚动",
+            if params.direction.as_deref() == Some("up") {
+                "向上"
+            } else {
+                "向下"
+            }
+        ),
+        "read" => format!(
+            "读取元素「{}」内容",
+            params.selector.as_deref().unwrap_or("?")
+        ),
         "wait" => format!("等待 {} 毫秒", params.ms.unwrap_or(0)),
         "navigate" => format!("跳转到 {}", params.url.as_deref().unwrap_or("?")),
         "back" => "后退一页".to_string(),
@@ -197,7 +222,6 @@ pub fn describe_action(params: &AgentActionParams) -> String {
         other => format!("动作 {}", other),
     }
 }
-
 
 #[cfg(test)]
 #[path = "agent/tests.rs"]

@@ -11,8 +11,9 @@ use super::WHOLE_PAGE_TRANSLATE_JS;
 
 /// translate-progress 事件节流器：同一 webview 至少间隔 300ms 才转发一次，
 /// 防整页翻译高频上报刷爆 UI 事件通道（2026-09-19 安全修复）
-pub(super) static PROGRESS_THROTTLE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Instant>>> =
-    std::sync::OnceLock::new();
+pub(super) static PROGRESS_THROTTLE: std::sync::OnceLock<
+    std::sync::Mutex<HashMap<String, Instant>>,
+> = std::sync::OnceLock::new();
 
 /// 翻译请求速率限制器：同一 webview 每分钟最多 30 次翻译请求，
 /// 防恶意网页批量驱动浏览器外发翻译（2026-09-19）
@@ -181,12 +182,14 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                     ),
                     None => ("google".to_string(), 15),
                 };
-                let payload =
-                    match crate::translate::translate_with(&text, "zh-CN", &engine, timeout).await
-                    {
-                        Ok(t) => serde_json::json!({ "text": t }),
-                        Err(e) => serde_json::json!({ "error": e }),
-                    };
+                let payload = match crate::translate::translate_with(
+                    &text, "zh-CN", &engine, timeout,
+                )
+                .await
+                {
+                    Ok(t) => serde_json::json!({ "text": t }),
+                    Err(e) => serde_json::json!({ "error": e }),
+                };
                 write_translate_result(&app_clone, &label, &callback, &payload);
             });
         }
@@ -201,14 +204,14 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                 let texts: Vec<String> = match serde_json::from_str(&texts_json) {
                     Ok(v) => v,
                     Err(e) => {
-                        let payload = serde_json::json!({ "error": format!("参数解析失败: {}", e) });
+                        let payload =
+                            serde_json::json!({ "error": format!("参数解析失败: {}", e) });
                         write_translate_result(&app_clone, &label, &callback, &payload);
                         return;
                     }
                 };
                 if texts.len() > 20 || texts.iter().any(|t| t.len() > 2000) {
-                    let payload =
-                        serde_json::json!({ "error": "批量翻译参数超限（≤20 段、每段 ≤2000 字符）" });
+                    let payload = serde_json::json!({ "error": "批量翻译参数超限（≤20 段、每段 ≤2000 字符）" });
                     write_translate_result(&app_clone, &label, &callback, &payload);
                     return;
                 }

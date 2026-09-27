@@ -50,8 +50,7 @@ fn auth_header(c: &Credentials) -> String {
     use base64::Engine;
     format!(
         "Basic {}",
-        base64::engine::general_purpose::STANDARD
-            .encode(format!("{}:{}", c.username, c.password))
+        base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", c.username, c.password))
     )
 }
 
@@ -85,7 +84,10 @@ async fn live_模型列表端点能解析且含active项() {
     println!(
         "解析出 {} 个模型，前 3：{:?}",
         list.len(),
-        list.iter().take(3).map(|m| &m.model_ref).collect::<Vec<_>>()
+        list.iter()
+            .take(3)
+            .map(|m| &m.model_ref)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -123,7 +125,10 @@ async fn live_侧边栏问答链路_有回答或显式上游错误() {
         Ok(full) => {
             assert!(!full.trim().is_empty(), "正常路径不应空回复");
             assert!(deltas.load(Ordering::Relaxed) > 0, "正常路径应有流式增量");
-            println!("✅ 拿到回答（{} 块增量）：{full}", deltas.load(Ordering::Relaxed));
+            println!(
+                "✅ 拿到回答（{} 块增量）：{full}",
+                deltas.load(Ordering::Relaxed)
+            );
         }
         Err(e) => {
             // 上游故障（如免费额度耗尽）必须显式抛出，绝不允许"静默空回复"

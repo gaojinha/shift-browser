@@ -13,15 +13,18 @@ use crate::engine::layout::CONTENT_TOP_OFFSET;
 /// 前端快捷键监听的是 HTML 层的 keydown，只在主 webview 持焦时触发；
 /// 用户点击网页后焦点落到 child webview，按键到不了 HTML 层——此时由 GTK 顶层窗口
 /// 兜底拦截并转发（emit `global-shortcut`），保证 Ctrl+T/W/R/L/H 等始终可用。
-pub(crate) static UI_FOCUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+pub(crate) static UI_FOCUSED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
 
 /// 证书警告等"全屏覆盖层"激活时置 true：布局重排（apply_split_layout）只隐藏 webview、
 /// 不再显示，否则覆盖层会被 GTK 层 child webview 盖住。由 set_webview_visible 命令维护。
-pub(crate) static UI_OVERLAY_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub(crate) static UI_OVERLAY_ACTIVE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Web 进程崩溃自动重载的冷却表（tab_id → 上次崩溃 unix 秒），防确定性崩溃导致无限重载
-pub(crate) static WEB_CRASH_COOLDOWN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, i64>>> =
-    std::sync::OnceLock::new();
+pub(crate) static WEB_CRASH_COOLDOWN: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, i64>>,
+> = std::sync::OnceLock::new();
 
 impl TabManager {
     /// 根据窗口尺寸计算内容区域大小（逻辑像素）；top 随书签栏显隐变化
@@ -36,7 +39,11 @@ impl TabManager {
     }
 
     /// 切换 webview 显隐
-    pub(crate) fn set_webview_visible(app: &AppHandle, id: &str, visible: bool) -> Result<(), String> {
+    pub(crate) fn set_webview_visible(
+        app: &AppHandle,
+        id: &str,
+        visible: bool,
+    ) -> Result<(), String> {
         let window = app
             .get_window("main")
             .ok_or_else(|| "主窗口不存在".to_string())?;
@@ -112,7 +119,6 @@ impl TabManager {
     }
 }
 
-
 // backend 模块由 tabs.rs 以 #[path = "tabs/backend.rs"] 引入，子模块基准目录随之变为 tabs/，
 // 故此处需显式 #[path] 指向 backend/ 子目录。
 #[path = "backend/create.rs"]
@@ -150,7 +156,10 @@ pub(crate) fn is_internal_newtab_url(url: &str) -> bool {
     match url.parse::<tauri::Url>() {
         Ok(u) => match u.scheme() {
             "shift" => matches!(u.host_str(), Some("newtab") | Some("worldnav")),
-            "file" => url.contains(crate::contracts::urls::NEWTAB_MARKER) || url.contains(crate::contracts::urls::WORLD_NAV_FILE),
+            "file" => {
+                url.contains(crate::contracts::urls::NEWTAB_MARKER)
+                    || url.contains(crate::contracts::urls::WORLD_NAV_FILE)
+            }
             _ => false,
         },
         Err(_) => false,

@@ -7,10 +7,10 @@
 use tauri::Manager;
 
 // setup 的子步骤（按域拆出以控制本文件行数；调用顺序即原启动顺序，不可乱）
-#[path = "bootstrap/guards.rs"]
-mod guards;
 #[path = "bootstrap/caches.rs"]
 mod caches;
+#[path = "bootstrap/guards.rs"]
+mod guards;
 #[path = "bootstrap/tray_setup.rs"]
 mod tray_setup;
 
@@ -162,7 +162,8 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     // 注意：必须在 GTK 层面实现——Vue 锁屏覆盖层只能盖住 Vue 自己的 DOM，
     // 盖不住另一个独立的 GTK webview（标签页）。
     // R2-1b：实现已迁至 ui/lock_dialog.rs（含 LOCKED 状态与 GTK 对话框）
-    let unlocked_after_lock = crate::lock_dialog::show_startup_lock(app, app.state::<crate::db::Db>().inner());
+    let unlocked_after_lock =
+        crate::lock_dialog::show_startup_lock(app, app.state::<crate::db::Db>().inner());
 
     // 初始化标签管理器
     app.manage(crate::tabs::TabManager::new());
@@ -183,13 +184,12 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
         // 第三方 Cookie 阻断：仅"严格档"启用（绑定隐私防护档位，切换后需重启生效）
         let strict: bool = tauri::async_runtime::block_on(async {
             let db = app.state::<crate::db::Db>();
-            let row: Option<(String,)> = sqlx::query_as(
-                "SELECT value FROM settings WHERE key = 'privacy_shield_level'",
-            )
-            .fetch_optional(&db.pool)
-            .await
-            .ok()
-            .flatten();
+            let row: Option<(String,)> =
+                sqlx::query_as("SELECT value FROM settings WHERE key = 'privacy_shield_level'")
+                    .fetch_optional(&db.pool)
+                    .await
+                    .ok()
+                    .flatten();
             row.map(|r| r.0 == "strict").unwrap_or(false)
         });
         crate::engine::platform::apply_cookie_policy(strict);
@@ -303,9 +303,23 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
                 );
                 for url in urls {
                     let state = app_handle.state::<crate::tabs::TabManager>();
-                    match crate::tabs::commands::create_tab(app_handle.clone(), state, url.clone(), None, None, None, None).await {
+                    match crate::tabs::commands::create_tab(
+                        app_handle.clone(),
+                        state,
+                        url.clone(),
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await
+                    {
                         Ok(tab) => log::info!("[default-browser] 外部链接已打开: {}", tab.id),
-                        Err(e) => log::warn!("[default-browser] 外部链接打开失败: {} ({})", crate::redact_url(&url), e),
+                        Err(e) => log::warn!(
+                            "[default-browser] 外部链接打开失败: {} ({})",
+                            crate::redact_url(&url),
+                            e
+                        ),
                     }
                 }
             });

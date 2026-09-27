@@ -232,7 +232,10 @@ pub fn collect_egress() -> EgressReport {
             .then(a.remote_port.cmp(&b.remote_port))
     });
     conns.dedup_by(|a, b| {
-        a.pid == b.pid && a.proto == b.proto && a.remote_ip == b.remote_ip && a.remote_port == b.remote_port
+        a.pid == b.pid
+            && a.proto == b.proto
+            && a.remote_ip == b.remote_ip
+            && a.remote_port == b.remote_port
     });
 
     let distinct: HashSet<(String, u16)> = conns

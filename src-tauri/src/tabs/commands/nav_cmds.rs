@@ -41,7 +41,11 @@ pub async fn navigate_tab(
     let url = clean_tracking_params(&url);
     // 用户直驱导航不拦内网（路由器/NAS 后台要能开），但日志必须脱敏，
     // 防路径/query/token 落盘（与导航守卫、open_and_read 同脱敏口径）
-    log::info!("[tabs] navigate_tab: id={} url={}", id, crate::redact_url(&url));
+    log::info!(
+        "[tabs] navigate_tab: id={} url={}",
+        id,
+        crate::redact_url(&url)
+    );
     let window = app
         .get_window("main")
         .ok_or_else(|| AppError::internal("主窗口不存在"))?;

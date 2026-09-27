@@ -109,8 +109,7 @@ pub fn build_privacy_selftest(
     whitelisted: bool,
     page_json: &str,
 ) -> PrivacySelfTestReport {
-    let v: serde_json::Value =
-        serde_json::from_str(page_json).unwrap_or(serde_json::Value::Null);
+    let v: serde_json::Value = serde_json::from_str(page_json).unwrap_or(serde_json::Value::Null);
     let installed = v["installed"].as_bool().unwrap_or(false);
     let feat = &v["features"];
     let has = |k: &str| feat[k].as_bool().unwrap_or(false);
@@ -133,7 +132,12 @@ pub fn build_privacy_selftest(
     if off {
         checks.push(mk_check("inject", "防护脚本注入", "skip", skip_reason));
     } else if installed {
-        checks.push(mk_check("inject", "防护脚本注入", "pass", "防护脚本已在页面生效"));
+        checks.push(mk_check(
+            "inject",
+            "防护脚本注入",
+            "pass",
+            "防护脚本已在页面生效",
+        ));
     } else {
         checks.push(mk_check(
             "inject",

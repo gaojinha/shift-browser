@@ -16,7 +16,6 @@ pub struct UserPrefs {
     pub wallpaper: String,
 }
 
-
 impl Default for UserPrefs {
     fn default() -> Self {
         Self {
@@ -31,7 +30,6 @@ impl Default for UserPrefs {
     }
 }
 
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct User {
     pub id: i64,
@@ -43,7 +41,6 @@ pub struct User {
     pub prefs: UserPrefs,
 }
 
-
 /// 统一返回：{ ok, msg, user?, path? }
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UserResult {
@@ -54,7 +51,6 @@ pub struct UserResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
 }
-
 
 impl UserResult {
     pub(crate) fn ok(msg: impl Into<String>) -> Self {
@@ -83,14 +79,17 @@ impl UserResult {
     }
 }
 
-
-
 /// sqlx 错误统一转 UserResult::err（UserResult 不是 Result，不能用 ?）
 macro_rules! db_try {
     ($e:expr) => {
         match $e.await {
             Ok(v) => v,
-            Err(e) => return Ok(crate::db::users::UserResult::err(format!("数据库错误: {}", e))),
+            Err(e) => {
+                return Ok(crate::db::users::UserResult::err(format!(
+                    "数据库错误: {}",
+                    e
+                )))
+            }
         }
     };
 }
@@ -103,18 +102,19 @@ mod import_export;
 mod profile;
 mod security;
 // 锁屏对话框（crate::ui::lock_dialog）复用登录防爆破计数，需跨模块可见
-pub(crate) use security::{guard_clear, guard_get, guard_record_failure, now_ms, MAX_LOGIN_FAILURES};
+pub(crate) use security::{
+    guard_clear, guard_get, guard_record_failure, now_ms, MAX_LOGIN_FAILURES,
+};
 mod session;
 
 pub use import_export::*;
 pub use profile::*;
 pub use session::*;
 
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::security::*;
+    use super::*;
     use crate::db::Db;
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
@@ -301,7 +301,9 @@ mod tests {
             .execute(&db.pool)
             .await
             .unwrap();
-        let err = verify_password(&db, "someone", "whatever").await.unwrap_err();
+        let err = verify_password(&db, "someone", "whatever")
+            .await
+            .unwrap_err();
         assert_eq!(err.code, crate::error::E_DB);
     }
 }

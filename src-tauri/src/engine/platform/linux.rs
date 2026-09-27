@@ -16,7 +16,9 @@ pub fn init_cookie_persistence(data_home: &std::path::Path) -> Option<std::path:
     let _ = gtk::init();
     let context = WebContext::default()?;
     let cm = context.cookie_manager()?;
-    let cookie_path = data_home.join("com.shiftbrowser.app").join("cookies.sqlite");
+    let cookie_path = data_home
+        .join("com.shiftbrowser.app")
+        .join("cookies.sqlite");
     if let Some(dir) = cookie_path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -113,9 +115,7 @@ fn find_web_extensions_dir(resource_dir: Option<std::path::PathBuf>) -> Option<s
 }
 
 /// 公开探测：返回含 `libshift_web_extension.so` 的目录（供 create_webview 复用）。
-pub fn web_extensions_dir(
-    resource_dir: Option<std::path::PathBuf>,
-) -> Option<std::path::PathBuf> {
+pub fn web_extensions_dir(resource_dir: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
     find_web_extensions_dir(resource_dir)
 }
 
@@ -126,7 +126,9 @@ pub fn web_extensions_dir(
 /// 从 lib.rs 下沉（P0-2 补完 · 2026-09-22）。
 pub fn setup_web_extensions_dir(resource_dir: Option<std::path::PathBuf>) {
     use webkit2gtk::{WebContext, WebContextExt};
-    let Some(context) = WebContext::default() else { return };
+    let Some(context) = WebContext::default() else {
+        return;
+    };
     match find_web_extensions_dir(resource_dir) {
         Some(dir) => {
             context.set_web_extensions_directory(&dir.display().to_string());
@@ -151,7 +153,9 @@ pub fn setup_web_extensions_dir(resource_dir: Option<std::path::PathBuf>) {
 /// 从 lib.rs 下沉（P0-2 补完 · 2026-09-22）。
 pub fn apply_cookie_policy(strict: bool) {
     use webkit2gtk::{CookieManagerExt, WebContext, WebContextExt};
-    let Some(context) = WebContext::default() else { return };
+    let Some(context) = WebContext::default() else {
+        return;
+    };
     if strict {
         if let Some(cm) = context.cookie_manager() {
             cm.set_accept_policy(webkit2gtk::CookieAcceptPolicy::NoThirdParty);

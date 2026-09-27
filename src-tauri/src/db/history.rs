@@ -1,7 +1,7 @@
 // 历史记录管理
-use ts_rs::TS;
 use crate::db::{Db, DbResult};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 #[derive(Debug, Serialize, Deserialize, Clone, TS)]
 #[ts(export, export_to = "../../src/types/generated/")]
@@ -84,9 +84,7 @@ pub async fn backfill_history_titles(db: tauri::State<'_, Db>) -> DbResult<usize
 }
 
 /// 空标题回填内核（pool 级，便于测试）
-pub async fn backfill_history_titles_inner(
-    pool: &sqlx::SqlitePool,
-) -> DbResult<usize> {
+pub async fn backfill_history_titles_inner(pool: &sqlx::SqlitePool) -> DbResult<usize> {
     // 2026-09-19：历史里标题为空的记录用 URL 域名兜底（页面加载时 document.title 未就绪导致）。
     // 启动优化：每轮只取 500 条、单事务批量提交，多轮跑完（大库也不卡启动，调用方放首绘后空闲任务）。
     let mut total = 0usize;
@@ -406,18 +404,23 @@ mod tests {
             .unwrap();
         let fixed = super::backfill_history_titles_inner(&pool).await.unwrap();
         assert_eq!(fixed, 2);
-        let t1: String = sqlx::query_scalar("SELECT title FROM history WHERE url = 'https://example.com/a'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let t1: String =
+            sqlx::query_scalar("SELECT title FROM history WHERE url = 'https://example.com/a'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(t1, "example.com");
-        let t2: String = sqlx::query_scalar("SELECT title FROM history WHERE url = 'https://foo.bar/b'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let t2: String =
+            sqlx::query_scalar("SELECT title FROM history WHERE url = 'https://foo.bar/b'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(t2, "foo.bar");
         // 已有标题不动；二次跑为 0（幂等）
-        assert_eq!(super::backfill_history_titles_inner(&pool).await.unwrap(), 0);
+        assert_eq!(
+            super::backfill_history_titles_inner(&pool).await.unwrap(),
+            0
+        );
     }
 
     #[tokio::test]
@@ -434,12 +437,10 @@ mod tests {
             )
             .await
             .unwrap();
-        sqlx::raw_sql(include_str!(
-            "../../migrations/20260905000000_init.sql"
-        ))
-        .execute(&pool)
-        .await
-        .unwrap();
+        sqlx::raw_sql(include_str!("../../migrations/20260905000000_init.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
         for _ in 0..2 {
             sqlx::raw_sql(include_str!(
                 "../../migrations/20260928000002_search_indexes.sql"

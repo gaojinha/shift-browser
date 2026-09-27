@@ -7,82 +7,82 @@
 /// 正则方案可被 `<svg/onload=alert(1)>`（无闭合、/on* 前无空白）绕过，
 /// ammonia 按 HTML5 规范解析后只保留白名单标签/属性，on* 事件与危险协议一律剥离。
 pub(super) fn sanitize_html(html: &str) -> String {
-  use std::collections::{HashMap, HashSet};
-  let mut builder = ammonia::Builder::default();
-  builder
-    .tags(HashSet::from([
-      // 块级
-      "p",
-      "div",
-      "h1",
-      "h2",
-      "h3",
-      "h4",
-      "h5",
-      "h6",
-      "ul",
-      "ol",
-      "li",
-      "blockquote",
-      "pre",
-      "hr",
-      "br",
-      "table",
-      "thead",
-      "tbody",
-      "tr",
-      "td",
-      "th",
-      "figure",
-      "figcaption",
-      "section",
-      "article",
-      "header",
-      "footer",
-      "main",
-      "aside",
-      // 行内
-      "span",
-      "a",
-      "img",
-      "strong",
-      "em",
-      "b",
-      "i",
-      "u",
-      "s",
-      "small",
-      "code",
-      "sub",
-      "sup",
-      "mark",
-      "abbr",
-      "cite",
-      "q",
-      "time",
-      // 媒体（src 仅 http/https，data: 一律不放行）
-      "video",
-      "audio",
-      "source",
-      "picture",
-    ]))
-    .tag_attributes(HashMap::from([
-      ("a", HashSet::from(["href", "title"])),
-      (
-        "img",
-        HashSet::from(["src", "alt", "title", "width", "height"]),
-      ),
-      ("td", HashSet::from(["colspan", "rowspan"])),
-      ("th", HashSet::from(["colspan", "rowspan"])),
-      ("video", HashSet::from(["src", "controls", "poster"])),
-      ("audio", HashSet::from(["src", "controls"])),
-      ("source", HashSet::from(["src", "type"])),
-    ]))
-    .add_generic_attributes(HashSet::from(["class", "title"]))
-    // 只允许 http/https URL（剥 javascript:/vbscript:/data:text/html 等可执行协议）
-    .url_schemes(HashSet::from(["http", "https"]))
-    .clean(html)
-    .to_string()
+    use std::collections::{HashMap, HashSet};
+    let mut builder = ammonia::Builder::default();
+    builder
+        .tags(HashSet::from([
+            // 块级
+            "p",
+            "div",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "ul",
+            "ol",
+            "li",
+            "blockquote",
+            "pre",
+            "hr",
+            "br",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "td",
+            "th",
+            "figure",
+            "figcaption",
+            "section",
+            "article",
+            "header",
+            "footer",
+            "main",
+            "aside",
+            // 行内
+            "span",
+            "a",
+            "img",
+            "strong",
+            "em",
+            "b",
+            "i",
+            "u",
+            "s",
+            "small",
+            "code",
+            "sub",
+            "sup",
+            "mark",
+            "abbr",
+            "cite",
+            "q",
+            "time",
+            // 媒体（src 仅 http/https，data: 一律不放行）
+            "video",
+            "audio",
+            "source",
+            "picture",
+        ]))
+        .tag_attributes(HashMap::from([
+            ("a", HashSet::from(["href", "title"])),
+            (
+                "img",
+                HashSet::from(["src", "alt", "title", "width", "height"]),
+            ),
+            ("td", HashSet::from(["colspan", "rowspan"])),
+            ("th", HashSet::from(["colspan", "rowspan"])),
+            ("video", HashSet::from(["src", "controls", "poster"])),
+            ("audio", HashSet::from(["src", "controls"])),
+            ("source", HashSet::from(["src", "type"])),
+        ]))
+        .add_generic_attributes(HashSet::from(["class", "title"]))
+        // 只允许 http/https URL（剥 javascript:/vbscript:/data:text/html 等可执行协议）
+        .url_schemes(HashSet::from(["http", "https"]))
+        .clean(html)
+        .to_string()
 }
 
 /// 阅读页唯一内联脚本（固定静态内容）。
@@ -122,18 +122,18 @@ const READER_SCRIPT: &str = r#"
 /// 计算内联脚本的 CSP hash token：`'sha256-<base64>'`。
 /// 算法遵循 CSP Level 2/3：对 `<script>` 元素 text content 的 UTF-8 字节做 SHA-256 再 base64。
 fn inline_script_hash(script: &str) -> String {
-  use base64::Engine;
-  use sha2::{Digest, Sha256};
-  let digest = Sha256::digest(script.as_bytes());
-  format!(
-    "'sha256-{}'",
-    base64::engine::general_purpose::STANDARD.encode(digest)
-  )
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(script.as_bytes());
+    format!(
+        "'sha256-{}'",
+        base64::engine::general_purpose::STANDARD.encode(digest)
+    )
 }
 
 /// 阅读页模板（占位符用 replace 注入，正文 HTML 里可能有花括号，不能走 format!）
 pub(super) fn render_reader_html(title: &str, source: &str, content: &str) -> String {
-  r#"<!DOCTYPE html>
+    r#"<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -190,139 +190,139 @@ pub(super) fn render_reader_html(title: &str, source: &str, content: &str) -> St
 }
 
 fn esc_html(s: &str) -> String {
-  s.replace('&', "&amp;")
-    .replace('<', "&lt;")
-    .replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn esc_attr(s: &str) -> String {
-  s.replace('&', "&amp;")
-    .replace('"', "&quot;")
-    .replace('<', "&lt;")
+    s.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
 }
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+    use super::*;
 
-  #[test]
-  fn sanitize_blocks_script_and_svg() {
-    // 正则方案被绕过的用例：无闭合 svg + onload
-    let s = sanitize_html(r#"<p>hi</p><svg/onload=alert(1)>"#);
-    assert!(!s.contains("svg"));
-    assert!(!s.contains("onload"));
-    assert!(s.contains("hi"));
-    // 完整 script 块删除
-    let s = sanitize_html(r#"<p>a</p><script>alert(1)</script><p>b</p>"#);
-    assert!(!s.contains("script"));
-    assert!(s.contains("a"));
-    assert!(s.contains("b"));
-  }
+    #[test]
+    fn sanitize_blocks_script_and_svg() {
+        // 正则方案被绕过的用例：无闭合 svg + onload
+        let s = sanitize_html(r#"<p>hi</p><svg/onload=alert(1)>"#);
+        assert!(!s.contains("svg"));
+        assert!(!s.contains("onload"));
+        assert!(s.contains("hi"));
+        // 完整 script 块删除
+        let s = sanitize_html(r#"<p>a</p><script>alert(1)</script><p>b</p>"#);
+        assert!(!s.contains("script"));
+        assert!(s.contains("a"));
+        assert!(s.contains("b"));
+    }
 
-  #[test]
-  fn sanitize_strips_events_and_danger_uris() {
-    // onerror 事件剥掉
-    let s = sanitize_html(r#"<img src="https://x.com/a.png" onerror="alert(1)">"#);
-    assert!(!s.contains("onerror"));
-    assert!(s.contains("https://x.com/a.png"));
-    // javascript: href 剥掉
-    let s = sanitize_html(r#"<a href="javascript:alert(1)">点我</a>"#);
-    assert!(!s.contains("javascript:"));
-    assert!(s.contains("点我"));
-    // data:text/html src 剥掉（url_schemes 只放 http/https）
-    let s = sanitize_html(r#"<img src="data:text/html,<script>alert(1)</script>">"#);
-    assert!(!s.contains("data:"));
-    // 正常 https 链接保留
-    let s = sanitize_html(r#"<a href="https://ok.com/x">链接</a>"#);
-    assert!(s.contains("https://ok.com/x"));
-    // iframe/object/embed 删除
-    let s = sanitize_html(
-      r#"<p>a</p><iframe src="https://evil.com"></iframe><object data="x"></object><embed src="y">"#,
-    );
-    assert!(!s.contains("iframe"));
-    assert!(!s.contains("object"));
-    assert!(!s.contains("embed"));
-    // base 删除（防相对链接劫持）
-    let s = sanitize_html(r#"<base href="https://evil.com/"><p>a</p>"#);
-    assert!(!s.contains("base"));
-  }
+    #[test]
+    fn sanitize_strips_events_and_danger_uris() {
+        // onerror 事件剥掉
+        let s = sanitize_html(r#"<img src="https://x.com/a.png" onerror="alert(1)">"#);
+        assert!(!s.contains("onerror"));
+        assert!(s.contains("https://x.com/a.png"));
+        // javascript: href 剥掉
+        let s = sanitize_html(r#"<a href="javascript:alert(1)">点我</a>"#);
+        assert!(!s.contains("javascript:"));
+        assert!(s.contains("点我"));
+        // data:text/html src 剥掉（url_schemes 只放 http/https）
+        let s = sanitize_html(r#"<img src="data:text/html,<script>alert(1)</script>">"#);
+        assert!(!s.contains("data:"));
+        // 正常 https 链接保留
+        let s = sanitize_html(r#"<a href="https://ok.com/x">链接</a>"#);
+        assert!(s.contains("https://ok.com/x"));
+        // iframe/object/embed 删除
+        let s = sanitize_html(
+            r#"<p>a</p><iframe src="https://evil.com"></iframe><object data="x"></object><embed src="y">"#,
+        );
+        assert!(!s.contains("iframe"));
+        assert!(!s.contains("object"));
+        assert!(!s.contains("embed"));
+        // base 删除（防相对链接劫持）
+        let s = sanitize_html(r#"<base href="https://evil.com/"><p>a</p>"#);
+        assert!(!s.contains("base"));
+    }
 
-  #[test]
-  fn sanitize_keeps_normal_content() {
-    let s = sanitize_html(
-      r#"<h1>标题</h1><p>正文 <strong>粗体</strong> <a href="https://x.com">链接</a></p><ul><li>项</li></ul>"#,
-    );
-    assert!(s.contains("标题"));
-    assert!(s.contains("粗体"));
-    assert!(s.contains("链接"));
-    assert!(s.contains("<li>"));
-  }
+    #[test]
+    fn sanitize_keeps_normal_content() {
+        let s = sanitize_html(
+            r#"<h1>标题</h1><p>正文 <strong>粗体</strong> <a href="https://x.com">链接</a></p><ul><li>项</li></ul>"#,
+        );
+        assert!(s.contains("标题"));
+        assert!(s.contains("粗体"));
+        assert!(s.contains("链接"));
+        assert!(s.contains("<li>"));
+    }
 
-  /// 从渲染结果抠出 meta CSP 的 content
-  fn extract_csp(html: &str) -> &str {
-    let marker = "Content-Security-Policy\" content=\"";
-    let start = html.find(marker).unwrap() + marker.len();
-    let end = html[start..].find('"').unwrap() + start;
-    &html[start..end]
-  }
+    /// 从渲染结果抠出 meta CSP 的 content
+    fn extract_csp(html: &str) -> &str {
+        let marker = "Content-Security-Policy\" content=\"";
+        let start = html.find(marker).unwrap() + marker.len();
+        let end = html[start..].find('"').unwrap() + start;
+        &html[start..end]
+    }
 
-  /// 抠出页面模板脚本 `<script>...</script>` 的元素内文本（参与 hash 的部分）。
-  /// 用 rfind：head 注释里含 "<script>" 字面说明文字；正文经净化不含 script 标签，
-  /// 即便纵深防御测试直接注入，模板脚本也始终是最后一个。
-  fn extract_inline_script(html: &str) -> &str {
-    let start = html.rfind("<script>").unwrap() + "<script>".len();
-    let end = html[start..].find("</script>").unwrap() + start;
-    &html[start..end]
-  }
+    /// 抠出页面模板脚本 `<script>...</script>` 的元素内文本（参与 hash 的部分）。
+    /// 用 rfind：head 注释里含 "<script>" 字面说明文字；正文经净化不含 script 标签，
+    /// 即便纵深防御测试直接注入，模板脚本也始终是最后一个。
+    fn extract_inline_script(html: &str) -> &str {
+        let start = html.rfind("<script>").unwrap() + "<script>".len();
+        let end = html[start..].find("</script>").unwrap() + start;
+        &html[start..end]
+    }
 
-  #[test]
-  fn csp_whitelists_template_script_by_sha256_without_unsafe_inline() {
-    let html = render_reader_html("标题", "https://x.com/a", "<p>正文</p>");
-    let csp = extract_csp(&html);
+    #[test]
+    fn csp_whitelists_template_script_by_sha256_without_unsafe_inline() {
+        let html = render_reader_html("标题", "https://x.com/a", "<p>正文</p>");
+        let csp = extract_csp(&html);
 
-    // script-src 不得放行任何内联脚本（style-src 的 unsafe-inline 与本断言无关）
-    assert!(
-      !csp.contains("script-src 'unsafe-inline'"),
-      "CSP 仍含 script-src 'unsafe-inline': {csp}"
-    );
+        // script-src 不得放行任何内联脚本（style-src 的 unsafe-inline 与本断言无关）
+        assert!(
+            !csp.contains("script-src 'unsafe-inline'"),
+            "CSP 仍含 script-src 'unsafe-inline': {csp}"
+        );
 
-    // CSP 中的 hash 必须精确等于页面里实际脚本字节的 hash（防两处漂移）
-    let actual_script = extract_inline_script(&html);
-    let expected = inline_script_hash(actual_script);
-    assert!(
-      csp.contains(&expected),
-      "CSP 未放行实际脚本 hash {expected}，CSP: {csp}"
-    );
-    // READER_SCRIPT 常量就是页面脚本本身（占位符替换后无偏差）
-    assert_eq!(actual_script, READER_SCRIPT);
+        // CSP 中的 hash 必须精确等于页面里实际脚本字节的 hash（防两处漂移）
+        let actual_script = extract_inline_script(&html);
+        let expected = inline_script_hash(actual_script);
+        assert!(
+            csp.contains(&expected),
+            "CSP 未放行实际脚本 hash {expected}，CSP: {csp}"
+        );
+        // READER_SCRIPT 常量就是页面脚本本身（占位符替换后无偏差）
+        assert_eq!(actual_script, READER_SCRIPT);
 
-    // 改动一个字节的脚本不得被放行（证明 hash 不是摆设）
-    let mutated = inline_script_hash(&READER_SCRIPT.replace("19", "20"));
-    assert_ne!(mutated, expected);
-    assert!(!csp.contains(&mutated));
-  }
+        // 改动一个字节的脚本不得被放行（证明 hash 不是摆设）
+        let mutated = inline_script_hash(&READER_SCRIPT.replace("19", "20"));
+        assert_ne!(mutated, expected);
+        assert!(!csp.contains(&mutated));
+    }
 
-  #[test]
-  fn injected_scripts_are_not_whitelisted() {
-    // 即便净化层漏过（纵深防御场景），注入脚本/事件处理器的 hash 也不在白名单
-    let html = render_reader_html(
-      "t",
-      "https://x.com",
-      r#"<script>alert(1)</script><img src="x" onerror="alert(1)">"#,
-    );
-    let csp = extract_csp(&html);
-    assert!(!csp.contains(&inline_script_hash("alert(1)")));
-    assert!(!csp.contains(&inline_script_hash("\nalert(1)\n")));
-    // 白名单里只有一个 sha256 token
-    assert_eq!(csp.matches("'sha256-").count(), 1);
-  }
+    #[test]
+    fn injected_scripts_are_not_whitelisted() {
+        // 即便净化层漏过（纵深防御场景），注入脚本/事件处理器的 hash 也不在白名单
+        let html = render_reader_html(
+            "t",
+            "https://x.com",
+            r#"<script>alert(1)</script><img src="x" onerror="alert(1)">"#,
+        );
+        let csp = extract_csp(&html);
+        assert!(!csp.contains(&inline_script_hash("alert(1)")));
+        assert!(!csp.contains(&inline_script_hash("\nalert(1)\n")));
+        // 白名单里只有一个 sha256 token
+        assert_eq!(csp.matches("'sha256-").count(), 1);
+    }
 
-  #[test]
-  fn hash_matches_w3c_known_vector() {
-    // CSP 规范已知向量：空内容的 sha256-base64，锚定实现与浏览器验签口径一致
-    assert_eq!(
-      inline_script_hash(""),
-      "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='"
-    );
-  }
+    #[test]
+    fn hash_matches_w3c_known_vector() {
+        // CSP 规范已知向量：空内容的 sha256-base64，锚定实现与浏览器验签口径一致
+        assert_eq!(
+            inline_script_hash(""),
+            "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='"
+        );
+    }
 }

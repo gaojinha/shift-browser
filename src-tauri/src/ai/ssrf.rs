@@ -149,23 +149,27 @@ fn parse_int_radix(s: &str) -> Option<u64> {
 /// 通过的地址统一封装为带 `port` 的 SocketAddr，供 reqwest resolve_to_addrs /
 /// curl --resolve 直接使用，使建连阶段不再二次解析，闭合 TOCTOU。
 pub(crate) fn check_resolved_ips(
-  host: &str,
-  ips: impl IntoIterator<Item = std::net::IpAddr>,
-  port: u16,
+    host: &str,
+    ips: impl IntoIterator<Item = std::net::IpAddr>,
+    port: u16,
 ) -> Result<Vec<std::net::SocketAddr>, String> {
-  let mut out = Vec::new();
-  let mut count = 0u32;
-  for ip in ips {
-    count += 1;
-    if is_private_ip(ip) {
-      return Err(format!("域名 {host} 解析到本机/内网地址 {ip}，已拒绝（SSRF 防护）"));
+    let mut out = Vec::new();
+    let mut count = 0u32;
+    for ip in ips {
+        count += 1;
+        if is_private_ip(ip) {
+            return Err(format!(
+                "域名 {host} 解析到本机/内网地址 {ip}，已拒绝（SSRF 防护）"
+            ));
+        }
+        out.push(std::net::SocketAddr::new(ip, port));
     }
-    out.push(std::net::SocketAddr::new(ip, port));
-  }
-  if count == 0 {
-    return Err(format!("域名 {host} 没有可用的 DNS 解析结果，已拒绝（SSRF 防护）"));
-  }
-  Ok(out)
+    if count == 0 {
+        return Err(format!(
+            "域名 {host} 没有可用的 DNS 解析结果，已拒绝（SSRF 防护）"
+        ));
+    }
+    Ok(out)
 }
 
 /// 解析已通过 `validate_base_url` 静态校验的 https URL，返回 pin 所需信息（P0-6）。
@@ -175,34 +179,33 @@ pub(crate) fn check_resolved_ips(
 ///   `reqwest::ClientBuilder::resolve_to_addrs(resolve_key, &pinned)` 注册，
 ///   reqwest 建连时只在这些地址间选择、不再重新解析（DNS-rebinding TOCTOU 闭合）
 pub(crate) async fn resolve_pin_for_https(
-  url: &str,
+    url: &str,
 ) -> Result<(String, Option<Vec<std::net::SocketAddr>>), String> {
-  let parsed = url::Url::parse(url).map_err(|_| "API 地址格式不合法".to_string())?;
-  let port = parsed.port_or_known_default().unwrap_or(443);
-  let raw = parsed
-    .host_str()
-    .ok_or_else(|| "API 地址缺少主机名".to_string())?;
-  // url crate 对 IPv6 返回带方括号的 "[::1]"，解析/resolve key 都用去括号形式
-  let host = raw.trim_start_matches('[').trim_end_matches(']').to_string();
-  // 标准 IP 字面量：validate_base_url 已拒绝内网/混淆写法，公网字面量无需 pin
-  if host.parse::<std::net::IpAddr>().is_ok() {
-    return Ok((host, None));
-  }
-  // IPv4 数字混淆主机（如 0x08080808）：归一化后按规范 IP pin；
-  // 内网写法已在 validate_base_url 静态拒绝，这里 fail-closed 再判一次
-  if let Some(v4) = parse_obfuscated_ipv4(&host) {
-    let addrs = check_resolved_ips(
-      &host,
-      std::iter::once(std::net::IpAddr::V4(v4)),
-      port,
-    )?;
-    return Ok((host, Some(addrs)));
-  }
-  // 域名：只解析这一次，校验全部结果，随后 pin 死交给调用方
-  let sock: Vec<_> = tokio::net::lookup_host((host.as_str(), port))
-    .await
-    .map_err(|e| format!("域名解析失败: {host} ({e})"))?
-    .collect();
-  let addrs = check_resolved_ips(&host, sock.iter().map(|s| s.ip()), port)?;
-  Ok((host, Some(addrs)))
+    let parsed = url::Url::parse(url).map_err(|_| "API 地址格式不合法".to_string())?;
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let raw = parsed
+        .host_str()
+        .ok_or_else(|| "API 地址缺少主机名".to_string())?;
+    // url crate 对 IPv6 返回带方括号的 "[::1]"，解析/resolve key 都用去括号形式
+    let host = raw
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_string();
+    // 标准 IP 字面量：validate_base_url 已拒绝内网/混淆写法，公网字面量无需 pin
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return Ok((host, None));
+    }
+    // IPv4 数字混淆主机（如 0x08080808）：归一化后按规范 IP pin；
+    // 内网写法已在 validate_base_url 静态拒绝，这里 fail-closed 再判一次
+    if let Some(v4) = parse_obfuscated_ipv4(&host) {
+        let addrs = check_resolved_ips(&host, std::iter::once(std::net::IpAddr::V4(v4)), port)?;
+        return Ok((host, Some(addrs)));
+    }
+    // 域名：只解析这一次，校验全部结果，随后 pin 死交给调用方
+    let sock: Vec<_> = tokio::net::lookup_host((host.as_str(), port))
+        .await
+        .map_err(|e| format!("域名解析失败: {host} ({e})"))?
+        .collect();
+    let addrs = check_resolved_ips(&host, sock.iter().map(|s| s.ip()), port)?;
+    Ok((host, Some(addrs)))
 }

@@ -84,14 +84,13 @@ async fn with_id(
         &'a AppHandle,
         State<'a, crate::tabs::TabManager>,
         String,
-    )
-        -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<Output = crate::error::CommandResult<Option<crate::tabs::Tab>>>
-                    + Send
-                    + 'a,
-            >,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = crate::error::CommandResult<Option<crate::tabs::Tab>>>
+                + Send
+                + 'a,
         >,
+    >,
 ) -> Value {
     let id = match required_str(req, "id", "缺少 id") {
         Ok(v) => v,
@@ -181,15 +180,13 @@ pub(super) async fn search(app: &AppHandle, req: &Value) -> Value {
     // 读 search_engine 设置，拼搜索 URL（与 newtab/AddressBar 同映射）
     let engine: String = {
         let db = app.state::<crate::db::Db>();
-        sqlx::query_as::<_, (String,)>(
-            "SELECT value FROM settings WHERE key = 'search_engine'",
-        )
-        .fetch_optional(&db.pool)
-        .await
-        .ok()
-        .flatten()
-        .map(|(v,)| v)
-        .unwrap_or_else(|| crate::constants::search::DEFAULT_ENGINE.to_string())
+        sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'search_engine'")
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(v,)| v)
+            .unwrap_or_else(|| crate::constants::search::DEFAULT_ENGINE.to_string())
     };
     // 搜索引擎 URL 模板来自 constants.rs（唯一来源，未知 id 自动回退默认引擎）
     let template = crate::constants::search::url_template(&engine);
@@ -204,7 +201,11 @@ pub(super) async fn search(app: &AppHandle, req: &Value) -> Value {
 }
 
 pub(super) async fn pin_tab(app: &AppHandle, req: &Value) -> Value {
-    let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let id = req
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let Ok(state) = manager(app) else {
         return AppError::internal("标签管理器不可用").error_json();
     };
@@ -215,7 +216,11 @@ pub(super) async fn pin_tab(app: &AppHandle, req: &Value) -> Value {
 }
 
 pub(super) async fn mute_tab(app: &AppHandle, req: &Value) -> Value {
-    let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let id = req
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let Ok(state) = manager(app) else {
         return AppError::internal("标签管理器不可用").error_json();
     };

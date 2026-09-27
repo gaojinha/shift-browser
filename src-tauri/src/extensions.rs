@@ -58,7 +58,6 @@ use webkit2gtk::{
     UserStyleLevel, UserStyleSheet, WebViewExt,
 };
 
-
 /// 在主线程把所有 child webview 的 UserContentManager 清空并注入扩展
 /// UserContentManager 是 webview 级（非 WebContext 级），必须逐个 webview 注入
 /// 右键翻译菜单脚本（编译期嵌入）
@@ -181,7 +180,9 @@ fn inject_extensions(
                             move |_mgr, res| {
                                 if let Some(v) = res.js_value() {
                                     let raw = v.to_string();
-                                    crate::proto_shift::native_translate_handle(&app_msg, &label_msg, &raw);
+                                    crate::proto_shift::native_translate_handle(
+                                        &app_msg, &label_msg, &raw,
+                                    );
                                 }
                             },
                         );
@@ -215,7 +216,10 @@ fn inject_extensions(
                     );
                     manager.add_script(&polyfill);
                     // 即时注入：已加载的标签立即生效（幂等，重复无害）
-                    crate::engine::webview::eval_js(&webview, crate::engine::webmcp::WEBMCP_POLYFILL_JS);
+                    crate::engine::webview::eval_js(
+                        &webview,
+                        crate::engine::webmcp::WEBMCP_POLYFILL_JS,
+                    );
                 }
                 // 用户脚本（阶段3.2）：按各自 matches 限定页面（空则全站）；与扩展脚本同一套机制
                 for (code, patterns) in &user_scripts_clone {
@@ -270,7 +274,6 @@ fn inject_extensions(
     });
 }
 
-
 /// 重新注入全部启用扩展 + 广告拦截（新标签创建后调用，确保新 webview 也有扩展）
 pub async fn re_inject(app: &AppHandle) {
     re_inject_filtered(app, None).await;
@@ -288,7 +291,9 @@ async fn re_inject_filtered(app: &AppHandle, only: Option<String>) {
         Ok((items, webmcp_on)) => {
             log::info!(
                 "[extensions] re_inject{}: {} 个注入项",
-                only.as_deref().map(|l| format!("（单页 {l}）")).unwrap_or_default(),
+                only.as_deref()
+                    .map(|l| format!("（单页 {l}）"))
+                    .unwrap_or_default(),
                 items.len()
             );
             inject_extensions(app, items.clone(), webmcp_on, only.as_deref());

@@ -21,7 +21,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
-
 /// 一批里最多放多少字符。
 ///
 /// 2026-09-26 实测（live_批大小对单批耗时影响）：**单批耗时几乎与批大小无关**
@@ -78,7 +77,11 @@ pub async fn page_collect_translatable(app: AppHandle, tab_id: Option<String>) -
                 "[webzh] 收集完成：文本 {total} 段 / 属性 {attr_total} 项 / 滤掉 {} 段",
                 v.get("skipped").and_then(|x| x.as_u64()).unwrap_or(0)
             );
-            CollectResult { ok: true, msg: None, data: Some(v) }
+            CollectResult {
+                ok: true,
+                msg: None,
+                data: Some(v),
+            }
         }
         None => CollectResult {
             ok: false,
@@ -142,7 +145,11 @@ pub async fn page_apply_translation(
         };
     };
     if mode != "apply" && mode != "restore" {
-        return ApplyResult { ok: false, msg: Some("mode 只能是 apply 或 restore".into()), data: None };
+        return ApplyResult {
+            ok: false,
+            msg: Some("mode 只能是 apply 或 restore".into()),
+            data: None,
+        };
     }
 
     let args = match (mode.as_str(), &payload) {
@@ -160,8 +167,16 @@ pub async fn page_apply_translation(
     );
 
     match crate::api::handlers::eval_value_public(&wv, &script, 20).await {
-        Some(v) => ApplyResult { ok: true, msg: None, data: Some(v) },
-        None => ApplyResult { ok: false, msg: Some("写回页面失败或超时".into()), data: None },
+        Some(v) => ApplyResult {
+            ok: true,
+            msg: None,
+            data: Some(v),
+        },
+        None => ApplyResult {
+            ok: false,
+            msg: Some("写回页面失败或超时".into()),
+            data: None,
+        },
     }
 }
 
@@ -225,11 +240,15 @@ pub async fn opencode_translate_batch(
     let creds = crate::webqa::resolve_credentials_pub(&db).await?;
     let http = crate::webqa::client_pub(&creds)?;
     let base = crate::webqa::base_url_pub();
-    let agent = req.agent.unwrap_or_else(|| crate::webqa::DEFAULT_AGENT.to_string());
+    let agent = req
+        .agent
+        .unwrap_or_else(|| crate::webqa::DEFAULT_AGENT.to_string());
 
     // 翻译会话跟"随手问"分开：整页汉化会刷几百条消息，混进问答会话
     // 会把用户的聊天历史淹掉，也会污染后续追问的上下文。
-    let sid = match crate::webqa::ensure_session_pub(&http, req.session_id.as_deref(), "网页汉化").await {
+    let sid = match crate::webqa::ensure_session_pub(&http, req.session_id.as_deref(), "网页汉化")
+        .await
+    {
         Ok((s, _)) => s,
         Err(e) => {
             return Ok(TranslateBatchResult {
@@ -250,7 +269,10 @@ pub async fn opencode_translate_batch(
             let got = items.len();
             let want = req.items.len();
             if got == 0 {
-                log::warn!("[webzh] 批次翻译失败：模型输出无法解析，前 200 字：{}", truncate(&raw, 200));
+                log::warn!(
+                    "[webzh] 批次翻译失败：模型输出无法解析，前 200 字：{}",
+                    truncate(&raw, 200)
+                );
             } else if got < want {
                 log::warn!("[webzh] 批次翻译漏项：{got}/{want}，其余按原文保留");
             }
@@ -311,7 +333,8 @@ pub async fn opencode_translate_cleanup(
 /// 翻译记忆按模型隔离：换了模型旧译文作废。前端每次开翻前取一次，
 /// 失败返回 Err，前端据此跳过整轮缓存（不允许用空模型名读写）。
 #[tauri::command]
-pub async fn opencode_translate_model(    db: tauri::State<'_, crate::db::Db>,
+pub async fn opencode_translate_model(
+    db: tauri::State<'_, crate::db::Db>,
 ) -> crate::error::CommandResult<String> {
     let creds = crate::webqa::resolve_credentials_pub(&db).await?;
     let http = crate::webqa::client_pub(&creds)?;
@@ -371,7 +394,10 @@ pub async fn translate_memory_lookup(
         .filter_map(|i| {
             // key 在 db 层归一化，这里必须用同一个函数算 key，口径漂移 = 静默 miss
             let key = crate::db::translate_memory::normalize_source(&i.text);
-            hits.get(&key).map(|t| BatchItem { id: i.id, text: t.clone() })
+            hits.get(&key).map(|t| BatchItem {
+                id: i.id,
+                text: t.clone(),
+            })
         })
         .collect())
 }
@@ -456,7 +482,11 @@ pub fn plan_batches(items: &[BatchItem]) -> Vec<Vec<BatchItem>> {
 }
 
 /// 按给定上限分批（内核，档位由调用方定，便于单测各档）
-pub fn plan_batches_with(items: &[BatchItem], max_chars: usize, max_segs: usize) -> Vec<Vec<BatchItem>> {
+pub fn plan_batches_with(
+    items: &[BatchItem],
+    max_chars: usize,
+    max_segs: usize,
+) -> Vec<Vec<BatchItem>> {
     // 先做段内切分：单段超长时按自然边界切成子块（id 带 .序号 后缀），
     // 否则一个 8000 字符的长段会整段丢给模型——翻译质量掉、还容易超时。
     let mut expanded: Vec<BatchItem> = Vec::new();
@@ -587,8 +617,13 @@ pub fn parse_translate_response(raw: &str, items: &[BatchItem]) -> Vec<BatchItem
         if let Ok(v) = serde_json::from_str::<Vec<Value>>(c) {
             let mut out = Vec::new();
             for e in v {
-                let id = e.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                let t = e.get("t")
+                let id = e
+                    .get("id")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let t = e
+                    .get("t")
                     .or_else(|| e.get("translated"))
                     .or_else(|| e.get("text"))
                     .and_then(|x| x.as_str())
@@ -681,7 +716,10 @@ fn truncate(s: &str, n: usize) -> String {
 /// 验收调不到**——api.sock 和 Tauri invoke 是两条互不相通的路。P1 的
 /// `read_selection` 当初也是同样理由暴露出去的。实现共用，不复制。
 pub(super) async fn collect_for_api(app: &AppHandle, req: &Value) -> Value {
-    let tab_id = req.get("tab_id").and_then(|v| v.as_str()).map(str::to_string);
+    let tab_id = req
+        .get("tab_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let r = page_collect_translatable(app.clone(), tab_id).await;
     json!({
         "ok": r.ok,
@@ -692,7 +730,10 @@ pub(super) async fn collect_for_api(app: &AppHandle, req: &Value) -> Value {
 
 /// `page_apply_translation` 的 api.sock 包装。参数同上（req 里带 mode/payload）。
 pub(super) async fn apply_for_api(app: &AppHandle, req: &Value) -> Value {
-    let tab_id = req.get("tab_id").and_then(|v| v.as_str()).map(str::to_string);
+    let tab_id = req
+        .get("tab_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let mode = req
         .get("mode")
         .and_then(|v| v.as_str())
@@ -736,7 +777,10 @@ mod tests {
 
     fn items(v: &[(&str, &str)]) -> Vec<BatchItem> {
         v.iter()
-            .map(|(a, b)| BatchItem { id: (*a).to_string(), text: (*b).to_string() })
+            .map(|(a, b)| BatchItem {
+                id: (*a).to_string(),
+                text: (*b).to_string(),
+            })
             .collect()
     }
 
@@ -756,7 +800,10 @@ mod tests {
     #[test]
     fn 保守档65段切三批默认档切两批() {
         let its: Vec<BatchItem> = (0..65)
-            .map(|i| BatchItem { id: format!("t{i}"), text: "x".repeat(30) })
+            .map(|i| BatchItem {
+                id: format!("t{i}"),
+                text: "x".repeat(30),
+            })
             .collect();
         let fast = plan_batches_with(&its, BATCH_MAX_CHARS, 60);
         assert_eq!(fast.len(), 2, "60 段档 65 段应切 2 批");
@@ -773,7 +820,10 @@ mod tests {
         // 免得以后调参（2026-09-26 从 25 提到 60）测试就瞎红。
         let n = BATCH_MAX_SEGMENTS + 5;
         let its: Vec<BatchItem> = (0..n)
-            .map(|i| BatchItem { id: format!("t{i}"), text: "x".repeat(30) })
+            .map(|i| BatchItem {
+                id: format!("t{i}"),
+                text: "x".repeat(30),
+            })
             .collect();
         let b = plan_batches(&its);
         assert!(b.len() >= 2, "{n} 段必须切多批");
@@ -820,7 +870,11 @@ mod tests {
             .filter(|i| i.id.starts_with("t0."))
             .map(|i| i.text.chars().count())
             .sum();
-        assert_eq!(z_len, BATCH_MAX_CHARS + 2000, "子块拼起来的长度必须等于原段长度");
+        assert_eq!(
+            z_len,
+            BATCH_MAX_CHARS + 2000,
+            "子块拼起来的长度必须等于原段长度"
+        );
     }
 
     #[test]
@@ -834,7 +888,8 @@ mod tests {
 
     #[test]
     fn 解析裹代码块的输出() {
-        let raw = "好的，以下是翻译：\n```json\n[{\"id\":\"t0\",\"t\":\"你好\"}]\n```\n希望有帮助！";
+        let raw =
+            "好的，以下是翻译：\n```json\n[{\"id\":\"t0\",\"t\":\"你好\"}]\n```\n希望有帮助！";
         let its = items(&[("t0", "hello")]);
         let got = parse_translate_response(raw, &its);
         assert_eq!(got.len(), 1);
@@ -923,12 +978,15 @@ mod tests {
         assert!(pieces.len() > 1);
         // 块应以句末标点或空格收尾，别把词切两半
         for (i, p) in pieces.iter().enumerate() {
-            if i == pieces.len() - 1 { break; }
+            if i == pieces.len() - 1 {
+                break;
+            }
             let last = p.chars().last().unwrap();
             assert!(
                 matches!(last, '.' | ' ' | '。' | '!' | '?' | ';' | '\n'),
                 "块 {:?} 结尾 {:?} 不是自然边界",
-                p, last
+                p,
+                last
             );
         }
         assert_eq!(pieces.concat(), t);
@@ -955,7 +1013,11 @@ mod tests {
         // 全部块的 id 都该是 t0.N 形式
         for batch in &b {
             for it in batch {
-                assert!(it.id.starts_with("t0."), "子块 id 形如 t0.0，实际 {}", it.id);
+                assert!(
+                    it.id.starts_with("t0."),
+                    "子块 id 形如 t0.0，实际 {}",
+                    it.id
+                );
             }
         }
         // 每块都不超过上限
@@ -980,7 +1042,6 @@ mod tests {
         assert!(bases.contains("t7"));
     }
 
-
     /// 契约测试：四条 webzh 命令的返回字段名，必须与前端解包逐字对上。
     ///
     /// 前端 `zhCall` 读的是 `{ok, msg, data}` 里的 `data`；`data` 里再按
@@ -1000,7 +1061,10 @@ mod tests {
         };
         let v = serde_json::to_value(&c).unwrap();
         assert_eq!(v["ok"], true);
-        assert!(v.get("msg").is_some(), "必须有 msg 字段（前端读 r.msg 出错误提示）");
+        assert!(
+            v.get("msg").is_some(),
+            "必须有 msg 字段（前端读 r.msg 出错误提示）"
+        );
         assert!(v["data"]["segments"].is_array(), "前端读 data.segments");
         assert!(v["data"]["attrs"].is_array(), "前端读 data.attrs");
         assert!(v["data"]["title"].is_string(), "前端读 data.title");

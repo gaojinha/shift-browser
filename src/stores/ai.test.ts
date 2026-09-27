@@ -114,7 +114,8 @@ describe('流式错误与停止', () => {
     })
     const ai = useAIStore()
     await ai.sendMessage('hi')
-    expect(ai.error).toBe('AI 服务错误 500')
+    // 人话化后含原文（内部 hiccup 话术 + 原消息括注）
+    expect(ai.error).toContain('AI 服务错误 500')
     // 空 assistant 占位被丢弃，只剩用户消息
     expect(ai.messages).toEqual([{ role: 'user', content: 'hi' }])
     expect(ai.loading).toBe(false)
@@ -137,7 +138,7 @@ describe('流式错误与停止', () => {
     expect(ai.messages).toEqual([{ role: 'user', content: 'hi' }])
   })
 
-  it('invoke reject 裸字符串（旧命令形态）→ error 取原消息', async () => {
+  it('invoke reject 裸字符串（旧命令形态）→ 人话话术 + 原文括注', async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === 'content_snapshot') return Promise.reject('x')
       if (cmd === 'mcp_list_tools') return Promise.resolve([])
@@ -146,7 +147,7 @@ describe('流式错误与停止', () => {
     })
     const ai = useAIStore()
     await ai.sendMessage('hi')
-    expect(ai.error).toBe('网络不可达')
+    expect(ai.error).toContain('网络不可达')
     expect(ai.messages).toEqual([{ role: 'user', content: 'hi' }])
     expect(ai.loading).toBe(false)
   })
@@ -162,7 +163,8 @@ describe('流式错误与停止', () => {
     })
     const ai = useAIStore()
     await ai.sendMessage('hi')
-    expect(ai.error).toBe('未配置 API Key')
+    // 新契约对象的人话化：E_AUTH 话术 + 原消息括注，不再是 [object Object]
+    expect(ai.error).toContain('未配置 API Key')
   })
 
   it('stopStreaming：按 requestId 调 ai_cancel_stream，取消失败静默', async () => {
@@ -1085,6 +1087,54 @@ describe('带上下文发送', () => {
     const args = call![1] as { messages: Array<{ role: string; content: string }> }
     // 回退老一句：模型侧即显示原文
     expect(args.messages[args.messages.length - 1].content).toContain('5 条以内')
+    expect(ai.error).toBeNull()
+  })
+
+  it('explainWithContext：三级组装后发送，显示存原文', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'read_page_selection')
+        return Promise.resolve({
+          has_selection: true,
+          text: '选中的一段',
+          title: '页标题',
+          url: 'https://example.com/a',
+        })
+      if (cmd === 'content_qa_prompt')
+        return Promise.resolve({ prompt: '组装解释提示词', chars: 7, truncated: false })
+      if (cmd === 'content_snapshot') return Promise.reject('x')
+      if (cmd === 'mcp_list_tools') {
+        return Promise.resolve([{ name: 't', serverName: 's', description: '' }])
+      }
+      if (cmd === 'ai_chat') return Promise.resolve('ok')
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    ai.setPageContext('https://example.com/a', '页标题')
+    await ai.explainWithContext('tab-1')
+    const call = invokeMock.mock.calls.find((c) => c[0] === 'ai_chat')
+    const args = call![1] as { messages: Array<{ role: string; content: string }> }
+    expect(args.messages[args.messages.length - 1].content).toBe('组装解释提示词')
+    expect(ai.messages[0].content).toContain('通俗易懂')
+    expect(ai.qaSource).toBe('选区')
+  })
+
+  it('explainWithContext：组装失败回退老一句', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'read_page_selection') return Promise.resolve({ has_selection: false })
+      if (cmd === 'content_extract') return Promise.reject('x')
+      if (cmd === 'content_snapshot') return Promise.reject('no tab')
+      if (cmd === 'mcp_list_tools') {
+        return Promise.resolve([{ name: 't', serverName: 's', description: '' }])
+      }
+      if (cmd === 'ai_chat') return Promise.resolve('ok')
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    ai.setPageContext('https://example.com/a', '页标题')
+    await ai.explainWithContext('tab-1')
+    const call = invokeMock.mock.calls.find((c) => c[0] === 'ai_chat')
+    const args = call![1] as { messages: Array<{ role: string; content: string }> }
+    expect(args.messages[args.messages.length - 1].content).toContain('通俗易懂')
     expect(ai.error).toBeNull()
   })
 })

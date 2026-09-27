@@ -1,7 +1,7 @@
 // 会话管理：保存/恢复标签页状态
-use ts_rs::TS;
 use crate::db::{Db, DbResult};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 #[derive(Debug, Serialize, Deserialize, Clone, TS)]
 #[ts(export, export_to = "../../src/types/generated/")]
@@ -287,7 +287,9 @@ mod tests {
             .unwrap();
         assert_eq!(total.0, 53);
         // 自动保存规则不受影响：插一条自动保存不触发手动裁剪
-        save_session_inner(&pool, "自动保存", None, &[]).await.unwrap();
+        save_session_inner(&pool, "自动保存", None, &[])
+            .await
+            .unwrap();
         let total2: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
             .fetch_one(&pool)
             .await

@@ -2,9 +2,9 @@
 
 use crate::db::Db;
 
-use super::*;
-use super::session::{current_user_id, load_prefs};
 use super::security::*;
+use super::session::{current_user_id, load_prefs};
+use super::*;
 
 /// 校验导入备份的账号字段（P1-4）
 ///
@@ -51,7 +51,6 @@ pub(crate) fn validate_import_account(
 }
 
 // ===== 登录防爆破（内存态：连续失败锁定 30 秒）=====
-
 
 /// 导出账号备份（JSON 文件，含密码哈希，提示妥善保管）
 /// 安全：只能导出当前登录用户自己的数据——不接受任意用户名参数，
@@ -131,7 +130,6 @@ pub async fn user_export(db: tauri::State<'_, Db>) -> Result<UserResult, String>
         path: Some(path.display().to_string()),
     })
 }
-
 
 /// 导入账号备份（JSON 文件）
 #[tauri::command]
@@ -273,5 +271,3 @@ pub async fn user_import(db: tauri::State<'_, Db>) -> Result<UserResult, String>
 }
 
 // ===== 小工具 =====
-
-

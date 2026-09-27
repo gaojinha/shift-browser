@@ -43,8 +43,13 @@ async fn pinned_client_for(url: &str) -> Result<reqwest::Client, String> {
         return Err("只支持 http/https 订阅源".to_string());
     }
     let parsed = url::Url::parse(url).map_err(|_| "URL 不合法".to_string())?;
-    let raw = parsed.host_str().ok_or_else(|| "URL 缺少主机名".to_string())?;
-    let host = raw.trim_start_matches('[').trim_end_matches(']').to_string();
+    let raw = parsed
+        .host_str()
+        .ok_or_else(|| "URL 缺少主机名".to_string())?;
+    let host = raw
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_string();
     let port = parsed.port_or_known_default().unwrap_or(80);
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(
@@ -60,13 +65,11 @@ async fn pinned_client_for(url: &str) -> Result<reqwest::Client, String> {
             return Err(format!("订阅源指向内网/保留地址，已拦截：{}", host));
         }
     } else {
-        let sock: Vec<std::net::SocketAddr> =
-            tokio::net::lookup_host((host.as_str(), port))
-                .await
-                .map_err(|e| format!("DNS 解析失败: {} ({})", host, e))?
-                .collect();
-        let addrs =
-            crate::ai::check_resolved_ips(&host, sock.iter().map(|s| s.ip()), port)?;
+        let sock: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
+            .await
+            .map_err(|e| format!("DNS 解析失败: {} ({})", host, e))?
+            .collect();
+        let addrs = crate::ai::check_resolved_ips(&host, sock.iter().map(|s| s.ip()), port)?;
         builder = builder.resolve_to_addrs(&host, &addrs);
     }
     builder
@@ -75,12 +78,7 @@ async fn pinned_client_for(url: &str) -> Result<reqwest::Client, String> {
 }
 
 /// 抓单个源并入库；返回条目数
-async fn fetch_one(
-    db: &Db,
-    source: &str,
-    url: &str,
-    category: &str,
-) -> usize {
+async fn fetch_one(db: &Db, source: &str, url: &str, category: &str) -> usize {
     // 手动跟随重定向（最多 5 跳）：reqwest 自动跟随会在复核前把请求打到内网，
     // 这里每跳先建 pin 死的连接再发请求，内网跳转连第一个字节都发不出去
     let mut cur = url.to_string();
@@ -112,7 +110,10 @@ async fn fetch_one(
                 log::warn!("[feed] {} 重定向无 Location: HTTP {}", source, status);
                 return 0;
             }
-            match url::Url::parse(&cur).ok().and_then(|base| base.join(&loc).ok()) {
+            match url::Url::parse(&cur)
+                .ok()
+                .and_then(|base| base.join(&loc).ok())
+            {
                 Some(next) => {
                     hops += 1;
                     if hops > 5 {
@@ -246,10 +247,11 @@ pub async fn refresh_all(db: &Db) -> usize {
                 // 失败重试一次：anyfeeder 偶发限流/网络抖动会让单个源整轮丢失，
                 // 等 30 分钟下一轮太久，补抓一次；延迟 2-5 秒抖动（纳秒取模，
                 // 不为抖动引入 rand 依赖），避免多源同时失败同时重试打群架
-                let jitter = 2 + (std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.subsec_nanos() as u64 % 4)
-                    .unwrap_or(0));
+                let jitter = 2
+                    + (std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.subsec_nanos() as u64 % 4)
+                        .unwrap_or(0));
                 tokio::time::sleep(std::time::Duration::from_secs(jitter)).await;
                 log::warn!("[feed] {} 首次抓取失败，{} 秒后重试", name, jitter);
                 fetch_one(&db_owned, &name, &url, &category).await
@@ -284,7 +286,10 @@ pub async fn latest_items(db: &Db, limit: i64) -> Vec<(String, String, String, S
 pub fn start_scheduler(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(
+            crate::contracts::timeout::FEED_INITIAL_DELAY_SECS,
+        ))
+        .await;
         loop {
             let n = {
                 let db = app.state::<Db>();
@@ -297,11 +302,13 @@ pub fn start_scheduler(app: &AppHandle) {
                 let db = app.state::<Db>();
                 let _ = crate::newtab::generate(&db, &path).await;
             }
-            tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(
+                crate::contracts::timeout::FEED_LOOP_SECS,
+            ))
+            .await;
         }
     });
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -317,10 +324,7 @@ mod tests {
             "http://169.254.169.254/latest",
             "http://[::1]/",
         ] {
-            assert!(
-                pinned_client_for(url).await.is_err(),
-                "{url} 必须被拦截"
-            );
+            assert!(pinned_client_for(url).await.is_err(), "{url} 必须被拦截");
         }
     }
 

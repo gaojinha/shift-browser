@@ -22,14 +22,54 @@ const EDGE: i32 = 6;
 /// 8 个方向规格：(方向, 光标名, 水平对齐, 垂直对齐)
 /// 先加 4 条边、后加 4 个角——角在上层，重叠处优先触发斜向拉伸
 const SPECS: [(WindowEdge, &str, gtk::Align, gtk::Align); 8] = [
-    (WindowEdge::North, "n-resize", gtk::Align::Fill, gtk::Align::Start),
-    (WindowEdge::South, "s-resize", gtk::Align::Fill, gtk::Align::End),
-    (WindowEdge::West, "w-resize", gtk::Align::Start, gtk::Align::Fill),
-    (WindowEdge::East, "e-resize", gtk::Align::End, gtk::Align::Fill),
-    (WindowEdge::NorthWest, "nw-resize", gtk::Align::Start, gtk::Align::Start),
-    (WindowEdge::NorthEast, "ne-resize", gtk::Align::End, gtk::Align::Start),
-    (WindowEdge::SouthWest, "sw-resize", gtk::Align::Start, gtk::Align::End),
-    (WindowEdge::SouthEast, "se-resize", gtk::Align::End, gtk::Align::End),
+    (
+        WindowEdge::North,
+        "n-resize",
+        gtk::Align::Fill,
+        gtk::Align::Start,
+    ),
+    (
+        WindowEdge::South,
+        "s-resize",
+        gtk::Align::Fill,
+        gtk::Align::End,
+    ),
+    (
+        WindowEdge::West,
+        "w-resize",
+        gtk::Align::Start,
+        gtk::Align::Fill,
+    ),
+    (
+        WindowEdge::East,
+        "e-resize",
+        gtk::Align::End,
+        gtk::Align::Fill,
+    ),
+    (
+        WindowEdge::NorthWest,
+        "nw-resize",
+        gtk::Align::Start,
+        gtk::Align::Start,
+    ),
+    (
+        WindowEdge::NorthEast,
+        "ne-resize",
+        gtk::Align::End,
+        gtk::Align::Start,
+    ),
+    (
+        WindowEdge::SouthWest,
+        "sw-resize",
+        gtk::Align::Start,
+        gtk::Align::End,
+    ),
+    (
+        WindowEdge::SouthEast,
+        "se-resize",
+        gtk::Align::End,
+        gtk::Align::End,
+    ),
 ];
 
 /// 安装边缘拉伸（setup 阶段、GTK 主线程调用）
@@ -83,13 +123,7 @@ pub fn install(overlay: &gtk::Overlay, gtk_window: &gtk::Window) {
         let win = gtk_window.clone();
         eb.connect_button_press_event(move |_, ev| {
             if ev.button() == 1 {
-                win.begin_resize_drag(
-                    edge,
-                    1,
-                    ev.root().0 as i32,
-                    ev.root().1 as i32,
-                    ev.time(),
-                );
+                win.begin_resize_drag(edge, 1, ev.root().0 as i32, ev.root().1 as i32, ev.time());
                 return gtk::glib::Propagation::Stop;
             }
             gtk::glib::Propagation::Proceed

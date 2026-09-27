@@ -174,8 +174,9 @@ pub(crate) fn spawn_http(app: AppHandle, tokens: auth::ApiTokenShared) {
                             )
                         } else {
                             guard.record_success(&peer_ip);
-                            let s = serde_json::to_string(&dashboard::model_gateway(&app, &body).await)
-                                .unwrap_or_else(|_| "{}".into());
+                            let s =
+                                serde_json::to_string(&dashboard::model_gateway(&app, &body).await)
+                                    .unwrap_or_else(|_| "{}".into());
                             (200u16, "OK", String::new(), s)
                         }
                     } else {
@@ -216,11 +217,12 @@ pub(crate) fn spawn_http(app: AppHandle, tokens: auth::ApiTokenShared) {
                         None
                     };
                     let tickets_ok = app.try_state::<auth::DashboardTickets>();
-                    let ticket_ok = query_ticket.as_deref().is_some_and(|t| {
-                        tickets_ok.as_ref().is_some_and(|s| s.consume(t))
-                    }) || posted.as_deref().is_some_and(|t| {
-                        tickets_ok.as_ref().is_some_and(|s| s.consume(t))
-                    });
+                    let ticket_ok = query_ticket
+                        .as_deref()
+                        .is_some_and(|t| tickets_ok.as_ref().is_some_and(|s| s.consume(t)))
+                        || posted
+                            .as_deref()
+                            .is_some_and(|t| tickets_ok.as_ref().is_some_and(|s| s.consume(t)));
                     let ok = bearer_ok
                         || ticket_ok
                         || posted.as_deref().is_some_and(|t| auth::ct_eq(t, &token));
@@ -239,9 +241,7 @@ pub(crate) fn spawn_http(app: AppHandle, tokens: auth::ApiTokenShared) {
                     }
                     // 只有真的提交了凭据（表单/Authorization 头/带 ticket 链接）才计失败；
                     // 裸开登录页与浏览器预取不触发限速
-                    let submitted = has_auth_header
-                        || query_ticket.is_some()
-                        || posted.is_some();
+                    let submitted = has_auth_header || query_ticket.is_some() || posted.is_some();
                     let retry = if submitted {
                         guard.record_failure(&peer_ip, Instant::now())
                     } else {

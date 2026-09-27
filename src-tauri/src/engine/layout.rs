@@ -48,7 +48,13 @@ impl ContentGeometry {
             .inner_size()
             .unwrap_or(tauri::PhysicalSize::new(1280, 800));
         let scale = window.scale_factor().unwrap_or(1.0);
-        Self::from_size(inner.width as f64 / scale, inner.height as f64 / scale, top, ai_active, vertical)
+        Self::from_size(
+            inner.width as f64 / scale,
+            inner.height as f64 / scale,
+            top,
+            ai_active,
+            vertical,
+        )
     }
 
     /// 分屏：把内容区左右分栏，返回 (左栏, 右栏)。
@@ -79,7 +85,11 @@ impl ContentGeometry {
         ai_active: bool,
         vertical: bool,
     ) -> Self {
-        let left = if vertical { VERTICAL_TAB_BAR_WIDTH } else { 0.0 };
+        let left = if vertical {
+            VERTICAL_TAB_BAR_WIDTH
+        } else {
+            0.0
+        };
         let mut w = logical_w - left;
         if ai_active {
             w = (w - AI_PANEL_WIDTH).max(MIN_CONTENT_WIDTH);
@@ -95,7 +105,12 @@ impl ContentGeometry {
 }
 
 /// 内容区尺寸（浮点，供建标签时直接使用）
-pub fn content_size(window: &tauri::Window, top: f64, ai_active: bool, vertical: bool) -> (f64, f64) {
+pub fn content_size(
+    window: &tauri::Window,
+    top: f64,
+    ai_active: bool,
+    vertical: bool,
+) -> (f64, f64) {
     let geo = ContentGeometry::compute(window, top, ai_active, vertical);
     (geo.width as f64, geo.height as f64)
 }
@@ -112,7 +127,10 @@ pub fn apply_to_webview(window: &tauri::Window, tab_id: &str, geo: ContentGeomet
     };
     // 窗口逻辑宽度（供 margin_end 计算，闭包外提取避免借用逃逸）
     let scale = window.scale_factor().unwrap_or(1.0);
-    let w_physical = window.inner_size().map(|s| s.width as f64).unwrap_or(1280.0);
+    let w_physical = window
+        .inner_size()
+        .map(|s| s.width as f64)
+        .unwrap_or(1280.0);
     let w_logical = (w_physical / scale) as i32;
     let _ = wv.with_webview(move |pwv| {
         let gtk_wv = pwv.inner();
@@ -232,19 +250,17 @@ mod tests {
         let g = ContentGeometry::from_size(1280.0, 800.0, CONTENT_TOP_OFFSET, false, false);
         assert_eq!(g.left, 0);
         assert_eq!(g.width, 1280);
-        assert_eq!(g.height, (800.0 - CONTENT_TOP_OFFSET - STATUS_BAR_HEIGHT) as i32);
+        assert_eq!(
+            g.height,
+            (800.0 - CONTENT_TOP_OFFSET - STATUS_BAR_HEIGHT) as i32
+        );
         assert_eq!(g.top, CONTENT_TOP_OFFSET as i32);
     }
 
     #[test]
     fn geometry_vertical_lets_out_left() {
-        let g = ContentGeometry::from_size(
-            1280.0,
-            800.0,
-            CONTENT_TOP_OFFSET_NO_BOOKMARKS,
-            false,
-            true,
-        );
+        let g =
+            ContentGeometry::from_size(1280.0, 800.0, CONTENT_TOP_OFFSET_NO_BOOKMARKS, false, true);
         assert_eq!(g.left, VERTICAL_TAB_BAR_WIDTH as i32);
         assert_eq!(g.width, 1280 - VERTICAL_TAB_BAR_WIDTH as i32);
     }

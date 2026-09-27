@@ -20,8 +20,8 @@ pub use ui_cmds::*;
 
 #[cfg(test)]
 mod tests {
-    use crate::tabs::*;
     use crate::tabs::util::sanitize_filename;
+    use crate::tabs::*;
 
     #[test]
     fn internal_newtab_url_detection() {
@@ -96,4 +96,3 @@ mod tests {
         assert_eq!(sanitize_filename(&long).len(), 200);
     }
 }
-

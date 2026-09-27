@@ -174,7 +174,10 @@ pub async fn get_passwords_for_domain(
         return Ok(vec![]);
     }
     // LIKE 转义：\、%、_ 按字面量匹配，加 ESCAPE 子句
-    let escaped = domain.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+    let escaped = domain
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
     let rows = sqlx::query_as::<_, (i64, String, Option<String>, String, Option<String>, String, String)>(
         "SELECT id, domain, username, password, notes, created_at, updated_at FROM passwords WHERE domain LIKE ? ESCAPE '\\' ORDER BY id",
     )

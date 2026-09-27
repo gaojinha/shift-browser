@@ -10,14 +10,14 @@
 //! action/dismiss（保守弹窗关闭）。对 handlers/mod.rs 的分发面不变
 //! （仍经 `page::xxx` 调用，下方 re-export 保持路径稳定）。
 
+#[path = "page/open_read.rs"]
+mod open_read;
+#[path = "page/read.rs"]
+mod read;
 #[path = "page/shot.rs"]
 mod shot;
 #[path = "page/util.rs"]
 mod util;
-#[path = "page/read.rs"]
-mod read;
-#[path = "page/open_read.rs"]
-mod open_read;
 
 pub(crate) use open_read::open_and_read;
 pub(crate) use read::{read_page, read_status};
@@ -32,15 +32,14 @@ use crate::error::AppError;
 pub(super) async fn eval(app: &AppHandle, req: &Value) -> Value {
     // 执行 JS（安全闸门：设置 api_allow_eval 必须为 'true'，默认关）
     let db = app.state::<crate::db::Db>();
-    let allowed: String = sqlx::query_as::<_, (String,)>(
-        "SELECT value FROM settings WHERE key = 'api_allow_eval'",
-    )
-    .fetch_optional(&db.pool)
-    .await
-    .ok()
-    .flatten()
-    .map(|(v,)| v)
-    .unwrap_or_default();
+    let allowed: String =
+        sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'api_allow_eval'")
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(v,)| v)
+            .unwrap_or_default();
     if allowed != "true" {
         return AppError::permission("执行 JS 已禁用：需在设置里显式开启「允许 API 执行 JS」")
             .error_json();

@@ -22,9 +22,10 @@ use webkit2gtk::UserContentManager;
 // 规则数据与 JSON 构造（纯函数，拆出以控制本文件行数）
 #[path = "content_filter/rules.rs"]
 mod rules;
-pub use rules::build_rules_with_keywords;
-#[allow(unused_imports)] // build_rules 供单测与后续自检使用（生产路径走 build_rules_with_keywords）
+#[allow(unused_imports)]
+// build_rules 供单测与后续自检使用（生产路径走 build_rules_with_keywords）
 pub use rules::build_rules;
+pub use rules::build_rules_with_keywords;
 use rules::BUILTIN_URL_RULES;
 
 #[cfg(test)]
@@ -260,5 +261,3 @@ pub fn status() -> serde_json::Value {
         "ruleCount": BUILTIN_URL_RULES.len(),
     })
 }
-
-

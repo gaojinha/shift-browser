@@ -8,77 +8,77 @@
 
 /// 一个动作
 pub struct Action {
-  pub id: &'static str,
-  pub desc: &'static str,
-  /// 必填参数（供 Agent 校验 / 提示词生成）
-  pub required: &'static [&'static str],
+    pub id: &'static str,
+    pub desc: &'static str,
+    /// 必填参数（供 Agent 校验 / 提示词生成）
+    pub required: &'static [&'static str],
 }
 
 /// 全部动作（唯一来源）
 pub const ACTIONS: &[Action] = &[
-  Action {
-    id: "click",
-    desc: "点击页面元素",
-    required: &["selector"],
-  },
-  Action {
-    id: "fill",
-    desc: "填写输入框",
-    required: &["selector", "value"],
-  },
-  Action {
-    id: "scroll",
-    desc: "滚动页面",
-    required: &["direction"],
-  },
-  Action {
-    id: "read",
-    desc: "读取页面文本",
-    required: &[],
-  },
-  Action {
-    id: "wait",
-    desc: "等待若干毫秒",
-    required: &["ms"],
-  },
-  Action {
-    id: "navigate",
-    desc: "跳转到指定 URL",
-    required: &["url"],
-  },
-  Action {
-    id: "back",
-    desc: "后退一页",
-    required: &[],
-  },
-  Action {
-    id: "snapshot",
-    desc: "采集页面语义快照",
-    required: &[],
-  },
-  Action {
-    id: "submit",
-    desc: "提交表单",
-    required: &["selector"],
-  },
+    Action {
+        id: "click",
+        desc: "点击页面元素",
+        required: &["selector"],
+    },
+    Action {
+        id: "fill",
+        desc: "填写输入框",
+        required: &["selector", "value"],
+    },
+    Action {
+        id: "scroll",
+        desc: "滚动页面",
+        required: &["direction"],
+    },
+    Action {
+        id: "read",
+        desc: "读取页面文本",
+        required: &[],
+    },
+    Action {
+        id: "wait",
+        desc: "等待若干毫秒",
+        required: &["ms"],
+    },
+    Action {
+        id: "navigate",
+        desc: "跳转到指定 URL",
+        required: &["url"],
+    },
+    Action {
+        id: "back",
+        desc: "后退一页",
+        required: &[],
+    },
+    Action {
+        id: "snapshot",
+        desc: "采集页面语义快照",
+        required: &[],
+    },
+    Action {
+        id: "submit",
+        desc: "提交表单",
+        required: &["selector"],
+    },
 ];
 
 /// 动作 id 数组（供 function calling 的 `enum` / 白名单校验直接用）
 pub const IDS: [&str; 9] = [
-  "click", "fill", "scroll", "read", "wait", "navigate", "back", "snapshot", "submit",
+    "click", "fill", "scroll", "read", "wait", "navigate", "back", "snapshot", "submit",
 ];
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+    use super::*;
 
-  #[test]
-  fn ids_match_actions() {
-    // IDS 与 ACTIONS 必须一致（防两处漂移）
-    assert_eq!(IDS.len(), ACTIONS.len());
-    for (id, a) in IDS.iter().zip(ACTIONS.iter()) {
-      assert_eq!(id, &a.id);
-      assert!(!a.desc.is_empty());
+    #[test]
+    fn ids_match_actions() {
+        // IDS 与 ACTIONS 必须一致（防两处漂移）
+        assert_eq!(IDS.len(), ACTIONS.len());
+        for (id, a) in IDS.iter().zip(ACTIONS.iter()) {
+            assert_eq!(id, &a.id);
+            assert!(!a.desc.is_empty());
+        }
     }
-  }
 }

@@ -123,7 +123,11 @@ pub(crate) fn classify_status(status: u16, body: &str) -> AiError {
         401 | 403 => AiError::Auth(format!(
             "AI 鉴权失败（{}）：API Key 无效或已过期，请检查设置。{}",
             status,
-            if body.is_empty() { String::new() } else { format!("（{}）", body) }
+            if body.is_empty() {
+                String::new()
+            } else {
+                format!("（{}）", body)
+            }
         )),
         429 => AiError::RateLimited(
             "AI 服务限流（429）：请求太频繁，请稍等片刻再试。若持续出现，可能是当日额度已用完。"
@@ -169,14 +173,15 @@ pub(crate) async fn agnes_chat_impl(
         .map_err(|e| classify_pin_error(&e))?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
-    let mut builder = reqwest::Client::builder()
-      .timeout(std::time::Duration::from_secs(req.timeout_secs.unwrap_or(90)));
+    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(
+        req.timeout_secs.unwrap_or(90),
+    ));
     if let Some(addrs) = &pinned {
-      builder = builder.resolve_to_addrs(&resolve_key, addrs);
+        builder = builder.resolve_to_addrs(&resolve_key, addrs);
     }
     let client = builder
-      .build()
-      .map_err(|e| AiError::Internal(format!("HTTP 客户端创建失败: {}", e)))?;
+        .build()
+        .map_err(|e| AiError::Internal(format!("HTTP 客户端创建失败: {}", e)))?;
     let req_body = ChatRequest {
         model: req.model.clone(),
         messages: req.messages.clone(),
@@ -230,22 +235,22 @@ pub(crate) async fn agnes_chat_stream_impl<F>(
 where
     F: Fn(String) -> Result<(), ()>,
 {
-    let base_url =
-        validate_base_url(base_url).map_err(AiError::Permission)?;
+    let base_url = validate_base_url(base_url).map_err(AiError::Permission)?;
     // P0-6：解析一次并 pin 死公网地址，reqwest 建连不再二次解析（防 DNS rebinding）
     let (resolve_key, pinned) = resolve_pin_for_https(&base_url)
         .await
         .map_err(|e| classify_pin_error(&e))?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
-    let mut builder = reqwest::Client::builder()
-      .timeout(std::time::Duration::from_secs(req.timeout_secs.unwrap_or(120)));
+    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(
+        req.timeout_secs.unwrap_or(120),
+    ));
     if let Some(addrs) = &pinned {
-      builder = builder.resolve_to_addrs(&resolve_key, addrs);
+        builder = builder.resolve_to_addrs(&resolve_key, addrs);
     }
     let client = builder
-      .build()
-      .map_err(|e| AiError::Internal(format!("HTTP 客户端创建失败: {}", e)))?;
+        .build()
+        .map_err(|e| AiError::Internal(format!("HTTP 客户端创建失败: {}", e)))?;
     let req_body = ChatRequest {
         model: req.model.clone(),
         messages: req.messages.clone(),

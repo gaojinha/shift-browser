@@ -7,7 +7,7 @@ use serde_json::json;
 use super::core::{tool, Risk, ToolDef};
 
 pub(super) fn defs() -> Vec<ToolDef> {
-  vec![
+    vec![
     // ===== 标签开闭 / 导航（改变浏览器状态，受 api_readonly 闸门约束）=====
     tool(
       "open_url",

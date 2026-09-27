@@ -140,7 +140,9 @@ pub(super) fn unwrap_key(encoded: &str, password: &str) -> Result<[u8; KEY_LEN],
 
 /// 文件内容是否为 v1 历史格式（解锁成功后需透明重包）
 pub(super) fn is_legacy_v1_file(encoded: &str) -> bool {
-    parse_vault_file(encoded).map(|p| p.is_legacy_v1).unwrap_or(false)
+    parse_vault_file(encoded)
+        .map(|p| p.is_legacy_v1)
+        .unwrap_or(false)
 }
 
 /// 写入 vault.key（权限 600，create_new 防并发双写）
@@ -198,6 +200,5 @@ pub(super) fn replace_vault_file(path: &Path, encoded: &str) -> DbResult<()> {
 }
 
 pub(super) fn read_vault_file(path: &Path) -> DbResult<String> {
-    std::fs::read_to_string(path)
-        .map_err(|e| DbError::Other(format!("读取主密码文件失败: {}", e)))
+    std::fs::read_to_string(path).map_err(|e| DbError::Other(format!("读取主密码文件失败: {}", e)))
 }

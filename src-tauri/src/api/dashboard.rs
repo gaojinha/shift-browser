@@ -184,11 +184,11 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
         Ok(v) => v,
         Err(e) => {
             log::warn!("[api] 模型网关注解/pin 上游地址失败: {} ({})", e, base);
-            return AppError::permission(format!("上游地址未通过安全校验: {e}")).gateway_error_json();
+            return AppError::permission(format!("上游地址未通过安全校验: {e}"))
+                .gateway_error_json();
         }
     };
-    let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120));
+    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(120));
     if let Some(addrs) = &pinned {
         builder = builder.resolve_to_addrs(&resolve_key, addrs);
     }
@@ -213,4 +213,3 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
         Err(e) => AppError::net(format!("上游请求失败: {}", e)).gateway_error_json(),
     }
 }
-

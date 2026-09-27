@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 浏览器主窗口布局
 // 结构：TabBar(38) + AddressBar(36) + BookmarksBar(26) + 内容区(webview) + StatusBar(22)
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { invokeOk } from './utils/invoke'
 import { isDialogGuardedAction } from './utils/shortcut-guard'
@@ -146,17 +146,8 @@ function shiftTlsError() {
   tlsError.value = tlsQueue.value.shift() ?? null
 }
 
-function openPanel(name: 'translate' | 'sessions' | 'history' | 'passwords' | 'groups' | 'downloads' | 'settings' | 'ai' | 'bookmarks' | 'userscripts') {
-  showTranslate.value = name === 'translate'
-  showSessions.value = name === 'sessions'
-  showHistory.value = name === 'history'
-  showPasswords.value = name === 'passwords'
-  showGroups.value = name === 'groups'
-  showDownloads.value = name === 'downloads'
-  showSettings.value = name === 'settings'
-  showAI.value = name === 'ai'
-  showBookmarks.value = name === 'bookmarks'
-  showUserscripts.value = name === 'userscripts'
+function openPanel(name: PanelName) {
+  for (const k of PANEL_KEYS) panels[k].value = k === name
 }
 
 const showTranslate = ref(false)
@@ -168,6 +159,21 @@ const showCommandPalette = ref(false)
 // 用户脚本管理（阶段 3.2）
 const showUserscripts = ref(false)
 const addressBarRef = ref<InstanceType<typeof AddressBar> | null>(null)
+// 面板开关收表：再加面板只加一行，不改 openPanel
+type PanelName = 'translate' | 'sessions' | 'history' | 'passwords' | 'groups' | 'downloads' | 'settings' | 'ai' | 'bookmarks' | 'userscripts'
+const panels: Record<PanelName, Ref<boolean>> = {
+  translate: showTranslate,
+  sessions: showSessions,
+  history: showHistory,
+  passwords: showPasswords,
+  groups: showGroups,
+  downloads: showDownloads,
+  settings: showSettings,
+  ai: showAI,
+  bookmarks: showBookmarks,
+  userscripts: showUserscripts,
+}
+const PANEL_KEYS = Object.keys(panels) as PanelName[]
 let saveTimer: number | null = null
 // 锁屏兜底轮询句柄（R1-5：提升到组件级，卸载时必须清理，避免组件销毁后轮询仍在跑）
 let lockTimer: ReturnType<typeof window.setInterval> | null = null
@@ -300,8 +306,11 @@ function onPaletteCommand(action: string) {
   }
 }
 
-/** 命令栏选中「问 AI」：侧栏已开则直接发问，否则暂存待侧栏打开时消费 */
+/** 命令栏选中「问 AI」：带上当前页面上下文（无才补，不覆盖侧栏已同步的）；
+ * 侧栏已开则直接发问，否则暂存待侧栏打开时消费 */
 function onPaletteAskAi(query: string) {
+  const tab = tabsStore.activeTab
+  if (tab && !aiStore.pageContext) aiStore.setPageContext(tab.url, tab.title)
   if (showAI.value) {
     aiStore.sendMessage(query)
   } else {

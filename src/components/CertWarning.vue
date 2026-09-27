@@ -4,6 +4,7 @@
 import { ref, watch } from 'vue'
 import { invokeOk, errText } from '../utils/invoke'
 import { setWebviewVisible } from '../utils/webview'
+import { verdictFor } from '../utils/advice'
 import { useToastStore } from '../stores/toast'
 
 interface TlsErrorPayload {
@@ -73,17 +74,7 @@ async function goBack() {
   emit('close')
 }
 
-/** 各错误原因一句话研判：能不能进、怎么进最安全 */
-function verdictFor(reason: string): string {
-  if (reason.includes('过期')) return '证书过期了：内容可能被偷看，建议返回；自己的站且刚续费可继续。'
-  if (reason.includes('未知') || reason.includes('自签'))
-    return '自签或内网证书常见，公网大站出现就是异常，建议返回。'
-  if (reason.includes('不匹配')) return '证书和主机名对不上，极可能是钓鱼或劫持，建议返回。'
-  if (reason.includes('吊销')) return '证书已被签发者作废，不要继续。'
-  if (reason.includes('尚未生效')) return '证书还没到生效时间，先检查系统时间对不对。'
-  if (reason.includes('不安全')) return '加密算法强度不够，建议返回。'
-  return '原因不明，谨慎起见建议返回。'
-}
+/** 各错误原因一句话研判（单源见 utils/advice，组件只展示） */
 </script>
 
 <template>

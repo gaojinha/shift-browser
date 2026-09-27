@@ -5,9 +5,9 @@
 use serde::{Deserialize, Serialize};
 
 #[cfg(target_os = "linux")]
-use gtk::{gio, glib};
-#[cfg(target_os = "linux")]
 use gtk::gio::prelude::TlsCertificateExt;
+#[cfg(target_os = "linux")]
+use gtk::{gio, glib};
 #[cfg(target_os = "linux")]
 use webkit2gtk::WebViewExt;
 
@@ -41,7 +41,10 @@ impl CertInfo {
 pub(super) fn flags_to_names(flags: gio::TlsCertificateFlags) -> Vec<String> {
     let mut out = Vec::new();
     let pairs = [
-        (gio::TlsCertificateFlags::UNKNOWN_CA, "未知的 CA（自签或未受信任的签发者）"),
+        (
+            gio::TlsCertificateFlags::UNKNOWN_CA,
+            "未知的 CA（自签或未受信任的签发者）",
+        ),
         (gio::TlsCertificateFlags::BAD_IDENTITY, "证书与主机名不匹配"),
         (gio::TlsCertificateFlags::NOT_ACTIVATED, "证书尚未生效"),
         (gio::TlsCertificateFlags::EXPIRED, "证书已过期"),
@@ -66,7 +69,9 @@ fn fmt_dt(dt: Option<glib::DateTime>) -> Option<String> {
 #[cfg(target_os = "linux")]
 pub(crate) fn collect(wv: &webkit2gtk::WebView) -> Option<CertInfo> {
     let (cert, flags) = WebViewExt::tls_info(wv)?;
-    let uri = WebViewExt::uri(wv).map(|s| s.to_string()).unwrap_or_default();
+    let uri = WebViewExt::uri(wv)
+        .map(|s| s.to_string())
+        .unwrap_or_default();
     let (host, port) = parse_host_port(&uri);
     Some(build_info(&cert, flags, &host, port))
 }
@@ -108,8 +113,14 @@ pub(crate) fn build_info(
         host: host.to_string(),
         port,
         fingerprint_sha256: fp,
-        subject: cert.subject_name().map(|s| s.to_string()).unwrap_or_default(),
-        issuer: cert.issuer_name().map(|s| s.to_string()).unwrap_or_default(),
+        subject: cert
+            .subject_name()
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
+        issuer: cert
+            .issuer_name()
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
         not_before: fmt_dt(cert.not_valid_before()),
         not_after: fmt_dt(cert.not_valid_after()),
         dns_names: cert
@@ -117,7 +128,11 @@ pub(crate) fn build_info(
             .into_iter()
             .map(|b| String::from_utf8_lossy(&b).trim().to_string())
             .collect(),
-        ip_addresses: cert.ip_addresses().into_iter().map(|a| a.to_string()).collect(),
+        ip_addresses: cert
+            .ip_addresses()
+            .into_iter()
+            .map(|a| a.to_string())
+            .collect(),
         errors: flags.bits(),
         error_flags: flags_to_names(flags),
         chain,

@@ -29,9 +29,9 @@ pub(crate) use core::Risk;
 
 /// 完整注册表（读类在前、写类在后；消费方一律按 name 查找，顺序不构成契约）。
 fn registry() -> Vec<core::ToolDef> {
-  let mut all = table_read::defs();
-  all.extend(table_write::defs());
-  all
+    let mut all = table_read::defs();
+    all.extend(table_write::defs());
+    all
 }
 
 /// 仅开放 API 暴露、不进 MCP 清单的命令风险表（API 闸门与防漂移测试必须覆盖）：
@@ -40,62 +40,59 @@ fn registry() -> Vec<core::ToolDef> {
 ///   单一事实来源：`risk_of` 查询与防漂移测试（经 `extra_risk_pairs`）共用本表，
 ///   新增一条即自动进入 `readonly_gate_matches_registry_risk` 断言范围。
 const EXTRA_RISK: &[(&str, Risk)] = &[
-  ("eval", Risk::Write),
-  ("tool_call", Risk::Write),
-  ("plugins/set_enabled", Risk::Write),
-  ("tools", Risk::Read),
+    ("eval", Risk::Write),
+    ("tool_call", Risk::Write),
+    ("plugins/set_enabled", Risk::Write),
+    ("tools", Risk::Read),
 ];
 
 fn extra_risk(name: &str) -> Option<Risk> {
-  EXTRA_RISK
-    .iter()
-    .find(|(n, _)| *n == name)
-    .map(|(_, r)| *r)
+    EXTRA_RISK.iter().find(|(n, _)| *n == name).map(|(_, r)| *r)
 }
 
 /// extra_risk 覆盖的命令清单（供 api/handlers 防漂移测试正向断言：每个名字必有 handler）
 #[cfg(test)]
 pub(crate) fn extra_risk_pairs() -> &'static [(&'static str, Risk)] {
-  EXTRA_RISK
+    EXTRA_RISK
 }
 
 /// 查询命令风险等级（API 只读闸门唯一来源；未知命令返回 None）
 pub fn risk_of(name: &str) -> Option<Risk> {
-  registry()
-    .iter()
-    .find(|d| d.name == name)
-    .map(|d| d.risk)
-    .or_else(|| extra_risk(name))
+    registry()
+        .iter()
+        .find(|d| d.name == name)
+        .map(|d| d.risk)
+        .or_else(|| extra_risk(name))
 }
 
 /// 是否为写命令（`api_readonly=true` 时统一拒绝）
 pub fn is_write(name: &str) -> bool {
-  risk_of(name) == Some(Risk::Write)
+    risk_of(name) == Some(Risk::Write)
 }
 
 /// MCP JSON 视图：把内部注册表（含风险等级）投影为工具 schema；
 /// risk 是内部安全元数据，不对外暴露。
 fn tool_defs() -> Vec<Value> {
-  registry()
-    .iter()
-    .map(|d| {
-      json!({
-        "name": d.name,
-        "description": d.description,
-        "inputSchema": {
-          "type": "object",
-          "properties": d.props,
-          "required": d.required
-        }
-      })
-    })
-    .collect()
+    registry()
+        .iter()
+        .map(|d| {
+            json!({
+              "name": d.name,
+              "description": d.description,
+              "inputSchema": {
+                "type": "object",
+                "properties": d.props,
+                "required": d.required
+              }
+            })
+        })
+        .collect()
 }
 
 /// 全部能力 id（供 API 校验 / Agent 动作白名单 / 文档生成）
 #[allow(dead_code)] // 目前经 tests 与 list_json 间接覆盖；保留为公开校验入口
 pub fn ids() -> Vec<String> {
-  registry().iter().map(|d| d.name.to_string()).collect()
+    registry().iter().map(|d| d.name.to_string()).collect()
 }
 
 /// 能力清单 schema 版本（加字段/改语义时递增；调用方据此感知工具集演进，
@@ -107,14 +104,14 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// instructions 单一来源在 contracts::ai_behavior（build.rs 同源生成前端），
 /// 此处只透传——避免"工具清单"与"行为约定"两处手写漂移
 pub fn list_json() -> Value {
-  let defs = tool_defs();
-  let count = defs.len();
-  json!({
-    "tools": defs,
-    "count": count,
-    "schema_version": SCHEMA_VERSION,
-    "instructions": crate::contracts::ai_behavior::BEHAVIOR_RULES
-  })
+    let defs = tool_defs();
+    let count = defs.len();
+    json!({
+      "tools": defs,
+      "count": count,
+      "schema_version": SCHEMA_VERSION,
+      "instructions": crate::contracts::ai_behavior::BEHAVIOR_RULES
+    })
 }
 
 // 注册表防漂移测试随被测面外置（避免门面文件超长）

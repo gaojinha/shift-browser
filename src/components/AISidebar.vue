@@ -202,7 +202,7 @@ function runSkill(id: string) {
     summarize_page: () => aiStore.summarizeWithContext(),
     translate_page: () => aiStore.translatePage(tabsStore.activeTabId ?? undefined),
     translate_selection: () => aiStore.translateSelection(tabsStore.activeTabId ?? undefined),
-    explain_page: () => aiStore.explainPage(),
+    explain_page: () => aiStore.explainWithContext(tabsStore.activeTabId ?? undefined),
     page_qa: () => inputRef.value?.focus(),
   }
   handlers[id]?.()

@@ -3,8 +3,8 @@
 use crate::db::Db;
 use crate::error::{AppError, CommandResult};
 
-use super::*;
 use super::security::*;
+use super::*;
 
 /// 当前登录用户 id（未登录返回 None）
 pub(crate) async fn current_user_id(db: &Db) -> Option<i64> {
@@ -17,7 +17,6 @@ pub(crate) async fn current_user_id(db: &Db) -> Option<i64> {
     .flatten();
     row.map(|r| r.0)
 }
-
 
 pub(crate) async fn load_prefs(db: &Db, user_id: i64) -> UserPrefs {
     let row: Option<(i64, i64, i64, i64, String, String, String)> = sqlx::query_as::<_, (i64, i64, i64, i64, String, String, String)>(
@@ -43,7 +42,6 @@ pub(crate) async fn load_prefs(db: &Db, user_id: i64) -> UserPrefs {
     }
 }
 
-
 pub(crate) async fn load_user(db: &Db, user_id: i64) -> Option<User> {
     let row: Option<(i64, String, String, String, String, String)> =
         sqlx::query_as::<_, (i64, String, String, String, String, String)>(
@@ -66,7 +64,6 @@ pub(crate) async fn load_user(db: &Db, user_id: i64) -> Option<User> {
         prefs,
     })
 }
-
 
 /// 偏好写入 settings 表（登录时应用 / 更新时同步，newtab 等读取生效）
 /// 返回 Result：写入失败如实上报，避免"前端显示成功、实际没生效"的假成功
@@ -103,7 +100,6 @@ pub(crate) async fn apply_prefs_to_settings(db: &Db, prefs: &UserPrefs) -> Comma
     Ok(())
 }
 
-
 /// 清除当前会话（启动锁屏验证身份后调用，确保个人中心未登录）
 pub async fn clear_session(db: &Db) -> CommandResult<()> {
     sqlx::query(
@@ -115,7 +111,6 @@ pub async fn clear_session(db: &Db) -> CommandResult<()> {
     .map_err(|e| AppError::db(format!("清除会话失败: {}", e)))?;
     Ok(())
 }
-
 
 pub(crate) async fn set_session(db: &Db, user_id: Option<i64>) -> CommandResult<()> {
     let logged_in = if user_id.is_some() { 1 } else { 0 };
@@ -132,7 +127,6 @@ pub(crate) async fn set_session(db: &Db, user_id: Option<i64>) -> CommandResult<
 }
 
 // ===== IPC 命令 =====
-
 
 /// 注册账号（成功后自动登录）
 #[tauri::command]
@@ -207,7 +201,6 @@ pub async fn user_register(
     }
 }
 
-
 /// 纯密码验证（供启动锁屏等非 IPC 场景使用，不写会话、不触发防爆破）
 /// 按存储的 hash_algo 选迭代次数校验；成功后若是旧参数则透明升级到当前参数
 pub async fn verify_password(db: &Db, username: &str, password: &str) -> CommandResult<bool> {
@@ -244,7 +237,6 @@ pub async fn verify_password(db: &Db, username: &str, password: &str) -> Command
     }
     Ok(true)
 }
-
 
 /// 登录
 #[tauri::command]
@@ -311,7 +303,6 @@ pub async fn user_login(
     }
 }
 
-
 /// 退出登录（偏好恢复默认）
 #[tauri::command]
 pub async fn user_logout(db: tauri::State<'_, Db>) -> CommandResult<UserResult> {
@@ -324,5 +315,3 @@ pub async fn user_logout(db: tauri::State<'_, Db>) -> CommandResult<UserResult> 
     log::info!("[users] 用户退出登录");
     Ok(UserResult::ok("已退出登录"))
 }
-
-

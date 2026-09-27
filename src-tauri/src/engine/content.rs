@@ -9,9 +9,9 @@
 //!
 //! 复用：正文提取（content/extract）走 reader.rs 的 curl+readability 管线（独立命令）。
 
-use ts_rs::TS;
-use serde::{Deserialize, Serialize};
 use crate::engine::webmcp::WebmcpToolDef;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// 结构体：无障碍树语义元素（阶段 1.5 试验：对齐 Lighthouse Agentic Browsing
 /// "代理为中心的无障碍"信号——每个可交互元素要有**程序化名称**（aria-label）与
@@ -76,7 +76,11 @@ pub struct AiFriendlinessReport {
 pub fn ai_friendliness(snap: &Snapshot) -> AiFriendlinessReport {
     // 无障碍树评分
     let aria_total = snap.aria.len();
-    let aria_named = snap.aria.iter().filter(|a| !a.hidden && !a.name.is_empty()).count();
+    let aria_named = snap
+        .aria
+        .iter()
+        .filter(|a| !a.hidden && !a.name.is_empty())
+        .count();
     let aria_score = if aria_total > 0 {
         (aria_named as f32 / aria_total as f32) * 100.0
     } else {
@@ -85,7 +89,9 @@ pub fn ai_friendliness(snap: &Snapshot) -> AiFriendlinessReport {
 
     // 表单可访问性评分：表单有 name 或 label 字段
     let forms_total = snap.forms.len();
-    let forms_labeled = snap.forms.iter()
+    let forms_labeled = snap
+        .forms
+        .iter()
         .filter(|f| !f.name.is_empty() || !f.placeholder.is_empty())
         .count();
     let forms_score = if forms_total > 0 {

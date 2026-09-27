@@ -800,10 +800,7 @@ pub fn base_url_pub() -> String {
 
 /// 供 opencode_chat（侧边栏 Provider）：确认只读 agent 存在。
 /// 未知 agent 会被静默回退成有编辑权限的默认 agent，所以缺失时直接拒绝。
-pub async fn ensure_agent_exists_pub(
-    http: &reqwest::Client,
-    agent: &str,
-) -> CommandResult<()> {
+pub async fn ensure_agent_exists_pub(http: &reqwest::Client, agent: &str) -> CommandResult<()> {
     ensure_agent_exists(http, agent).await
 }
 

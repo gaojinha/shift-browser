@@ -132,10 +132,8 @@ fn wrap(v: Value) -> Value {
 
 /// 开关未开时的统一拒绝
 fn gated() -> Value {
-    AppError::permission(
-        "交互能力未开启：需在设置里开启「允许 API 页面交互」(api_agent_actions)",
-    )
-    .error_json()
+    AppError::permission("交互能力未开启：需在设置里开启「允许 API 页面交互」(api_agent_actions)")
+        .error_json()
 }
 
 /// `action/wait_for`：等待元素出现/消失或页面加载完成（超时返回 met:false）。
@@ -156,10 +154,12 @@ pub(super) async fn wait_for(app: &AppHandle, req: &Value) -> Value {
         condition,
         "appear" | "gone" | "load" | "text" | "enabled" | "idle"
     ) {
-        return AppError::validation("condition 可选 appear/gone/load/text/enabled/idle").error_json();
+        return AppError::validation("condition 可选 appear/gone/load/text/enabled/idle")
+            .error_json();
     }
     if matches!(condition, "appear" | "gone" | "text" | "enabled") && selector.trim().is_empty() {
-        return AppError::validation(format!("condition={condition} 时 selector 必填")).error_json();
+        return AppError::validation(format!("condition={condition} 时 selector 必填"))
+            .error_json();
     }
     // text 条件必须带合法 expect（预检在 Rust 侧完成，非法直接拒，不进轮询）
     if condition == "text" {
@@ -167,7 +167,8 @@ pub(super) async fn wait_for(app: &AppHandle, req: &Value) -> Value {
             return resp;
         }
         if req.get("expect").is_none() {
-            return AppError::validation("condition=text 时 expect 必填（{op, value}）").error_json();
+            return AppError::validation("condition=text 时 expect 必填（{op, value}）")
+                .error_json();
         }
     }
     let timeout_ms = req
@@ -177,7 +178,11 @@ pub(super) async fn wait_for(app: &AppHandle, req: &Value) -> Value {
         .min(60_000);
     let start = std::time::Instant::now();
     loop {
-        match eval_action(app, req, "check", &selector, 0, "", "down", 0, condition, "", 5).await {
+        match eval_action(
+            app, req, "check", &selector, 0, "", "down", 0, condition, "", 5,
+        )
+        .await
+        {
             Ok(v) => {
                 // 脚本级致命错误（如非法正则）直接透传，不再盲等
                 if v.get("action_error").is_some() {
@@ -214,7 +219,20 @@ async fn idle_cleanup(app: &AppHandle, req: &Value, condition: &str) {
     if condition != "idle" {
         return;
     }
-    let _ = eval_action(app, req, "check", "", 0, "", "down", 0, "idle_cleanup", "", 2).await;
+    let _ = eval_action(
+        app,
+        req,
+        "check",
+        "",
+        0,
+        "",
+        "down",
+        0,
+        "idle_cleanup",
+        "",
+        2,
+    )
+    .await;
 }
 
 /// `action/scroll`：滚动（up/down/top/bottom）。
@@ -250,7 +268,11 @@ pub(super) async fn click(app: &AppHandle, req: &Value) -> Value {
         Err(resp) => return resp,
     };
     let index = req.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
-    match eval_action(app, req, "click", &selector, index, "", "down", 0, "", "", 10).await {
+    match eval_action(
+        app, req, "click", &selector, index, "", "down", 0, "", "", 10,
+    )
+    .await
+    {
         Ok(v) => wrap(v),
         Err(resp) => resp,
     }
@@ -267,7 +289,11 @@ pub(super) async fn fill(app: &AppHandle, req: &Value) -> Value {
     };
     let value = req.get("value").and_then(|v| v.as_str()).unwrap_or("");
     let index = req.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
-    match eval_action(app, req, "fill", &selector, index, value, "down", 0, "", "", 10).await {
+    match eval_action(
+        app, req, "fill", &selector, index, value, "down", 0, "", "", 10,
+    )
+    .await
+    {
         Ok(v) => wrap(v),
         Err(resp) => resp,
     }
@@ -294,7 +320,11 @@ pub(super) async fn hover(app: &AppHandle, req: &Value) -> Value {
         Err(resp) => return resp,
     };
     let index = req.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
-    match eval_action(app, req, "hover", &selector, index, "", "down", 0, "", "", 10).await {
+    match eval_action(
+        app, req, "hover", &selector, index, "", "down", 0, "", "", 10,
+    )
+    .await
+    {
         Ok(v) => wrap(v),
         Err(resp) => resp,
     }
@@ -356,7 +386,11 @@ pub(super) async fn type_text(app: &AppHandle, req: &Value) -> Value {
         return AppError::validation("selector 过长（>1024 字符）").error_json();
     }
     let index = req.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
-    match eval_action(app, req, "type", &selector, index, "", "down", 0, "", "", 10).await {
+    match eval_action(
+        app, req, "type", &selector, index, "", "down", 0, "", "", 10,
+    )
+    .await
+    {
         Ok(v) => wrap(v),
         Err(resp) => resp,
     }
@@ -441,7 +475,8 @@ fn frames_literal(req: &Value) -> Result<String, Value> {
     let mut out: Vec<Value> = Vec::new();
     if let Some(f) = req.get("frames") {
         let arr = f.as_array().ok_or_else(|| {
-            AppError::validation("frames 必须是数组（数字=第 N 个 iframe，字符串=选择器）").error_json()
+            AppError::validation("frames 必须是数组（数字=第 N 个 iframe，字符串=选择器）")
+                .error_json()
         })?;
         if arr.len() > 4 {
             return Err(AppError::validation("frames 层级过深（>4）").error_json());
@@ -465,11 +500,7 @@ fn frames_literal(req: &Value) -> Result<String, Value> {
                     }
                     out.push(json!(s));
                 }
-                _ => {
-                    return Err(
-                        AppError::validation("frames 元素只支持数字或字符串").error_json()
-                    )
-                }
+                _ => return Err(AppError::validation("frames 元素只支持数字或字符串").error_json()),
             }
         }
     }
@@ -485,9 +516,9 @@ fn modifiers_literal(req: &Value) -> Result<String, Value> {
             AppError::validation("modifiers 必须是数组（如 [\"Control\",\"Shift\"]）").error_json()
         })?;
         for item in arr {
-            let s = item.as_str().ok_or_else(|| {
-                AppError::validation("modifiers 元素必须是字符串").error_json()
-            })?;
+            let s = item
+                .as_str()
+                .ok_or_else(|| AppError::validation("modifiers 元素必须是字符串").error_json())?;
             if !ALLOWED.contains(&s) {
                 return Err(AppError::validation(format!(
                     "modifiers 仅支持 Control/Shift/Alt/Meta，收到: {s}"
@@ -509,10 +540,7 @@ fn expect_literal(req: &Value) -> Result<String, Value> {
     let obj = e
         .as_object()
         .ok_or_else(|| AppError::validation("expect 必须是对象 {op, value}").error_json())?;
-    let op = obj
-        .get("op")
-        .and_then(|v| v.as_str())
-        .unwrap_or("contains");
+    let op = obj.get("op").and_then(|v| v.as_str()).unwrap_or("contains");
     if !matches!(op, "contains" | "equals" | "regex") {
         return Err(AppError::validation("expect.op 可选 contains/equals/regex").error_json());
     }

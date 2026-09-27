@@ -47,7 +47,10 @@ fn action_history() -> std::sync::MutexGuard<'static, VecDeque<ActionHistoryItem
 }
 
 fn action_step_no() -> std::sync::MutexGuard<'static, u64> {
-    ACTION_STEP.get_or_init(|| Mutex::new(0)).lock().unwrap_or_else(|e| e.into_inner())
+    ACTION_STEP
+        .get_or_init(|| Mutex::new(0))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
 }
 
 /// 记录一条动作（命令层每次执行后调用；返回本步号）

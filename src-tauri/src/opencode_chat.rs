@@ -26,10 +26,10 @@ use serde_json::{json, Value};
 pub use crate::engine::ai_provider::{AiProvider, ProviderRequest};
 pub use crate::engine::types::ChatMessage;
 use crate::error::{AppError, CommandResult};
+use crate::webqa::DEFAULT_AGENT;
 use crate::webqa::{
     base_url_pub, client_pub, ensure_agent_exists_pub, fold_event, Credentials, SseAccumulator,
 };
-use crate::webqa::DEFAULT_AGENT;
 
 /// SSE 等待上限：与 webqa 一致，防"迟迟不 idle"挂住协程。
 const SSE_MAX_SECS: u64 = 120;
@@ -83,11 +83,9 @@ impl OpencodeProvider {
             .await
             .map_err(|e| AppError::net(format!("建 opencode 会话失败：{e}")))?;
         if !resp.status().is_success() {
-            return Err(AppError::net(format!(
-                "建 opencode 会话失败：HTTP {}",
-                resp.status()
-            ))
-            .into());
+            return Err(
+                AppError::net(format!("建 opencode 会话失败：HTTP {}", resp.status())).into(),
+            );
         }
         let body: Value = resp
             .json()
@@ -126,11 +124,7 @@ impl OpencodeProvider {
             .await
             .map_err(|e| AppError::net(format!("发问失败：{e}")))?;
         if !post.status().is_success() {
-            return Err(AppError::net(format!(
-                "opencode 拒收提问：HTTP {}",
-                post.status()
-            ))
-            .into());
+            return Err(AppError::net(format!("opencode 拒收提问：HTTP {}", post.status())).into());
         }
 
         drive_sse(&sid, sse, cancel, on_delta).await
@@ -349,9 +343,14 @@ pub fn render_transcript(messages: &[ChatMessage]) -> (Option<String>, String) {
         return (system, turns[0].1.clone());
     }
 
-    let mut out = String::from("以下是此前的对话记录，请结合上下文直接回答最后的问题，不要复述记录：\n\n");
+    let mut out =
+        String::from("以下是此前的对话记录，请结合上下文直接回答最后的问题，不要复述记录：\n\n");
     for (role, content) in &turns {
-        let label = if role == "assistant" { "助手" } else { "用户" };
+        let label = if role == "assistant" {
+            "助手"
+        } else {
+            "用户"
+        };
         out.push_str(&format!("【{label}】{content}\n\n"));
     }
     (system, out.trim_end().to_string())

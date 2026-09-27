@@ -3,9 +3,11 @@
 // 原版 Electron 翻译功能的核心场景——选不中文本复制到这里翻译
 import { computed, ref, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { invokeOk, errText } from '../utils/invoke'
+import { humanizeError, TRANSLATE_PANEL_HINT } from '../frontend-prompts'
 import { setWebviewVisible } from '../utils/webview'
 import { useSettingsStore } from '../stores/settings'
+import { useAIStore } from '../stores/ai'
+import { useTabsStore } from '../stores/tabs'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -40,14 +42,15 @@ const loading = ref(false)
 const error = ref('')
 const elapsedMs = ref(0)
 
-/** 翻译当前标签的整个页面：复用 Rust 侧整页翻译脚本（whole_page_translate.js） */
+/** 整页汉化走 AI 侧栏（译文直接长在页面上）；本面板只做粘贴机翻 */
 async function translatePage() {
   error.value = ''
   try {
-    await invokeOk('translate_current_page')
-    emit('close') // 关掉面板，让用户直接看页面上的翻译进度浮层
+    const tabId = useTabsStore().activeTab?.id ?? undefined
+    await useAIStore().translatePage(tabId)
+    emit('close') // 关掉面板，让用户直接看页面上的汉化进度
   } catch (e) {
-    error.value = errText(e) || '整页翻译失败'
+    error.value = humanizeError(e)
   }
 }
 
@@ -90,7 +93,7 @@ async function doTranslate() {
     }
   } catch (e: unknown) {
     window.clearInterval(tick)
-    error.value = e instanceof Error ? e.message : String(e || '翻译失败')
+    error.value = humanizeError(e) || '翻译失败'
   } finally {
     loading.value = false
     elapsedMs.value = Math.round(performance.now() - start)
@@ -214,7 +217,7 @@ const charCount = (s: string) => s.length
         </div>
 
         <div class="tr-footer">
-          提示：从网页选中文字复制 → 在此粘贴 → Ctrl+Enter 翻译
+          {{ TRANSLATE_PANEL_HINT }}
         </div>
       </div>
     </div>

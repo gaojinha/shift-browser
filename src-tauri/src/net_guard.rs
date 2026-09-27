@@ -106,7 +106,11 @@ mod tests {
             assert!(host_is_private(h), "{h} 应判定为内网/私有");
         }
         // IPv4-mapped IPv6 按 v4 判定
-        for h in ["::ffff:127.0.0.1", "::ffff:192.168.1.1", "[::ffff:10.0.0.1]"] {
+        for h in [
+            "::ffff:127.0.0.1",
+            "::ffff:192.168.1.1",
+            "[::ffff:10.0.0.1]",
+        ] {
             assert!(host_is_private(h), "{h} 应判定为内网/私有");
         }
         // 组播 / 废弃站点本地 / 运营商内网 / 文档地址
@@ -119,9 +123,16 @@ mod tests {
 
     #[test]
     fn url_host_helpers() {
-        assert!(host_is_private(&url_host("http://192.168.1.1/admin").unwrap()));
-        assert!(!host_is_private(&url_host("https://example.com/x").unwrap()));
-        assert_eq!(url_host("https://Example.COM/a"), Some("example.com".to_string()));
+        assert!(host_is_private(
+            &url_host("http://192.168.1.1/admin").unwrap()
+        ));
+        assert!(!host_is_private(
+            &url_host("https://example.com/x").unwrap()
+        ));
+        assert_eq!(
+            url_host("https://Example.COM/a"),
+            Some("example.com".to_string())
+        );
     }
 
     #[test]

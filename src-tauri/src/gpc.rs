@@ -96,7 +96,8 @@ pub async fn check_gpc_json(origin: &str) -> GpcSiteStatus {
 
     let u = url.clone();
     let fetched =
-        tokio::task::spawn_blocking(move || crate::reader::curl_fetch_with_redirects(&u, None)).await;
+        tokio::task::spawn_blocking(move || crate::reader::curl_fetch_with_redirects(&u, None))
+            .await;
 
     match fetched {
         Ok(Ok(raw)) => match parse_gpc_json(&raw) {
@@ -121,7 +122,9 @@ pub async fn check_gpc_json(origin: &str) -> GpcSiteStatus {
 pub async fn gpc_site_check(
     state: tauri::State<'_, crate::tabs::TabManager>,
 ) -> Result<GpcSiteStatus, String> {
-    let url = state.active_url().ok_or_else(|| "没有活动标签".to_string())?;
+    let url = state
+        .active_url()
+        .ok_or_else(|| "没有活动标签".to_string())?;
     let origin = origin_of(&url).ok_or_else(|| "当前标签不是普通网页".to_string())?;
     Ok(check_gpc_json(&origin).await)
 }

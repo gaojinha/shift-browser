@@ -210,10 +210,7 @@ pub async fn set_split_tab(
 /// 关闭分屏
 
 #[tauri::command]
-pub async fn clear_split(
-    app: AppHandle,
-    state: tauri::State<'_, TabManager>,
-) -> CommandResult<()> {
+pub async fn clear_split(app: AppHandle, state: tauri::State<'_, TabManager>) -> CommandResult<()> {
     state.set_split_tab(None);
     log::info!("[tabs] clear_split");
     apply_split_layout(&app, &state).map_err(crate::error::CommandError::from)
@@ -298,6 +295,3 @@ pub async fn start_drag_window(app: AppHandle) -> CommandResult<()> {
         .start_dragging()
         .map_err(|e| AppError::internal(e.to_string()).into())
 }
-
-
-

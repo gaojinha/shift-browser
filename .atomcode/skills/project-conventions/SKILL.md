@@ -43,6 +43,20 @@ grep -rn "\.with_webview(\|\.gtk_window()" src-tauri/src
 - 验证顺序：小改只跑对应侧（改 .vue/.ts 跑前端，改 .rs 跑 cargo）；跨 IPC 契约的改动两侧都跑。
 - 不要手改 `package-lock.json` / `Cargo.lock`（已有 hook 拦截）。
 
+### 契约再生成关口（铁律）
+
+- `src/constants.rs` / `src/contracts.rs` 是 Rust 侧唯一来源；`cargo check`/`cargo build`
+  时 build.rs 重新生成 `src/constants.ts`，`cargo test --lib -- ts_export`（测试名
+  `ts_export_tests::export_bindings`）重新生成 `src/types/generated/*.ts`。
+- **改了任一契约源 → 生成物必须重新生成并随本次提交**。漏提交时 CI 全绿但前端行为漂移，
+  这是唯一靠自觉的漏网通道（交工关口 deliver skill 第 9 项专查此项）。
+
+## 排查前先查经验库
+
+- 修 bug / 踩到反直觉行为时，先 `grep -in "<关键词>" .learnings/ERRORS.md .learnings/LEARNINGS.md`
+  查既有坑位（sqlx 默认值、启动顺序、fingerprint 不重编译等已沉淀）。
+- 修完有根因的坑，用 `/learn` 按格式追加，不许让经验只留在会话里。
+
 ## 代码风格
 
 - 前端：ESLint（`eslint.config.js`）+ Prettier（`.prettierrc.json`）；Vue 3 Composition API + Pinia；

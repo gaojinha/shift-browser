@@ -47,10 +47,12 @@ fn discover() -> Option<(String, String)> {
 }
 
 fn creds() -> shift_browser_lib::webqa::Credentials {
-    let (u, p) = discover().expect(
-        "未发现 opencode 凭据：本机需跑着带 OPENCODE_SERVER_PASSWORD 的 `opencode serve`",
-    );
-    shift_browser_lib::webqa::Credentials { username: u, password: p }
+    let (u, p) = discover()
+        .expect("未发现 opencode 凭据：本机需跑着带 OPENCODE_SERVER_PASSWORD 的 `opencode serve`");
+    shift_browser_lib::webqa::Credentials {
+        username: u,
+        password: p,
+    }
 }
 
 async fn ask(items: &[BatchItem], title: &str) -> Vec<BatchItem> {
@@ -71,24 +73,50 @@ async fn ask(items: &[BatchItem], title: &str) -> Vec<BatchItem> {
 #[ignore]
 async fn live_真机翻译一批能解析出id和译文() {
     let items = vec![
-        BatchItem { id: "t0".into(), text: "Submit".into() },
-        BatchItem { id: "t1".into(), text: "Cancel".into() },
-        BatchItem { id: "t2".into(), text: "Sign in to your account".into() },
-        BatchItem { id: "t3".into(), text: "The server returned an error".into() },
+        BatchItem {
+            id: "t0".into(),
+            text: "Submit".into(),
+        },
+        BatchItem {
+            id: "t1".into(),
+            text: "Cancel".into(),
+        },
+        BatchItem {
+            id: "t2".into(),
+            text: "Sign in to your account".into(),
+        },
+        BatchItem {
+            id: "t3".into(),
+            text: "The server returned an error".into(),
+        },
     ];
     let got = ask(&items, "登录页").await;
     println!("解析出 {} 条：", got.len());
     for g in &got {
         println!("  [{}] {}", g.id, g.text);
     }
-    assert!(!got.is_empty(), "一条都没解析出来：模型输出格式和预期差太远");
+    assert!(
+        !got.is_empty(),
+        "一条都没解析出来：模型输出格式和预期差太远"
+    );
     for g in &got {
         assert!(!g.id.is_empty() && !g.text.is_empty());
         assert!(items.iter().any(|i| i.id == g.id), "出现了不在本批的 id");
     }
     // 至少一半要真的翻成中文
-    let zh = got.iter().filter(|g| g.text.chars().any(|c| c as u32 >= 0x4e00 && c as u32 <= 0x9fff)).count();
-    assert!(zh * 2 >= got.len(), "只有 {zh}/{} 条有中文，翻译质量存疑", got.len());
+    let zh = got
+        .iter()
+        .filter(|g| {
+            g.text
+                .chars()
+                .any(|c| c as u32 >= 0x4e00 && c as u32 <= 0x9fff)
+        })
+        .count();
+    assert!(
+        zh * 2 >= got.len(),
+        "只有 {zh}/{} 条有中文，翻译质量存疑",
+        got.len()
+    );
 }
 
 #[tokio::test]
@@ -100,7 +128,11 @@ async fn live_超长段切分后能翻回来() {
     let pieces = webzh::split_long_text_pub(&long, 1000);
     println!("切成 {} 块：", pieces.len());
     for (i, p) in pieces.iter().enumerate() {
-        println!("  [{i}] {} 字符，末尾 {:?}", p.chars().count(), p.chars().last());
+        println!(
+            "  [{i}] {} 字符，末尾 {:?}",
+            p.chars().count(),
+            p.chars().last()
+        );
     }
     assert!(pieces.len() >= 3, "应切成多块");
     assert_eq!(pieces.concat(), long, "切分拼回必须等于原文");
@@ -109,7 +141,10 @@ async fn live_超长段切分后能翻回来() {
     let items: Vec<BatchItem> = pieces
         .iter()
         .enumerate()
-        .map(|(i, p)| BatchItem { id: format!("t0.{i}"), text: p.clone() })
+        .map(|(i, p)| BatchItem {
+            id: format!("t0.{i}"),
+            text: p.clone(),
+        })
         .collect();
     let got = ask(&items, "测试文档").await;
     assert!(!got.is_empty(), "子块翻译一条都没出来");
@@ -122,8 +157,14 @@ async fn live_超长段切分后能翻回来() {
 fn live_脏输出能救回来() {
     // 直接喂真实常见的脏形状，确认解析层顶得住
     let its = vec![
-        BatchItem { id: "t0".into(), text: "Save".into() },
-        BatchItem { id: "t1".into(), text: "Open".into() },
+        BatchItem {
+            id: "t0".into(),
+            text: "Save".into(),
+        },
+        BatchItem {
+            id: "t1".into(),
+            text: "Open".into(),
+        },
     ];
     let cases = vec![
         ("裸数组", r#"[{"id":"t0","t":"保存"},{"id":"t1","t":"打开"}]"#),
@@ -144,7 +185,8 @@ fn live_脏输出能救回来() {
 #[tokio::test]
 #[ignore]
 async fn live_真页面片段翻译落盘() {
-    let raw = std::fs::read_to_string("/tmp/opencode/items.json").expect("先跑收集脚本生成 items.json");
+    let raw =
+        std::fs::read_to_string("/tmp/opencode/items.json").expect("先跑收集脚本生成 items.json");
     let items: Vec<BatchItem> = serde_json::from_str(&raw).expect("解析 items.json");
     assert!(!items.is_empty());
     for i in &items {
@@ -182,7 +224,11 @@ async fn live_同会话连翻多批都拿到译文() {
             .await
             .expect("发翻译请求");
         let got = webzh::parse_translate_response_pub(&raw, &items);
-        println!("  第 {round} 批：raw {} 字，解析 {} 条", raw.chars().count(), got.len());
+        println!(
+            "  第 {round} 批：raw {} 字，解析 {} 条",
+            raw.chars().count(),
+            got.len()
+        );
         assert!(
             !got.is_empty(),
             "第 {round} 批没拿到译文（{} 字）——baseline 大概率把本批新消息当历史丢了",
@@ -200,19 +246,23 @@ async fn live_并发提速对比() {
     use std::time::Instant;
     let http = webqa::client_pub(&creds()).expect("client");
     let base = webqa::base_url_pub();
-    let mk = |r: usize| vec![BatchItem {
-        id: format!("t{r}"),
-        text: format!("Round {r}: the server returned an error when posting the request."),
-    }];
+    let mk = |r: usize| {
+        vec![BatchItem {
+            id: format!("t{r}"),
+            text: format!("Round {r}: the server returned an error when posting the request."),
+        }]
+    };
 
     let (sid, _) = webqa::ensure_session_pub(&http, None, "提速顺序")
-        .await.expect("建会话");
+        .await
+        .expect("建会话");
     let t0 = Instant::now();
     for r in 0..6 {
         let items = mk(r);
         let prompt = webzh::build_translate_prompt_pub(&items, Some("bench"));
         let _ = webqa::ask_once(&http, &base, &sid, webqa::DEFAULT_AGENT, &prompt, 120)
-            .await.expect("顺序批");
+            .await
+            .expect("顺序批");
     }
     let seq = t0.elapsed();
 
@@ -223,14 +273,18 @@ async fn live_并发提速对比() {
         let base = base.clone();
         futs.push(tokio::spawn(async move {
             let (sid, _) = webqa::ensure_session_pub(&http, None, "提速并发")
-                .await.expect("建会话");
+                .await
+                .expect("建会话");
             let items = mk(r);
             let prompt = webzh::build_translate_prompt_pub(&items, Some("bench"));
             webqa::ask_once(&http, &base, &sid, webqa::DEFAULT_AGENT, &prompt, 120)
-                .await.expect("并发批")
+                .await
+                .expect("并发批")
         }));
     }
-    for f in futs { let _ = f.await; }
+    for f in futs {
+        let _ = f.await;
+    }
     let par = t1.elapsed();
 
     println!("顺序 6 批: {seq:?}  ({:?}/批)", seq / 6);
@@ -253,14 +307,16 @@ async fn live_批大小对单批耗时影响() {
                 text: format!("Paragraph {i}: the client must not reuse a connection after the server closes it."),
             })
             .collect();
-        let (sid, _) = webqa::ensure_session_pub(&http, None, "批量基准").await.expect("会话");
+        let (sid, _) = webqa::ensure_session_pub(&http, None, "批量基准")
+            .await
+            .expect("会话");
         let prompt = webzh::build_translate_prompt_pub(&items, Some("bench"));
         let t = Instant::now();
         let raw = webqa::ask_once(&http, &base, &sid, webqa::DEFAULT_AGENT, &prompt, 180)
-            .await.expect("批");
+            .await
+            .expect("批");
         let el = t.elapsed();
         let got = webzh::parse_translate_response_pub(&raw, &items).len();
         println!("  {n:>2} 段: {el:>8.2?}  解析 {got}/{n}");
     }
 }
-

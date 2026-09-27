@@ -33,9 +33,8 @@ pub fn apply_default_settings(wv: &WebView, host: &str) {
     settings.set_javascript_can_open_windows_automatically(true);
     // 开发者工具：F12 / Ctrl+Shift+I（快捷键在 GTK 窗口层兜底拦截）
     // 安全 #6：开发者工具按开关（默认关）
-    settings.set_enable_developer_extras(
-        DEVTOOLS_ENABLED.load(std::sync::atomic::Ordering::Relaxed),
-    );
+    settings
+        .set_enable_developer_extras(DEVTOOLS_ENABLED.load(std::sync::atomic::Ordering::Relaxed));
     // UA 动态取（站点覆盖 > 全局 > 默认）
     settings.set_user_agent(Some(&crate::useragent::ua_for(host)));
 }
@@ -198,7 +197,6 @@ impl WebViewBackend for WebView {
     }
 }
 
-
 /// 下载策略：主框架导航到"不可显示的 MIME"（apk/zip/exe…）时转为下载。
 /// 从 tabs.rs 下沉（P0-2 补完）：业务模块不再直接 use webkit2gtk 的 PolicyDecision 类型。
 pub fn attach_download_policy(wv: &WebView) {
@@ -227,11 +225,11 @@ pub fn attach_download_policy(wv: &WebView) {
 /// 白名单取进程内缓存（`net_guard::set_allowlist`，由 `open_and_read` 每次查库刷新）。
 pub fn attach_navigation_guard(wv: &WebView, app: tauri::AppHandle, tab_id: String) {
     use gtk::glib::prelude::Cast;
+    use tauri::Manager;
     use webkit2gtk::{
         NavigationPolicyDecision, NavigationPolicyDecisionExt, PolicyDecisionExt,
         PolicyDecisionType, URIRequestExt,
     };
-    use tauri::Manager;
     wv.connect_decide_policy(move |_wv, decision, decision_type| {
         if decision_type != PolicyDecisionType::NavigationAction {
             return false;

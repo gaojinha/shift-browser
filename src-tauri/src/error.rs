@@ -249,7 +249,16 @@ mod tests {
     #[test]
     fn command_error_to_app_error_preserves_code_and_message() {
         // API handler 透传：命令侧分类的错误码不得在边界丢失（此前硬编码 E_NET 的缺陷）
-        for code in [E_DB, E_PERM, E_TIMEOUT, E_AUTH, E_RATELIMIT, E_NET, E_VALIDATION, E_INTERNAL] {
+        for code in [
+            E_DB,
+            E_PERM,
+            E_TIMEOUT,
+            E_AUTH,
+            E_RATELIMIT,
+            E_NET,
+            E_VALIDATION,
+            E_INTERNAL,
+        ] {
             let e = CommandError {
                 code,
                 message: "m".to_string(),

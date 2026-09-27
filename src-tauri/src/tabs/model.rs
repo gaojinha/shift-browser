@@ -119,9 +119,7 @@ impl TabManager {
     }
 
     /// 共享读（多字段一致性快照；毒化时恢复继续，不崩进程）
-    pub(crate) fn read_state(
-        &self,
-    ) -> std::sync::RwLockReadGuard<'_, TabState> {
+    pub(crate) fn read_state(&self) -> std::sync::RwLockReadGuard<'_, TabState> {
         self.state.read().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -410,7 +408,7 @@ mod tests {
         assert_eq!(m.top_offset(), 100.0); // 38+36+26
         m.set_show_bookmarks_bar(false);
         assert_eq!(m.top_offset(), 74.0); // 38+36
-        // 垂直 + 书签显隐（前端 AISidebar.topOffset 同算法，38px 错位回归即测此处）
+                                          // 垂直 + 书签显隐（前端 AISidebar.topOffset 同算法，38px 错位回归即测此处）
         m.set_vertical_tabs(true);
         assert_eq!(m.top_offset(), 36.0); // 36
         m.set_show_bookmarks_bar(true);
@@ -502,8 +500,14 @@ mod tests {
             TabManager::deferred_placeholder(true, "http://a.example/"),
             Some(crate::contracts::urls::NEWTAB)
         );
-        assert_eq!(TabManager::deferred_placeholder(false, "https://a.example/"), None);
-        assert_eq!(TabManager::deferred_placeholder(true, "shift://newtab"), None);
+        assert_eq!(
+            TabManager::deferred_placeholder(false, "https://a.example/"),
+            None
+        );
+        assert_eq!(
+            TabManager::deferred_placeholder(true, "shift://newtab"),
+            None
+        );
         assert_eq!(TabManager::deferred_placeholder(true, "file:///x"), None);
         assert_eq!(TabManager::deferred_placeholder(true, "not-a-url"), None);
     }

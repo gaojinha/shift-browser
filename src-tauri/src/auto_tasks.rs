@@ -24,7 +24,9 @@ pub fn spawn(app: AppHandle) {
             };
 
             // 定时清理历史：删 N 天前的记录
-            if let Some(v) = crate::db::settings_cache::get(&db.pool, "auto_clear_history_days").await {
+            if let Some(v) =
+                crate::db::settings_cache::get(&db.pool, "auto_clear_history_days").await
+            {
                 if let Ok(days) = v.trim().parse::<i64>() {
                     if days > 0 && now - last_history >= 86_400 {
                         match clear_history_older(&db.pool, days).await {
@@ -39,7 +41,9 @@ pub fn spawn(app: AppHandle) {
             }
 
             // 定时刷新订阅
-            if let Some(v) = crate::db::settings_cache::get(&db.pool, "auto_refresh_feeds_minutes").await {
+            if let Some(v) =
+                crate::db::settings_cache::get(&db.pool, "auto_refresh_feeds_minutes").await
+            {
                 if let Ok(mins) = v.trim().parse::<i64>() {
                     if mins > 0 && now - last_feeds >= mins * 60 {
                         let n = crate::feed::refresh_all(&db).await;

@@ -55,9 +55,10 @@ pub async fn create_tab(
     let sem = CREATE_SEM.get_or_init(|| {
         tokio::sync::Semaphore::new(crate::contracts::limits::TAB_CREATE_CONCURRENCY)
     });
-    let _permit = sem.acquire().await.map_err(|e| {
-        crate::error::AppError::internal(format!("建页限流器异常: {}", e))
-    })?;
+    let _permit = sem
+        .acquire()
+        .await
+        .map_err(|e| crate::error::AppError::internal(format!("建页限流器异常: {}", e)))?;
     // 本地新标签页（file:// 路径含 /newtab/ 或 shift://newtab/worldnav）标题显示"启动页"，
     // 不显示冗长 URL/host。注意：协议改版后 URL 是 shift://newtab，旧的 contains("/newtab/")
     // 判断匹配不到，必须按 scheme+host 判断
@@ -274,7 +275,9 @@ pub async fn switch_tab(
     // 导致 go_back/go_forward 报"标签不存在"、UI 显示与实际不符）
     let hibernated_info = {
         let s = state.read_state();
-        s.tabs.get(&id).map(|t| (t.hibernated, t.url.clone(), t.private))
+        s.tabs
+            .get(&id)
+            .map(|t| (t.hibernated, t.url.clone(), t.private))
     };
     let Some((is_hibernated, hibernated_url, hibernated_private)) = hibernated_info else {
         return Ok(None);
@@ -388,7 +391,11 @@ pub async fn hibernate_idle_tabs(
                     return false;
                 }
                 // 超阈值：后台标签直接候选；否则按"最后激活时间早于阈值"
-                count_pressure || s.last_active.get(*id).map(|ts| *ts < threshold).unwrap_or(true)
+                count_pressure
+                    || s.last_active
+                        .get(*id)
+                        .map(|ts| *ts < threshold)
+                        .unwrap_or(true)
             })
             .map(|(id, _)| id.clone())
             .collect()

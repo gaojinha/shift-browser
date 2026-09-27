@@ -121,10 +121,9 @@ async fn test_master_key_concurrent_generation_same_key() {
     let db = std::sync::Arc::new(db);
     let db1 = db.clone();
     let db2 = db.clone();
-    let (k1, k2) = tokio::join!(
-        async { get_master_key(&db1).await.unwrap() },
-        async { get_master_key(&db2).await.unwrap() },
-    );
+    let (k1, k2) = tokio::join!(async { get_master_key(&db1).await.unwrap() }, async {
+        get_master_key(&db2).await.unwrap()
+    },);
     assert_eq!(
         k1, k2,
         "并发首次生成必须得到同一密钥（不能各自生成互相覆盖）"

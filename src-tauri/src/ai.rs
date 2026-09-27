@@ -11,7 +11,9 @@ use tauri::{ipc::Channel, Manager};
 // R2-1 拆分（2026-09-24）：SSRF 防护独立成子模块
 #[path = "ai/ssrf.rs"]
 pub(crate) mod ssrf;
-pub(crate) use ssrf::{check_resolved_ips, is_private_host, is_private_ip, resolve_pin_for_https, validate_base_url};
+pub(crate) use ssrf::{
+    check_resolved_ips, is_private_host, is_private_ip, resolve_pin_for_https, validate_base_url,
+};
 // R1 拆分（2026-09-25）：AGNES 非流式/SSE 两条 HTTP 管线实现
 #[path = "ai/agnes.rs"]
 mod agnes;
@@ -81,8 +83,7 @@ async fn resolve_runtime_provider(
             .unwrap_or_default();
         let creds = crate::webqa::resolve_credentials_pub(db).await?;
         return Ok(Box::new(crate::opencode_chat::OpencodeProvider::new(
-            creds,
-            &model_ref,
+            creds, &model_ref,
         )));
     }
     crate::engine::ai_provider::resolve_provider(provider_id, base_url, api_key)
@@ -96,11 +97,7 @@ pub(crate) fn clamp_ai_timeout(raw: Option<String>, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-async fn ai_timeout_secs(
-    db: &tauri::State<'_, crate::db::Db>,
-    key: &str,
-    default: u64,
-) -> u64 {
+async fn ai_timeout_secs(db: &tauri::State<'_, crate::db::Db>, key: &str, default: u64) -> u64 {
     let raw = crate::db::settings_cache::get(&db.pool, key).await;
     clamp_ai_timeout(raw, default)
 }
@@ -142,7 +139,6 @@ pub fn ai_cancel_stream(request_id: String) {
     }
 }
 
-
 /// AI 对话（经 Provider 抽象路由，默认 AGNES 云端）
 /// provider：provider id（"agnes" 默认 / "local" 本机 Ollama / "opencode" 本机serve）
 /// model / base_url / api_key：透传给 provider（缺省用 AGNES 默认值；
@@ -162,8 +158,7 @@ pub async fn ai_chat(
     api_key: Option<String>,
 ) -> crate::error::CommandResult<String> {
     let provider_id = provider.unwrap_or_default();
-    let mut provider =
-        resolve_runtime_provider(&db, &provider_id, base_url, api_key).await?;
+    let mut provider = resolve_runtime_provider(&db, &provider_id, base_url, api_key).await?;
     // 本地默认模型走 Ollama 名（ai_model 设置页可改）；云端沿用 agnes 默认
     let mut model = model.unwrap_or_else(|| {
         if provider_id == "local" {
@@ -183,7 +178,10 @@ pub async fn ai_chat(
     }
     tool_defs.extend(crate::engine::agent::agent_tool_defs());
     let tools = Some(tool_defs);
-    log::info!("[ai] 本次对话携带 {} 个工具定义（function calling）", tools.as_ref().map(|t| t.len()).unwrap_or(0));
+    log::info!(
+        "[ai] 本次对话携带 {} 个工具定义（function calling）",
+        tools.as_ref().map(|t| t.len()).unwrap_or(0)
+    );
 
     // 多轮循环：模型请求工具 → 执行 → 结果回传 → 再请求（上限 6 轮防死循环）
     let mut current = messages;
@@ -216,16 +214,22 @@ pub async fn ai_chat(
             if calls.is_empty() {
                 return Ok(reply.content);
             }
-            log::info!("[ai] 第 {} 轮模型请求 {} 个工具调用", round + 1, calls.len());
+            log::info!(
+                "[ai] 第 {} 轮模型请求 {} 个工具调用",
+                round + 1,
+                calls.len()
+            );
             // 追加 assistant 消息（含 tool_calls）
             current.push(reply);
             // 逐个执行工具并追加 tool 结果消息
             for call in &calls {
-                let args: serde_json::Value =
-                    serde_json::from_str(&call.function.arguments).unwrap_or(serde_json::Value::Null);
+                let args: serde_json::Value = serde_json::from_str(&call.function.arguments)
+                    .unwrap_or(serde_json::Value::Null);
                 let content = if call.function.name == "browser_action" {
                     // Agent 动作：每步人工确认（安全铁律）
-                    match serde_json::from_value::<crate::engine::agent::AgentActionParams>(args.clone()) {
+                    match serde_json::from_value::<crate::engine::agent::AgentActionParams>(
+                        args.clone(),
+                    ) {
                         Ok(params) => {
                             // 请求确认（前端弹卡片，60s 超时）
                             match crate::agent_cmd::request_agent_action(&app, &params).await {
@@ -237,7 +241,11 @@ pub async fn ai_chat(
                                     let state = app
                                         .try_state::<crate::tabs::TabManager>()
                                         .ok_or_else(|| "标签管理器未初始化".to_string())?;
-                                    match crate::agent_cmd::execute_agent_action(&app, &window, &state, &params).await {
+                                    match crate::agent_cmd::execute_agent_action(
+                                        &app, &window, &state, &params,
+                                    )
+                                    .await
+                                    {
                                         Ok(text) => format!("动作已执行：{}", text),
                                         Err(e) => format!("动作执行失败: {}", e),
                                     }
@@ -250,7 +258,9 @@ pub async fn ai_chat(
                     }
                 } else if call.function.name == "browser_action_plan" {
                     // 多步任务编排提示词：整体确认 + 按序执行
-                    match serde_json::from_value::<crate::engine::agent::MultiStepPlan>(args.clone()) {
+                    match serde_json::from_value::<crate::engine::agent::MultiStepPlan>(
+                        args.clone(),
+                    ) {
                         Ok(plan) => {
                             match crate::agent_cmd::request_multi_step_action(&app, &plan).await {
                                 Ok(true) => {
@@ -260,7 +270,11 @@ pub async fn ai_chat(
                                     let state = app
                                         .try_state::<crate::tabs::TabManager>()
                                         .ok_or_else(|| "标签管理器未初始化".to_string())?;
-                                    match crate::agent_cmd::execute_multi_step_action(&app, &window, &state, &plan).await {
+                                    match crate::agent_cmd::execute_multi_step_action(
+                                        &app, &window, &state, &plan,
+                                    )
+                                    .await
+                                    {
                                         Ok(text) => format!("多步计划已执行：\n{}", text),
                                         Err(e) => format!("多步计划执行失败: {}", e),
                                     }
@@ -273,7 +287,8 @@ pub async fn ai_chat(
                     }
                 } else {
                     // MCP 工具
-                    let result = crate::engine::mcp::call_tool(&db.pool, &call.function.name, args).await;
+                    let result =
+                        crate::engine::mcp::call_tool(&db.pool, &call.function.name, args).await;
                     match result {
                         Ok(text) => text,
                         Err(e) => format!("工具执行失败: {}", e),
@@ -317,19 +332,18 @@ pub async fn ai_chat_stream(
     api_key: Option<String>,
 ) -> crate::error::CommandResult<()> {
     let provider_id = provider.unwrap_or_default();
-    let mut provider =
-        match resolve_runtime_provider(&db, &provider_id, base_url, api_key).await {
-            Ok(p) => p,
-            Err(e) => {
-                // StreamEvent::Error.message 保持纯消息字符串（渠道内契约不变）
-                on_event
-                    .send(StreamEvent::Error {
-                        message: e.to_string(),
-                    })
-                    .ok();
-                return Err(e.into());
-            }
-        };
+    let mut provider = match resolve_runtime_provider(&db, &provider_id, base_url, api_key).await {
+        Ok(p) => p,
+        Err(e) => {
+            // StreamEvent::Error.message 保持纯消息字符串（渠道内契约不变）
+            on_event
+                .send(StreamEvent::Error {
+                    message: e.to_string(),
+                })
+                .ok();
+            return Err(e.into());
+        }
+    };
     // 本地默认模型走 Ollama 名；云端沿用 agnes 默认
     let model = model.unwrap_or_else(|| {
         if provider_id == "local" {
@@ -409,7 +423,9 @@ pub async fn ai_chat_stream(
             // 用户主动停止不算错误（impl 里 cancel 时返回"已停止生成"）
             if e.message != "已停止生成" {
                 on_event
-                    .send(StreamEvent::Error { message: e.message.clone() })
+                    .send(StreamEvent::Error {
+                        message: e.message.clone(),
+                    })
                     .ok();
             }
             // 流式管线失败错误码由 provider 实现给出（agnes 侧已分类透出）；

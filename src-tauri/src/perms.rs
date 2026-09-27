@@ -80,7 +80,9 @@ fn kind_of(req: &PermissionRequest) -> &'static str {
                 if name.is_null() {
                     String::new()
                 } else {
-                    std::ffi::CStr::from_ptr(name).to_string_lossy().into_owned()
+                    std::ffi::CStr::from_ptr(name)
+                        .to_string_lossy()
+                        .into_owned()
                 }
             }
         }
@@ -156,7 +158,12 @@ pub async fn respond_permission(
                 } else {
                     req.deny();
                 }
-                log::info!("[perm] 用户{} {} {}", if allow { "放行" } else { "拒绝" }, k, h);
+                log::info!(
+                    "[perm] 用户{} {} {}",
+                    if allow { "放行" } else { "拒绝" },
+                    k,
+                    h
+                );
             }
         });
     })
@@ -197,11 +204,12 @@ pub async fn respond_permission(
 
 /// 启动时从 settings 载入白名单到内存缓存
 pub async fn load_allowlist(pool: &sqlx::SqlitePool) {
-    let cur: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'perm_allow'")
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten();
+    let cur: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'perm_allow'")
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
     let map: HashMap<String, Vec<String>> = cur
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
@@ -250,11 +258,12 @@ pub async fn remove_permission_rule(
     host: String,
 ) -> Result<(), String> {
     set_allowed(&kind, &host, false);
-    let cur: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'perm_allow'")
-        .fetch_optional(&db.pool)
-        .await
-        .ok()
-        .flatten();
+    let cur: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'perm_allow'")
+            .fetch_optional(&db.pool)
+            .await
+            .ok()
+            .flatten();
     let mut map: HashMap<String, Vec<String>> = cur
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
@@ -262,9 +271,11 @@ pub async fn remove_permission_rule(
         list.retain(|x| x != &host);
     }
     let json = serde_json::to_string(&map).unwrap_or_else(|_| "{}".into());
-    let _ = sqlx::query("UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = 'perm_allow'")
-        .bind(&json)
-        .execute(&db.pool)
-        .await;
+    let _ = sqlx::query(
+        "UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = 'perm_allow'",
+    )
+    .bind(&json)
+    .execute(&db.pool)
+    .await;
     Ok(())
 }
