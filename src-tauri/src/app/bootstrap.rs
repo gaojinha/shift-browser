@@ -142,7 +142,7 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     {
         let app_handle = app.handle().clone();
         tauri::async_runtime::spawn(async move {
-            caches::warmup_caches(&app_handle);
+            caches::warmup_caches(&app_handle).await;
         });
     }
 
