@@ -304,6 +304,7 @@ pub fn run() {
       webzh::page_collect_translatable,
       webzh::page_apply_translation,
       webzh::opencode_translate_batch,
+      webzh::opencode_translate_cleanup,
       webzh::plan_translate_batches,
       webzh::opencode_translate_model,
       webzh::opencode_translate_warmup,

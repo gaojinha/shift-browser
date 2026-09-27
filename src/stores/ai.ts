@@ -78,6 +78,8 @@ interface AIState {
   selection: { text: string; title: string; url: string } | null
   /** opencode 会话 id：多轮追问靠它保持上下文；空则首次提问时新建 */
   webqaSessionId: string | null
+  /** 同一会话已追问轮数：超 50 轮另开新会话，防上下文无限滚大 */
+  webqaRounds: number
   /** opencode 连通性探测结果 */
   webqaProbe: OpencodeProbe | null
   /** 「网页随手问」模式：走本机 opencode，不走 AGNES 云端 */
@@ -105,6 +107,7 @@ export const useAIStore = defineStore('ai', {
     pendingPrompt: null,
     selection: null,
     webqaSessionId: null,
+    webqaRounds: 0,
     webqaProbe: null,
     webqaMode: false,
     zhBusy: false,
@@ -334,6 +337,8 @@ export const useAIStore = defineStore('ai', {
 
       // 并发路数：实测 3 路是甜点（6 路只 1.36x，云端会话固定开销反而摊不平）
       const CONC = 3
+      // 本轮用过的翻译会话：结束（成功/失败/取消）统一删，控制台不堆积
+      const usedTranslateSessions = new Set<string>()
       type Item = { id: string; text: string }
       type Markers = Record<string, { tag: string; a: string[][] }>
       type Seg = {
@@ -420,7 +425,7 @@ export const useAIStore = defineStore('ai', {
           missItems.length === 0
             ? []
             : await zhCall<Item[][]>('plan_translate_batches', {
-                req: { items: missItems, page_title: col.title },
+                req: { items: missItems, page_title: col.title, model: cacheOn ? model : undefined },
               })
         const warmSessions = await warmP
 
@@ -585,29 +590,36 @@ export const useAIStore = defineStore('ai', {
          * 每次调用都用**独立会话**（预热池里取一个，取不到就让 Rust 新建）：
          * 会话历史不复用 = 没有逐批 prefill 滚雪球。
          * 缺项自动拆半递归重试，直到单条——只补真正没翻出来的，不重复花钱。
+         * 用过的会话记账，整页结束统一删（opencode 控制台不堆积）。
          */
         const translateItems = async (itemsB: Item[]): Promise<Map<string, string>> => {
           const out = new Map<string, string>()
           let res: {
             data?: Array<{ id: string; text: string }> | null
+            session_id?: string | null
           }
+          // 预热会话一个只用一次；用过的记下来，整页翻完统一删（会话复用实施）
+          const warmSid = warmSessions.shift() ?? null
+          if (warmSid) usedTranslateSessions.add(warmSid)
           try {
             res = await invokeOk<{
               ok?: boolean
               msg?: string | null
               data?: Array<{ id: string; text: string }> | null
+              session_id?: string | null
             }>('opencode_translate_batch', {
               req: {
                 items: itemsB,
                 page_title: col.title,
                 // 预热会话一个只用一次；消费完即弃，绝不复用成"长会话"
-                session_id: warmSessions.shift() ?? null,
+                session_id: warmSid,
               },
             })
           } catch (e) {
             // 传输/凭据层硬错：拆半重试也是白试，向上抛给 worker 中止
             throw new Error(String(e))
           }
+          if (res?.session_id) usedTranslateSessions.add(res.session_id)
           for (const g of res?.data || []) out.set(g.id, g.text)
           if (this.zhCancel) return out
           const missing = itemsB.filter((i) => !out.has(i.id))
@@ -710,6 +722,14 @@ export const useAIStore = defineStore('ai', {
         this.zhBusy = false
         this.zhProgress = null
         this.zhCancel = false
+        // 收尾删翻译会话（成功/失败/取消都删；fire-and-forget，失败不扰民）
+        if (usedTranslateSessions.size > 0) {
+          const sids = [...usedTranslateSessions]
+          usedTranslateSessions.clear()
+          invokeOk<number>('opencode_translate_cleanup', { sessions: sids }).catch((e) => {
+            console.error('[ai] 翻译会话清理失败:', e)
+          })
+        }
       }
     },
 
@@ -879,6 +899,12 @@ export const useAIStore = defineStore('ai', {
 
       const requestId = `webqa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       this.streamingId = requestId
+      // 轮数封顶：同一会话超 50 轮另开新会话，上下文不无限滚大
+      if (this.webqaRounds >= 50) {
+        this.webqaSessionId = null
+        this.webqaRounds = 0
+      }
+      this.webqaRounds += 1
 
       const channel = new Channel<WebqaEvent>()
       channel.onmessage = (event) => {
@@ -943,6 +969,7 @@ export const useAIStore = defineStore('ai', {
     exitWebqa() {
       this.webqaMode = false
       this.webqaSessionId = null
+      this.webqaRounds = 0
       this.selection = null
       this.messages = []
       this.error = null

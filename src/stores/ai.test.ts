@@ -307,6 +307,31 @@ describe('网页随手问：askPage 走本机 opencode', () => {
     expect(args.req.sessionId).toBe('ses_abc')
   })
 
+  it('50 轮封顶：超轮另开新会话，计数归零', async () => {
+    mockDefaultInvoke()
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'opencode_ask') return Promise.resolve(undefined)
+      return Promise.resolve(undefined)
+    })
+    const ai = useAIStore()
+    ai.webqaSessionId = 'ses_old'
+    ai.webqaRounds = 50
+    await ai.askPage('第 51 问')
+    const call = invokeMock.mock.calls.find((c) => c[0] === 'opencode_ask')
+    const args = call![1] as { req: Record<string, unknown> }
+    // 旧会话丢弃，本轮空会话开新，计数从 1 起
+    expect(args.req.sessionId).toBeNull()
+    expect(ai.webqaRounds).toBe(1)
+    // 未超轮照常复用（mock 不发 done 事件，手动放行 loading）
+    ai.loading = false
+    ai.webqaSessionId = 'ses_keep'
+    await ai.askPage('追问')
+    const calls = invokeMock.mock.calls.filter((c) => c[0] === 'opencode_ask')
+    const args2 = calls[calls.length - 1][1] as { req: Record<string, unknown> }
+    expect(args2.req.sessionId).toBe('ses_keep')
+    expect(ai.webqaRounds).toBe(2)
+  })
+
   it('delta 增量追加、done 以 full 权威覆盖', async () => {
     mockDefaultInvoke()
     const ai = useAIStore()
@@ -481,6 +506,16 @@ describe('整页汉化', () => {
     )
     expect(ai.zhApplied).toBe(true)
     expect(ai.zhBusy).toBe(false)
+  })
+
+  it('收尾删翻译会话：用过的会话 id 统一清理', async () => {
+    mockHappy()
+    const ai = useAIStore()
+    await ai.translatePage('tab-1')
+    const clean = invokeMock.mock.calls.find((c) => c[0] === 'opencode_translate_cleanup')
+    expect(clean).toBeTruthy()
+    // mock 每批发 ses_zh：去重后只删一次
+    expect((clean[1] as { sessions: string[] }).sessions).toEqual(['ses_zh'])
   })
 
   it('写回时按 mode=apply 传译文对', async () => {

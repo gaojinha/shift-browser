@@ -9,9 +9,10 @@
 //! | `E_PERM`      | 策略拒绝（只读模式/功能禁用/SSRF）| 不改参数重试无意义       |
 //! | `E_TIMEOUT`   | 超时                           | 可重试                   |
 //! | `E_AUTH`      | 鉴权/凭据缺失或无效             | 重新取 token/key         |
+//! | `E_RATELIMIT` | 服务端限流（429）               | 等待后重试，不要立即重试 |
 //! | `E_NET`       | 网络/外部服务（含 MCP）失败     | 可重试                   |
 //! | `E_VALIDATION`| 请求参数非法/资源不存在/未知命令| 修正参数，不要原样重试   |
-//! | `E_INTERNAL`  | 服务端内部状态异常（兜底，报告六码之外的第七码）| 记日志，一般为缺陷 |
+//! | `E_INTERNAL`  | 服务端内部状态异常（兜底）       | 记日志，一般为缺陷       |
 //!
 //! 兼容性（R1 第一批只落地 api/ 边界）：
 //! - 本地 API 信封：`{"ok":false,"code":"E_VALIDATION","error":"<人读消息>"}`
@@ -31,6 +32,9 @@ pub enum AppError {
     Timeout(String),
     #[error("{0}")]
     Auth(String),
+    /// 服务端限流（HTTP 429）：调用方应等待后重试，不要立即重试
+    #[error("{0}")]
+    RateLimited(String),
     #[error("{0}")]
     Net(String),
     #[error("{0}")]
@@ -44,6 +48,7 @@ pub const E_DB: &str = "E_DB";
 pub const E_PERM: &str = "E_PERM";
 pub const E_TIMEOUT: &str = "E_TIMEOUT";
 pub const E_AUTH: &str = "E_AUTH";
+pub const E_RATELIMIT: &str = "E_RATELIMIT";
 pub const E_NET: &str = "E_NET";
 pub const E_VALIDATION: &str = "E_VALIDATION";
 pub const E_INTERNAL: &str = "E_INTERNAL";
@@ -56,6 +61,7 @@ impl AppError {
             AppError::Permission(_) => E_PERM,
             AppError::Timeout(_) => E_TIMEOUT,
             AppError::Auth(_) => E_AUTH,
+            AppError::RateLimited(_) => E_RATELIMIT,
             AppError::Net(_) => E_NET,
             AppError::Validation(_) => E_VALIDATION,
             AppError::Internal(_) => E_INTERNAL,
@@ -83,6 +89,9 @@ impl AppError {
     }
     pub fn auth(msg: impl Into<String>) -> Self {
         AppError::Auth(msg.into())
+    }
+    pub fn ratelimited(msg: impl Into<String>) -> Self {
+        AppError::RateLimited(msg.into())
     }
     pub fn net(msg: impl Into<String>) -> Self {
         AppError::Net(msg.into())
@@ -141,6 +150,7 @@ impl From<CommandError> for AppError {
             E_PERM => AppError::Permission(msg),
             E_TIMEOUT => AppError::Timeout(msg),
             E_AUTH => AppError::Auth(msg),
+            E_RATELIMIT => AppError::RateLimited(msg),
             E_NET => AppError::Net(msg),
             E_VALIDATION => AppError::Validation(msg),
             _ => AppError::Internal(msg),
@@ -181,6 +191,7 @@ mod tests {
         assert_eq!(AppError::permission("x").code(), "E_PERM");
         assert_eq!(AppError::timeout("x").code(), "E_TIMEOUT");
         assert_eq!(AppError::auth("x").code(), "E_AUTH");
+        assert_eq!(AppError::ratelimited("x").code(), "E_RATELIMIT");
         assert_eq!(AppError::net("x").code(), "E_NET");
         assert_eq!(AppError::validation("x").code(), "E_VALIDATION");
         assert_eq!(AppError::internal("x").code(), "E_INTERNAL");
@@ -238,7 +249,7 @@ mod tests {
     #[test]
     fn command_error_to_app_error_preserves_code_and_message() {
         // API handler 透传：命令侧分类的错误码不得在边界丢失（此前硬编码 E_NET 的缺陷）
-        for code in [E_DB, E_PERM, E_TIMEOUT, E_AUTH, E_NET, E_VALIDATION, E_INTERNAL] {
+        for code in [E_DB, E_PERM, E_TIMEOUT, E_AUTH, E_RATELIMIT, E_NET, E_VALIDATION, E_INTERNAL] {
             let e = CommandError {
                 code,
                 message: "m".to_string(),

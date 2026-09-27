@@ -111,15 +111,45 @@ fn extract_between(hay: &str, start: &str, end: &str) -> Option<String> {
     Some(rest[..j].to_string())
 }
 
-/// 抓取 Bing 翻译会话参数（IG / IID / key / token），缓存 30 分钟
+/// 会话缓存是否新鲜（纯函数，可单测）：抓取后 1800 秒（30 分钟）内即新鲜。
+fn bing_cache_fresh(at: std::time::Instant) -> bool {
+    at.elapsed().as_secs() < 1800
+}
+
+/// 抓取 Bing 翻译会话参数（IG / IID / key / token），缓存 30 分钟（1800 秒）
+///
+/// 锁拆分（第六件）：拿会话与发请求分两段——先短持锁看缓存（命中直接克隆返回），
+/// 未命中则放锁后发网络请求，拿到再短持锁回填。旧实现整段持锁（含最长 timeout 秒
+/// 的网络等待），并行双发后多路翻译排队堵在同一把锁上；拆开后锁内只剩内存操作。
 async fn bing_session(timeout: u64) -> Result<BingSession, String> {
     let cell = BING_SESSION.get_or_init(|| tokio::sync::Mutex::new(None));
-    let mut guard = cell.lock().await;
-    if let Some((ig, iid, key, token, at)) = guard.as_ref() {
-        if at.elapsed().as_secs() < 1800 {
-            return Ok((ig.clone(), iid.clone(), key.clone(), token.clone(), *at));
+    // 第一段：短持锁，只读缓存
+    {
+        let guard = cell.lock().await;
+        if let Some((ig, iid, key, token, at)) = guard.as_ref() {
+            if bing_cache_fresh(*at) {
+                return Ok((ig.clone(), iid.clone(), key.clone(), token.clone(), *at));
+            }
         }
     }
+    // 不持锁发网络请求（并发多路在此并行，不再串行等待）
+    let (ig, iid, key, token) = fetch_bing_session(timeout).await?;
+    // 第二段：短持锁回填（双重检查：并发下别人已刷新就用新的，自己这份丢掉）
+    {
+        let mut guard = cell.lock().await;
+        if let Some((ig2, iid2, key2, token2, at2)) = guard.as_ref() {
+            if bing_cache_fresh(*at2) {
+                return Ok((ig2.clone(), iid2.clone(), key2.clone(), token2.clone(), *at2));
+            }
+        }
+        let now = std::time::Instant::now();
+        *guard = Some((ig.clone(), iid.clone(), key.clone(), token.clone(), now));
+        Ok((ig, iid, key, token, now))
+    }
+}
+
+/// 纯网络抓取 Bing 会话参数（不碰锁，由 bing_session 分段调用）
+async fn fetch_bing_session(timeout: u64) -> Result<(String, String, String, String), String> {
     let html = client()
         .get("https://cn.bing.com/translator")
         .timeout(std::time::Duration::from_secs(timeout))
@@ -146,9 +176,7 @@ async fn bing_session(timeout: u64) -> Result<BingSession, String> {
     if key.is_empty() || token.is_empty() {
         return Err("Bing 会话参数为空".to_string());
     }
-    let now = std::time::Instant::now();
-    *guard = Some((ig.clone(), iid.clone(), key.clone(), token.clone(), now));
-    Ok((ig, iid, key, token, now))
+    Ok((ig, iid, key, token))
 }
 
 /// Bing 翻译（cn.bing.com 网页端同款接口，无需 API key）
@@ -216,8 +244,23 @@ pub async fn translate_bing(text: &str, target: &str, timeout: u64) -> Result<St
     })
 }
 
-/// 统一派发：按引擎选择翻译，**失败自动回退另一方**
-/// （Google 国内常连不上、Bing 偶发限流，互为兜底可显著提升可用性）
+/// 单引擎跑一次（owned 参数，供并行双发 spawn，要求 'static）。
+async fn translate_one(
+    engine: String,
+    text: String,
+    target: String,
+    timeout: u64,
+) -> Result<String, String> {
+    if engine == "bing" {
+        translate_bing(&text, &target, timeout).await
+    } else {
+        translate_google(&text, &target, timeout).await
+    }
+}
+
+/// 统一派发：双引擎并行双发，谁先成功要谁，慢者取消。
+/// （旧逻辑串行回退：首选超时 15 秒再换另一方，最坏双倍延迟。
+/// Google 国内常连不上、Bing 偶发限流，并行后单引擎故障不再翻倍。）
 /// `timeout` 秒：来自设置 translate_timeout（默认 15）
 pub async fn translate_with(
     text: &str,
@@ -225,23 +268,44 @@ pub async fn translate_with(
     engine: &str,
     timeout: u64,
 ) -> Result<String, String> {
-    if engine == "bing" {
-        match translate_bing(text, target, timeout).await {
-            Ok(t) => Ok(t),
-            Err(e) => {
-                log::warn!("[translate] Bing 失败，回退 Google: {}", e);
-                translate_google(text, target, timeout).await
-            }
-        }
+    // 非 bing 即 google：未知引擎名回落 google（与旧分支一致）
+    let (first, second) = if engine == "bing" {
+        ("bing", "google")
     } else {
-        match translate_google(text, target, timeout).await {
-            Ok(t) => Ok(t),
+        ("google", "bing")
+    };
+    let mut set = tokio::task::JoinSet::new();
+    set.spawn(translate_one(
+        first.to_string(),
+        text.to_string(),
+        target.to_string(),
+        timeout,
+    ));
+    set.spawn(translate_one(
+        second.to_string(),
+        text.to_string(),
+        target.to_string(),
+        timeout,
+    ));
+    // 先完成的失败不致命：记下等另一个；首个成功直接返回，析构取消在途者
+    let mut errs: Vec<String> = Vec::new();
+    while let Some(r) = set.join_next().await {
+        match r {
+            Ok(Ok(t)) => {
+                log::info!("[translate] 并行双发成功");
+                return Ok(t);
+            }
+            Ok(Err(e)) => {
+                log::warn!("[translate] 一路失败，等另一路: {}", e);
+                errs.push(e);
+            }
             Err(e) => {
-                log::warn!("[translate] Google 失败，回退 Bing: {}", e);
-                translate_bing(text, target, timeout).await
+                log::warn!("[translate] 引擎任务异常: {}", e);
+                errs.push(e.to_string());
             }
         }
     }
+    Err(format!("双引擎均失败（{}）", errs.join("；")))
 }
 
 /// 读取当前翻译源（settings.translate_engine，默认 google）
@@ -290,4 +354,26 @@ pub struct TranslateResult {
     pub ok: bool,
     pub msg: Option<String>,
     pub data: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bing_cache_freshness_window_is_1800s() {
+        let now = std::time::Instant::now();
+        // 刚抓的、1700 秒前的都新鲜
+        assert!(bing_cache_fresh(now));
+        assert!(bing_cache_fresh(
+            now - std::time::Duration::from_secs(1700)
+        ));
+        // 1900 秒前、3600 秒前的都过期（留足余量，不掐 1800 整点防抖动）
+        assert!(!bing_cache_fresh(
+            now - std::time::Duration::from_secs(1900)
+        ));
+        assert!(!bing_cache_fresh(
+            now - std::time::Duration::from_secs(3600)
+        ));
+    }
 }

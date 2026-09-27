@@ -3,10 +3,11 @@
 //! 目标：多 provider 抽象——统一接口，业务代码不关心具体走哪个服务。
 //! - `AiProvider` trait：id / name / is_configured / chat / chat_stream
 //! - `AgnesProvider`：云端（OpenAI 兼容，默认，现有 AGNES）
-//! - `LocalProvider`：本地推理（Ollama/llama.cpp）——**接口预留，不实现**
-//!   （2026-09-19 高哥决策：本地模型集成暂缓，只留接口）
+//! - `LocalProvider`：本地推理（Ollama，第七件最小可用：直连本机 11434，
+//!   连不上由 ai.rs 回退云端；自定义端点/鉴权后续再加）
 //!
-//! 安全：所有 provider 的 base_url 都走 SSRF 校验（https-only + 非内网），
+//! 安全：agnes 的 base_url 走 SSRF 校验（https-only + 非内网）；
+//! 本地端点固定回环（见 OLLAMA_DEFAULT_BASE），不接受外部覆盖，
 //! 校验函数从 ai.rs 迁来，保持行为一致。
 
 use crate::engine::types::ChatMessage;
@@ -21,6 +22,8 @@ pub struct ProviderRequest {
     pub stream: bool,
     /// function calling 工具定义（OpenAI 格式，None = 不带工具）
     pub tools: Option<Vec<serde_json::Value>>,
+    /// 请求超时（秒，None = 各实现默认值；ai.rs 从设置 ai_timeout/ai_stream_timeout 填）
+    pub timeout_secs: Option<u64>,
 }
 
 /// AI Provider 统一接口
@@ -95,6 +98,34 @@ pub fn register_chat_impl(f: ChatFn, fs: ChatStreamFn) {
     let _ = CHAT_STREAM_IMPL.set(fs);
 }
 
+/// 本地 Ollama 默认端点（回环固定值；engine 侧拥有，ai 侧实现只收参 SLO）
+pub const OLLAMA_DEFAULT_BASE: &str = "http://127.0.0.1:11434/v1";
+
+/// 本地聊天实现签名（由 ai.rs 注册；与 ChatFn 的区别：无 api_key，
+/// base 由 resolve 固定为回环默认，不接受调用方覆盖）
+pub type OllamaChatFn = fn(
+    base_url: String,
+    req: ProviderRequest,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = CommandResult<ChatMessage>> + Send>>;
+
+/// 本地流式聊天实现签名（由 ai.rs 注册）
+pub type OllamaChatStreamFn = fn(
+    base_url: String,
+    req: ProviderRequest,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    on_delta: Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = CommandResult<String>> + Send>>;
+
+static OLLAMA_CHAT_IMPL: std::sync::OnceLock<OllamaChatFn> = std::sync::OnceLock::new();
+static OLLAMA_CHAT_STREAM_IMPL: std::sync::OnceLock<OllamaChatStreamFn> =
+    std::sync::OnceLock::new();
+
+/// 由 ai.rs 启动时注册本地实现（打破反向依赖，与 register_chat_impl 配对）
+pub fn register_ollama_impl(f: OllamaChatFn, fs: OllamaChatStreamFn) {
+    let _ = OLLAMA_CHAT_IMPL.set(f);
+    let _ = OLLAMA_CHAT_STREAM_IMPL.set(fs);
+}
+
 #[async_trait]
 impl AiProvider for AgnesProvider {
     fn id(&self) -> &str {
@@ -132,9 +163,23 @@ impl AiProvider for AgnesProvider {
     }
 }
 
-/// 本地推理 Provider（Ollama/llama.cpp）——**接口预留，暂不实现**
-/// 2026-09-19 决策：本地模型集成暂缓，返回明确错误提示。
-pub struct LocalProvider;
+/// 本地推理 Provider（Ollama，最小可用）。
+///
+/// `base_url` 固定回环默认（`OLLAMA_DEFAULT_BASE`）：resolve 时写死，
+/// 调用方透传的外部地址一律忽略——"本地模型"绝不能被指到外网。
+/// 模型走请求的 model（ai.rs 按 provider 给默认 `llama3.1`，用户在设置页改）。
+/// Ollama 没在跑时实现侧报传输失败，ai.rs 回退 AGNES 云端。
+pub struct LocalProvider {
+    pub base_url: String,
+}
+
+impl LocalProvider {
+    pub fn with_default() -> Self {
+        Self {
+            base_url: OLLAMA_DEFAULT_BASE.to_string(),
+        }
+    }
+}
 
 #[async_trait]
 impl AiProvider for LocalProvider {
@@ -142,34 +187,34 @@ impl AiProvider for LocalProvider {
         "local"
     }
     fn name(&self) -> &str {
-        "本地模型（预留）"
+        "本机 Ollama"
     }
     fn is_configured(&self) -> bool {
-        false
+        // 端点固定、无需 key：是否真在跑要发请求才知道，调用时见分晓
+        true
     }
-    async fn chat(&self, _req: &ProviderRequest) -> CommandResult<ChatMessage> {
-        // 功能按决策暂缓不开放：E_PERM 告知调用方不要重试
-        Err(AppError::permission(
-            "本地模型集成暂缓（2026-09-19 决策）：当前仅预留接口，未实现。",
-        )
-        .into())
+    async fn chat(&self, req: &ProviderRequest) -> CommandResult<ChatMessage> {
+        let f = OLLAMA_CHAT_IMPL
+            .get()
+            .ok_or_else(|| AppError::internal("本地聊天实现未注册（ai::register）"))?;
+        f(self.base_url.clone(), req.clone()).await
     }
     async fn chat_stream(
         &self,
-        _req: &ProviderRequest,
-        _cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        _on_delta: Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>,
+        req: &ProviderRequest,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        on_delta: Box<dyn Fn(String) -> Result<(), ()> + Send + 'static>,
     ) -> CommandResult<String> {
-        Err(AppError::permission(
-            "本地模型集成暂缓（2026-09-19 决策）：当前仅预留接口，未实现。",
-        )
-        .into())
+        let f = OLLAMA_CHAT_STREAM_IMPL
+            .get()
+            .ok_or_else(|| AppError::internal("本地流式聊天实现未注册（ai::register）"))?;
+        f(self.base_url.clone(), req.clone(), cancel, on_delta).await
     }
 }
 
 /// 按 provider id 解析出可用 provider。
 /// - "agnes"（默认）：AGNES 云端
-/// - "local"：本地（预留，未实现，返回明确错误）
+/// - "local"：本机 Ollama（端点固定回环默认；透传的 base_url/api_key 忽略）
 /// - 其他：未知 provider 错误
 pub fn resolve_provider(
     provider_id: &str,
@@ -193,7 +238,7 @@ pub fn resolve_provider(
             // SSRF 校验（https-only + 非内网）在 agnes_chat_impl 内部执行
             Ok(Box::new(AgnesProvider { base_url, api_key }))
         }
-        "local" => Ok(Box::new(LocalProvider)),
+        "local" => Ok(Box::new(LocalProvider::with_default())),
         other => Err(crate::error::AppError::validation(format!(
             "未知 provider: {}",
             other
@@ -212,9 +257,10 @@ pub fn list_providers() -> Vec<ProviderInfo> {
         },
         ProviderInfo {
             id: "local".to_string(),
-            name: "本地模型（预留）".to_string(),
-            configured: false,
-            description: "Ollama/llama.cpp 接口预留，暂缓实现（2026-09-19 决策）".to_string(),
+            name: "本机 Ollama".to_string(),
+            configured: true,
+            description: "本机 Ollama（127.0.0.1:11434），模型在下方填写；没在跑时自动回退云端"
+                .to_string(),
         },
         ProviderInfo {
             id: "opencode".to_string(),
@@ -260,25 +306,27 @@ mod tests {
     }
 
     #[test]
-    fn resolve_local_is_stub() {
+    fn resolve_local_uses_loopback_default() {
         let p = resolve_provider("local", None, None).unwrap();
         assert_eq!(p.id(), "local");
-        assert!(!p.is_configured());
+        // 端点固定无需 key：configured 为真，是否真在跑调用时见分晓
+        assert!(p.is_configured());
     }
 
-    /// 防漂移：本地 provider 暂缓决策若被推翻（接入实现），本测试会提醒同步错误契约
-    #[tokio::test]
-    async fn local_provider_chat_is_perm_stub() {
-        let p = LocalProvider;
-        let req = ProviderRequest {
-            model: String::new(),
-            messages: Vec::new(),
-            stream: false,
-            tools: None,
-        };
-        let err = p.chat(&req).await.unwrap_err();
-        assert_eq!(err.code, crate::error::E_PERM);
-        assert!(err.message.contains("暂缓"), "未预期的消息: {}", err.message);
+    /// 防漂移：local 的外部地址透传必须被忽略（"本地模型"绝不能被指到外网）
+    #[test]
+    fn resolve_local_ignores_external_overrides() {
+        let p = resolve_provider(
+            "local",
+            Some("https://evil.example/v1".to_string()),
+            Some("sk-xxx".to_string()),
+        )
+        .unwrap();
+        assert_eq!(p.id(), "local");
+        assert!(p.is_configured());
+        // 默认端点写死回环（直接验构造器，trait 对象看不到字段）
+        assert_eq!(LocalProvider::with_default().base_url, OLLAMA_DEFAULT_BASE);
+        assert!(OLLAMA_DEFAULT_BASE.contains("127.0.0.1"));
     }
 
     #[test]

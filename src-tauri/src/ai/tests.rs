@@ -174,3 +174,112 @@ fn pin_rejects_empty_dns_answer() {
   )
   .is_err());
 }
+
+#[test]
+fn clamp_ai_timeout_bounds() {
+    use super::clamp_ai_timeout;
+    // 正常值直通
+    assert_eq!(clamp_ai_timeout(Some("60".into()), 90), 60);
+    // 越界钳制回默认
+    assert_eq!(clamp_ai_timeout(Some("5".into()), 90), 90);
+    assert_eq!(clamp_ai_timeout(Some("301".into()), 90), 90);
+    assert_eq!(clamp_ai_timeout(Some("0".into()), 120), 120);
+    // 脏输入回默认
+    assert_eq!(clamp_ai_timeout(None, 90), 90);
+    assert_eq!(clamp_ai_timeout(Some("abc".into()), 90), 90);
+    assert_eq!(clamp_ai_timeout(Some("".into()), 90), 90);
+    // 边界值可用
+    assert_eq!(clamp_ai_timeout(Some("10".into()), 90), 10);
+    assert_eq!(clamp_ai_timeout(Some("300".into()), 90), 300);
+}
+
+#[test]
+fn ai_error_status_maps_to_codes() {
+    use super::agnes::{classify_pin_error, classify_send_error, classify_status, AiError};
+    // 401/403 → 鉴权（E_AUTH）
+    for status in [401u16, 403] {
+        let e = classify_status(status, "bad key");
+        assert_eq!(e.code(), crate::error::E_AUTH, "status {} 应走鉴权", status);
+        assert!(e.message().contains("鉴权"), "消息应提示鉴权: {}", e.message());
+    }
+    // 429 → 限流（E_RATELIMIT），消息沿用旧友好提示
+    let e = classify_status(429, "whatever");
+    assert_eq!(e.code(), crate::error::E_RATELIMIT);
+    assert!(e.message().contains("429"));
+    // 其余 → 上游网络错误（E_NET），消息沿用旧格式
+    let e = classify_status(500, "boom");
+    assert_eq!(e.code(), crate::error::E_NET);
+    assert!(e.message().contains("500"));
+    let e = classify_status(400, "x");
+    assert_eq!(e.code(), crate::error::E_NET);
+    // 发送失败：超时识别走 E_TIMEOUT，其余走 E_NET
+    let e = classify_send_error(true, "timeout");
+    assert_eq!(e.code(), crate::error::E_TIMEOUT);
+    assert!(matches!(e, AiError::Timeout(_)));
+    let e = classify_send_error(false, "connection refused");
+    assert_eq!(e.code(), crate::error::E_NET);
+    // pin 失败：策略拒绝走 E_PERM，解析失败走 E_NET
+    let e = classify_pin_error("域名 x 解析到本机/内网地址 127.0.0.1，已拒绝（SSRF 防护）");
+    assert_eq!(e.code(), crate::error::E_PERM);
+    let e = classify_pin_error("域名解析失败: x (dns)");
+    assert_eq!(e.code(), crate::error::E_NET);
+}
+
+#[test]
+fn ai_error_converts_to_command_error_with_code() {
+    use super::agnes::AiError;
+    // AiError → CommandError 码透出（ai.rs 注册闭包不再全压 E_NET）
+    for (err, code) in [
+        (AiError::Timeout("t".into()), crate::error::E_TIMEOUT),
+        (AiError::Auth("a".into()), crate::error::E_AUTH),
+        (AiError::RateLimited("r".into()), crate::error::E_RATELIMIT),
+        (AiError::Permission("p".into()), crate::error::E_PERM),
+        (AiError::Net("n".into()), crate::error::E_NET),
+        (AiError::Internal("i".into()), crate::error::E_INTERNAL),
+    ] {
+        let msg = err.message().to_string();
+        let cmd = crate::error::CommandError::from(err);
+        assert_eq!(cmd.code, code, "code {} 透传丢失", code);
+        assert_eq!(cmd.message, msg);
+    }
+    // Display 与消息一致（ai.rs 按消息识别"已停止生成"）
+    let e = AiError::Net("已停止生成".to_string());
+    assert_eq!(format!("{}", e), "已停止生成");
+}
+
+#[test]
+fn transport_failure_triggers_ollama_fallback_only() {
+    use super::is_transport_failure;
+    use crate::error::{AppError, CommandError};
+    // 超时、发送失败 → 回退
+    assert!(is_transport_failure(&CommandError::from(AppError::timeout(
+        "AI 请求超时：x"
+    ))));
+    assert!(is_transport_failure(&CommandError::from(AppError::net(
+        "AI 请求失败: connection refused"
+    ))));
+    // 上游有响应的错误 → 不回退（模型名写错回退也救不了）
+    assert!(!is_transport_failure(&CommandError::from(
+        AppError::net("AI 服务错误 404: Not Found")
+    )));
+    assert!(!is_transport_failure(&CommandError::from(AppError::auth(
+        "AI 鉴权失败（401）"
+    ))));
+    assert!(!is_transport_failure(&CommandError::from(
+        AppError::ratelimited("限流")
+    )));
+    assert!(!is_transport_failure(&CommandError::from(
+        AppError::permission("SSRF")
+    )));
+}
+
+#[test]
+fn ollama_base_allows_loopback_only() {
+    use super::ollama::is_loopback_base;
+    assert!(is_loopback_base("http://127.0.0.1:11434/v1"));
+    assert!(is_loopback_base("http://localhost:11434/v1"));
+    assert!(is_loopback_base("http://[::1]:11434/v1"));
+    assert!(!is_loopback_base("https://evil.example/v1"));
+    assert!(!is_loopback_base("http://192.168.1.1:11434/v1"));
+    assert!(!is_loopback_base("not a url"));
+}

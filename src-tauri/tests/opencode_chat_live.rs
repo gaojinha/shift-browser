@@ -103,6 +103,7 @@ async fn live_侧边栏问答链路_有回答或显式上游错误() {
         ],
         stream: true,
         tools: None,
+        timeout_secs: None,
     };
     let cancel = Arc::new(AtomicBool::new(false));
     let deltas = Arc::new(AtomicUsize::new(0));
@@ -149,6 +150,7 @@ async fn live_空对话被前置校验拒绝() {
         messages: vec![ChatMessage::new("user", "   ")],
         stream: false,
         tools: None,
+        timeout_secs: None,
     };
     let err = provider
         .chat(&req)

@@ -1,5 +1,5 @@
 // invokeOk / toAppError / errText 单测（R1 错误类型化）
-// 契约：Rust CommandError = {code ∈ 七码, message}；旧命令裸字符串兜底 E_INTERNAL
+// 契约：Rust CommandError = {code ∈ 八码, message}；旧命令裸字符串兜底 E_INTERNAL
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const invokeMock = vi.fn()
@@ -43,6 +43,13 @@ describe('toAppError', () => {
     expect(toAppError({ code: 'E_WHATEVER', message: 'm' })).toEqual({
       code: 'E_INTERNAL',
       message: 'm',
+    })
+  })
+
+  it('第八码 E_RATELIMIT 原样通过（前端可按码提示稍后重试）', () => {
+    expect(toAppError({ code: 'E_RATELIMIT', message: '限流' })).toEqual({
+      code: 'E_RATELIMIT',
+      message: '限流',
     })
   })
 

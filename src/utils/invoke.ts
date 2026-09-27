@@ -1,14 +1,15 @@
 // Tauri 命令统一调用封装（R1 错误类型化 · 2026-09-25）
-// 契约：Rust CommandError 序列化为 {code, message}（七码见 src-tauri/src/error.rs）；
-// 迁移期旧命令仍以裸字符串/Error reject，这里统一归一为 AppErrorShape。
+// 契约：Rust CommandError 序列化为 {code, message}（八码见 src-tauri/src/error.rs）；
+// 迁移期旧命令仍以裸字符串/Error reject，这里统一归一为 AppErrorShape.
 import { invoke } from '@tauri-apps/api/core'
 
-/** 稳定错误码（与 Rust error.rs 七码一一对应，改名需走契约评审） */
+/** 稳定错误码（与 Rust error.rs 八码一一对应，改名需走契约评审） */
 export type ErrorCode =
   | 'E_DB'
   | 'E_PERM'
   | 'E_TIMEOUT'
   | 'E_AUTH'
+  | 'E_RATELIMIT'
   | 'E_NET'
   | 'E_VALIDATION'
   | 'E_INTERNAL'
@@ -23,6 +24,7 @@ const CODES: readonly string[] = [
   'E_PERM',
   'E_TIMEOUT',
   'E_AUTH',
+  'E_RATELIMIT',
   'E_NET',
   'E_VALIDATION',
   'E_INTERNAL',
@@ -30,7 +32,7 @@ const CODES: readonly string[] = [
 
 /** 任意 reject 值归一为 {code,message}：
  *  - 新命令的 CommandError 对象：原样通过
- *  - 带 message 但 code 不在七码内的对象：code 兜底 E_INTERNAL，保留 message
+ *  - 带 message 但 code 不在八码内的对象：code 兜底 E_INTERNAL，保留 message
  *  - Error 实例：取 e.message
  *  - 裸字符串/其他：String(e) 兜底 E_INTERNAL
  */

@@ -179,6 +179,9 @@ pub struct TranslateBatchReq {
     pub session_id: Option<String>,
     #[serde(default)]
     pub agent: Option<String>,
+    /// 分档用模型名（opencode 模型引用；不传即默认档，前端已有现成的不用再查）
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -267,13 +270,48 @@ pub async fn opencode_translate_batch(
     }
 }
 
+/// 翻译会话清理：整页汉化完把用过的会话删掉，opencode 控制台不堆积。
+/// 逐个 DELETE，失败只记日志（端点不存在/已被删都不影响翻译结果）。
+/// 前端在汉化结束（成功/失败/取消）时 fire-and-forget 调用，带用过的会话 id。
+#[tauri::command]
+pub async fn opencode_translate_cleanup(
+    db: tauri::State<'_, crate::db::Db>,
+    sessions: Vec<String>,
+) -> crate::error::CommandResult<u64> {
+    if sessions.is_empty() {
+        return Ok(0);
+    }
+    let creds = match crate::webqa::resolve_credentials_pub(&db).await {
+        Ok(c) => c,
+        Err(_) => return Ok(0),
+    };
+    let http = match crate::webqa::client_pub(&creds) {
+        Ok(c) => c,
+        Err(_) => return Ok(0),
+    };
+    let base = crate::webqa::base_url_pub();
+    let mut deleted = 0u64;
+    for sid in sessions.iter().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        match http
+            .delete(format!("{}/session/{}", base, sid))
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => deleted += 1,
+            Ok(r) => log::info!("[webzh] 翻译会话删除跳过 {}: HTTP {}", sid, r.status()),
+            Err(e) => log::info!("[webzh] 翻译会话删除失败 {}: {}", sid, e),
+        }
+    }
+    log::info!("[webzh] 翻译会话清理完成: {}/{}", deleted, sessions.len());
+    Ok(deleted)
+}
+
 /// 查本机 opencode 当前选用的模型标识（如 `opencode/big-pickle`）。
 ///
 /// 翻译记忆按模型隔离：换了模型旧译文作废。前端每次开翻前取一次，
 /// 失败返回 Err，前端据此跳过整轮缓存（不允许用空模型名读写）。
 #[tauri::command]
-pub async fn opencode_translate_model(
-    db: tauri::State<'_, crate::db::Db>,
+pub async fn opencode_translate_model(    db: tauri::State<'_, crate::db::Db>,
 ) -> crate::error::CommandResult<String> {
     let creds = crate::webqa::resolve_credentials_pub(&db).await?;
     let http = crate::webqa::client_pub(&creds)?;
@@ -386,28 +424,48 @@ pub async fn translate_memory_remember(
     Ok(crate::db::translate_memory::remember(&db.pool, &req.model, &pairs).await as u64)
 }
 
-/// 把本批条目切成 ≤(BATCH_MAX_CHARS 字符 / BATCH_MAX_SEGMENTS 段) 的批次。
+/// 批量档位（字符上限，段数上限）：按模型名分档，纯函数可单测。
+/// 快慢两档：含 flash 走快档 60 段（实测本机主力在此档，60/60 全解析）；
+/// 含 pro 走保守档 30 段（防漏项加超时）；未知/空走 60 段（现状实测值，
+/// 不回退本机默认路径；漏项由解析校验兜底）。改档只影响分批数量，不影响单批语义。
+pub fn batch_tier_for_model(model: Option<&str>) -> (usize, usize) {
+    let name = model.unwrap_or("").to_ascii_lowercase();
+    if name.contains("pro") {
+        (BATCH_MAX_CHARS, 30)
+    } else {
+        (BATCH_MAX_CHARS, BATCH_MAX_SEGMENTS)
+    }
+}
+
+/// 把本批条目切成 ≤(字符上限 / 段数上限) 的批次。
 ///
 /// 前端调用前会调它拿到分批方案，这样"一次要发几次"在前后端口径一致。
+/// 档位按请求模型走 batch_tier_for_model（不传模型即默认档）。
 #[tauri::command]
 pub fn plan_translate_batches(req: TranslateBatchReq) -> Value {
+    let (max_chars, max_segs) = batch_tier_for_model(req.model.as_deref());
     json!({
         "ok": true,
-        "data": plan_batches(&req.items),
+        "data": plan_batches_with(&req.items, max_chars, max_segs),
         "total_items": req.items.len(),
     })
 }
 
 pub fn plan_batches(items: &[BatchItem]) -> Vec<Vec<BatchItem>> {
+    plan_batches_with(items, BATCH_MAX_CHARS, BATCH_MAX_SEGMENTS)
+}
+
+/// 按给定上限分批（内核，档位由调用方定，便于单测各档）
+pub fn plan_batches_with(items: &[BatchItem], max_chars: usize, max_segs: usize) -> Vec<Vec<BatchItem>> {
     // 先做段内切分：单段超长时按自然边界切成子块（id 带 .序号 后缀），
     // 否则一个 8000 字符的长段会整段丢给模型——翻译质量掉、还容易超时。
     let mut expanded: Vec<BatchItem> = Vec::new();
     for it in items {
         let c = it.text.chars().count();
-        if c <= BATCH_MAX_CHARS {
+        if c <= max_chars {
             expanded.push(it.clone());
         } else {
-            for (i, piece) in split_long_text(&it.text, BATCH_MAX_CHARS).into_iter().enumerate() {
+            for (i, piece) in split_long_text(&it.text, max_chars).into_iter().enumerate() {
                 expanded.push(BatchItem {
                     id: format!("{}.{}", it.id, i),
                     text: piece,
@@ -422,7 +480,7 @@ pub fn plan_batches(items: &[BatchItem]) -> Vec<Vec<BatchItem>> {
     for it in expanded {
         let c = it.text.chars().count();
         let would = cur_chars + c;
-        if !cur.is_empty() && (would > BATCH_MAX_CHARS || cur.len() >= BATCH_MAX_SEGMENTS) {
+        if !cur.is_empty() && (would > max_chars || cur.len() >= max_segs) {
             out.push(std::mem::take(&mut cur));
             cur_chars = 0;
         }
@@ -680,6 +738,33 @@ mod tests {
         v.iter()
             .map(|(a, b)| BatchItem { id: (*a).to_string(), text: (*b).to_string() })
             .collect()
+    }
+
+    #[test]
+    fn 分档按模型名走快慢两档() {
+        // flash 快档 60，未知走默认 60（现状实测值），pro 保守 30
+        assert_eq!(batch_tier_for_model(Some("opencode/flash-x")).1, 60);
+        assert_eq!(batch_tier_for_model(Some("agnes-2.0-flash")).1, 60);
+        assert_eq!(batch_tier_for_model(Some("opencode/big-pickle")).1, 60);
+        assert_eq!(batch_tier_for_model(None).1, 60);
+        assert_eq!(batch_tier_for_model(Some("agnes-2.5-pro")).1, 30);
+        assert_eq!(batch_tier_for_model(Some("PRO-MAX")).1, 30);
+        // 字符上限两档一致
+        assert_eq!(batch_tier_for_model(Some("x-pro")).0, BATCH_MAX_CHARS);
+    }
+
+    #[test]
+    fn 保守档65段切三批默认档切两批() {
+        let its: Vec<BatchItem> = (0..65)
+            .map(|i| BatchItem { id: format!("t{i}"), text: "x".repeat(30) })
+            .collect();
+        let fast = plan_batches_with(&its, BATCH_MAX_CHARS, 60);
+        assert_eq!(fast.len(), 2, "60 段档 65 段应切 2 批");
+        let safe = plan_batches_with(&its, BATCH_MAX_CHARS, 30);
+        assert_eq!(safe.len(), 3, "30 段档 65 段应切 3 批");
+        for x in fast.iter().chain(safe.iter()) {
+            assert!(x.len() <= 60);
+        }
     }
 
     #[test]
@@ -959,6 +1044,7 @@ mod tests {
             page_title: None,
             session_id: None,
             agent: None,
+            model: None,
         });
         assert_eq!(p["ok"], true);
         assert!(p["data"].is_array(), "前端读 data 当批次数组");

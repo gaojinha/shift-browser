@@ -35,6 +35,7 @@ interface OcProbe {
   askAgentPresent: boolean
 }
 const isOc = computed(() => (settingsStore.get('ai_provider') || 'agnes') === 'opencode')
+const isLocal = computed(() => (settingsStore.get('ai_provider') || 'agnes') === 'local')
 const ocModels = ref<OcModel[]>([])
 const ocProbe = ref<OcProbe | null>(null)
 const ocLoading = ref(false)
@@ -145,19 +146,18 @@ watch(
               v-for="p in aiProviders"
               :key="p.id"
               :value="p.id"
-              :disabled="p.id === 'local'"
             >
-              {{ p.name }}{{ p.id === 'local' ? '（暂缓）' : '' }}
+              {{ p.name }}
             </option>
             <option v-if="aiProviders.length === 0" value="agnes">AGNES 云端</option>
           </select>
           <div class="field-hint" v-if="settingsStore.get('ai_provider') === 'local'">
-            本地模型集成暂缓（2026-09-19 决策），请选择 AGNES 云端。
+            本机 Ollama（默认连 127.0.0.1:11434，需先在本机起好 Ollama 并拉好模型；连不上自动回退 AGNES 云端）。
           </div>
         </div>
 
         <!-- AGNES 云端专属配置 -->
-        <template v-if="!isOc">
+        <template v-if="!isOc && !isLocal">
           <div class="field">
             <label>模型</label>
             <select
@@ -188,6 +188,46 @@ watch(
               spellcheck="false"
               @change="onAiKeyChange"
             />
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label>请求超时（秒）</label>
+              <input
+                type="number"
+                min="10"
+                max="300"
+                :value="settingsStore.get('ai_timeout') || '90'"
+                @change="onSet('ai_timeout', ($event.target as HTMLInputElement).value)"
+              />
+            </div>
+            <div class="field">
+              <label>流式超时（秒）</label>
+              <input
+                type="number"
+                min="10"
+                max="300"
+                :value="settingsStore.get('ai_stream_timeout') || '120'"
+                @change="onSet('ai_stream_timeout', ($event.target as HTMLInputElement).value)"
+              />
+            </div>
+          </div>
+          <div class="field-hint">范围 10-300 秒，慢网可调大；超范围回落默认值（90/120）。</div>
+        </template>
+
+        <!-- 本机 Ollama 专属配置（复用 ai_model 键，无新增契约） -->
+        <template v-else-if="isLocal">
+          <div class="field">
+            <label>模型</label>
+            <input
+              type="text"
+              :value="settingsStore.get('ai_model')"
+              placeholder="llama3.1（填 Ollama 本机已拉取的模型名）"
+              spellcheck="false"
+              @change="onSet('ai_model', ($event.target as HTMLInputElement).value.trim())"
+            />
+          </div>
+          <div class="field-hint">
+            直连本机 Ollama（127.0.0.1:11434）；Ollama 没在跑或超时时自动回退 AGNES 云端（回退用云端默认模型）。
           </div>
         </template>
 
@@ -246,7 +286,9 @@ watch(
 </template>
 
 <style scoped>
-.ai-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }.ai-tabs { display: flex; gap: 4px; padding: 10px 16px 0; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }.ai-tab { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; font-size: 12.5px; color: var(--text-secondary); background: transparent; border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; cursor: pointer; transition: all 0.15s; }.ai-tab:hover { color: var(--text-primary); background: var(--bg-hover); }.ai-tab.active { color: var(--accent); background: var(--accent-soft); border-color: var(--border-subtle); font-weight: 600; }.settings-scroll { flex: 1; overflow-y: auto; padding: 14px 16px; min-height: 0; }.settings-scroll::-webkit-scrollbar { width: 6px; }.settings-scroll::-webkit-scrollbar-thumb { background: var(--bg-active); border-radius: 3px; }.card { margin-bottom: 12px; }.card-title { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--text-primary); font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }.card-title .app-icon { color: var(--accent); }.field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }.field-desc { flex: 1; font-size: 12px; color: var(--text-secondary); }.field-hint { font-size: 12px; line-height: 1.6; color: var(--text-secondary); background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }.field-hint code { color: var(--accent); font-family: var(--font-mono, monospace); font-size: 11px; }.field label { font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }.field input,
+.ai-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }.ai-tabs { display: flex; gap: 4px; padding: 10px 16px 0; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }.ai-tab { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; font-size: 12.5px; color: var(--text-secondary); background: transparent; border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; cursor: pointer; transition: all 0.15s; }.ai-tab:hover { color: var(--text-primary); background: var(--bg-hover); }.ai-tab.active { color: var(--accent); background: var(--accent-soft); border-color: var(--border-subtle); font-weight: 600; }.settings-scroll { flex: 1; overflow-y: auto; padding: 14px 16px; min-height: 0; }.settings-scroll::-webkit-scrollbar { width: 6px; }.settings-scroll::-webkit-scrollbar-thumb { background: var(--bg-active); border-radius: 3px; }.card { margin-bottom: 12px; }.card-title { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--text-primary); font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }.card-title .app-icon { color: var(--accent); }.field-row { display: flex; gap: 12px; }
+.field-row .field { flex: 1; }
+.field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }.field-desc { flex: 1; font-size: 12px; color: var(--text-secondary); }.field-hint { font-size: 12px; line-height: 1.6; color: var(--text-secondary); background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }.field-hint code { color: var(--accent); font-family: var(--font-mono, monospace); font-size: 11px; }.field label { font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }.field input,
 .field select { flex: 1; max-width: 300px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary); border-radius: 7px; padding: 7px 11px; font-size: 13px; outline: none; transition: border-color 0.15s; -webkit-appearance: none; appearance: none; }.field select { padding-right: 26px; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='%23c6d0df' d='M2.5 4.5L6 8l3.5-3.5'/></svg>"); background-repeat: no-repeat; background-position: right 8px center; background-size: 12px; }.field input:focus,
 .field select:focus { border-color: var(--accent); }
 /* 本机 opencode 状态区（多行文本，不走 .field 的两端对齐单行布局） */
