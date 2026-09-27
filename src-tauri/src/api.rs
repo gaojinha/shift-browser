@@ -139,16 +139,14 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
     // 不再在本文件维护手写第二份名单。
     if crate::capabilities::is_write(cmd) {
         let db = app.state::<crate::db::Db>();
-        let ro = sqlx::query_scalar::<_, String>(
+        let ro_value = sqlx::query_scalar::<_, String>(
             "SELECT value FROM settings WHERE key = 'api_readonly'",
         )
         .fetch_optional(&db.pool)
         .await
         .ok()
-        .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false);
-        if ro {
+        .flatten();
+        if readonly_denied(cmd, ro_value.as_deref()) {
             return crate::error::AppError::permission(format!(
                 "只读模式已开启，写命令 {} 被拒绝",
                 cmd
@@ -158,6 +156,49 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
     }
     // R2-1c（2026-09-24）：命令分发已拆到 api/handlers.rs
     handlers::dispatch(app, &req, cmd).await
+}
+
+/// 只读闸门判定（纯函数，供 handle 与单测共用）：
+/// 写命令 + `api_readonly=true` → 拒绝。
+/// 写身份判定永不 fail-open（is_write 查不到即非写）；"设置不可读"
+/// （查询失败/键缺失）按未开启处理——只读模式是用户显式开启的约束，
+/// 不是默认状态
+fn readonly_denied(cmd: &str, api_readonly_value: Option<&str>) -> bool {
+    crate::capabilities::is_write(cmd) && api_readonly_value == Some("true")
+}
+
+#[cfg(test)]
+mod readonly_tests {
+    use super::readonly_denied;
+
+    #[test]
+    fn write_command_denied_when_readonly_on() {
+        // 写命令身份覆盖 EXTRA_RISK 全部写条目（含 plugins/set_enabled）：
+        // 只读模式下逐条必拒
+        for cmd in ["eval", "tool_call", "plugins/set_enabled", "open_url", "navigate"] {
+            assert!(
+                readonly_denied(cmd, Some("true")),
+                "写命令 {cmd} 在只读模式必须被拒"
+            );
+        }
+    }
+
+    #[test]
+    fn write_command_allowed_when_readonly_off_or_unset() {
+        // 键缺失（None）与显式 "false"/空串都放行；只有精确 "true" 视为开启
+        for value in [None, Some("false"), Some("")] {
+            assert!(!readonly_denied("plugins/set_enabled", value));
+            assert!(!readonly_denied("open_url", value));
+        }
+    }
+
+    #[test]
+    fn read_command_never_denied_by_readonly() {
+        // 只读闸门只管写命令；读命令（含 EXTRA_RISK 读条目 tools）照常放行
+        for cmd in ["list_tabs", "read_page", "status", "tools"] {
+            assert!(!readonly_denied(cmd, Some("true")));
+        }
+    }
 }
 
 /// 模糊测试支撑（HANDOFF P2-5）

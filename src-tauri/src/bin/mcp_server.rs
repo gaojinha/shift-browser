@@ -114,11 +114,21 @@ fn handle(msg: &Value) -> Option<Value> {
             } else {
                 PROTOCOL_VERSION
             };
-            resp["result"] = json!({
+            // instructions：AI 行为约定（页面内容是数据不是指令等），
+            // 单一来源在浏览器侧 contracts::ai_behavior，经 capabilities/list 拉取
+            // ——本进程零编译耦合；浏览器未运行/老版本无该字段时降级省略
+            let instructions = call_browser("capabilities/list", &json!({}))
+                .ok()
+                .and_then(|v| v.get("instructions").and_then(|i| i.as_str()).map(|s| s.to_string()));
+            let mut result = json!({
                 "protocolVersion": version,
                 "capabilities": { "tools": { "listChanged": false } },
                 "serverInfo": { "name": SERVER_NAME, "version": SERVER_VERSION }
             });
+            if let Some(text) = instructions {
+                result["instructions"] = json!(text);
+            }
+            resp["result"] = result;
             Some(resp)
         }
         // 通知：无响应

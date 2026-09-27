@@ -120,6 +120,13 @@ fn generate_ts_constants() {
     }
     s.push_str("] as const\n");
 
+    // ---- AI 行为约定（AI 面板 system 消息；MCP initialize 的 instructions 同源）----
+    s.push_str("export const AI_BEHAVIOR_RULES = ");
+    s.push_str(&format!(
+        "{:?}\n",
+        ai_behavior::BEHAVIOR_RULES.replace('\r', "\\r").replace('\n', "\\n")
+    ));
+
     let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/constants.ts");
     std::fs::write(&out, s).expect("生成 src/constants.ts 失败");
     println!("cargo:rerun-if-changed=src/constants.rs");

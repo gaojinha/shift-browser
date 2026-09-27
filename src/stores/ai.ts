@@ -3,6 +3,7 @@
 import { defineStore } from 'pinia'
 import { invoke, Channel } from '@tauri-apps/api/core'
 import { errText, invokeOk } from '../utils/invoke'
+import { AI_BEHAVIOR_RULES } from '../constants'
 import { useSettingsStore } from './settings'
 import type { Snapshot } from '../types/content'
 
@@ -196,11 +197,15 @@ export const useAIStore = defineStore('ai', {
         } catch {
           // 快照失败不阻断对话（可能页面未就绪/无活动标签），降级用标题+地址
         }
-        const system = snapshotDesc
+        // 行为约定（数据/指令隔离、hints 优先、wait_for 先于交互等）与
+        // MCP initialize 的 instructions 同源（contracts::ai_behavior，build.rs 生成）
+        const system = `${snapshotDesc
           ? `你是 ShiftBrowser 内置 AI 助手。${snapshotDesc}回答要简洁实用，中文回复；代码用围栏代码块，列表用 Markdown 语法。`
           : ctx
             ? `你是 ShiftBrowser 内置 AI 助手。当前用户正在浏览的页面：标题「${ctx.title}」，地址 ${ctx.url}。回答要简洁实用，中文回复；代码用围栏代码块，列表用 Markdown 语法。`
-            : '你是 ShiftBrowser 内置 AI 助手。回答要简洁实用，中文回复；代码用围栏代码块，列表用 Markdown 语法。'
+            : '你是 ShiftBrowser 内置 AI 助手。回答要简洁实用，中文回复；代码用围栏代码块，列表用 Markdown 语法。'}
+
+${AI_BEHAVIOR_RULES}`
         // 从设置读取 AI 参数（模型/API 地址/API Key）
         const settingsStore = useSettingsStore()
         const model = settingsStore.get('ai_model') || 'agnes-2.0-flash'

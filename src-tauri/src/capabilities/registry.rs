@@ -6,7 +6,7 @@
 //!
 //! 本模块把**能力清单**收敛为唯一来源（2026-09-25 三次拆分后结构）：
 //!   - [`core`]：Risk 等级 + 内部 ToolDef 结构 + 统一构造器；
-//!   - [`table_read`] / [`table_write`]：读 24 / 写 19 条数据条目；
+//!   - [`table_read`] / [`table_write`]：读 27 / 写 21 条数据条目（截至 2026-09-27，计数以 registry_tests.rs 断言为准）；
 //!   - 本门面：注册表拼接与查询投影（risk_of / is_write / tool_defs / ids / list_json）。
 //!
 //! 消费方：
@@ -34,15 +34,29 @@ fn registry() -> Vec<core::ToolDef> {
   all
 }
 
-/// 仅开放 API 暴露、不进 MCP 清单的命令风险等级（API 闸门与防漂移测试必须覆盖）：
+/// 仅开放 API 暴露、不进 MCP 清单的命令风险表（API 闸门与防漂移测试必须覆盖）：
 /// - 写：`eval`/`tool_call`（注释明确不暴露给 MCP）、`plugins/set_enabled`；
 /// - 读：`tools`（列 MCP 工具清单，无状态变更）。
+///   单一事实来源：`risk_of` 查询与防漂移测试（经 `extra_risk_pairs`）共用本表，
+///   新增一条即自动进入 `readonly_gate_matches_registry_risk` 断言范围。
+const EXTRA_RISK: &[(&str, Risk)] = &[
+  ("eval", Risk::Write),
+  ("tool_call", Risk::Write),
+  ("plugins/set_enabled", Risk::Write),
+  ("tools", Risk::Read),
+];
+
 fn extra_risk(name: &str) -> Option<Risk> {
-  match name {
-    "eval" | "tool_call" | "plugins/set_enabled" => Some(Risk::Write),
-    "tools" => Some(Risk::Read),
-    _ => None,
-  }
+  EXTRA_RISK
+    .iter()
+    .find(|(n, _)| *n == name)
+    .map(|(_, r)| *r)
+}
+
+/// extra_risk 覆盖的命令清单（供 api/handlers 防漂移测试正向断言：每个名字必有 handler）
+#[cfg(test)]
+pub(crate) fn extra_risk_pairs() -> &'static [(&'static str, Risk)] {
+  EXTRA_RISK
 }
 
 /// 查询命令风险等级（API 只读闸门唯一来源；未知命令返回 None）
@@ -84,11 +98,23 @@ pub fn ids() -> Vec<String> {
   registry().iter().map(|d| d.name.to_string()).collect()
 }
 
-/// `capabilities/list` API 响应：能力清单 + schema（MCP Server 动态拉取用）
+/// 能力清单 schema 版本（加字段/改语义时递增；调用方据此感知工具集演进，
+/// 老调用方忽略未知字段即可——只加不删、只增不改）
+pub const SCHEMA_VERSION: u32 = 1;
+
+/// `capabilities/list` API 响应：能力清单 + schema + AI 行为约定（MCP Server 动态拉取用）
+///
+/// instructions 单一来源在 contracts::ai_behavior（build.rs 同源生成前端），
+/// 此处只透传——避免"工具清单"与"行为约定"两处手写漂移
 pub fn list_json() -> Value {
   let defs = tool_defs();
   let count = defs.len();
-  json!({ "tools": defs, "count": count })
+  json!({
+    "tools": defs,
+    "count": count,
+    "schema_version": SCHEMA_VERSION,
+    "instructions": crate::contracts::ai_behavior::BEHAVIOR_RULES
+  })
 }
 
 // 注册表防漂移测试随被测面外置（避免门面文件超长）

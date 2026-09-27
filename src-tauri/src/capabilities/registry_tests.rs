@@ -21,6 +21,20 @@ fn tool_defs_wellformed() {
 }
 
 #[test]
+fn list_json_carries_schema_version() {
+  // 调用方（MCP bin / 外部脚本）感知工具集演进的锚点：字段必须在，
+  // 值与常量同源（防两处手写漂移）
+  let v = list_json();
+  assert_eq!(
+    v.get("schema_version").and_then(|x| x.as_u64()),
+    Some(SCHEMA_VERSION as u64),
+    "list_json 的 schema_version 必须与常量一致"
+  );
+  assert_eq!(v.get("count").and_then(|x| x.as_u64()), Some(48));
+  assert!(v.get("instructions").and_then(|x| x.as_str()).is_some(), "缺 instructions");
+}
+
+#[test]
 fn ids_unique() {
   let mut ids = ids();
   let n = ids.len();
@@ -42,10 +56,16 @@ fn readonly_gate_matches_registry_risk() {
       d.risk
     );
   }
-  // 不进 MCP 清单的高危命令也必须被闸门覆盖
-  for name in ["eval", "tool_call", "plugins/set_enabled"] {
-    assert_eq!(risk_of(name), Some(Risk::Write), "{name} 应为写命令");
-    assert!(is_write(name), "{name} 必须被只读闸门拦截");
+  // 不进 MCP 清单的命令（EXTRA_RISK 旁路）必须全部有正确风险分类：
+  // 写被只读闸门拦截、读放行；清单直接派生自 EXTRA_RISK 表，
+  // 新增一条旁路命令即自动进入本断言（此前 tools 漏在断言外）
+  for (name, risk) in extra_risk_pairs() {
+    assert_eq!(risk_of(name), Some(*risk), "命令 {name} 的 extra_risk 分类漂移");
+    assert_eq!(
+      is_write(name),
+      *risk == Risk::Write,
+      "命令 {name} 的只读闸门判定与风险分类不一致"
+    );
   }
   // 未知命令不享有写身份（match 分发本身会拒未知命令，这里双保险）
   assert!(!is_write("definitely-not-a-command"));

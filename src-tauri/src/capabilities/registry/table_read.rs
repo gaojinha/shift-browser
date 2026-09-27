@@ -240,9 +240,10 @@ pub(super) fn defs() -> Vec<ToolDef> {
     // 不碰 DOM 值、不返回内容），纯读——按 Read 管理；api_readonly 下天然放行（P2 只读语义落地）。
     tool(
       "read_status",
-      "读取活动标签页状态与元信息（url/title/最终 URL/加载态/脱敏提示 hints）。纯读、不返回页面内容，只读模式（api_readonly=true）下放行。",
+      "读取标签页状态与元信息（url/title/最终 URL/加载态/脱敏提示 hints）。纯读、不返回页面内容，只读模式（api_readonly=true）下放行。",
       json!({
-        "id": { "type": "string", "description": "标签 id（可选；缺省为活动标签）" }
+        "tab_id": { "type": "string", "description": "标签 id（可选；缺省为活动标签，先 list_tabs 获取）" },
+        "id": { "type": "string", "description": "tab_id 的旧别名（向后兼容；两者都给时 tab_id 优先）" }
       }),
       vec![],
       Risk::Read,

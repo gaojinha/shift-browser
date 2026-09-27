@@ -40,7 +40,8 @@ pub(super) type HandlerFn = for<'a> fn(
 
 /// 命令分发表（命令名唯一；重复项在单测中断言）
 pub(super) const HANDLERS: &[(&str, HandlerFn)] = &[
-    // 元命令（能力/技能/插件清单；不经 capabilities 风险表，见 META 白名单）
+    // 元命令（能力/技能/插件清单；list 类不经 capabilities 风险表，见 META 白名单；
+    // set_enabled 是写，走 EXTRA_RISK 受只读闸门约束）
     ("capabilities/list", |a, r| Box::pin(system::capabilities_list(a, r))),
     ("skills/list", |a, r| Box::pin(system::skills_list(a, r))),
     ("plugins/list", |a, r| Box::pin(plugins::list_plugins(a, r))),
@@ -156,7 +157,10 @@ mod tests {
     use super::HANDLERS;
     use crate::capabilities;
 
-    /// 不进 capabilities 风险表、但确属只读安全的元命令
+    /// 不进 capabilities 风险表、但确属只读安全的元命令（逐条豁免理由）：
+    /// - capabilities/list：只读投影注册表（tool_defs 只含 name/desc/schema），无状态变更
+    /// - skills/list：只读投影 contracts::skills 静态常量表，无状态变更
+    /// - plugins/list：只读列插件目录，无状态变更（注意：set_enabled 不在列，它是写，进 EXTRA_RISK）
     const META: &[&str] = &["capabilities/list", "skills/list", "plugins/list"];
 
     #[test]
@@ -176,6 +180,19 @@ mod tests {
             assert!(
                 HANDLERS.iter().any(|(n, _)| *n == name),
                 "capabilities 已登记命令 {name} 在 HANDLERS 表无 handler"
+            );
+        }
+    }
+
+    #[test]
+    fn every_extra_risk_has_handler() {
+        // 正向防漂移：extra_risk 旁路登记（不进 MCP 清单的命令）每个名字
+        // 必须在 HANDLERS 表有 handler——此前只有反向断言（handler 必有分类），
+        // 旁路加错名字会静默绕过只读闸门
+        for (name, _) in crate::capabilities::extra_risk_pairs() {
+            assert!(
+                HANDLERS.iter().any(|(n, _)| *n == *name),
+                "extra_risk 已登记命令 {name} 在 HANDLERS 表无 handler"
             );
         }
     }

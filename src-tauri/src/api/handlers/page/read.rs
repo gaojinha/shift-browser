@@ -194,9 +194,12 @@ pub(crate) async fn read_status(app: &AppHandle, req: &Value) -> Value {
         return AppError::internal("标签管理器不可用").error_json();
     };
     let all = state.all_tabs();
+    // tab_id 为 id 的别名（与 read_page/action/* 参数名统一；id 保留向后兼容，
+    // tab_id 优先——对齐 shot.rs 截图的既有口径）
     let target: Option<&crate::tabs::Tab> = req
-        .get("id")
+        .get("tab_id")
         .and_then(|v| v.as_str())
+        .or_else(|| req.get("id").and_then(|v| v.as_str()))
         .map(|id| all.iter().find(|t| t.id == id))
         .unwrap_or_else(|| all.iter().find(|t| t.is_active));
     let Some(target) = target else {

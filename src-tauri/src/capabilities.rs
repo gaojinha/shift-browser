@@ -16,9 +16,9 @@
 mod registry;
 
 pub(crate) use registry::{is_write, list_json};
-// ids / risk_of 仅 lib 内防漂移测试使用（api/handlers tests）
+// ids / risk_of / extra_risk_pairs 仅 lib 内防漂移测试使用（api/handlers tests）
 #[cfg(test)]
-pub(crate) use registry::{ids, risk_of};
+pub(crate) use registry::{extra_risk_pairs, ids, risk_of};
 
 #[path = "capabilities/skills.rs"]
 mod skills;

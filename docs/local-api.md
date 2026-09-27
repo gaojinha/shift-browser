@@ -16,7 +16,8 @@
 | **Unix 套接字** | `~/.local/share/com.shiftbrowser.app/api.sock` | 文件权限 0600 | 本机脚本/工具 |
 | **HTTP**（阶段4 自托管） | `http://127.0.0.1:19701/api` | `Authorization: Bearer <token>` | 浏览器扩展/HTTP 客户端等 |
 
-HTTP 形态**只绑 127.0.0.1**（不对外），token 随机生成、落 `api-token`（权限 0600）。
+HTTP 形态默认**只绑 127.0.0.1**（不对外），token 随机生成、落 `api-token`（权限 0600）；
+局域网绑定需 `api_bind_lan=true` 且配非空 IP 白名单（见下「端口 / 绑定可配」）。
 两形态**命令完全一致**（同一套处理逻辑）。
 
 ### MCP Server（AI 驱动浏览器 · 标准协议）
@@ -27,7 +28,7 @@ Cursor / 自研 agent）配一条 command 即可驱动浏览器——不用自�
 - **二进制**：`~/.local/bin/shift-browser-mcp`（`cargo build --release --bin shift-browser-mcp` 编译）
 - **协议**：MCP 2025-03-26，stdio 传输（newline-delimited JSON-RPC）
 - **转发**：直连浏览器 Unix socket（api.sock，0600 权限鉴权）——**零额外依赖、不经网络**
-- **工具**：43 个 = 24 读 + 19 写（与 API 命令同名同参；写类受 `api_readonly` 只读闸门约束，交互类另受 `api_agent_actions` 约束）
+- **工具**：48 个 = 27 读 + 21 写（截至 2026-09-27，数量以 `capabilities/registry_tests.rs` 计数断言为准，不再手抄；与 API 命令同名同参；写类受 `api_readonly` 只读闸门约束，交互类另受 `api_agent_actions` 约束）
 - **不暴露**：`eval`（执行任意 JS）与 `tool_call`（嵌套 MCP）——风险高，需要时走浏览器 API 直连（有显式闸门）
 
 配置示例（opencode / Claude Desktop 的 `mcpServers`）：
@@ -43,12 +44,20 @@ Cursor / 自研 agent）配一条 command 即可驱动浏览器——不用自�
 环境变量 `SHIFT_BROWSER_SOCK` 可覆盖 api.sock 路径（默认
 `~/.local/share/com.shiftbrowser.app/api.sock`）。
 
-**工具清单**：
+**工具清单**（27 读 + 21 写 = 48，与 `registry_tests.rs` 计数断言一致；2026-09-27 补齐 5 个漏列）：
 
 | 类别 | 工具 |
 |---|---|
-| 读 | `status` · `list_tabs` · `active_tab` · `history` · `bookmarks` · `search_history` · `list_downloads` · `list_sessions` · `list_groups` · `list_spaces` · `list_userscripts` · `get_setting` · `list_settings` · `screenshot` · `read_page` · `read_status` · `open_and_read` · `extract` · `reader/extract` · `translate` · `content/snapshot` · `audit/reads` · `audit/egress` · `action/wait_for` |
-| 写 | `open_url` · `new_tab` · `close_tab` · `switch_tab` · `reload_tab` · `navigate` · `search` · `pin_tab` · `mute_tab` · `minimize_window` · `maximize_window` · `tabs/close_ai` · `action/dismiss` · `action/scroll` · `action/click` · `action/fill` · `action/back` · `action/hover` · `action/key` |
+| 读 | `status` · `list_tabs` · `active_tab` · `history` · `bookmarks` · `search_history` · `list_downloads` · `list_sessions` · `list_groups` · `list_spaces` · `list_userscripts` · `get_setting` · `list_settings` · `screenshot` · `read_page` · `read_status` · `open_and_read` · `extract` · `reader/extract` · `translate` · `content/snapshot` · `audit/reads` · `audit/egress` · `action/wait_for` · `action/find` · `read_selection` · `page_collect_translatable` |
+| 写 | `open_url` · `new_tab` · `close_tab` · `switch_tab` · `reload_tab` · `navigate` · `search` · `pin_tab` · `mute_tab` · `minimize_window` · `maximize_window` · `tabs/close_ai` · `action/dismiss` · `action/scroll` · `action/click` · `action/fill` · `action/back` · `action/hover` · `action/key` · `action/type` · `page_apply_translation` |
+
+> **HANDLERS ↔ 注册表差集（7 项，不在 MCP 工具清单内）**：`capabilities/list`、
+> `skills/list`、`plugins/list`（只读元命令，见 mod.rs `META` 白名单）；
+> `plugins/set_enabled`（写，走 `EXTRA_RISK`，受只读闸门约束）；
+> `eval` / `tool_call` / `tools`（`EXTRA_RISK`，风险高不暴露给 MCP——
+> 需要时走浏览器 API 直连，有显式闸门）。
+> 这 7 项有对称防漂移测试兜底（`every_extra_risk_has_handler` +
+> `readonly_gate_matches_registry_risk`），不是漏登记。
 
 > 交互类（`action/*`）额外受独立开关 `api_agent_actions` 约束（**默认关**）；写类另受 `api_readonly` 约束。
 
@@ -70,11 +79,13 @@ curl -s -X POST http://127.0.0.1:19701/api -H "Authorization: Bearer $TOKEN" \
 ```
 无/错 token 返回 `{"ok":false,"error":"未授权…"}`。
 
-> **端口 / 绑定可配**（设置 → 隐私）：
-> - 「开放 API 端口」默认 `19701`；
-> - 「开放 API 绑局域网（危险）」默认关（只绑 `127.0.0.1`）；开启后绑 `0.0.0.0`，
->   局域网可达（手机/其它设备可驱动浏览器）——**务必保管好 token**。
-> 两者改完**需重启生效**。
+> **端口 / 绑定可配**（设置 → 隐私，改完需重启浏览器生效）：
+> - 「开放 API 端口」（`api_http_port`）默认 `19701`；
+> - 「开放 API 绑局域网（危险）」（`api_bind_lan`）默认关（只绑 `127.0.0.1`）；
+>   开启后绑 `0.0.0.0`，局域网可达（手机/其它设备可驱动浏览器）——**务必保管好 token**。
+> - **安全策略**：LAN 绑定要求 `api_allowed_ips` 非空；白名单为空时拒绝 LAN 绑定、
+>   自动退回 `127.0.0.1`（日志 `[api] 拒绝绑定 LAN`）——防止"绑了 0.0.0.0 却只有
+>   token 一道防线"。
 
 ### 模型网关（OpenAI 兼容）
 
@@ -117,7 +128,7 @@ curl -s -X POST http://127.0.0.1:19701/v1/chat/completions \
 | `{"cmd":"open_url","url":"https://…"}` | `{"ok":true,"data":Tab}` | 新标签打开网址 |
 | `{"cmd":"close_tab","id":"…"}` | `{"ok":true,"data":Tab\|null}` | 关标签（返回接管的活动标签） |
 | `{"cmd":"tabs/close_ai"}` | `{"ok":true,"data":{"closed":[…],"count":N}}` | 关闭**所有 AI 标签**（`origin=ai`，开放 API 打开的那些）——绝不碰用户标签。AI 读完回收现场用 |
-| `{"cmd":"audit/reads","limit":50}` | `{"ok":true,"data":[{id,ts,cmd,url,tab_id,ok,error_code,origin}…]}` | 查询最近 AI 操作审计（**只记命令/url/结果码，不含页面内容**）。所有 API 命令自动入库（元命令与 `audit/reads` 自身除外） |
+| `{"cmd":"audit/reads","limit":50}` | `{"ok":true,"data":[{id,ts,cmd,url,tab_id,ok,error_code,origin}…]}` | 查询最近 AI 操作审计（**只记命令/url/结果码，不含页面内容**）。所有 API 命令自动入库（元命令与 `audit/reads` 自身除外）。保留策略：只留最近 5000 条（`AUDIT_KEEP`，记录时同事务裁剪，表不无限增长） |
 | `{"cmd":"audit/egress"}` | `{"ok":true,"data":{processes,connections:[{pid,proto,remote_ip,remote_port,state}…],distinct_remotes,loopback,external,checked_at}}` | 网络外发审计：列出本应用及子进程当前 TCP 外联端点（只读 /proc、零出网），核对"浏览器连了哪儿" |
 | `{"cmd":"extract","selector":".item","fields":["text","href"],"limit":100}` | `{"ok":true,"data":{selector,total,returned,truncated,items:[…]}}` | 按选择器结构化提取（固定模板，非任意 JS）。`fields` 白名单 `text`/`href`/`src`/`alt`/`title`/`data-*`；`tab_id` 可选（缺省活动标签） |
 | `{"cmd":"reader/extract","url":"…"}` | `{"ok":true,"data":{title,content,text}}` | 给 URL 抓取并净化正文（阅读模式 readability，独立于标签） |
@@ -208,10 +219,15 @@ print(s.recv(65536).decode())
 - **交互总开关**（设置 `api_agent_actions=false`，**默认关**）：`action/*` 全系列需显式开启
   才生效；未开返回 `ok:false`（提示开启「允许 API 页面交互」）。交互另受只读模式约束。
 - **IP 白名单**（设置 `api_allowed_ips`）：HTTP 形态可绑 `0.0.0.0` 暴露到局域网，
-  此时用白名单限定来源 IP，逗号分隔，支持精确 IP（`127.0.0.1`）、CIDR
-  （`192.168.1.0/24`、`fe80::/10`）与旧式尾点段前缀（`192.168.1.`）；
-  空 = 不限制。注意裸前缀 `192.168.1` 已不再生效（旧实现会误放行 `192.168.10.x`）。
+  此时用白名单限定来源 IP，逗号分隔（容忍空白），支持精确 IP（`127.0.0.1`）、
+  CIDR（`192.168.1.0/24`、`fe80::/10`）与旧式尾点段前缀（`192.168.1.`）；
+  非法条目（垃圾值、前缀越界 CIDR）被忽略，不影响合法条目。
+  空白名单的语义按绑定模式分：本机绑定（默认）= 不限制；LAN 绑定 = 不允许，
+  拒绝绑定并退回 `127.0.0.1`（见上「端口 / 绑定可配」）。
+  注意裸前缀 `192.168.1` 已不再生效（旧实现会误放行 `192.168.10.x`）。
   非白名单来源的连接直接被拒（日志留痕）。
+- **HTTP 请求体上限 8MB**（`HTTP_MAX_BODY`，`/api` 与模型网关 `/v1/chat/completions`
+  同源）：超限直接拒。上限为模型网关转发长对话而设。
 - **内网地址默认拒绝（SSRF 防护）**：`open_and_read` 与 AI 标签的**每一跳导航**都拒绝
   私有/内网/回环地址（含 `localhost`、`10./172.16-31./192.168./169.254.`、CGNAT、
   IPv6 ULA/link-local）。如确需读取内网服务，在 `api_allowed_ips` 白名单中显式放行
@@ -265,9 +281,10 @@ ls -la ~/.local/share/com.shiftbrowser.app/api.sock   # 应为 srw-------
 - 鉴权细化（已完成）：只读模式（`api_readonly`）+ IP 白名单（`api_allowed_ips`）
   + 交互总开关（`api_agent_actions`）；如仍需要，可再加速率限制 / 命令级权限表。
 - HTTP 形态已支持（`127.0.0.1:<port>` + token，端口可配、可绑局域网 + IP 白名单）。
-- MCP Server：`shift-browser-mcp` 二进制，标准 MCP stdio 协议，**43 个工具**
-  （读 24 + 写 19），任何 MCP 客户端可驱动浏览器；`eval` / `tool_call` 不暴露。
-  工具清单由 `capabilities/list` 自动派生——新增命令只需在 `HANDLERS` 表 +
-  `capabilities/registry.rs` 两处登记，MCP 侧零改动。
+- MCP Server：`shift-browser-mcp` 二进制，标准 MCP stdio 协议，**48 个工具**
+  （读 27 + 写 21，截至 2026-09-27，以 `registry_tests.rs` 计数断言为准），
+  任何 MCP 客户端可驱动浏览器；`eval` / `tool_call` 不暴露。
+  工具清单由 `capabilities/list` 自动派生——新增命令需三处登记：`HANDLERS` 表 +
+  `table_read`/`table_write` 数据条目 + `registry_tests.rs` 计数断言同步，MCP 侧零改动。
 - 页面读取能力完善方案（2026-09-25）已全量落地：见
   `docs/开放API-页面读取能力完善方案_2026-09-25.md`。
