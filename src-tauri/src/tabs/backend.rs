@@ -85,10 +85,7 @@ impl TabManager {
             CONTENT_TOP_OFFSET
         };
         let ai_active = if let Some(state) = app.try_state::<TabManager>() {
-            *state
-                .ai_panel_active
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
+            state.ai_panel_active()
         } else {
             false
         };

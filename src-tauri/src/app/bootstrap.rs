@@ -122,14 +122,6 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
         let app_handle = app.handle().clone();
         tauri::async_runtime::spawn(async move {
             let db_state = app_handle.state::<crate::db::Db>();
-            // 历史空标题回填（2026-09-19）：页面加载时 document.title 未就绪导致
-            // 历史里存了空标题，最近访问只剩网址——用 URL 域名兜底
-            if let Ok(fixed) = crate::db::history::backfill_history_titles(db_state).await {
-                if fixed > 0 {
-                    log::info!("[ShiftBrowser] 历史空标题回填完成: {} 条", fixed);
-                }
-            }
-            let db_state = app_handle.state::<crate::db::Db>();
             if let Some(path) = crate::newtab::newtab_path(&app_handle) {
                 match crate::newtab::generate(&db_state, &path).await {
                     Ok(p) => log::info!("[ShiftBrowser] 新标签页已预生成: {}", p),
@@ -139,6 +131,31 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
             // 壁纸后台刷新（独立于 GEN_LOCK，拉取不阻塞任何 generate）
             crate::newtab::refresh_wallpapers_background(&app_handle).await;
         });
+    }
+
+    // 启动优化实施（锁屏让路）：以下初始化与锁屏 dialog 并发跑，不再排队等用户输密码。
+    // dialog.run() 虽堵住 GTK 主线程，但 tokio 任务照跑——用户输完密码时后台多半已就绪。
+    // 留守锁后的只有：TabManager（要 &mut app）、GTK 布局、定时器/接口/订阅/托盘
+    // （spawn 本身不耗时，且锁屏期间不应对外服务/定时触发）、解锁通知、外部链接。
+    // 注意：预热是后台跑的，极端情况（800ms 内解锁且首标签秒建）首个页面注入可能
+    // 读到未预热的缓存——建标签的 re_inject 与延迟重试会补上，无感。
+    {
+        let app_handle = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+            caches::warmup_caches(&app_handle);
+        });
+    }
+
+    // P0-2 补完：注册 AI Provider 实现（纯内存注册，打破 engine→ai 反向依赖）
+    crate::ai::register_provider_impls();
+
+    // 引擎层：注册内容过滤器（网络层规则拦截）的缓存目录与应用句柄。
+    // 必须在下面的注入流程之前注册：规则编译由注入流程触发（在主线程进行），
+    // 编译完成后会自动重新注入，把过滤器挂到已打开标签上；
+    // 加/删自定义关键词因此无需重启即可生效。
+    {
+        let cache_dir = app_data_dir.join("content-filters");
+        crate::engine::content_filter::register_app(app.handle().clone(), cache_dir);
     }
 
     // 启动锁屏：设置启用后，在创建任何 webview 之前弹 GTK 原生密码对话框。
@@ -151,14 +168,8 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     app.manage(crate::tabs::TabManager::new());
     log::info!("[ShiftBrowser] 标签管理器初始化成功");
 
-    // 用户脚本注入缓存 / settings 预热 / 权限白名单 / UA / devtools 开关载入
-    caches::warmup_caches(app);
-
     // 定时任务调度器（阶段3 自动化：设置驱动的后台任务）
     crate::auto_tasks::spawn(app.handle().clone());
-
-    // P0-2 补完：注册 AI Provider 实现（打破 engine→ai 反向依赖）
-    crate::ai::register_provider_impls();
 
     // 本地开放 API（阶段4 开放生态：Unix 域套接字 + 行式 JSON）
     crate::api::spawn(app.handle().clone());
@@ -193,36 +204,33 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
         }
     }
 
-    // 引擎层：注册内容过滤器（网络层规则拦截）的缓存目录与应用句柄。
-    // 必须在下面的注入流程之前注册：规则编译由注入流程触发（在主线程进行），
-    // 编译完成后会自动重新注入，把过滤器挂到已打开标签上；
-    // 加/删自定义关键词因此无需重启即可生效。
-    {
-        let cache_dir = app_data_dir.join("content-filters");
-        crate::engine::content_filter::register_app(app.handle().clone(), cache_dir);
-    }
+    // 引擎层内容过滤器注册已在锁屏前完成（见上），此处不再重复——
+    // register_app 重复调用会覆盖缓存目录与句柄，单次注册为准
 
     // 启动时注入所有启用扩展（UserContentManager 用户脚本/样式）
-    {
-        let app_handle = app.handle().clone();
-        let db_state = app.state::<crate::db::Db>();
-        crate::extensions::inject_on_startup(&app_handle, &db_state);
-    }
-
-    // 启动时生成新标签页（左侧栏面板生态）——异步生成，不阻塞主线程首绘
-    // 前端 newtab_url 在文件不存在时会自行触发 generate（newtab.rs），有兜底
+    // 启动优化实施：setup 时尚无标签页可注（首个标签由前端稍后创建，走建标签的
+    // re_inject 覆盖），这里只后台预查一次（提前暴露坏扩展/坏规则日志），不堵主线程
     {
         let app_handle = app.handle().clone();
         tauri::async_runtime::spawn(async move {
             let db_state = app_handle.state::<crate::db::Db>();
-            if let Some(path) = crate::newtab::newtab_path(&app_handle) {
-                match crate::newtab::generate(&db_state, &path).await {
-                    Ok(p) => log::info!("[ShiftBrowser] 新标签页已生成: {}", p),
-                    Err(e) => log::error!("[ShiftBrowser] 新标签页生成失败: {}", e),
+            match crate::db::extensions::list(&db_state).await {
+                Ok(exts) => {
+                    let enabled = exts.iter().filter(|e| e.enabled).count();
+                    log::info!(
+                        "[extensions] 启动预查：{} 个扩展（{} 个启用），首页面注入走建标签流程",
+                        exts.len(),
+                        enabled
+                    );
                 }
+                Err(e) => log::warn!("[extensions] 启动预查失败（首页面注入不受影响）: {}", e),
             }
         });
     }
+
+    // 启动时生成新标签页已在锁屏前 spawn 做过一次（见上），这里不再重复——
+    // 两次全量 generate 只靠 1.5s 防抖去重，超时即双倍开销（启动优化实施）。
+    // 前端 newtab_url 在文件不存在时会自行触发 generate（newtab.rs），有兜底
 
     // 防御：GNOME/Xwayland 偶发把新窗口以 Iconic（最小化）状态挂起，导致窗口不映射上屏。
     // 启动 1 秒后强制 unminimize + show + focus 一次
@@ -260,8 +268,9 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     tray_setup::setup_tray(app);
 
     // 外部 URL 打开（默认浏览器入口）：命令行带 http/https 参数时（desktop 文件
-    // Exec=shift-browser %U），启动后延迟打开新标签——等前端初始化完（onMounted
-    // 会建初始标签），避免与初始标签竞争
+    // Exec=shift-browser %U），等前端建好初始标签后再开新标签，避免与初始标签竞争。
+    // 启动优化实施：旧逻辑死等 2000ms（慢机丢页、快机白等），现轮询 TabManager
+    // 是否已有标签（200ms 一次），上限 EXTERNAL_URL_READY_MS，超时按旧逻辑直接开
     #[cfg(target_os = "linux")]
     {
         let urls: Vec<String> = std::env::args()
@@ -272,16 +281,50 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
             log::info!("[default-browser] 外部链接参数 {} 个", urls.len());
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                let waited = {
+                    let start = std::time::Instant::now();
+                    let limit = std::time::Duration::from_millis(
+                        crate::contracts::timeout::EXTERNAL_URL_READY_MS,
+                    );
+                    loop {
+                        let n = app_handle
+                            .state::<crate::tabs::TabManager>()
+                            .all_tabs()
+                            .len();
+                        if n > 0 || start.elapsed() >= limit {
+                            break start.elapsed();
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    }
+                };
+                log::info!(
+                    "[default-browser] 前端就绪等待 {}ms，开始打开外部链接",
+                    waited.as_millis()
+                );
                 for url in urls {
                     let state = app_handle.state::<crate::tabs::TabManager>();
-                    match crate::tabs::commands::create_tab(app_handle.clone(), state, url.clone(), None, None, None).await {
+                    match crate::tabs::commands::create_tab(app_handle.clone(), state, url.clone(), None, None, None, None).await {
                         Ok(tab) => log::info!("[default-browser] 外部链接已打开: {}", tab.id),
                         Err(e) => log::warn!("[default-browser] 外部链接打开失败: {} ({})", crate::redact_url(&url), e),
                     }
                 }
             });
         }
+    }
+
+    // 历史空标题回填（启动优化实施）：首绘后 20 秒空闲任务，每轮 500 条单事务，
+    // 启动期不再跑，不跟首绘抢库
+    {
+        let app_handle = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+            let db_state = app_handle.state::<crate::db::Db>();
+            match crate::db::history::backfill_history_titles(db_state).await {
+                Ok(0) => {}
+                Ok(fixed) => log::info!("[ShiftBrowser] 历史空标题回填完成: {} 条", fixed),
+                Err(e) => log::warn!("[ShiftBrowser] 历史空标题回填失败: {}", e),
+            }
+        });
     }
 
     Ok(())

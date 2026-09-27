@@ -4,6 +4,7 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { invokeOk } from './utils/invoke'
+import { isDialogGuardedAction } from './utils/shortcut-guard'
 import { useManagedListeners } from './composables/useManagedListeners'
 import TabBar from './components/TabBar.vue'
 import VerticalTabBar from './components/VerticalTabBar.vue'
@@ -199,8 +200,12 @@ function anyDialogOpen() {
  * 统一快捷键动作入口。
  * 两个来源共用：① 前端 keydown（UI 层持焦时）② GTK 窗口层转发（页面持焦时，
  * 前端收不到按键，由 Rust 在 GTK 层拦截后 emit `global-shortcut`）。
+ * 弹窗守卫与 keydown 同口径（见 utils/shortcut-guard，单测锁定）：
+ * GTK 路径不经过 onGlobalKeydown 的守卫，AI 开着时点一下页面再按 Ctrl+T，
+ * 两边行为必须一致（焦点统一实施）。
  */
 function handleGlobalAction(action: string) {
+  if (isDialogGuardedAction(action) && anyDialogOpen()) return
   switch (action) {
     case 'new-tab':
       tabsStore.createTab()

@@ -31,6 +31,24 @@ use super::vault_crypto::{
     wrap_key, write_vault_file, KEY_LEN,
 };
 
+/// CPU 密集派生扔阻塞池：PBKDF2 60 万次硬算占满一个 async worker，
+/// 该 worker 期间无法服务别的 IPC。数据全 move 进去，无借用。
+async fn unwrap_key_blocking(encoded: String, password: String) -> Result<[u8; KEY_LEN], String> {
+    tokio::task::spawn_blocking(move || unwrap_key(&encoded, &password))
+        .await
+        .map_err(|e| format!("派生任务异常: {}", e))?
+}
+
+async fn wrap_key_blocking(master: [u8; KEY_LEN], password: String) -> String {
+    // 兜底份：spawn 失败时降级同步算一次（闭包无 panic 路径，正常走不到）
+    let (m2, p2) = (master, password.clone());
+    tokio::task::spawn_blocking(move || wrap_key(&m2, &p2))
+        .await
+        .unwrap_or_else(|e| {
+            log::error!("[vault] 派生任务异常，降级同步派生: {}", e);
+            wrap_key(&master, &password)
+        })
+}
 /// 主密码最短长度
 const MIN_PASSWORD_LEN: usize = 8;
 /// 空闲自动锁定设置键（分钟；0 = 关闭），缺省 15
@@ -200,7 +218,7 @@ pub async fn set_vault_password(db: State<'_, Db>, password: String) -> Result<(
     let master = crate::db::passwords::master_key(&db)
         .await
         .map_err(|e| e.to_string())?;
-    let wrapped = wrap_key(&master, &password);
+    let wrapped = wrap_key_blocking(master, password).await;
     write_vault_file(&db.vault_path, &wrapped).map_err(|e| e.to_string())?;
     // 设置完成即视为已解锁（用户刚输入过密码）
     set_unlocked(master);
@@ -215,12 +233,12 @@ pub async fn unlock_vault(db: State<'_, Db>, password: String) -> Result<(), Str
         return Err("密码库未设主密码".to_string());
     }
     let encoded = read_vault_file(&db.vault_path).map_err(|e| e.to_string())?;
-    let master = unwrap_key(&encoded, &password)?;
+    let master = unwrap_key_blocking(encoded.clone(), password.clone()).await?;
     set_unlocked(master);
     // 透明升级：v1（无文件头，20 万次）解锁成功后用同一密码重包为 v2/60 万次落盘。
     // 失败不阻断解锁（密钥已在内存），下次解锁再试。
     if is_legacy_v1_file(&encoded) {
-        let upgraded = wrap_key(&master, &password);
+        let upgraded = wrap_key_blocking(master, password).await;
         match replace_vault_file(&db.vault_path, &upgraded) {
             Ok(()) => log::info!("[vault] 主密码文件已透明升级 v1(200k) → v2(600k)"),
             Err(e) => log::warn!("[vault] 主密码文件升级 v2 失败（不影响本次解锁）: {e}"),
@@ -245,7 +263,7 @@ pub async fn remove_vault_password(db: State<'_, Db>, password: String) -> Resul
         return Err("密码库未设主密码".to_string());
     }
     let encoded = read_vault_file(&db.vault_path).map_err(|e| e.to_string())?;
-    let _ = unwrap_key(&encoded, &password)?; // 验证主密码
+    let _ = unwrap_key_blocking(encoded, password).await?; // 验证主密码
     std::fs::remove_file(&db.vault_path)
         .map_err(|e| format!("删除主密码文件失败: {}", e))?;
     // 移除后主密钥回到文件模式，保持内存缓存可用

@@ -18,22 +18,20 @@ pub async fn set_webview_visible(
     source: Option<String>,
 ) -> CommandResult<()> {
     // 过期指令丢弃：并发乱序时只应用最大 seq
-    {
-        let mut last = state
-            .webview_visible_seq
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if seq <= *last {
-            log::info!(
-                "[tabs] set_webview_visible 过期指令丢弃 seq={} last={} source={:?}",
-                seq,
-                *last,
-                source
-            );
-            return Ok(());
-        }
-        *last = seq;
+    // 读锁内判定，写锁内更新（过期直接返回，不推版本）
+    let last = state.read_state().webview_visible_seq;
+    if seq <= last {
+        log::info!(
+            "[tabs] set_webview_visible 过期指令丢弃 seq={} last={} source={:?}",
+            seq,
+            last,
+            source
+        );
+        return Ok(());
     }
+    state.mutate_quiet(|s| {
+        s.webview_visible_seq = seq;
+    });
     // 覆盖层锁：隐藏 webview（visible=false）视为"有全屏覆盖层"，布局重排不得再显示，
     // 否则证书警告页会被 GTK 层 webview 盖掉；恢复显示时解锁。
     UI_OVERLAY_ACTIVE.store(!visible, std::sync::atomic::Ordering::Relaxed);
@@ -42,13 +40,7 @@ pub async fn set_webview_visible(
         .ok_or_else(|| AppError::internal("主窗口不存在"))?;
     // 注意：child webview 不在 window.webviews() 列表里（只有 main），
     // 必须从 TabManager 拿已知标签逐个 get_webview
-    let ids: Vec<String> = state
-        .tabs
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .keys()
-        .cloned()
-        .collect();
+    let ids: Vec<String> = state.read_state().tabs.keys().cloned().collect();
     let mut count = 0usize;
     for id in ids {
         let label = format!("tab-{}", id);
@@ -94,10 +86,9 @@ pub async fn set_webview_ai_panel(
     state: tauri::State<'_, TabManager>,
     active: bool,
 ) -> CommandResult<()> {
-    *state
-        .ai_panel_active
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = active;
+    state.mutate(|s| {
+        s.ai_panel_active = active;
+    });
     let window = app
         .get_window("main")
         .ok_or_else(|| AppError::internal("主窗口不存在"))?;
@@ -124,11 +115,7 @@ pub async fn set_webview_ai_panel(
         if active {
             let _ = main_wv.set_focus();
         } else {
-            let active_id = state
-                .active_id
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
+            let active_id = state.read_state().active_id.clone();
             if let Some(id) = active_id {
                 if let Some(wv) = window.get_webview(&format!("tab-{}", id)) {
                     let _ = wv.set_focus();
@@ -157,20 +144,13 @@ pub async fn set_bookmarks_bar_visible(
     // 即时重算：不依赖下次窗口 Resize，直接按新的 top_offset 重算几何并应用
     // （几何计算统一走引擎层，见 engine/layout.rs）
     if let Some(window) = app.get_window("main") {
-        let ai_active = *state
-            .ai_panel_active
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let vertical = state.vertical_tabs();
+        let s = state.read_state();
+        let ai_active = s.ai_panel_active;
+        let vertical = s.vertical_tabs;
         let geo =
             crate::engine::layout::ContentGeometry::compute(&window, new_top, ai_active, vertical);
-        let ids: Vec<String> = state
-            .tabs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .keys()
-            .cloned()
-            .collect();
+        let ids: Vec<String> = s.tabs.keys().cloned().collect();
+        drop(s);
         for id in ids {
             crate::engine::layout::apply_to_webview(&window, &id, geo);
         }
@@ -197,19 +177,12 @@ pub async fn set_vertical_tabs(
 
     // 即时重算：标签栏从顶部移到左侧，影响内容区 top 与 left，直接重算几何并应用到所有标签
     if let Some(window) = app.get_window("main") {
-        let ai_active = *state
-            .ai_panel_active
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let s = state.read_state();
+        let ai_active = s.ai_panel_active;
         let geo =
             crate::engine::layout::ContentGeometry::compute(&window, new_top, ai_active, active);
-        let ids: Vec<String> = state
-            .tabs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .keys()
-            .cloned()
-            .collect();
+        let ids: Vec<String> = s.tabs.keys().cloned().collect();
+        drop(s);
         for id in ids {
             crate::engine::layout::apply_to_webview(&window, &id, geo);
         }
@@ -226,12 +199,7 @@ pub async fn set_split_tab(
     state: tauri::State<'_, TabManager>,
     id: String,
 ) -> CommandResult<()> {
-    if !state
-        .tabs
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .contains_key(&id)
-    {
+    if !state.read_state().tabs.contains_key(&id) {
         return Err(AppError::validation("标签不存在").into());
     }
     state.set_split_tab(Some(id.clone()));

@@ -34,10 +34,7 @@ impl TabManager {
             }
         };
         let ai_active = if let Some(state) = app.try_state::<TabManager>() {
-            *state
-                .ai_panel_active
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
+            state.ai_panel_active()
         } else {
             false
         };
@@ -107,7 +104,7 @@ impl TabManager {
             let app = app_handle.clone();
             tauri::async_runtime::spawn(async move {
               let state = app.state::<TabManager>();
-              if let Ok(tab) = crate::tabs::commands::create_tab(app.clone(), state, url_str, None, None, None).await {
+              if let Ok(tab) = crate::tabs::commands::create_tab(app.clone(), state, url_str, None, None, None, None).await {
                 log::info!("[tabs] on_new_window: 新标签创建成功 id={}", tab.id);
                 // 页面内 window.open 建的新标签，前端不知情 → 通知同步
                 let _ = app.emit(crate::contracts::events::TABS_UPDATED, ());
@@ -152,10 +149,11 @@ impl TabManager {
         #[cfg(target_os = "linux")]
         signals::wire_linux_signals(&child, app, id);
 
-        // 新标签创建后重新注入扩展 + 广告拦截（新 webview 需要注入）
+        // 新标签创建后给本页注入扩展 + 广告拦截（单页模式，别家不动，防闪断）
         let app_for_inject = app.clone();
+        let label_for_inject = format!("tab-{}", id);
         tauri::async_runtime::spawn(async move {
-            crate::extensions::re_inject(&app_for_inject).await;
+            crate::extensions::re_inject_one(&app_for_inject, &label_for_inject).await;
         });
 
         Ok(())

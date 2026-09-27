@@ -105,17 +105,24 @@ pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &s
                         return;
                     }
                 }
-                // 标题变化 → 更新内存态；仅在真的变化时通知前端（防高频重复 emit）
+                // 标题变化 → 更新内存态；仅在真的变化时通知前端（防高频重复 emit）。
+                // 先读后写：无变化时不进 mutate，避免版本号空转带崩前端差分
                 let changed = {
                     if let Some(state) = app2.try_state::<TabManager>() {
-                        let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-                        match tabs.get_mut(&tab_id) {
-                            Some(tab) if tab.title != title => {
-                                tab.title = title;
-                                true
-                            }
-                            _ => false,
+                        let need = state
+                            .read_state()
+                            .tabs
+                            .get(&tab_id)
+                            .map(|t| t.title != title)
+                            .unwrap_or(false);
+                        if need {
+                            state.mutate(|s| {
+                                if let Some(tab) = s.tabs.get_mut(&tab_id) {
+                                    tab.title = title;
+                                }
+                            });
                         }
+                        need
                     } else {
                         false
                     }

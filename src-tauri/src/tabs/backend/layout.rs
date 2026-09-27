@@ -98,10 +98,7 @@ pub(crate) fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
           CONTENT_TOP_OFFSET
         };
         let ai_active = if let Some(state) = app_handle.try_state::<TabManager>() {
-          *state
-            .ai_panel_active
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+          state.ai_panel_active()
         } else {
           false
         };
@@ -130,13 +127,7 @@ pub(crate) fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
             // 分屏中：两个窗格各自几何，统一走 apply_split_layout
             let _ = apply_split_layout(&app_handle, &state);
           } else {
-            let ids: Vec<String> = state
-              .tabs
-              .lock()
-              .unwrap_or_else(|e| e.into_inner())
-              .keys()
-              .cloned()
-              .collect();
+            let ids: Vec<String> = state.read_state().tabs.keys().cloned().collect();
             for id in ids {
               crate::engine::layout::apply_to_webview(&win_for_geo, &id, geo);
             }
@@ -226,25 +217,14 @@ pub(crate) fn apply_split_layout(app: &AppHandle, state: &TabManager) -> Result<
     .ok_or_else(|| "主窗口不存在".to_string())?;
   let top = state.top_offset();
   let vertical = state.vertical_tabs();
-  let ai_active = *state
-    .ai_panel_active
-    .lock()
-    .unwrap_or_else(|e| e.into_inner());
-  let active = state
-    .active_id
-    .lock()
-    .unwrap_or_else(|e| e.into_inner())
-    .clone();
-  let split = state.split_tab();
+  let s = state.read_state();
+  let ai_active = s.ai_panel_active;
+  let active = s.active_id.clone();
+  let split = s.split_tab.clone();
 
   let full = crate::engine::layout::ContentGeometry::compute(&window, top, ai_active, vertical);
-  let ids: Vec<String> = state
-    .tabs
-    .lock()
-    .unwrap_or_else(|e| e.into_inner())
-    .keys()
-    .cloned()
-    .collect();
+  let ids: Vec<String> = s.tabs.keys().cloned().collect();
+  drop(s);
 
   // 先全部隐藏（避免 z-order/尺寸错位），再按窗格定位并显示
   for id in &ids {
@@ -282,11 +262,7 @@ pub(crate) fn open_devtools_for_active(app: &AppHandle) {
     let Some(state) = app.try_state::<TabManager>() else {
       return;
     };
-    let id = state
-      .active_id
-      .lock()
-      .unwrap_or_else(|e| e.into_inner())
-      .clone();
+    let id = state.read_state().active_id.clone();
     let Some(id) = id else {
       return;
     };

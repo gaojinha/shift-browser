@@ -11,23 +11,22 @@ pub async fn reorder_tabs(
     state: tauri::State<'_, TabManager>,
     ids: Vec<String>,
 ) -> CommandResult<()> {
-    let existing_set: std::collections::HashSet<String> = {
-        let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        tabs.keys().cloned().collect()
-    };
-    let mut new_order: Vec<String> = ids
-        .iter()
-        .filter(|id| existing_set.contains(*id))
-        .cloned()
-        .collect();
-    let mut order = state.order.lock().unwrap_or_else(|e| e.into_inner());
-    for id in order.iter() {
-        if !new_order.contains(id) {
-            new_order.push(id.clone());
+    // 读锁内一次取全（状态收敛实施）
+    let new_order: Vec<String> = state.mutate(|s| {
+        let mut new_order: Vec<String> = ids
+            .iter()
+            .filter(|id| s.tabs.contains_key(*id))
+            .cloned()
+            .collect();
+        for id in s.order.iter() {
+            if !new_order.contains(id) {
+                new_order.push(id.clone());
+            }
         }
-    }
-    *order = new_order;
-    log::info!("[tabs] reorder_tabs: 新顺序 {:?}", order);
+        s.order = new_order.clone();
+        new_order
+    });
+    log::info!("[tabs] reorder_tabs: 新顺序 {:?}", new_order);
     Ok(())
 }
 
@@ -40,6 +39,12 @@ pub async fn get_tabs(state: tauri::State<'_, TabManager>) -> CommandResult<Vec<
     Ok(tabs)
 }
 
+/// 获取标签状态版本（前端差分同步用：版本未变跳过全量同步）
+#[tauri::command]
+pub async fn get_tabs_version(state: tauri::State<'_, TabManager>) -> CommandResult<u64> {
+    Ok(state.snapshot_version())
+}
+
 /// 更新标签页元数据（标题/图标等，供前端同步）
 #[tauri::command]
 pub async fn update_tab(
@@ -48,17 +53,17 @@ pub async fn update_tab(
     title: Option<String>,
     favicon: Option<String>,
 ) -> CommandResult<Option<Tab>> {
-    let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-    let mut tab = tabs.get_mut(&id);
-    if let Some(ref mut t) = tab {
-        if let Some(new_title) = title {
-            t.title = new_title;
-        }
-        if let Some(new_favicon) = favicon {
-            t.favicon = new_favicon;
-        }
-    }
-    Ok(tab.cloned())
+    Ok(state.mutate(|s| {
+        s.tabs.get_mut(&id).map(|t| {
+            if let Some(new_title) = title {
+                t.title = new_title;
+            }
+            if let Some(new_favicon) = favicon {
+                t.favicon = new_favicon;
+            }
+            t.clone()
+        })
+    }))
 }
 
 #[tauri::command]
@@ -66,13 +71,13 @@ pub async fn toggle_pin(
     state: tauri::State<'_, TabManager>,
     id: String,
 ) -> CommandResult<Option<Tab>> {
-    let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-    let mut tab = tabs.get_mut(&id);
-    if let Some(ref mut t) = tab {
-        t.is_pinned = !t.is_pinned;
-        log::info!("[tabs] toggle_pin: id={} pinned={}", id, t.is_pinned);
-    }
-    Ok(tab.cloned())
+    Ok(state.mutate(|s| {
+        s.tabs.get_mut(&id).map(|t| {
+            t.is_pinned = !t.is_pinned;
+            log::info!("[tabs] toggle_pin: id={} pinned={}", id, t.is_pinned);
+            t.clone()
+        })
+    }))
 }
 
 /// 静音/取消静音标签。
@@ -84,15 +89,13 @@ pub async fn toggle_mute(
     state: tauri::State<'_, TabManager>,
     id: String,
 ) -> CommandResult<Option<Tab>> {
-    let result = {
-        let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        let mut tab = tabs.get_mut(&id);
-        if let Some(ref mut t) = tab {
+    let result = state.mutate(|s| {
+        s.tabs.get_mut(&id).map(|t| {
             t.is_muted = !t.is_muted;
             log::info!("[tabs] toggle_mute: id={} muted={}", id, t.is_muted);
-        }
-        tab.cloned()
-    };
+            t.clone()
+        })
+    });
     let muted = result.as_ref().map(|t| t.is_muted).unwrap_or(false);
 
     // 真静音：异步派发到主线程（从 GTK 信号/异步上下文直接调 with_webview 有主线程重入风险）

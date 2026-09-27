@@ -91,6 +91,13 @@ pub async fn remember(
         return 0;
     }
     let mut written = 0usize;
+    // 先归一化过滤，再分片批量写：每片 200 行（600 绑定位，兼容新老 SQLite 变量上限），
+    // 一片一次往返；原逐条 execute 几百次往返，与 feed 的批量做法对齐
+    let clean: Vec<(String, &str)> = pairs
+        .iter()
+        .map(|(raw_source, raw_target)| (normalize_source(raw_source), raw_target.trim()))
+        .filter(|(source, target)| storable(model, source, target))
+        .collect();
     // 单事务批量提交：翻译一页要写几百条，逐条 autocommit 会让 WAL fsync 刷屏。
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
@@ -99,25 +106,23 @@ pub async fn remember(
             return 0;
         }
     };
-    for (raw_source, raw_target) in pairs {
-        let source = normalize_source(raw_source);
-        let target = raw_target.trim();
-        if !storable(model, &source, target) {
-            continue;
-        }
-        let res = sqlx::query(
-            "INSERT INTO translate_memory (model, source, target) VALUES (?, ?, ?) \
-             ON CONFLICT(model, source) DO UPDATE SET \
-             target = excluded.target, hits = hits + 1, updated_at = datetime('now')",
-        )
-        .bind(model)
-        .bind(&source)
-        .bind(target)
-        .execute(&mut *tx)
-        .await;
-        match res {
-            Ok(_) => written += 1,
-            Err(e) => log::warn!("[translate_memory] 写入失败（本次翻译不受影响）: {e}"),
+    {
+        use sqlx::QueryBuilder;
+        for window in clean.chunks(200) {
+            let mut qb: QueryBuilder<sqlx::Sqlite> = QueryBuilder::new(
+                "INSERT INTO translate_memory (model, source, target) ",
+            );
+            qb.push_values(window.iter(), |mut b, (source, target)| {
+                b.push_bind(model).push_bind(source).push_bind(target);
+            });
+            qb.push(
+                " ON CONFLICT(model, source) DO UPDATE SET \
+                 target = excluded.target, hits = hits + 1, updated_at = datetime('now')",
+            );
+            match qb.build().execute(&mut *tx).await {
+                Ok(_) => written += window.len(),
+                Err(e) => log::warn!("[translate_memory] 写入失败（本次翻译不受影响）: {e}"),
+            }
         }
     }
     // 总量裁剪：优先保留高命中、最近使用的条目，其余淘汰（防无限增长）

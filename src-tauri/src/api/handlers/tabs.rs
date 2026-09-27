@@ -49,7 +49,7 @@ pub(super) async fn open_url(app: &AppHandle, req: &Value) -> Value {
     let Ok(state) = manager(app) else {
         return AppError::internal("标签管理器不可用").error_json();
     };
-    match crate::tabs::commands::create_tab(app.clone(), state, url, None, None, None).await {
+    match crate::tabs::commands::create_tab(app.clone(), state, url, None, None, None, None).await {
         Ok(t) => json!({"ok": true, "data": t}),
         Err(e) => AppError::from(e).error_json(),
     }
@@ -64,6 +64,7 @@ pub(super) async fn new_tab(app: &AppHandle, _req: &Value) -> Value {
         app.clone(),
         state,
         crate::contracts::urls::NEWTAB.to_string(),
+        None,
         None,
         None,
         None,
@@ -196,7 +197,7 @@ pub(super) async fn search(app: &AppHandle, req: &Value) -> Value {
     let Ok(state) = manager(app) else {
         return AppError::internal("标签管理器不可用").error_json();
     };
-    match crate::tabs::commands::create_tab(app.clone(), state, url, None, None, None).await {
+    match crate::tabs::commands::create_tab(app.clone(), state, url, None, None, None, None).await {
         Ok(t) => json!({"ok": true, "data": t}),
         Err(e) => AppError::from(e).error_json(),
     }

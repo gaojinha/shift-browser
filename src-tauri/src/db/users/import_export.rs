@@ -116,10 +116,17 @@ pub async fn user_export(db: tauri::State<'_, Db>) -> Result<UserResult, String>
         serde_json::to_string_pretty(&payload).unwrap_or_default(),
     )
     .map_err(|e| format!("写入文件失败: {}", e))?;
-    log::info!("[users] 账号备份已导出: {}", path.display());
+    // 日志只记文件名不记绝对路径（防目录结构外泄）；返回消息带保管提示，
+    // 备份含密码哈希+盐，离线可爆破——目前为明文格式（保导入兼容），勿传网盘与聊天
+    log::info!(
+        "[users] 账号备份已导出: {}",
+        path.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    );
     Ok(UserResult {
         ok: true,
-        msg: "备份已导出".into(),
+        msg: "备份已导出（含密码哈希，妥善保管，勿上传网盘或发聊天）".into(),
         user: None,
         path: Some(path.display().to_string()),
     })

@@ -8,48 +8,71 @@ use crate::db::{Db, DbError, DbResult};
 
 use super::store::now_str;
 
+/// 导出分页大小：密码/书签逐片拉取，避免万级库单次全表查询卡死同步超时.
+/// 协议不变（仍合成单个包一次 PUT），分片只约束单次 SQL 规模。
+const EXPORT_PAGE: i64 = 500;
+
 /// 导出密码库：password 列**原样密文**（服务器零知识的关键：绝不解密）
 pub(super) async fn export_payload(db: &Db) -> DbResult<Vec<u8>> {
-    let rows = sqlx::query_as::<_, (String, Option<String>, String, Option<String>, String, String)>(
-        "SELECT domain, username, password, notes, created_at, updated_at FROM passwords ORDER BY id",
-    )
-    .fetch_all(&db.pool)
-    .await?;
-
-    let entries: Vec<serde_json::Value> = rows
-        .into_iter()
-        .map(|(domain, username, password, notes, created_at, updated_at)| {
-            serde_json::json!({
-                "domain": domain,
-                "username": username,
-                "password": password,
-                "notes": notes,
-                "created_at": created_at,
-                "updated_at": updated_at,
-            })
-        })
-        .collect();
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    let mut offset = 0i64;
+    loop {
+        let rows = sqlx::query_as::<_, (String, Option<String>, String, Option<String>, String, String)>(
+            "SELECT domain, username, password, notes, created_at, updated_at FROM passwords ORDER BY id LIMIT ? OFFSET ?",
+        )
+        .bind(EXPORT_PAGE)
+        .bind(offset)
+        .fetch_all(&db.pool)
+        .await?;
+        let n = rows.len();
+        entries.extend(rows.into_iter().map(
+            |(domain, username, password, notes, created_at, updated_at)| {
+                serde_json::json!({
+                    "domain": domain,
+                    "username": username,
+                    "password": password,
+                    "notes": notes,
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                })
+            },
+        ));
+        offset += n as i64;
+        if n < EXPORT_PAGE as usize {
+            break;
+        }
+    }
 
     // 书签（阶段4 多端协同）：跨端同步；文件夹按名字保留，导入时 find-or-create
-    let bm_rows = sqlx::query_as::<_, (String, String, Option<String>, i64, String)>(
-        "SELECT b.title, b.url, f.name, b.sort_order, b.created_at
-         FROM bookmarks b LEFT JOIN bookmark_folders f ON f.id = b.folder_id
-         ORDER BY b.id",
-    )
-    .fetch_all(&db.pool)
-    .await?;
-    let bookmarks: Vec<serde_json::Value> = bm_rows
-        .into_iter()
-        .map(|(title, url, folder, sort_order, created_at)| {
-            serde_json::json!({
-                "title": title,
-                "url": url,
-                "folder": folder,
-                "sort_order": sort_order,
-                "created_at": created_at,
-            })
-        })
-        .collect();
+    let mut bookmarks: Vec<serde_json::Value> = Vec::new();
+    let mut bm_offset = 0i64;
+    loop {
+        let bm_rows = sqlx::query_as::<_, (String, String, Option<String>, i64, String)>(
+            "SELECT b.title, b.url, f.name, b.sort_order, b.created_at
+             FROM bookmarks b LEFT JOIN bookmark_folders f ON f.id = b.folder_id
+             ORDER BY b.id LIMIT ? OFFSET ?",
+        )
+        .bind(EXPORT_PAGE)
+        .bind(bm_offset)
+        .fetch_all(&db.pool)
+        .await?;
+        let n = bm_rows.len();
+        bookmarks.extend(bm_rows.into_iter().map(
+            |(title, url, folder, sort_order, created_at)| {
+                serde_json::json!({
+                    "title": title,
+                    "url": url,
+                    "folder": folder,
+                    "sort_order": sort_order,
+                    "created_at": created_at,
+                })
+            },
+        ));
+        bm_offset += n as i64;
+        if n < EXPORT_PAGE as usize {
+            break;
+        }
+    }
 
     // 会话（阶段4 多端协同）：标签集跨端；按 (name, created_at) 去重，最多带 50 条
     let se_rows = sqlx::query_as::<_, (String, String, String)>(
@@ -368,5 +391,29 @@ mod tests {
         // 旧版包（无 bookmarks 字段）不应报错
         let v1 = serde_json::to_vec(&serde_json::json!({"version": 1, "entries": []})).unwrap();
         assert_eq!(import_payload(&db, &v1).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn export_pages_cover_all_rows() {
+        let (_dir, db) = temp_db().await;
+        // 超出一页（500）的密码与书签：分片导出必须一根不少
+        for i in 0..505 {
+            sqlx::query("INSERT INTO passwords (domain, username, password) VALUES (?, ?, 'x')")
+                .bind(format!("d{i}.example.com"))
+                .bind(format!("u{i}"))
+                .execute(&db.pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO bookmarks (title, url) VALUES (?, ?)")
+                .bind(format!("t{i}"))
+                .bind(format!("https://b{i}.example.com"))
+                .execute(&db.pool)
+                .await
+                .unwrap();
+        }
+        let raw = export_payload(&db).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!(v["entries"].as_array().unwrap().len(), 505);
+        assert_eq!(v["bookmarks"].as_array().unwrap().len(), 505);
     }
 }

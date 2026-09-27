@@ -111,6 +111,7 @@ fn inject_extensions(
     app: &AppHandle,
     items: Vec<(Option<String>, Option<String>)>,
     webmcp_on: bool,
+    only_label: Option<&str>,
 ) {
     // 注意：主窗口是 Window 类型（tabs.rs 用 get_window("main")），
     // get_webview_window("main") 会返回 None 导致注入被跳过
@@ -128,6 +129,8 @@ fn inject_extensions(
     log::info!("[extensions] 用户脚本缓存 {} 个", user_scripts.len());
     // 翻译原生桥要 AppHandle（闭包需 'static，不能借用 app，故闭包外先克隆）
     let app_for_bridge_all = app.clone();
+    // 单页过滤同样要 owned（main 线程闭包 'static，借用活不过函数）
+    let only_owned: Option<String> = only_label.map(|s| s.to_string());
     let _ = app.run_on_main_thread(move || {
         // 引擎层内容过滤器：如有规则变更，在主线程编译（编译完成会回来触发一次重新注入）
         crate::engine::content_filter::compile_pending();
@@ -138,9 +141,15 @@ fn inject_extensions(
         let allow_list: &[&str] = &["*"];
         for wv in &webviews {
             // 跳过主 webview（label="main"，是 Vue UI），只注入 child 标签页（label="tab-*"）
+            // 单页模式（唤醒/新建）：只碰目标标签，别家脚本不动，防闪断
             // remove_all_scripts 会误删 Tauri 主 webview 的 UserScript（Vue UI 桥接），导致界面空白
             if wv.label() == "main" {
                 continue;
+            }
+            if let Some(ref only) = only_owned {
+                if wv.label() != only.as_str() {
+                    continue;
+                }
             }
             let items_clone = items_owned.clone();
             let user_scripts_clone = user_scripts.clone();
@@ -262,32 +271,27 @@ fn inject_extensions(
 }
 
 
-/// 保存加噪白名单（域名数组）并立即重新注入
-#[tauri::command]
-
-
-/// 启动时注入所有启用扩展（在 setup 阶段调用，db 已就绪）
-pub fn inject_on_startup(app: &AppHandle, db: &Db) {
-    let (items, webmcp_on) = match tauri::async_runtime::block_on(adblock::collect_enabled_items(db)) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("[extensions] 启动注入失败: {}", e);
-            return;
-        }
-    };
-    if !items.is_empty() {
-        log::info!("[extensions] 启动注入 {} 个启用扩展", items.len());
-        inject_extensions(app, items, webmcp_on);
-    }
-}
-
 /// 重新注入全部启用扩展 + 广告拦截（新标签创建后调用，确保新 webview 也有扩展）
 pub async fn re_inject(app: &AppHandle) {
+    re_inject_filtered(app, None).await;
+}
+
+/// 单页重注（唤醒/新建后调用）：只碰目标标签，别家脚本不动，防闪断。
+/// UserContent 注册、CSS、桥接与重试全部只对该页，与广播版同效果、零波及。
+pub async fn re_inject_one(app: &AppHandle, label: &str) {
+    re_inject_filtered(app, Some(label.to_string())).await;
+}
+
+async fn re_inject_filtered(app: &AppHandle, only: Option<String>) {
     let db = app.state::<Db>();
     match adblock::collect_enabled_items(&db).await {
         Ok((items, webmcp_on)) => {
-            log::info!("[extensions] re_inject: {} 个注入项", items.len());
-            inject_extensions(app, items.clone(), webmcp_on);
+            log::info!(
+                "[extensions] re_inject{}: {} 个注入项",
+                only.as_deref().map(|l| format!("（单页 {l}）")).unwrap_or_default(),
+                items.len()
+            );
+            inject_extensions(app, items.clone(), webmcp_on, only.as_deref());
             // 延迟重试 evaluate：页面加载中 evaluate 会失败（document 未就绪）。
             // page_load_finished 事件对部分页面（如 understandingwar.org）不触发，
             // 所以不能只靠 Finished 补注入——这里 1s/3s/8s 重试，页面加载完必然命中。
@@ -296,7 +300,7 @@ pub async fn re_inject(app: &AppHandle) {
             tauri::async_runtime::spawn(async move {
                 for delay in [1u64, 3, 8] {
                     tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-                    evaluate_inject_retry(&app2, items.clone());
+                    evaluate_inject_retry(&app2, items.clone(), only.clone());
                 }
             });
         }
@@ -304,8 +308,13 @@ pub async fn re_inject(app: &AppHandle) {
     }
 }
 
-/// 延迟重试：对所有 child webview evaluate 注入脚本 + 探针（确认脚本是否执行）
-fn evaluate_inject_retry(app: &AppHandle, items: Vec<(Option<String>, Option<String>)>) {
+/// 延迟重试：对 child webview evaluate 注入脚本 + 探针（确认脚本是否执行）。
+/// 单页模式只碰目标标签（唤醒/新建的重试不再闪断别家）。
+fn evaluate_inject_retry(
+    app: &AppHandle,
+    items: Vec<(Option<String>, Option<String>)>,
+    only: Option<String>,
+) {
     let Some(window) = app.get_window("main") else {
         return;
     };
@@ -315,6 +324,11 @@ fn evaluate_inject_retry(app: &AppHandle, items: Vec<(Option<String>, Option<Str
         for wv in &webviews {
             if wv.label() == "main" {
                 continue;
+            }
+            if let Some(ref one) = only {
+                if wv.label() != one.as_str() {
+                    continue;
+                }
             }
             let items_clone = items_owned.clone();
             let _ = wv.with_webview(move |pwv| {

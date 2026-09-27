@@ -88,19 +88,23 @@ pub(super) fn handle_page_load(
                     if let Ok(fav) = res {
                         if !fav.is_empty() && !fav.starts_with("about:") {
                             log::debug!("[tabs] favicon: tab={} {}", tab_id_fav, fav);
-                            let updated = {
-                                let state = app_fav.state::<TabManager>();
-                                let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-                                match tabs.get_mut(&tab_id_fav) {
-                                    Some(t) if t.favicon != fav => {
+                            // 先读后写：无变化不进 mutate，版本号不空转
+                            let state = app_fav.state::<TabManager>();
+                            let need = state
+                                .read_state()
+                                .tabs
+                                .get(&tab_id_fav)
+                                .map(|t| t.favicon != fav)
+                                .unwrap_or(false);
+                            if need {
+                                state.mutate(|s| {
+                                    if let Some(t) = s.tabs.get_mut(&tab_id_fav) {
                                         t.favicon = fav;
-                                        true
                                     }
-                                    _ => false,
-                                }
-                            };
+                                });
+                            }
                             // favicon 更新 → 通知前端同步
-                            if updated {
+                            if need {
                                 let _ = app_fav.emit(crate::contracts::events::TABS_UPDATED, ());
                             }
                         }
@@ -118,17 +122,18 @@ pub(super) fn handle_page_load(
         // 用标志位而非提前 return，保证前端同步事件照常发出（AI 标签也要显示在标签栏）。
         let mut skip_history = false;
         if let Some(state) = app.try_state::<TabManager>() {
-            let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(tab) = tabs.get_mut(tab_id) {
-                tab.url = url.to_string();
-                // 仅当还没有真标题（title-notify 未触发过）时用 host 占位，避免覆盖 document.title
-                if tab.title.is_empty() || tab.title == tab.url {
-                    tab.title = title;
+            state.mutate(|s| {
+                if let Some(tab) = s.tabs.get_mut(tab_id) {
+                    tab.url = url.to_string();
+                    // 仅当还没有真标题（title-notify 未触发过）时用 host 占位，避免覆盖 document.title
+                    if tab.title.is_empty() || tab.title == tab.url {
+                        tab.title = title;
+                    }
                 }
-            }
-            if let Some(t) = tabs.get(tab_id) {
-                skip_history = t.private || t.origin == "ai";
-            }
+                if let Some(t) = s.tabs.get(tab_id) {
+                    skip_history = t.private || t.origin == "ai";
+                }
+            });
         }
         // 页面加载完成（URL/标题变化）→ 通知前端同步（替代 2s 轮询）
         let _ = app.emit(crate::contracts::events::TABS_UPDATED, ());

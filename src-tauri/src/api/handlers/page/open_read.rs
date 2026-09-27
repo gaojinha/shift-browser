@@ -124,6 +124,7 @@ pub(crate) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
                 None,
                 None,
                 Some(true), // J6：AI 标签后台打开，不抢用户焦点
+                None, // AI 标签读内容不能等，不延迟（probe 紧接着读页）
             )
             .await
             {

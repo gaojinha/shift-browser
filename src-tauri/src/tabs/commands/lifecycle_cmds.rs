@@ -15,11 +15,15 @@ pub async fn create_tab(
     after_active: Option<bool>,
     // J6：后台打开（true = 不抢焦点，保持当前活动标签；默认 false = 现行为）
     background: Option<bool>,
+    // 延迟加载（会话恢复用）：http(s) 页先建占位，切到该标签时再载真址；
+    // AI 标签与内部页传 false 直接真载（读内容不能等）
+    defer: Option<bool>,
 ) -> CommandResult<Tab> {
     let is_private = private.unwrap_or(false);
     // 新标签插入位置：true = 插到当前活动标签之后（"在列表页右边打开"）；默认追加末尾
     let insert_after = after_active.unwrap_or(false);
     let background = background.unwrap_or(false);
+    let defer = defer.unwrap_or(false);
     // 隐私防护：新建标签前清洗跨站追踪参数（只影响 http/https，内部页面不受影响）
     let url = clean_tracking_params(&url);
     log::info!("[tabs] create_tab: url={}", crate::redact_url(&url));
@@ -46,6 +50,14 @@ pub async fn create_tab(
         }
     }
     let id = TabManager::uuid();
+    // 建页限流：WebKit 建页是重操作，同时最多 4 个，恢复会话连建时排队（阈值见 contracts::limits）
+    static CREATE_SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    let sem = CREATE_SEM.get_or_init(|| {
+        tokio::sync::Semaphore::new(crate::contracts::limits::TAB_CREATE_CONCURRENCY)
+    });
+    let _permit = sem.acquire().await.map_err(|e| {
+        crate::error::AppError::internal(format!("建页限流器异常: {}", e))
+    })?;
     // 本地新标签页（file:// 路径含 /newtab/ 或 shift://newtab/worldnav）标题显示"启动页"，
     // 不显示冗长 URL/host。注意：协议改版后 URL 是 shift://newtab，旧的 contains("/newtab/")
     // 判断匹配不到，必须按 scheme+host 判断
@@ -55,8 +67,17 @@ pub async fn create_tab(
         url.clone()
     };
 
-    TabManager::create_webview(&app, &id, &url, is_private)?;
-    log::info!("[tabs] create_tab: webview 创建成功 id={} private={}", id, is_private);
+    // 延迟占位：defer 且 http(s) 时 webview 先建本地占位页，真址记账，
+    // 切到该标签时再载（会话恢复连建不打爆内存与并发）
+    let deferred_url = TabManager::deferred_placeholder(defer, &url);
+    let webview_url = deferred_url.unwrap_or(&url);
+    TabManager::create_webview(&app, &id, webview_url, is_private)?;
+    log::info!(
+        "[tabs] create_tab: webview 创建成功 id={} private={} deferred={}",
+        id,
+        is_private,
+        deferred_url.is_some()
+    );
 
     let tab = Tab {
         id: id.clone(),
@@ -73,41 +94,42 @@ pub async fn create_tab(
     state.touch_active(&id);
 
     // 更新状态：新标签激活，旧标签取消激活（background 时保持当前活动标签不变）
-    let old_active = {
-        let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        let mut order = state.order.lock().unwrap_or_else(|e| e.into_inner());
-        let mut active = state.active_id.lock().unwrap_or_else(|e| e.into_inner());
-
-        let prev = (*active).clone();
+    // 单写锁内一次改完，中途无观察者（状态收敛实施）
+    let old_active = state.mutate(|s| {
+        let prev = s.active_id.clone();
         if !background {
-            for t in tabs.values_mut() {
+            for t in s.tabs.values_mut() {
                 t.is_active = false;
             }
         }
-        tabs.insert(id.clone(), tab.clone());
+        s.tabs.insert(id.clone(), tab.clone());
+        // 延迟账：占位页的真址记账，切标签时载入并销账
+        if deferred_url.is_some() {
+            s.deferred_loads.insert(id.clone(), tab.url.clone());
+        }
         // 插入位置：after_active=true 时插到旧活动标签之后（无活动标签则追加末尾）
         let pos = if insert_after {
             prev.as_ref()
-                .and_then(|p| order.iter().position(|x| x == p))
+                .and_then(|p| s.order.iter().position(|x| x == p))
                 .map(|p| p + 1)
-                .unwrap_or(order.len())
+                .unwrap_or(s.order.len())
         } else {
-            order.len()
+            s.order.len()
         };
         if insert_after {
             log::info!(
                 "[tabs] create_tab: 插到活动标签之后 pos={}/{}",
                 pos,
-                order.len()
+                s.order.len()
             );
         }
-        order.insert(pos, id.clone());
+        s.order.insert(pos, id.clone());
         if background {
             prev
         } else {
-            active.replace(id.clone())
+            s.active_id.replace(id.clone())
         }
-    };
+    });
 
     // 新建标签页可见性：前台标签立即切换（show 新、hide 旧），避免新 webview 透明期透出旧页面；
     // 后台标签（J6）保持隐藏，用户当前页面继续显示，webview 仍在后台加载。
@@ -122,6 +144,44 @@ pub async fn create_tab(
     Ok(tab)
 }
 
+/// 批量建标签（会话恢复用，一次 IPC 带走一组地址）
+/// 语义：逐个走 create_tab（限流加延迟占位照吃），单个失败跳过不整批炸；
+/// 返回与入参等长、按位对齐的数组（失败位为 None），前端按下标认领分组。
+/// 私有/内部页照常：defer 只对 http(s) 生效，其余直接真载（见 deferred_placeholder）。
+#[tauri::command]
+pub async fn create_tabs_batch(
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+    urls: Vec<String>,
+) -> CommandResult<Vec<Option<Tab>>> {
+    log::info!("[tabs] create_tabs_batch: {} 个地址", urls.len());
+    let mut out = Vec::with_capacity(urls.len());
+    for url in urls {
+        match create_tab(
+            app.clone(),
+            state.clone(),
+            url.clone(),
+            None,
+            None,
+            None,
+            Some(true),
+        )
+        .await
+        {
+            Ok(tab) => out.push(Some(tab)),
+            Err(e) => {
+                log::warn!(
+                    "[tabs] 批量建标签跳过失败项: {} ({})",
+                    crate::redact_url(&url),
+                    e
+                );
+                out.push(None);
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// 关闭标签页（切换到相邻标签）
 #[tauri::command]
 pub async fn close_tab(
@@ -130,39 +190,40 @@ pub async fn close_tab(
     id: String,
 ) -> CommandResult<Option<Tab>> {
     log::info!("[tabs] close_tab: id={}", id);
-    let mut next_id: Option<String> = None;
-
-    {
-        let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        let mut order = state.order.lock().unwrap_or_else(|e| e.into_inner());
-        let mut active = state.active_id.lock().unwrap_or_else(|e| e.into_inner());
-
-        let was_active = *active == Some(id.clone());
-        let removed = tabs.remove(&id);
+    // 单写锁内一次改完（状态收敛实施）；id 不存在时返回 None，调用方直接返回不碰 webview
+    let next_id: Option<Option<String>> = state.mutate(|s| {
+        let was_active = s.active_id == Some(id.clone());
+        let removed = s.tabs.remove(&id);
+        // 延迟账一起销（关了就不用载了，防泄漏）
+        s.deferred_loads.remove(&id);
+        // id 不存在：直接返回，调用方不碰 webview（version 照推，无害）
+        removed.as_ref()?;
         // 记录被删标签在 order 中的位置（删除后同位置即右邻）
-        let removed_pos = order.iter().position(|x| x == &id);
+        let removed_pos = s.order.iter().position(|x| x == &id);
         if let Some(pos) = removed_pos {
-            order.remove(pos);
+            s.order.remove(pos);
         }
 
+        let mut next_id: Option<String> = None;
         if was_active {
             // 优先切右边的标签（删除后同位置即右邻），没有则切左边（最后一个）
             next_id = match removed_pos {
-                Some(p) if p < order.len() => order.get(p).cloned(),
-                _ => order.last().cloned(),
+                Some(p) if p < s.order.len() => s.order.get(p).cloned(),
+                _ => s.order.last().cloned(),
             };
             if let Some(nid) = &next_id {
-                if let Some(t) = tabs.get_mut(nid) {
+                if let Some(t) = s.tabs.get_mut(nid) {
                     t.is_active = true;
                 }
             }
-            *active = next_id.clone();
+            s.active_id = next_id.clone();
         }
 
-        if removed.is_none() {
-            return Ok(None);
-        }
-    }
+        Some(next_id)
+    });
+    let Some(next_id) = next_id else {
+        return Ok(None);
+    };
 
     TabManager::destroy_webview(&app, &id);
 
@@ -171,8 +232,8 @@ pub async fn close_tab(
         let _ = TabManager::set_webview_visible(&app, nid, true);
     }
 
-    let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-    Ok(next_id.and_then(|nid| tabs.get(&nid).cloned()))
+    let s = state.read_state();
+    Ok(next_id.and_then(|nid| s.tabs.get(&nid).cloned()))
 }
 
 /// 关闭全部标签（切换工作区时清空用）
@@ -184,25 +245,16 @@ pub async fn close_all_tabs(
     state: tauri::State<'_, TabManager>,
 ) -> CommandResult<Vec<Tab>> {
     log::info!("[tabs] close_all_tabs");
-    // 先快照再清空：快照在锁内一次性取出，清空不可逆时调用方有料可回滚
-    let snapshot: Vec<Tab> = {
-        let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        let order = state.order.lock().unwrap_or_else(|e| e.into_inner());
-        order
-            .iter()
-            .filter_map(|id| tabs.get(id).cloned())
-            .collect()
-    };
-    let ids: Vec<String> = {
-        let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        let mut order = state.order.lock().unwrap_or_else(|e| e.into_inner());
-        let mut active = state.active_id.lock().unwrap_or_else(|e| e.into_inner());
-        let collected: Vec<String> = tabs.keys().cloned().collect();
-        tabs.clear();
-        order.clear();
-        *active = None;
+    // 先快照再清空：快照在读锁内一次性取出，清空不可逆时调用方有料可回滚
+    let snapshot: Vec<Tab> = state.all_tabs();
+    let ids: Vec<String> = state.mutate(|s| {
+        let collected: Vec<String> = s.tabs.keys().cloned().collect();
+        s.tabs.clear();
+        s.order.clear();
+        s.active_id = None;
+        s.deferred_loads.clear();
         collected
-    };
+    });
 
     for id in ids {
         TabManager::destroy_webview(&app, &id);
@@ -221,8 +273,8 @@ pub async fn switch_tab(
     // 先校验标签存在，再写 active_id（否则 active_id 会指向不存在的标签，
     // 导致 go_back/go_forward 报"标签不存在"、UI 显示与实际不符）
     let hibernated_info = {
-        let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        tabs.get(&id).map(|t| (t.hibernated, t.url.clone(), t.private))
+        let s = state.read_state();
+        s.tabs.get(&id).map(|t| (t.hibernated, t.url.clone(), t.private))
     };
     let Some((is_hibernated, hibernated_url, hibernated_private)) = hibernated_info else {
         return Ok(None);
@@ -233,31 +285,23 @@ pub async fn switch_tab(
     if is_hibernated {
         log::info!("[perf] 唤醒休眠标签: id={} url={}", id, hibernated_url);
         TabManager::create_webview(&app, &id, &hibernated_url, hibernated_private)?;
-        if let Some(t) = state
-            .tabs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get_mut(&id)
-        {
-            t.hibernated = false;
-        }
-        crate::extensions::re_inject(&app).await;
+        state.mutate(|s| {
+            if let Some(t) = s.tabs.get_mut(&id) {
+                t.hibernated = false;
+            }
+        });
+        // 单页补注：只给唤醒的这页注，别家不动（广播会闪断别的标签脚本）
+        crate::extensions::re_inject_one(&app, &format!("tab-{}", id)).await;
     }
-    // 隐藏当前活动 webview
-    let old_active = {
-        let mut active = state.active_id.lock().unwrap_or_else(|e| e.into_inner());
-        let old = active.clone();
-        *active = Some(id.clone());
-        old
-    };
-
-    // 更新激活状态
-    {
-        let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        for t in tabs.values_mut() {
+    // 隐藏当前活动 webview + 更新激活状态：一次写锁内完成
+    let old_active = state.mutate(|s| {
+        let old = s.active_id.clone();
+        s.active_id = Some(id.clone());
+        for t in s.tabs.values_mut() {
             t.is_active = t.id == id;
         }
-    }
+        old
+    });
 
     // 切换可见性：一次主线程投递里"先显示新标签、再隐藏旧标签"
     // （原实现 hide→show 两次投递且顺序相反，中间白屏空窗 + 双跨线程往返导致切换迟钝）
@@ -271,9 +315,25 @@ pub async fn switch_tab(
         let _ = TabManager::switch_visibility(&app, &id, old_active.as_deref());
     }
 
+    // 延迟加载兑现：占位页切出来时载真址并销账（点当前标签同样触发，不只切页）
+    let deferred: Option<String> = state.mutate(|s| s.deferred_loads.remove(&id));
+    if let Some(real_url) = deferred {
+        if let Some(window) = app.get_window("main") {
+            if let Some(wv) = window.get_webview(&format!("tab-{}", id)) {
+                match real_url.parse::<tauri::Url>() {
+                    Ok(target) => {
+                        let _ = wv.navigate(target);
+                        log::info!("[tabs] 延迟加载已触发: id={}", id);
+                    }
+                    Err(e) => log::warn!("[tabs] 延迟地址非法 id={}: {}", id, e),
+                }
+            }
+        }
+    }
+
     state.touch_active(&id);
-    let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-    Ok(tabs.get(&id).cloned())
+    let s = state.read_state();
+    Ok(s.tabs.get(&id).cloned())
 }
 
 /// 空闲标签休眠：销毁长时间未激活的标签 webview，回收其渲染进程内存
@@ -295,11 +355,11 @@ pub async fn hibernate_idle_tabs(
         return Ok(0);
     }
     let threshold = now_ts() - minutes * 60;
-    let active = state
-        .active_id
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
+    // 读锁内一次取全：活动标签 + 标签数（状态收敛实施）
+    let (active, tab_count) = {
+        let s = state.read_state();
+        (s.active_id.clone(), s.tabs.len())
+    };
 
     // 性能 P1（2026-09-22）：标签数阈值触发——标签数超过 tab_hibernate_count 时，
     // 后台（非激活）标签**切走即可休眠**（不再等 30 分钟无操作），
@@ -309,11 +369,6 @@ pub async fn hibernate_idle_tabs(
         .await
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(8);
-    let tab_count = state
-        .tabs
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .len();
     let count_pressure = count_threshold > 0 && tab_count > count_threshold;
     if count_pressure {
         log::info!(
@@ -325,15 +380,15 @@ pub async fn hibernate_idle_tabs(
 
     // 选出候选：非激活、未休眠，且（超时 或 标签数超阈值）
     let candidates: Vec<String> = {
-        let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        let last = state.last_active.lock().unwrap_or_else(|e| e.into_inner());
-        tabs.iter()
+        let s = state.read_state();
+        s.tabs
+            .iter()
             .filter(|(id, t)| {
                 if t.hibernated || Some((*id).clone()) == active {
                     return false;
                 }
                 // 超阈值：后台标签直接候选；否则按"最后激活时间早于阈值"
-                count_pressure || last.get(*id).map(|ts| *ts < threshold).unwrap_or(true)
+                count_pressure || s.last_active.get(*id).map(|ts| *ts < threshold).unwrap_or(true)
             })
             .map(|(id, _)| id.clone())
             .collect()
@@ -355,14 +410,13 @@ pub async fn hibernate_idle_tabs(
                 log::warn!("[perf] 标签休眠失败（close）: id={} err={}", id, e);
                 continue;
             }
-            if let Some(t) = state
-                .tabs
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get_mut(&id)
-            {
-                t.hibernated = true;
-            }
+            state.mutate(|s| {
+                if let Some(t) = s.tabs.get_mut(&id) {
+                    t.hibernated = true;
+                    // 延迟账一起销：唤醒走 tab.url 真载，不需要占位账了
+                    s.deferred_loads.remove(&id);
+                }
+            });
             count += 1;
             log::info!("[perf] 标签已休眠（释放渲染进程）: id={}", id);
         }

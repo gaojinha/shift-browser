@@ -217,13 +217,13 @@ async fn fetch_one(
 }
 
 /// 全量刷新（并发抓取，单请求 15s 超时）
-/// 并发限流：信号量压到 16 路——62 源全开 + 失败重试翻倍会与 UI 命令抢 SQLite
-/// 连接池（5 连接）和写锁，导致启动后半小时内历史/会话保存偶发卡顿
+/// 并发 6 路：feed_pool 仅 2 连接 + SQLite 单写锁，16 路排队超 10 秒直接报错回零；
+/// 降到 6 路后排队可消化。失败重试带 2-5 秒抖动，避免多源同时失败同时重试打群架。
 /// 连接说明：每跳自建 pin 死的客户端（见 pinned_client_for），无共享连接池——
 /// 订阅 30 分钟一轮，跨轮复用池子早已空闲回收，同轮同 host 复用收益极小，不值得为此留自动跟随
 pub async fn refresh_all(db: &Db) -> usize {
     let sources = load_sources();
-    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(16));
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(6));
     let mut set = tokio::task::JoinSet::new();
     for (name, url, category) in sources {
         let feed_pool = db.feed_pool.clone();
@@ -244,9 +244,14 @@ pub async fn refresh_all(db: &Db) -> usize {
             let n = fetch_one(&db_owned, &name, &url, &category).await;
             if n == 0 {
                 // 失败重试一次：anyfeeder 偶发限流/网络抖动会让单个源整轮丢失，
-                // 等 30 分钟下一轮太久，延迟 2 秒补抓一次
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                log::warn!("[feed] {} 首次抓取失败，2 秒后重试", name);
+                // 等 30 分钟下一轮太久，补抓一次；延迟 2-5 秒抖动（纳秒取模，
+                // 不为抖动引入 rand 依赖），避免多源同时失败同时重试打群架
+                let jitter = 2 + (std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.subsec_nanos() as u64 % 4)
+                    .unwrap_or(0));
+                tokio::time::sleep(std::time::Duration::from_secs(jitter)).await;
+                log::warn!("[feed] {} 首次抓取失败，{} 秒后重试", name, jitter);
                 fetch_one(&db_owned, &name, &url, &category).await
             } else {
                 n

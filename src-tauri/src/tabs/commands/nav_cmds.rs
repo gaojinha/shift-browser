@@ -15,9 +15,8 @@ pub async fn translate_current_page(
     state: tauri::State<'_, TabManager>,
 ) -> CommandResult<()> {
     let id = state
+        .read_state()
         .active_id
-        .lock()
-        .unwrap()
         .clone()
         .ok_or_else(|| AppError::validation("当前没有活动标签"))?;
     let label = format!("tab-{}", id);
@@ -72,13 +71,15 @@ pub async fn navigate_tab(
         .navigate(parsed_url)
         .map_err(|e| AppError::internal(format!("导航失败: {}", e)))?;
 
-    let mut tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-    let mut tab = tabs.get_mut(&id);
-    if let Some(ref mut t) = tab {
-        t.url = url.clone();
-        t.title = url;
-    }
-    Ok(tab.cloned())
+    let mut tab = None;
+    state.mutate(|s| {
+        if let Some(t) = s.tabs.get_mut(&id) {
+            t.url = url.clone();
+            t.title = url.clone();
+            tab = Some(t.clone());
+        }
+    });
+    Ok(tab)
 }
 
 /// 刷新当前标签（Ctrl+R）
@@ -101,8 +102,7 @@ pub async fn reload_tab(
             crate::engine::webview::reload(&pwv.inner());
         })
         .map_err(|e| AppError::internal(format!("刷新失败: {}", e)))?;
-    let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-    Ok(tabs.get(&id).cloned())
+    Ok(state.read_state().tabs.get(&id).cloned())
 }
 
 #[tauri::command]
@@ -110,11 +110,7 @@ pub async fn go_back(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
 ) -> CommandResult<Option<Tab>> {
-    let id = state
-        .active_id
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
+    let id = state.read_state().active_id.clone();
     let Some(id) = id else {
         return Ok(None);
     };
@@ -133,8 +129,7 @@ pub async fn go_back(
             webkit2gtk::WebViewExt::go_back(&pwv.inner());
         })
         .map_err(|e| AppError::internal(format!("后退失败: {}", e)))?;
-    let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-    Ok(tabs.get(&id).cloned())
+    Ok(state.read_state().tabs.get(&id).cloned())
 }
 
 /// 前进（对当前活动标签执行原生 go_forward()）
@@ -143,11 +138,7 @@ pub async fn go_forward(
     app: AppHandle,
     state: tauri::State<'_, TabManager>,
 ) -> CommandResult<Option<Tab>> {
-    let id = state
-        .active_id
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
+    let id = state.read_state().active_id.clone();
     let Some(id) = id else {
         return Ok(None);
     };
@@ -165,8 +156,7 @@ pub async fn go_forward(
             webkit2gtk::WebViewExt::go_forward(&pwv.inner());
         })
         .map_err(|e| AppError::internal(format!("前进失败: {}", e)))?;
-    let tabs = state.tabs.lock().unwrap_or_else(|e| e.into_inner());
-    Ok(tabs.get(&id).cloned())
+    Ok(state.read_state().tabs.get(&id).cloned())
 }
 
 #[tauri::command]
@@ -178,9 +168,8 @@ pub async fn get_nav_state(
     let id = match id {
         Some(i) => i,
         None => state
+            .read_state()
             .active_id
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
             .clone()
             .ok_or_else(|| AppError::validation("无活动标签"))?,
     };

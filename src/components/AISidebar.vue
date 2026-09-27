@@ -22,10 +22,13 @@ const inputRef = ref<HTMLTextAreaElement | null>(null)
 const listRef = ref<HTMLElement | null>(null)
 
 // 内容区顶部偏移（标签栏 + 地址栏 + 书签栏可显隐）——常量来自 constants.ts，
-// 与后端 CONTENT_TOP_OFFSET 同源，不再手工对齐
+// 与后端 CONTENT_TOP_OFFSET 同源，不再手工对齐。
+// 垂直标签模式标签栏在左，顶部不占高度（与 Rust top_offset 同算法，差 38px 错位回归单测见后端）。
 const topOffset = computed(() => {
+  const vertical = settingsStore.get('vertical_tabs') === 'true'
+  const tabH = vertical ? 0 : LAYOUT.tabBar
   const bookmarkH = settingsStore.showBookmarksBar ? LAYOUT.bookmarksBar : 0
-  return LAYOUT.tabBar + LAYOUT.addressBar + bookmarkH
+  return tabH + LAYOUT.addressBar + bookmarkH
 })
 
 /**

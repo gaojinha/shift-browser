@@ -199,6 +199,12 @@ pub mod urls {
     ];
 }
 
+/// 并发上限（后端专用，不进前端契约：前端无对应消费，硬塞 ALL 反而制造漂移）
+pub mod limits {
+    /// 同时建页上限：WebKit 建页是重操作，恢复会话 20 连建时排队，防内存与主线程被打爆
+    pub const TAB_CREATE_CONCURRENCY: usize = 4;
+}
+
 /// 超时 / 间隔（语义命名，杜绝"6 秒是什么？"的裸数字——改前先看名字）
 pub mod timeout {
     /// webview IPC 往返等待（采集页面内容 / 执行动作）
@@ -229,8 +235,10 @@ pub mod timeout {
     pub const SINGLE_INSTANCE_WAIT_MS: u64 = 300;
     /// 默认浏览器启动等待（毫秒）
     pub const DEFAULT_BROWSER_WAIT_MS: u64 = 2000;
-    /// 标签同步兜底轮询（毫秒，前端用）
-    pub const TAB_POLL_MS: u64 = 8000;
+    /// 外部链接等前端初始标签就绪上限（毫秒，轮询 TabManager，超时按旧逻辑直接开）
+    pub const EXTERNAL_URL_READY_MS: u64 = 5000;
+    /// 标签同步兜底轮询（毫秒，前端用；版本差分无变更即跳过）
+    pub const TAB_POLL_MS: u64 = 15000;
 
     /// (前端常量名, 值) —— 供 build.rs 生成前端 `TIMEOUT`
     pub const ALL: &[(&str, u64)] = &[
@@ -247,6 +255,7 @@ pub mod timeout {
         ("DB_BUSY_SECS", DB_BUSY_SECS),
         ("SINGLE_INSTANCE_WAIT_MS", SINGLE_INSTANCE_WAIT_MS),
         ("DEFAULT_BROWSER_WAIT_MS", DEFAULT_BROWSER_WAIT_MS),
+        ("EXTERNAL_URL_READY_MS", EXTERNAL_URL_READY_MS),
         ("TAB_POLL_MS", TAB_POLL_MS),
     ];
 }

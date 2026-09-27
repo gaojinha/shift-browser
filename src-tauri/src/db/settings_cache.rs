@@ -39,6 +39,11 @@ const WHITELIST: &[&str] = &[
     "translate_engine",
     "translate_target",
     "translate_timeout",
+    // 定时任务（auto_tasks.rs：每 60 秒读一次，走缓存后零库查询）
+    "auto_clear_history_days",
+    "auto_refresh_feeds_minutes",
+    "auto_agent_minutes",
+    "auto_agent_prompt",
 ];
 
 static CACHE: OnceLock<RwLock<HashMap<String, String>>> = OnceLock::new();

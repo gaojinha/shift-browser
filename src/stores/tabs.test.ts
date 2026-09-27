@@ -107,6 +107,7 @@ describe('createTab', () => {
       url: 'https://new.com/',
       private: false,
       afterActive: false,
+      defer: false,
     })
   })
 
@@ -252,29 +253,58 @@ describe('switchTab', () => {
 })
 
 describe('休眠轮询', () => {
-  it('startPolling：每 8 轮触发一次 hibernate_idle_tabs；窗口隐藏时跳过整轮', async () => {
+  it('startPolling：每 4 轮触发一次 hibernate_idle_tabs；窗口隐藏时跳过整轮', async () => {
     const s = useTabsStore()
-    s.startPolling(8000)
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'get_tabs_version') return Promise.resolve(1)
+      if (cmd === 'get_tabs') return Promise.resolve([])
+      return Promise.resolve(undefined)
+    })
+    s.startPolling(15000)
     expect(intervalCb).toBeTruthy()
-    // 跑 8 轮 → 恰好 1 次休眠检查
-    for (let i = 0; i < 8; i++) intervalCb!()
-    await Promise.resolve()
+    // 跑 4 轮 → 恰好 1 次休眠检查
+    for (let i = 0; i < 4; i++) await intervalCb!()
     const hibernateCalls = () => invokeMock.mock.calls.filter((c) => c[0] === 'hibernate_idle_tabs')
     expect(hibernateCalls()).toHaveLength(1)
-    // 再跑 7 轮不触发；第 8 轮触发第二次
-    for (let i = 0; i < 7; i++) intervalCb!()
+    // 再跑 3 轮不触发；第 4 轮触发第二次
+    for (let i = 0; i < 3; i++) await intervalCb!()
     expect(hibernateCalls()).toHaveLength(1)
-    intervalCb!()
+    await intervalCb!()
     expect(hibernateCalls()).toHaveLength(2)
-    // 窗口不可见：整轮跳过（连 syncTabs 的 get_tabs 都不发）
+    // 窗口不可见：整轮跳过（连版本检查都不发）
     invokeMock.mockClear()
     ;(document as { hidden: boolean }).hidden = true
-    intervalCb!()
+    await intervalCb!()
     expect(invokeMock).not.toHaveBeenCalled()
     s.stopPolling()
     // stopPolling 用全局 clearInterval（非 window.clearInterval），直接断言状态清空
     expect(s.pollTimer).toBeNull()
     expect(s._unlisten).toBeNull()
+  })
+
+  it('版本差分：后端无变更跳过全量同步，变了才同步', async () => {
+    const s = useTabsStore()
+    let version = 5
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'get_tabs_version') return Promise.resolve(version)
+      if (cmd === 'get_tabs') return Promise.resolve([makeTab('a')])
+      return Promise.resolve(undefined)
+    })
+    s.startPolling(15000)
+    // 首轮 lastTabVersion 为 null 必同步
+    await intervalCb!()
+    expect(s.tabs.map((t) => t.id)).toEqual(['a'])
+    expect(s.lastTabVersion).toBe(5)
+    invokeMock.mockClear()
+    // 版本不变 → 跳过 get_tabs
+    await intervalCb!()
+    expect(invokeMock.mock.calls.filter((c) => c[0] === 'get_tabs')).toHaveLength(0)
+    // 版本变了 → 全量同步
+    version = 6
+    await intervalCb!()
+    expect(invokeMock.mock.calls.filter((c) => c[0] === 'get_tabs')).toHaveLength(1)
+    expect(s.lastTabVersion).toBe(6)
+    s.stopPolling()
   })
 })
 
@@ -287,12 +317,47 @@ describe('restoreSession（串行恢复回归基线）', () => {
     created_at: '',
   })
 
-  it('逐个恢复：create_tab 按快照顺序调用；存在的 groupId 恢复归属，已删分组回退未分组', async () => {
+  it('批量恢复：一次 create_tabs_batch 建一组，按位认领分组；坏位跳过', async () => {
+    const s = useTabsStore()
+    const groups = useGroupsStore()
+    groups.groups = [{ id: 7, name: '工作', color: '#fff', collapsed: false, created_at: '' }]
+    invokeMock.mockImplementation((cmd: string, args: unknown) => {
+      if (cmd === 'create_tabs_batch') {
+        const urls = (args as { urls: string[] }).urls
+        // 第二位失败，验证按位对齐不串组
+        return Promise.resolve(urls.map((u, i) => (i === 1 ? null : makeTab(`r${i}`, { url: u }))))
+      }
+      return Promise.resolve(undefined)
+    })
+    const ok = await s.restoreSession(
+      session([
+        { url: 'https://a.com/', title: 'A', groupId: 7 },
+        { url: 'https://b.com/', title: 'B', groupId: 7 },
+        { url: 'https://c.com/', title: 'C', groupId: null },
+      ]),
+    )
+    expect(ok).toBe(true)
+    const batchCalls = invokeMock.mock.calls.filter((c) => c[0] === 'create_tabs_batch')
+    expect(batchCalls).toHaveLength(1)
+    expect((batchCalls[0][1] as { urls: string[] }).urls).toEqual([
+      'https://a.com/',
+      'https://b.com/',
+      'https://c.com/',
+    ])
+    expect(s.tabs).toHaveLength(2) // 坏位不进列表
+    expect(s.tabs[0].groupId).toBe(7) // 分组存在 → 恢复
+    expect(s.tabs[1].groupId).toBeNull() // 快照里本来就没分组
+    // 批量走了，逐个没走
+    expect(invokeMock.mock.calls.filter((c) => c[0] === 'create_tab')).toHaveLength(0)
+  })
+
+  it('批量失败回退逐个建：create_tab 按快照顺序调用', async () => {
     const s = useTabsStore()
     const groups = useGroupsStore()
     groups.groups = [{ id: 7, name: '工作', color: '#fff', collapsed: false, created_at: '' }]
     let n = 0
     invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'create_tabs_batch') return Promise.reject(new Error('旧版本没这命令'))
       if (cmd === 'create_tab') return Promise.resolve(makeTab(`r${++n}`))
       return Promise.resolve(undefined)
     })
@@ -300,19 +365,15 @@ describe('restoreSession（串行恢复回归基线）', () => {
       session([
         { url: 'https://a.com/', title: 'A', groupId: 7 },
         { url: 'https://b.com/', title: 'B', groupId: 999 },
-        { url: 'https://c.com/', title: 'C', groupId: null },
       ]),
     )
     expect(ok).toBe(true)
     const urls = invokeMock.mock.calls
       .filter((c) => c[0] === 'create_tab')
       .map((c) => (c[1] as { url: string }).url)
-    expect(urls).toEqual(['https://a.com/', 'https://b.com/', 'https://c.com/'])
-    expect(s.tabs[0].groupId).toBe(7) // 分组存在 → 恢复
-    expect(s.tabs[1].groupId).toBeNull() // 分组已删 → 回退未分组
-    expect(s.tabs[2].groupId).toBeNull()
-    // skipAutoGroup=true：恢复不触发按域名自动归组（不查分组列表）
-    expect(invokeMock).not.toHaveBeenCalledWith('get_tab_groups')
+    expect(urls).toEqual(['https://a.com/', 'https://b.com/'])
+    expect(s.tabs[0].groupId).toBe(7)
+    expect(s.tabs[1].groupId).toBeNull()
   })
 
   it('空快照返回 false；坏 JSON 返回 false 且不建标签', async () => {

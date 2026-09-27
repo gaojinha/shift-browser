@@ -57,7 +57,7 @@ pub async fn save_session_inner(
         .execute(&mut *tx)
         .await?;
     // 自动保存记录只保留最近 100 条，防止 sessions 表无限增长
-    // （手动命名的会话不受影响）
+    // （手动命名会话走下面的每工作区 50 条规则）
     sqlx::query(
         "DELETE FROM sessions WHERE name = '自动保存' AND id NOT IN (
            SELECT id FROM sessions WHERE name = '自动保存' ORDER BY id DESC LIMIT 100
@@ -65,6 +65,21 @@ pub async fn save_session_inner(
     )
     .execute(&mut *tx)
     .await?;
+    // 手动命名会话每工作区只保留最近 50 条（workspace_id NULL 用 -1 归一，自增 id 永不为负）：
+    // 只在本次存的是手动会话时执行，自动保存走上面的 100 条规则，两套互不干扰
+    if name != "自动保存" {
+        sqlx::query(
+            "DELETE FROM sessions WHERE name != '自动保存'
+             AND IFNULL(workspace_id, -1) = IFNULL(?, -1) AND id NOT IN (
+               SELECT id FROM sessions WHERE name != '自动保存'
+               AND IFNULL(workspace_id, -1) = IFNULL(?, -1) ORDER BY id DESC LIMIT 50
+             )",
+        )
+        .bind(workspace_id)
+        .bind(workspace_id)
+        .execute(&mut *tx)
+        .await?;
+    }
     tx.commit().await?;
     Ok(result.last_insert_rowid())
 }
@@ -239,5 +254,44 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count.0, 0);
+    }
+
+    #[tokio::test]
+    async fn manual_sessions_capped_per_workspace() {
+        let (_dir, pool) = temp_pool().await;
+        // 默认工作区（NULL）存 55 条手动会话，应只剩 50 条
+        for i in 0..55 {
+            save_session_inner(&pool, &format!("手动{i}"), None, &[])
+                .await
+                .unwrap();
+        }
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 50);
+        // 别的空间不受影响：wid=7 存 3 条，全留
+        for i in 0..3 {
+            save_session_inner(&pool, &format!("w7-{i}"), Some(7), &[])
+                .await
+                .unwrap();
+        }
+        let w7: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE workspace_id = 7")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(w7.0, 3);
+        let total: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(total.0, 53);
+        // 自动保存规则不受影响：插一条自动保存不触发手动裁剪
+        save_session_inner(&pool, "自动保存", None, &[]).await.unwrap();
+        let total2: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(total2.0, 54);
     }
 }

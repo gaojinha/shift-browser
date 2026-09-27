@@ -80,28 +80,51 @@ pub async fn record_history(
 /// 获取最近历史
 #[tauri::command]
 pub async fn backfill_history_titles(db: tauri::State<'_, Db>) -> DbResult<usize> {
+    backfill_history_titles_inner(&db.pool).await
+}
+
+/// 空标题回填内核（pool 级，便于测试）
+pub async fn backfill_history_titles_inner(
+    pool: &sqlx::SqlitePool,
+) -> DbResult<usize> {
     // 2026-09-19：历史里标题为空的记录用 URL 域名兜底（页面加载时 document.title 未就绪导致）。
-    // 一次性回填旧数据，避免最近访问只剩网址没有名字。
-    let rows: Vec<(i64, String)> =
-        sqlx::query_as("SELECT id, url FROM history WHERE title IS NULL OR title = ''")
-            .fetch_all(&db.pool)
-            .await?;
-    let mut fixed = 0usize;
-    for (id, url) in rows {
-        if let Some(host) = url
-            .parse::<tauri::Url>()
-            .ok()
-            .and_then(|u| u.host_str().map(|h| h.to_string()))
-        {
+    // 启动优化：每轮只取 500 条、单事务批量提交，多轮跑完（大库也不卡启动，调用方放首绘后空闲任务）。
+    let mut total = 0usize;
+    loop {
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT id, url FROM history WHERE title IS NULL OR title = '' LIMIT 500",
+        )
+        .fetch_all(pool)
+        .await?;
+        if rows.is_empty() {
+            break;
+        }
+        let pairs: Vec<(i64, String)> = rows
+            .into_iter()
+            .filter_map(|(id, url)| {
+                url.parse::<tauri::Url>()
+                    .ok()
+                    .and_then(|u| u.host_str().map(|h| (id, h.to_string())))
+            })
+            .collect();
+        if pairs.is_empty() {
+            break;
+        }
+        let mut tx = pool.begin().await?;
+        for (id, host) in &pairs {
             sqlx::query("UPDATE history SET title = ? WHERE id = ?")
-                .bind(&host)
+                .bind(host)
                 .bind(id)
-                .execute(&db.pool)
+                .execute(&mut *tx)
                 .await?;
-            fixed += 1;
+        }
+        tx.commit().await?;
+        total += pairs.len();
+        if pairs.len() < 500 {
+            break;
         }
     }
-    Ok(fixed)
+    Ok(total)
 }
 
 /// 获取最近历史
@@ -372,5 +395,68 @@ mod tests {
         let r = search(&pool, "plain").await;
         assert_eq!(r.len(), 1);
         assert!(r[0].contains("plain"));
+    }
+
+    #[tokio::test]
+    async fn test_backfill_fills_empty_titles_by_host() {
+        let (_dir, pool) = temp_pool().await;
+        sqlx::query("INSERT INTO history (url, title) VALUES ('https://example.com/a', ''), ('https://foo.bar/b', NULL), ('https://example.com/c', '已有标题')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let fixed = super::backfill_history_titles_inner(&pool).await.unwrap();
+        assert_eq!(fixed, 2);
+        let t1: String = sqlx::query_scalar("SELECT title FROM history WHERE url = 'https://example.com/a'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(t1, "example.com");
+        let t2: String = sqlx::query_scalar("SELECT title FROM history WHERE url = 'https://foo.bar/b'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(t2, "foo.bar");
+        // 已有标题不动；二次跑为 0（幂等）
+        assert_eq!(super::backfill_history_titles_inner(&pool).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_search_indexes_migration() {
+        // 搜索排序索引迁移：建表 + 打迁移，两索引必须存在且可重复执行（幂等）
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("idx_test.db");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&db_path)
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../migrations/20260905000000_init.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        for _ in 0..2 {
+            sqlx::raw_sql(include_str!(
+                "../../migrations/20260928000002_search_indexes.sql"
+            ))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        for idx in ["idx_history_visit_count", "idx_bookmarks_title"] {
+            let n: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?",
+            )
+            .bind(idx)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(n, 1, "索引 {} 缺失", idx);
+        }
     }
 }

@@ -238,6 +238,11 @@ impl Db {
                 "perf_indexes",
                 include_str!("../../migrations/20260928000001_perf_indexes.sql"),
             ),
+            (
+                20,
+                "search_indexes",
+                include_str!("../../migrations/20260928000002_search_indexes.sql"),
+            ),
         ];
 
         for (version, name, sql) in migrations {

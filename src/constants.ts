@@ -128,7 +128,8 @@ export const TIMEOUT = {
   DB_BUSY_SECS: 10,
   SINGLE_INSTANCE_WAIT_MS: 300,
   DEFAULT_BROWSER_WAIT_MS: 2000,
-  TAB_POLL_MS: 8000,
+  EXTERNAL_URL_READY_MS: 5000,
+  TAB_POLL_MS: 15000,
 } as const
 
 // 组合键字符串，形如 'ctrl+shift+t'（与前端 matchShortcut 约定一致）

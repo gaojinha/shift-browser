@@ -8,7 +8,7 @@ import type { Tab } from '../types/tab'
 import type { Session, SessionTab } from '../types/session'
 import { useGroupsStore } from './groups'
 // 分组配色池（单一来源）
-import { EVENTS, UI } from '../constants'
+import { EVENTS, TIMEOUT, UI } from '../constants'
 import { useSettingsStore } from './settings'
 import { useToastStore } from './toast'
 
@@ -66,6 +66,8 @@ interface TabsState {
   canGoForward: boolean
   /** 分屏：右侧窗格承载的标签 id（null = 未分屏，阶段 3.1） */
   splitTabId: string | null
+  /** 上次同步时的后端状态版本（null = 未同步过；轮询凭它差分跳过） */
+  lastTabVersion: number | null
 }
 
 export const useTabsStore = defineStore('tabs', {
@@ -80,6 +82,7 @@ export const useTabsStore = defineStore('tabs', {
     canGoBack: false,
     canGoForward: false,
     splitTabId: null,
+    lastTabVersion: null,
   }),
 
   getters: {
@@ -247,6 +250,7 @@ export const useTabsStore = defineStore('tabs', {
       skipAutoGroup = false,
       isPrivate = false,
       afterActive = false,
+      defer = false,
     ): Promise<Tab | null> {
       // 参与 _opSeq：防止 create_tab 在途时 syncTabs（轮询）用旧快照整体覆盖，把刚建的标签顶掉
       const my = ++this._opSeq
@@ -267,6 +271,7 @@ export const useTabsStore = defineStore('tabs', {
           url: target,
           private: isPrivate,
           afterActive,
+          defer,
         })
         // push 前去重：syncTabs 轮询可能已把该 id 带进列表（并发窗口），直接 push 会重复
         const dup = this.tabs.findIndex((t) => t.id === tab.id)
@@ -536,17 +541,55 @@ export const useTabsStore = defineStore('tabs', {
           console.error('[tabs] 恢复会话前加载分组失败:', e)
         })
       }
-      for (const t of tabs) {
-        if (t.url) {
-          // skipAutoGroup=true：恢复会话不触发按域名自动归组，
-          // 自动分组是临时概念，不应在"关闭窗口再打开"后复活
-          const tab = await this.createTab(t.url, undefined, true)
-          // 恢复分组归属（groupId 是数据库持久 id，按 session 顺序匹配；分组已删除则回未分组）
-          if (t.groupId != null && tab) {
-            const exists = groups.groups.some((g) => g.id === t.groupId)
-            this.assignTabToGroup(tab.id, exists ? t.groupId : null)
-          }
+      const withUrl = tabs.filter((t) => t.url)
+      // 批量恢复：一次 IPC 建一组（后端限流加延迟占位照吃，坏位跳过按位对齐）；
+      // 整批失败回退逐个建，保证一个坏的不拖死一批
+      let restored: (Tab | null)[] = []
+      try {
+        const batch = await invokeOk<(Tab | null)[]>(
+          'create_tabs_batch',
+          { urls: withUrl.map((t) => t.url) },
+        )
+        restored = batch.map((tab) => {
+          if (!tab) return null
+          // 去重并入列（与 createTab 单建一致：防轮询并发窗口重复）
+          const dup = this.tabs.findIndex((t) => t.id === tab.id)
+          if (dup !== -1) this.tabs[dup] = tab
+          else this.tabs.push(tab)
+          return tab
+        })
+        // 批量建完接管激活到最后一个，与逐个建行为一致
+        const last = [...restored].reverse().find((t) => t != null)
+        if (last) {
+          for (const t of this.tabs) t.is_active = t.id === last.id
+          this.activeTabId = last.id
+          this.canGoBack = false
         }
+      } catch (e) {
+        console.error('[tabs] 批量恢复失败，回退逐个建:', e)
+        restored = []
+        for (const t of withUrl) {
+          // skipAutoGroup=true：恢复会话不触发按域名自动归组
+          // defer=true：后台页先建占位，切出来时再载真址
+          const tab = await this.createTab(t.url, undefined, true, false, false, true).catch(
+            () => null,
+          )
+          restored.push(tab)
+        }
+      }
+      // 恢复分组归属（按快照顺序与结果按位对齐；分组已删除则回未分组）
+      withUrl.forEach((t, i) => {
+        const tab = restored[i]
+        if (t.groupId != null && tab) {
+          const exists = groups.groups.some((g) => g.id === t.groupId)
+          this.assignTabToGroup(tab.id, exists ? t.groupId : null)
+        }
+      })
+      // 点亮最后一个恢复出的标签：触发其延迟加载（占位变真页），与旧行为一致
+      if (this.activeTabId) {
+        await this.switchTab(this.activeTabId).catch((e) => {
+          console.error('[tabs] 恢复后点亮标签失败:', e)
+        })
       }
       return tabs.length > 0
     },
@@ -643,9 +686,12 @@ export const useTabsStore = defineStore('tabs', {
         // 避免同步的 is_active 覆盖用户刚点的 switchTab/closeTab 结果
         const active = tabs.find((t) => t.is_active)
         if (active && my === this._opSeq) this.activeTabId = active.id
+        // 记下后端版本：轮询凭它差分跳过（失败不清零，下轮重对）
+        const v = await invokeOk<number>('get_tabs_version').catch(() => null)
+        if (v !== null) this.lastTabVersion = v
         // 性能 P2（2026-09-22）：兜底轮询**不再**查 get_nav_state（该命令需 GTK 主线程）。
         // 导航状态改由事件驱动：切标签 / 页面加载完成 / 前进后退时调 syncNavState()。
-        // （SPA pushState 等无事件场景，由 8s 轮询里的 syncNavState 兜底，见 startPolling）
+        // （SPA pushState 等无事件场景，由 15s 轮询里的 syncNavState 兜底，见 startPolling）
       } catch (e) {
         console.error('[tabs] 同步标签失败:', e)
       }
@@ -655,14 +701,15 @@ export const useTabsStore = defineStore('tabs', {
      * 启动标签状态同步
      * Rust 侧在页面加载完成/标题变化/新窗口建标签/favicon 更新时 emit "tabs-updated"，
      * 前端监听事件即时同步（替代原 2s 轮询，查询开销约降 75%+）。
-     * 兜底轮询（8s，仅窗口可见时跑）：覆盖 WebKit 无事件信号的场景（如 JS history.pushState
-     * 改历史栈、SPA 内路由切换），把 get_nav_state（需 GTK 主线程）的开销从每 2s 降到每 8s。
+     * 兜底轮询（15s，仅窗口可见时跑）：先对版本号，变了才全量同步；
+     * 覆盖 WebKit 无事件信号的场景（如 JS history.pushState
+     * 改历史栈、SPA 内路由切换），把 get_nav_state（需 GTK 主线程）的开销降到每 30s。
      */
-    startPolling(fallbackInterval = 8000) {
+    startPolling(fallbackInterval = TIMEOUT.TAB_POLL_MS) {
       if (this.pollTimer) return
-      // 空闲标签休眠检查的轮次计数（每 8 轮 ≈64s 触发一次）
+      // 空闲标签休眠检查的轮次计数（每 4 轮 ≈60s 触发一次，与旧 64s 节奏持平）
       let hibernateTick = 0
-      // 性能 P2：nav_state 兜底轮询计数（每 3 轮 ≈24s 一次）
+      // 性能 P2：nav_state 兜底轮询计数（每 2 轮 ≈30s 一次，与旧 24s 节奏持平）
       let navTick = 0
       listen(EVENTS.TABS_UPDATED, () => {
         this.syncTabs()
@@ -675,19 +722,24 @@ export const useTabsStore = defineStore('tabs', {
         .catch((e) => {
           console.error('[tabs] 监听 tabs-updated 失败（退回兜底轮询）:', e)
         })
-      this.pollTimer = window.setInterval(() => {
+      this.pollTimer = window.setInterval(async () => {
         // 窗口不可见时跳过（省 CPU/GTK 主线程调用；恢复可见后事件或下轮会补上）
         if (document.hidden) return
-        this.syncTabs()
-        // 性能 P2：nav_state 兜底降频——每 3 轮（≈24s）查一次，覆盖 SPA pushState 场景
-        if (++navTick >= 3) {
+        // 版本差分：后端无变更直接跳过全量同步（版本号在每次变更时+1）
+        // 首轮 lastTabVersion 为 null 必同步；取版本失败按有变更处理
+        const v = await invokeOk<number>('get_tabs_version').catch(() => null)
+        if (v === null || v !== this.lastTabVersion) {
+          await this.syncTabs()
+        }
+        // nav_state 兜底降频——每 2 轮（≈30s）查一次，覆盖 SPA pushState 场景
+        if (++navTick >= 2) {
           navTick = 0
           this.syncNavState()
         }
-        // 每 8 轮（≈64s）触发一次"空闲标签休眠"检查：销毁久未激活标签的 webview
+        // 每 4 轮（≈60s）触发一次"空闲标签休眠"检查：销毁久未激活标签的 webview
         // 回收渲染进程内存（WebKitGTK 默认不主动回收，多标签内存线性增长）。
         // 阈值由 settings.tab_hibernate_minutes 控制（默认 10 分钟，0=关闭）
-        if (++hibernateTick >= 8) {
+        if (++hibernateTick >= 4) {
           hibernateTick = 0
           invokeOk('hibernate_idle_tabs').catch((e) => {
             console.error('[tabs] 空闲标签休眠检查失败:', e)

@@ -10,7 +10,7 @@
 // apply_split_layout 等）保留在 tabs.rs。
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::RwLock;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -49,22 +49,58 @@ fn default_origin() -> String {
 }
 
 /// 标签管理器（Tauri State）
+/// 状态收敛（启动优化实施）：九把 Mutex 并成一把 RwLock，锁顺序问题不复存在。
+///
+/// - 读多写少：日常查询走共享读锁，互不阻塞
+/// - 写独占：建/关/切等多字段变更在一次写锁内完成，中途无观察者，不漂移
+/// - 版本号：任何变更 version+1，前端按版本差分同步（见 snapshot_version）
+/// - 锁顺序：全局只有这一把状态锁，无嵌套、无死锁；
+///   需要 GTK 操作时先释放锁再调（禁止抱锁进 with_webview，防主线程死锁）
 pub struct TabManager {
-    pub(crate) tabs: Mutex<HashMap<String, Tab>>,
-    pub(crate) order: Mutex<Vec<String>>,
-    pub(crate) active_id: Mutex<Option<String>>,
+    state: RwLock<TabState>,
+}
+
+/// 全局标签状态（单写多读；字段 pub(crate)，commands/backend 经 read_state/mutate 访问）
+#[derive(Debug)]
+pub(crate) struct TabState {
+    pub(crate) tabs: HashMap<String, Tab>,
+    pub(crate) order: Vec<String>,
+    pub(crate) active_id: Option<String>,
     /// 书签栏是否显示（影响 child webview 的 top 偏移：112 vs 82）
-    pub(crate) show_bookmarks_bar: Mutex<bool>,
+    pub(crate) show_bookmarks_bar: bool,
     /// set_webview_visible 已应用的最近 seq（P1-9：丢弃并发乱序的过期指令）
-    pub(crate) webview_visible_seq: Mutex<u64>,
+    pub(crate) webview_visible_seq: u64,
     /// AI 面板是否占用右侧（child webview 宽度让出 AI_PANEL_WIDTH，方便边看页面边对话）
-    pub(crate) ai_panel_active: Mutex<bool>,
+    pub(crate) ai_panel_active: bool,
     /// 垂直标签模式（true 时左侧让出 VERTICAL_TAB_BAR_WIDTH，顶部不再含标签栏）
-    pub(crate) vertical_tabs: Mutex<bool>,
+    pub(crate) vertical_tabs: bool,
     /// 分屏：右侧窗格承载的标签 id（None = 未分屏；左侧窗格始终是活动标签）
-    pub(crate) split_tab: Mutex<Option<String>>,
+    pub(crate) split_tab: Option<String>,
     /// 每个标签最后一次激活时间（Unix 秒），用于"空闲休眠"判定
-    pub(crate) last_active: Mutex<HashMap<String, i64>>,
+    pub(crate) last_active: HashMap<String, i64>,
+    /// 延迟加载：tab_id → 真实 URL。后台恢复的 http(s) 页先建占位页，
+    /// 切到该标签时再加载真址（省内存省并发；AI 标签与内部页不等，直接真载）
+    pub(crate) deferred_loads: HashMap<String, String>,
+    /// 单调版本：mutate() 每次变更后+1（即使内容相同也+1，调用方只在真变更时调）
+    pub(crate) version: u64,
+}
+
+impl Default for TabState {
+    fn default() -> Self {
+        Self {
+            tabs: HashMap::new(),
+            order: Vec::new(),
+            active_id: None,
+            show_bookmarks_bar: true,
+            webview_visible_seq: 0,
+            ai_panel_active: false,
+            vertical_tabs: false,
+            split_tab: None,
+            last_active: HashMap::new(),
+            deferred_loads: HashMap::new(),
+            version: 0,
+        }
+    }
 }
 
 /// 当前 Unix 时间戳（秒）
@@ -78,106 +114,102 @@ pub(crate) fn now_ts() -> i64 {
 impl TabManager {
     pub fn new() -> Self {
         Self {
-            tabs: Mutex::new(HashMap::new()),
-            order: Mutex::new(Vec::new()),
-            active_id: Mutex::new(None),
-            show_bookmarks_bar: Mutex::new(true),
-            webview_visible_seq: Mutex::new(0),
-            ai_panel_active: Mutex::new(false),
-            vertical_tabs: Mutex::new(false),
-            split_tab: Mutex::new(None),
-            last_active: Mutex::new(HashMap::new()),
+            state: RwLock::new(TabState::default()),
         }
     }
 
+    /// 共享读（多字段一致性快照；毒化时恢复继续，不崩进程）
+    pub(crate) fn read_state(
+        &self,
+    ) -> std::sync::RwLockReadGuard<'_, TabState> {
+        self.state.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 独占变更（闭包内多字段一次改完，退出时 version+1；毒化时恢复继续）
+    pub(crate) fn mutate<R>(&self, f: impl FnOnce(&mut TabState) -> R) -> R {
+        let mut s = self.state.write().unwrap_or_else(|e| e.into_inner());
+        let r = f(&mut s);
+        s.version = s.version.wrapping_add(1);
+        r
+    }
+
+    /// 独占变更但不推版本（seq 这类前端不关心的元数据，避免版本号空转）
+    pub(crate) fn mutate_quiet<R>(&self, f: impl FnOnce(&mut TabState) -> R) -> R {
+        let mut s = self.state.write().unwrap_or_else(|e| e.into_inner());
+        f(&mut s)
+    }
+
+    /// 当前状态版本（前端差分同步用）
+    pub fn snapshot_version(&self) -> u64 {
+        self.read_state().version
+    }
+
     /// 记录标签激活时间（休眠判定的输入）
-    #[allow(clippy::unwrap_used, clippy::expect_used)]
     pub fn touch_active(&self, id: &str) {
-        self.last_active
-            .lock()
-            .unwrap()
-            .insert(id.to_string(), now_ts());
+        self.mutate(|s| {
+            s.last_active.insert(id.to_string(), now_ts());
+        });
     }
 
     pub fn set_show_bookmarks_bar(&self, visible: bool) -> f64 {
-        *self
-            .show_bookmarks_bar
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = visible;
+        self.mutate(|s| {
+            s.show_bookmarks_bar = visible;
+        });
         self.top_offset()
     }
 
     /// 运行时快照（自检/可观测性用）：标签数、活动标签、AI 分屏状态
     pub fn runtime_snapshot(&self) -> (usize, Option<String>, bool) {
-        let count = self.tabs.lock().unwrap_or_else(|e| e.into_inner()).len();
-        let active = self
-            .active_id
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        let ai = *self
-            .ai_panel_active
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        (count, active, ai)
+        let s = self.read_state();
+        (s.tabs.len(), s.active_id.clone(), s.ai_panel_active)
     }
 
     /// 活动标签的 URL（GPC 站点声明检测等用）
     pub fn active_url(&self) -> Option<String> {
-        let id = self
-            .active_id
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()?;
-        let tabs = self.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        tabs.get(&id).map(|t| t.url.clone())
+        let s = self.read_state();
+        let id = s.active_id.clone()?;
+        s.tabs.get(&id).map(|t| t.url.clone())
     }
 
     /// 是否垂直标签模式（阶段 3.1）
     pub fn vertical_tabs(&self) -> bool {
-        *self
-            .vertical_tabs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        self.read_state().vertical_tabs
     }
 
     /// 设置垂直标签模式
     pub fn set_vertical_tabs(&self, on: bool) {
-        *self
-            .vertical_tabs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = on;
+        self.mutate(|s| {
+            s.vertical_tabs = on;
+        });
+    }
+
+    /// AI 面板是否占用右侧
+    pub fn ai_panel_active(&self) -> bool {
+        self.read_state().ai_panel_active
     }
 
     /// 分屏：右侧窗格承载的标签 id（None = 未分屏）
     pub fn split_tab(&self) -> Option<String> {
-        self.split_tab
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
+        self.read_state().split_tab.clone()
     }
 
     /// 设置/清除分屏标签
     pub fn set_split_tab(&self, id: Option<String>) {
-        *self
-            .split_tab
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = id;
+        self.mutate(|s| {
+            s.split_tab = id;
+        });
     }
 
     /// 当前内容区顶部偏移（随书签栏显隐 + 垂直标签模式变化）
     pub fn top_offset(&self) -> f64 {
-        let bookmarks = *self
-            .show_bookmarks_bar
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let s = self.read_state();
         // 基准：标签栏 + 地址栏
         let mut t = CONTENT_TOP_OFFSET_NO_BOOKMARKS;
-        if self.vertical_tabs() {
+        if s.vertical_tabs {
             // 垂直标签：标签栏移到左侧，顶部不再占标签栏高度
             t -= TAB_BAR_HEIGHT;
         }
-        if bookmarks {
+        if s.show_bookmarks_bar {
             t += BOOKMARKS_BAR_HEIGHT;
         }
         t
@@ -188,21 +220,33 @@ impl TabManager {
         uuid::Uuid::new_v4().to_string()
     }
 
+    /// 延迟占位判定（纯函数，可单测）：defer 且 http(s) 时返回占位页，否则 None 直接真载。
+    /// 内部页/AI 标签（defer=false）永远真载；scheme 合法性由调用方先验。
+    pub(crate) fn deferred_placeholder(defer: bool, url: &str) -> Option<&'static str> {
+        if !defer {
+            return None;
+        }
+        match url.split("://").next().unwrap_or("") {
+            "http" | "https" => Some(crate::contracts::urls::NEWTAB),
+            _ => None,
+        }
+    }
+
     pub fn all_tabs(&self) -> Vec<Tab> {
-        let tabs = self.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        let order = self.order.lock().unwrap_or_else(|e| e.into_inner());
-        order
+        let s = self.read_state();
+        s.order
             .iter()
-            .filter_map(|id| tabs.get(id).cloned())
+            .filter_map(|id| s.tabs.get(id).cloned())
             .collect()
     }
 
     /// 设置标签来源（J 类治理）：`user` / `ai`。标签不存在时静默。
     pub(crate) fn set_origin(&self, id: &str, origin: &str) {
-        let mut tabs = self.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(t) = tabs.get_mut(id) {
-            t.origin = origin.to_string();
-        }
+        self.mutate(|s| {
+            if let Some(t) = s.tabs.get_mut(id) {
+                t.origin = origin.to_string();
+            }
+        });
     }
 
     /// AI 打开且仍在的标签 id 列表（按 order 顺序）
@@ -216,8 +260,11 @@ impl TabManager {
 
     /// 当前 AI 标签数量（受 `open_and_read` 上限约束）
     pub(crate) fn ai_tab_count(&self) -> usize {
-        let tabs = self.tabs.lock().unwrap_or_else(|e| e.into_inner());
-        tabs.values().filter(|t| t.origin == "ai").count()
+        self.read_state()
+            .tabs
+            .values()
+            .filter(|t| t.origin == "ai")
+            .count()
     }
 }
 
@@ -274,12 +321,13 @@ mod tests {
             origin: "user".to_string(),
         };
         {
-            let mut tabs = m.tabs.lock().unwrap();
-            let mut order = m.order.lock().unwrap();
-            tabs.insert("u1".into(), mk("u1"));
-            tabs.insert("a1".into(), mk("a1"));
-            tabs.insert("a2".into(), mk("a2"));
-            order.extend(["u1".into(), "a1".into(), "a2".into()]);
+            // 经 mutate 一次写完（多字段原子，中途无观察者）
+            m.mutate(|s| {
+                s.tabs.insert("u1".into(), mk("u1"));
+                s.tabs.insert("a1".into(), mk("a1"));
+                s.tabs.insert("a2".into(), mk("a2"));
+                s.order.extend(["u1".into(), "a1".into(), "a2".into()]);
+            });
         }
         assert_eq!(m.ai_tab_count(), 0, "默认全为 user");
         m.set_origin("a1", "ai");
@@ -309,51 +357,154 @@ mod tests {
     #[test]
     fn all_tabs_follows_order() {
         let m = TabManager::new();
-        // 直接操纵字段（纯数据状态机，测试允许）
-        let mut tabs = m.tabs.lock().unwrap();
-        let mut order = m.order.lock().unwrap();
-        tabs.insert(
-            "a".to_string(),
-            Tab {
-                id: "a".to_string(),
-                url: "https://a.example".to_string(),
-                title: "A".to_string(),
-                favicon: String::new(),
-                is_active: false,
-                is_pinned: false,
-                is_muted: false,
-                hibernated: false,
-                private: false,
-                origin: "user".to_string(),
-            },
-        );
-        tabs.insert(
-            "b".to_string(),
-            Tab {
-                id: "b".to_string(),
-                url: "https://b.example".to_string(),
-                title: "B".to_string(),
-                favicon: String::new(),
-                is_active: true,
-                is_pinned: false,
-                is_muted: false,
-                hibernated: false,
-                private: false,
-                origin: "user".to_string(),
-            },
-        );
-        order.push("b".to_string());
-        order.push("a".to_string());
-        drop(order);
-        let mut active = m.active_id.lock().unwrap();
-        *active = Some("b".to_string());
-        drop(active);
-        drop(tabs);
+        // 经 mutate 一次写完（纯数据状态机，测试允许）
+        m.mutate(|s| {
+            s.tabs.insert(
+                "a".to_string(),
+                Tab {
+                    id: "a".to_string(),
+                    url: "https://a.example".to_string(),
+                    title: "A".to_string(),
+                    favicon: String::new(),
+                    is_active: false,
+                    is_pinned: false,
+                    is_muted: false,
+                    hibernated: false,
+                    private: false,
+                    origin: "user".to_string(),
+                },
+            );
+            s.tabs.insert(
+                "b".to_string(),
+                Tab {
+                    id: "b".to_string(),
+                    url: "https://b.example".to_string(),
+                    title: "B".to_string(),
+                    favicon: String::new(),
+                    is_active: true,
+                    is_pinned: false,
+                    is_muted: false,
+                    hibernated: false,
+                    private: false,
+                    origin: "user".to_string(),
+                },
+            );
+            s.order.push("b".to_string());
+            s.order.push("a".to_string());
+            s.active_id = Some("b".to_string());
+        });
         let all = m.all_tabs();
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].id, "b");
         assert_eq!(all[1].id, "a");
         assert_eq!(m.runtime_snapshot().0, 2);
         assert_eq!(m.active_url().as_deref(), Some("https://b.example"));
+    }
+
+    #[test]
+    fn top_offset_four_combos_snapshot() {
+        // 快照断言：横/垂直 × 书签显隐四组合，改常量必须同步改此处（有意写死数字）。
+        // 38=标签栏 36=地址栏 26=书签栏；垂直模式标签栏在左，顶部不占高度。
+        let m = TabManager::new();
+        // 横向 + 书签显隐
+        assert_eq!(m.top_offset(), 100.0); // 38+36+26
+        m.set_show_bookmarks_bar(false);
+        assert_eq!(m.top_offset(), 74.0); // 38+36
+        // 垂直 + 书签显隐（前端 AISidebar.topOffset 同算法，38px 错位回归即测此处）
+        m.set_vertical_tabs(true);
+        assert_eq!(m.top_offset(), 36.0); // 36
+        m.set_show_bookmarks_bar(true);
+        assert_eq!(m.top_offset(), 62.0); // 36+26
+    }
+
+    #[test]
+    fn version_bumps_on_mutation() {
+        let m = TabManager::new();
+        let v0 = m.snapshot_version();
+        m.touch_active("x");
+        assert!(m.snapshot_version() > v0, "变更必须推高版本");
+        let v1 = m.snapshot_version();
+        // 纯读不推版本
+        let _ = m.all_tabs();
+        let _ = m.top_offset();
+        assert_eq!(m.snapshot_version(), v1, "纯读不得推高版本");
+    }
+
+    #[test]
+    fn concurrent_mutations_keep_invariants() {
+        use std::sync::Arc;
+        let m = Arc::new(TabManager::new());
+        // 先铺 20 个标签
+        m.mutate(|s| {
+            for i in 0..20 {
+                let id = format!("t{i}");
+                s.tabs.insert(
+                    id.clone(),
+                    Tab {
+                        id: id.clone(),
+                        url: format!("https://{id}.example"),
+                        title: id.clone(),
+                        favicon: String::new(),
+                        is_active: false,
+                        is_pinned: false,
+                        is_muted: false,
+                        hibernated: false,
+                        private: false,
+                        origin: "user".to_string(),
+                    },
+                );
+                s.order.push(id);
+            }
+            s.active_id = Some("t0".to_string());
+        });
+        // 8 线程并发读写各 200 轮：改顺序/切活动/读快照交错
+        let mut handles = Vec::new();
+        for w in 0..8 {
+            let m = m.clone();
+            handles.push(std::thread::spawn(move || {
+                for i in 0..200 {
+                    let id = format!("t{}", (w + i) % 20);
+                    m.mutate(|s| {
+                        s.active_id = Some(id.clone());
+                        if let Some(t) = s.tabs.get_mut(&id) {
+                            t.is_active = true;
+                        }
+                        for t in s.tabs.values_mut() {
+                            if t.id != id {
+                                t.is_active = false;
+                            }
+                        }
+                    });
+                    let _ = m.all_tabs();
+                    let _ = m.active_url();
+                    m.touch_active(&id);
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        // 不变量：order 全员在 tabs 里、active 落在 order 内、is_active 恰好一个
+        let s = m.read_state();
+        assert!(s.order.iter().all(|id| s.tabs.contains_key(id)));
+        assert!(s.active_id.as_ref().is_some_and(|a| s.order.contains(a)));
+        assert_eq!(s.tabs.values().filter(|t| t.is_active).count(), 1);
+    }
+
+    #[test]
+    fn deferred_placeholder_only_for_http() {
+        // defer 且 http(s) → 占位；其余一律直接真载
+        assert_eq!(
+            TabManager::deferred_placeholder(true, "https://a.example/x"),
+            Some(crate::contracts::urls::NEWTAB)
+        );
+        assert_eq!(
+            TabManager::deferred_placeholder(true, "http://a.example/"),
+            Some(crate::contracts::urls::NEWTAB)
+        );
+        assert_eq!(TabManager::deferred_placeholder(false, "https://a.example/"), None);
+        assert_eq!(TabManager::deferred_placeholder(true, "shift://newtab"), None);
+        assert_eq!(TabManager::deferred_placeholder(true, "file:///x"), None);
+        assert_eq!(TabManager::deferred_placeholder(true, "not-a-url"), None);
     }
 }
