@@ -194,6 +194,22 @@ pub(crate) fn read_setting_blocking(app: &AppHandle, key: &str) -> Option<String
     })
 }
 
+/// 开放接口侧只读判断唯一来源（与 `capabilities::is_write` 配合组成只读闸门）：
+/// `settings.api_readonly == "true"` 即只读。查询失败/键缺失按未开启处理——
+/// 只读是用户显式开启的约束，不是默认状态。调用方：`api.rs handle` 主闸门、
+/// `api/http.rs` HTTP 闸门、`api/handlers/data.rs` 凭据键闸门，三处同口径。
+pub(crate) async fn is_readonly(app: &AppHandle) -> bool {
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return false;
+    };
+    sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = 'api_readonly'")
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|v| v == "true")
+}
+
 /// IP 白名单校验：名单为空 = 不限制；非空时逗号分隔，每个条目须为以下之一：
 ///
 /// - 精确 IP：`192.168.1.5`、`::1`

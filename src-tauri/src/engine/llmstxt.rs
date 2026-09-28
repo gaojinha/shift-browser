@@ -75,7 +75,6 @@ impl LlmsCache {
 
     /// 清理过期缓存（供对外回收；查询时也会惰性清理）
     #[allow(dead_code)]
-    #[allow(clippy::unwrap_used, clippy::expect_used)]
     pub fn purge_expired(&self) {
         let now = Instant::now();
         if let Ok(mut e) = self.entries.lock() {
@@ -83,7 +82,9 @@ impl LlmsCache {
         }
         if let Ok(mut c) = self.counts.lock() {
             let keep: Vec<String> = {
-                let e = self.entries.lock().unwrap();
+                let Ok(e) = self.entries.lock() else {
+                    return;
+                };
                 e.keys().cloned().collect()
             };
             c.retain(|k, _| keep.contains(k));

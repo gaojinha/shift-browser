@@ -32,16 +32,9 @@ pub(crate) use req::{find_header_end, HTTP_MAX_BODY};
 
 const HTTP_PORT: u16 = 19701;
 
-/// 开放接口侧只读判断（与 api.rs 主闸门同口径：settings.api_readonly == "true"）
+/// 开放接口侧只读判断：唯一来源见 `super::auth::is_readonly`（三处同口径，防裸 SQL 散落）。
 async fn is_readonly(app: &AppHandle) -> bool {
-    let db = app.state::<crate::db::Db>();
-    sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = 'api_readonly'")
-        .fetch_optional(&db.pool)
-        .await
-        .ok()
-        .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false)
+    auth::is_readonly(app).await
 }
 
 /// dashboard 页面安全响应头：禁被嵌入任意框架（点击劫持），CSP 收紧到无脚本/无外联

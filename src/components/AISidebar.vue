@@ -188,12 +188,16 @@ async function onAgentMultiStepRequest(e: { payload: MultiStepPlan }) {
 }
 
 let unlistenAction: (() => void) | null = null
+let unlistenMultiStep: (() => void) | null = null
 onMounted(async () => {
   unlistenAction = await listen<AgentActionRequest>(EVENTS.AGENT_ACTION_REQUEST, onAgentActionRequest)
-  await listen<MultiStepPlan>(EVENTS.AGENT_MULTI_STEP_REQUEST, onAgentMultiStepRequest)
+  unlistenMultiStep = await listen<MultiStepPlan>(EVENTS.AGENT_MULTI_STEP_REQUEST, onAgentMultiStepRequest)
 })
 onUnmounted(() => {
   unlistenAction?.()
+  unlistenMultiStep?.()
+  unlistenAction = null
+  unlistenMultiStep = null
 })
 
 /** 技能分发：技能清单来自 constants.ts（源：contracts::skills），按钮由数据驱动 */

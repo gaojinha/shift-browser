@@ -158,16 +158,9 @@ pub(super) async fn list_settings(app: &AppHandle, _req: &Value) -> Value {
     }
 }
 
-/// 开放接口侧只读判断（与 api.rs 主闸门同口径：settings.api_readonly == "true"）
+/// 开放接口侧只读判断：唯一来源见 `crate::api::auth::is_readonly`（三处同口径，防裸 SQL 散落）。
 async fn is_api_readonly(app: &AppHandle) -> bool {
-    let db = app.state::<crate::db::Db>();
-    sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = 'api_readonly'")
-        .fetch_optional(&db.pool)
-        .await
-        .ok()
-        .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false)
+    crate::api::auth::is_readonly(app).await
 }
 
 /// AI 读取审计查询（K 类 / O3 持久化）：返回最近 N 条 AI 操作记录。

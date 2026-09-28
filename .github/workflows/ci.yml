@@ -76,3 +76,22 @@ jobs:
       - name: cargo audit
         working-directory: src-tauri
         run: cargo audit --color never
+
+  static-checks:
+    name: 静态一致性（文档/脚本防漂移）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 防 README 工具数/并发数手抄漂移：真值以 registry_tests.rs（48）与 feed.rs 信号量（6）为准
+      - name: 脚本语法检查
+        run: |
+          bash -n scripts/smoke.sh
+          bash -n scripts/backup.sh
+          bash -n scripts/package-deb.sh
+      - name: 文档数字防漂移
+        run: |
+          test "$(grep -c '48 个工具' README.md)" -ge 1
+          ! grep -q '25 工具' README.md
+          ! grep -q '43 个工具' README.md
+          ! grep -q '16 路并发' README.md
+          grep -q 'Semaphore::new(6)' src-tauri/src/feed.rs
