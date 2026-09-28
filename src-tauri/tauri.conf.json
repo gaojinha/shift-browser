@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Shift Browser",
-  "version": "5.8.1",
+  "version": "5.8.2",
   "identifier": "com.shiftbrowser.app",
   "build": {
     "frontendDist": "../dist",
