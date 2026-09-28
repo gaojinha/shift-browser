@@ -177,6 +177,22 @@ fn pin_rejects_empty_dns_answer() {
 }
 
 #[test]
+fn resolve_opencode_model_ref_missing_key_falls_back_to_contract_default() {
+    use super::resolve_opencode_model_ref;
+    // 缺键（用户从没手选过）→ 契约默认值（钉死 muse-spark-1.3）
+    assert_eq!(
+        resolve_opencode_model_ref(None),
+        "opencode/muse-spark-1.3-contributor-free"
+    );
+    // 有行原样尊重：手选模型、显式跟随空串都不碰
+    assert_eq!(
+        resolve_opencode_model_ref(Some("opencode/big-pickle".into())),
+        "opencode/big-pickle"
+    );
+    assert_eq!(resolve_opencode_model_ref(Some("".into())), "");
+}
+
+#[test]
 fn clamp_ai_timeout_bounds() {
     use super::clamp_ai_timeout;
     // 正常值直通

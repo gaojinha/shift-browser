@@ -17,11 +17,29 @@ fn build_js_escapes_quotes_and_dedups() {
 
 #[test]
 fn privacy_selftest_standard_all_pass() {
-    let page = r#"{"installed":true,"features":{"gpc":true,"canvas":true,"webgl":true,"audio":true,"hardware":true,"webrtc":true,"webgpu":true,"misc":true}}"#;
+    let page = r#"{"installed":true,"features":{"gpc":true,"canvas":true,"webgl":true,"audio":true,"hardware":true,"webrtc":true,"webgpu":true,"webgpu_engine":true,"misc":true}}"#;
     let r = build_privacy_selftest("standard", "example.com", false, page);
     assert_eq!(r.total, 9);
     assert_eq!(r.passed, 9, "标准档全开应全过");
     assert!(r.checks.iter().all(|c| c.status == "pass"));
+}
+
+#[test]
+fn privacy_selftest_webgpu_engine_unsupported_is_skip_not_fail() {
+    // WebKitGTK 无 WebGPU 实现：引擎不支持≠防护失效，必须标 skip（➖）而非 fail（❌），
+    // 否则用户会误以为防护坏了；其余 8 项不受影响。
+    let page = r#"{"installed":true,"features":{"gpc":true,"canvas":true,"webgl":true,"audio":true,"hardware":true,"webrtc":true,"webgpu":false,"webgpu_engine":false,"misc":true}}"#;
+    let r = build_privacy_selftest("standard", "example.com", false, page);
+    assert_eq!(r.total, 9);
+    assert_eq!(r.passed, 8);
+    let w = r.checks.iter().find(|c| c.id == "webgpu").expect("应有 webgpu 项");
+    assert_eq!(w.status, "skip");
+    assert!(w.detail.contains("引擎不支持"), "应说明引擎不支持：{}", w.detail);
+    assert!(
+        r.checks.iter().all(|c| c.status != "fail"),
+        "引擎不支持时不得有 fail 项：{:?}",
+        r.checks
+    );
 }
 
 #[test]
@@ -44,9 +62,10 @@ fn privacy_selftest_whitelist_is_full_compat_bypass() {
         .filter(|c| c.status == "skip")
         .map(|c| c.id.as_str())
         .collect();
+    // 注意顺序：webgpu 单列判定挪到 hardware/webrtc/misc 循环之后（引擎不支持分支）
     assert_eq!(
         skip,
-        vec!["gpc", "canvas", "webgl", "audio", "hardware", "webrtc", "webgpu", "misc"]
+        vec!["gpc", "canvas", "webgl", "audio", "hardware", "webrtc", "misc", "webgpu"]
     );
 }
 

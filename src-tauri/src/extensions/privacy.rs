@@ -192,11 +192,10 @@ pub fn build_privacy_selftest(
         }
     }
 
-    // 6-9) 常开归一化类（白名单兼容模式下同样整体不装，标 skip）
+    // 6-8) 常开归一化类（白名单兼容模式下同样整体不装，标 skip）
     for (id, label) in [
         ("hardware", "硬件信息归一化"),
         ("webrtc", "WebRTC 内网 IP 防泄露"),
-        ("webgpu", "WebGPU 指纹防护"),
         ("misc", "杂项指纹归一化"),
     ] {
         if off {
@@ -213,6 +212,40 @@ pub fn build_privacy_selftest(
         } else {
             checks.push(mk_check(id, label, "fail", "未生效"));
         }
+    }
+
+    // 9) WebGPU 单列：引擎不支持（WebKitGTK 无 WebGPU 实现，navigator.gpu 为空）
+    // 不等于防护失效——无接口即无泄露面，标 skip 而非 fail，避免误导。
+    if off {
+        checks.push(mk_check("webgpu", "WebGPU 指纹防护", "skip", skip_reason));
+    } else if whitelisted {
+        checks.push(mk_check(
+            "webgpu",
+            "WebGPU 指纹防护",
+            "skip",
+            "当前站点在白名单（兼容模式），整帧保持浏览器原生",
+        ));
+    } else if !feat["webgpu_engine"].as_bool().unwrap_or(false) {
+        checks.push(mk_check(
+            "webgpu",
+            "WebGPU 指纹防护",
+            "skip",
+            "引擎不支持 WebGPU（无此接口，无指纹泄露面）",
+        ));
+    } else if has("webgpu") {
+        checks.push(mk_check(
+            "webgpu",
+            "WebGPU 指纹防护",
+            "pass",
+            "已启用",
+        ));
+    } else {
+        checks.push(mk_check(
+            "webgpu",
+            "WebGPU 指纹防护",
+            "fail",
+            "未生效",
+        ));
     }
 
     let total = checks.len();

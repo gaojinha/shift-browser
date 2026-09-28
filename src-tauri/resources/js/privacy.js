@@ -266,8 +266,12 @@
   // （实现见 STRICT_PRIVACY_JS 的字体探针段）
 
   // ---- 9) WebGPU 指纹防护（2026 新兴高熵信号）----
+  // 引擎标记：WebKitGTK 无 WebGPU 实现（navigator.gpu 为空）时无补丁可装，
+  // 自测凭 webgpuEngine 区分"引擎不支持"（skip）与"补丁未挂上"（fail）。
+  var webgpuEngine = !!(navigator.gpu && navigator.gpu.requestAdapter);
+  var webgpuPatched = false;
   try {
-    if (navigator.gpu && navigator.gpu.requestAdapter) {
+    if (webgpuEngine) {
       var oreq = navigator.gpu.requestAdapter.bind(navigator.gpu);
       navigator.gpu.requestAdapter = function () {
         return oreq.apply(null, arguments).then(function (adapter) {
@@ -295,6 +299,7 @@
           return adapter;
         });
       };
+      webgpuPatched = true;
     }
   } catch (e) {}
 
@@ -388,7 +393,9 @@
       audio: NOISE_ON,
       hardware: true,
       webrtc: true,
-      webgpu: !!(navigator.gpu && navigator.gpu.requestAdapter),
+      // webgpu = 补丁真挂上；webgpu_engine = 引擎有无该接口（自测区分 skip/fail 用）
+      webgpu: webgpuPatched,
+      webgpu_engine: webgpuEngine,
       misc: true,
       fp_mode: FP_MODE
     };

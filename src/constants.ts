@@ -51,7 +51,7 @@ export const SETTINGS_SCHEMA = {
   ai_model: { default: 'agnes-2.0-flash', kind: 'str', sensitive: false, desc: 'AI 模型' },
   ai_base_url: { default: 'https://apihub.agnes-ai.com/v1', kind: 'str', sensitive: false, desc: 'AI API 地址' },
   ai_api_key: { default: '', kind: 'str', sensitive: false, desc: 'AI API Key（留空用环境变量；掩码存储）' },
-  opencode_model: { default: '', kind: 'str', sensitive: false, desc: '本机 opencode 模型引用（providerID/modelID；空=跟随 opencode 默认）' },
+  opencode_model: { default: 'opencode/muse-spark-1.3-contributor-free', kind: 'str', sensitive: false, desc: '本机 opencode 模型引用（providerID/modelID；空=跟随 opencode 默认；默认钉死 muse-spark-1.3 免费版）' },
   ai_timeout: { default: '90', kind: 'int', sensitive: false, desc: 'AI 非流式请求超时（秒，10-300）' },
   ai_stream_timeout: { default: '120', kind: 'int', sensitive: false, desc: 'AI 流式请求超时（秒，10-300）' },
   opencode_username: { default: '', kind: 'str', sensitive: false, desc: '本机 opencode serve 认证用户名（空=自动从进程发现）' },

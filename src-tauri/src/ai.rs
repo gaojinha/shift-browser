@@ -78,9 +78,13 @@ async fn resolve_runtime_provider(
     api_key: Option<String>,
 ) -> Result<Box<dyn crate::engine::ai_provider::AiProvider>, crate::error::AppError> {
     if provider_id == "opencode" {
-        let model_ref = crate::db::settings_cache::get(&db.pool, "opencode_model")
-            .await
-            .unwrap_or_default();
+        // 模型引用：库里没行（用户从没手选过）才回契约默认值（钉死 muse-spark-1.3）；
+        // 有行（含显式跟随的空串）一律尊重用户选择。不能拿空串一刀切，否则
+        // "跟随 opencode 默认"选项名存实亡。serve 常年不重启、运行时默认会陈旧，
+        // 缺键回退是正道（2026-09-28 实锤：serve 运行时的 big-pickle 盖掉了新默认值）。
+        let model_ref = resolve_opencode_model_ref(
+            crate::db::settings_cache::get(&db.pool, "opencode_model").await,
+        );
         let creds = crate::webqa::resolve_credentials_pub(db).await?;
         return Ok(Box::new(crate::opencode_chat::OpencodeProvider::new(
             creds, &model_ref,
@@ -89,6 +93,17 @@ async fn resolve_runtime_provider(
     crate::engine::ai_provider::resolve_provider(provider_id, base_url, api_key)
 }
 
+/// opencode 模型引用解析（纯函数，便于单测）。
+/// - 库里有行（含显式跟随的空串）→ 原样尊重用户选择；
+/// - 缺键（从没手选过）→ 回契约默认值。
+pub(crate) fn resolve_opencode_model_ref(cached: Option<String>) -> String {
+    match cached {
+        Some(v) => v,
+        None => crate::contracts::settings::default_of("opencode_model")
+            .unwrap_or("")
+            .to_string(),
+    }
+}
 /// AI 请求超时（秒）：读设置， clamp 到 10-300，缺省回实现默认值。
 /// 纯逻辑抽出来便于单测（读库部分在调用方）。
 pub(crate) fn clamp_ai_timeout(raw: Option<String>, default: u64) -> u64 {

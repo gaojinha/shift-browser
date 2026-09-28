@@ -240,7 +240,7 @@ pub fn build_prompt(
     }
     s.push_str(&format!("\n【问题】\n{question}\n"));
     s.push_str(
-        "\n要求：直接回答，简洁分点；这是网页阅读问答，\
+        "\n要求：直接回答，简洁分点，一律用中文回答；这是网页阅读问答，\
          不要读写任何文件、不要执行任何命令、不要调用工具。\n",
     );
     s
@@ -1064,6 +1064,8 @@ mod tests {
         assert!(p.contains("某篇文章"));
         // 边界声明必须在，防模型去动 serve cwd 里的文件
         assert!(p.contains("不要读写任何文件"));
+        // 语言指令必须在：plan agent 原生英文，不钉死中文就飘英文（2026-09-28 实锤）
+        assert!(p.contains("用中文回答"));
     }
 
     #[test]

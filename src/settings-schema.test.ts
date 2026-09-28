@@ -39,7 +39,8 @@ describe("批 2 新增设置控件绑定的 8 个键", () => {
 });
 
 // 本机 opencode 作为可选推理 Provider（2026-09-26）：契约键防漂移。
-// ai_provider 必须可持久化（白名单），opencode_model 默认空=跟随 serve 默认模型。
+// ai_provider 必须可持久化（白名单），opencode_model 默认钉死 muse-spark-1.3 免费版
+// （2026-09-28 高哥钦定；空=跟随 serve 默认仍保留，设置页下拉可选回）。
 describe("本机 opencode 推理 Provider 设置键", () => {
   it("ai_provider 默认 agnes 且为字符串键", () => {
     const def = SETTINGS_SCHEMA.ai_provider;
@@ -48,10 +49,10 @@ describe("本机 opencode 推理 Provider 设置键", () => {
     expect(def.default).toBe("agnes");
   });
 
-  it("opencode_model 默认空串（跟随 opencode 默认模型）", () => {
+  it("opencode_model 默认钉死 muse-spark-1.3 免费版", () => {
     const def = SETTINGS_SCHEMA.opencode_model;
     expect(def).toBeTruthy();
     expect(def.kind).toBe("str");
-    expect(def.default).toBe("");
+    expect(def.default).toBe("opencode/muse-spark-1.3-contributor-free");
   });
 });

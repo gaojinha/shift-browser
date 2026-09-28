@@ -70,7 +70,7 @@ pub mod settings {
         SettingDef { key: "ai_model", default: "agnes-2.0-flash", kind: Kind::Str, sensitive: false, desc: "AI 模型" },
         SettingDef { key: "ai_base_url", default: "https://apihub.agnes-ai.com/v1", kind: Kind::Str, sensitive: false, desc: "AI API 地址" },
         SettingDef { key: "ai_api_key", default: "", kind: Kind::Str, sensitive: false, desc: "AI API Key（留空用环境变量；掩码存储）" },
-        SettingDef { key: "opencode_model", default: "", kind: Kind::Str, sensitive: false, desc: "本机 opencode 模型引用（providerID/modelID；空=跟随 opencode 默认）" },
+        SettingDef { key: "opencode_model", default: "opencode/muse-spark-1.3-contributor-free", kind: Kind::Str, sensitive: false, desc: "本机 opencode 模型引用（providerID/modelID；空=跟随 opencode 默认；默认钉死 muse-spark-1.3 免费版）" },
         SettingDef { key: "ai_timeout", default: "90", kind: Kind::Int, sensitive: false, desc: "AI 非流式请求超时（秒，10-300）" },
         SettingDef { key: "ai_stream_timeout", default: "120", kind: Kind::Int, sensitive: false, desc: "AI 流式请求超时（秒，10-300）" },
         SettingDef { key: "opencode_username", default: "", kind: Kind::Str, sensitive: false, desc: "本机 opencode serve 认证用户名（空=自动从进程发现）" },

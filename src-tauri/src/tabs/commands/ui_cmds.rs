@@ -269,19 +269,13 @@ pub async fn minimize_window(app: AppHandle) -> CommandResult<()> {
         .map_err(|e| AppError::internal(e.to_string()).into())
 }
 
-/// 关闭主窗口（标题栏/标签栏合并后的窗口控制按钮）
-
+/// 关闭主窗口（标题栏 ✕ 按钮）。
+/// 高哥钦定：关窗 = 缩托盘，不退出（与 README/托盘行为一致）。
+/// 直接走唯一实现，不碰 REAL_QUIT；真退出只走托盘「退出」菜单。
 #[tauri::command]
 pub async fn close_window(app: AppHandle) -> CommandResult<()> {
-    // 前端「退出」按钮是明确要退出，先置真退出标志，
-    // 否则会被「关窗=缩托盘」的 delete-event 拦截，变成只隐藏。
-    crate::tray::REAL_QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
-    let window = app
-        .get_window("main")
-        .ok_or_else(|| AppError::internal("主窗口不存在"))?;
-    window
-        .close()
-        .map_err(|e| AppError::internal(e.to_string()).into())
+    crate::tray::minimize_to_tray(&app);
+    Ok(())
 }
 
 /// 开始拖动主窗口（无边框窗口标题栏拖拽，标签栏空白处按住调用）

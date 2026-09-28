@@ -20,6 +20,8 @@
         hardware: !!f.hardware,
         webrtc: !!(f.webrtc || rtcPatched),
         webgpu: !!f.webgpu,
+        // 引擎有无 WebGPU 接口（后端区分"引擎不支持→skip"与"补丁未挂上→fail"）
+        webgpu_engine: !!f.webgpu_engine,
         misc: !!f.misc
       },
       hardwareConcurrency: hc,

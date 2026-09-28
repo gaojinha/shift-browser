@@ -4,10 +4,10 @@
 //! 走 ksni 纯 Rust D-Bus 实现，不引入 libappindicator C 依赖（符合本仓"少引原生依赖"原则）。
 //!
 //! 行为（高哥钦定）：
-//! - 点窗口关闭按钮 → 缩到托盘，不退出（见 lib.rs 的 delete-event 拦截）
-//! - 托盘左键单击 → 显示/隐藏主窗口
-//! - 托盘菜单：显示/隐藏窗口 · 下载管理 · 密码库 · 退出
-//! - 真退出只走「退出」菜单或前端退出按钮（置 REAL_QUIT 后放行 delete-event）
+ //! - 点窗口关闭按钮 → 缩到托盘，不退出（见 lib.rs 的 delete-event 拦截）
+ //! - 托盘左键单击 → 显示/隐藏主窗口
+ //! - 托盘菜单：显示/隐藏窗口 · 下载管理 · 密码库 · 退出
+ //! - 真退出只走托盘「退出」菜单（置 REAL_QUIT 后放行 delete-event）
 //!
 //! 线程模型（重要）：ksni 的菜单闭包跑在 D-Bus 线程，**绝不能直接碰 GTK**。
 //! 闭包只往 mpsc 投递 [`TrayAction`]，由 GTK 主线程的 glib 定时器排空并执行。
@@ -17,7 +17,7 @@ use std::sync::mpsc::Sender;
 use std::sync::OnceLock;
 
 /// 真退出标志：置位后 delete-event 放行（不再缩托盘）。
-/// 前端退出按钮 / 托盘「退出」菜单都会先置位再关窗。
+/// 只有托盘「退出」菜单会置位；标题栏 ✕（close_window 命令）走缩托盘，不碰它。
 pub static REAL_QUIT: AtomicBool = AtomicBool::new(false);
 
 /// 应用图标（编译期嵌入 512x512 主源图 icon.png，不依赖运行时路径；
@@ -82,6 +82,30 @@ fn tray_icons() -> &'static [ksni::Icon] {
     })
 }
 
+/// 缩托盘唯一实现（高哥钦定：关窗 = 缩托盘，不退出）。
+/// 两处调用：GTK delete-event 拦截、标题栏 ✕ 的 close_window 命令。
+/// 只隐藏窗口 + 首次提示一次，不碰 REAL_QUIT。
+pub(crate) fn minimize_to_tray(app: &tauri::AppHandle) {
+    use tauri::{Emitter, Manager};
+    if let Some(win) = app.get_window("main") {
+        let _ = win.hide();
+    }
+    log::info!("[tray] 窗口已缩到托盘（未退出）");
+    // 首次缩托盘提示一次（标记文件落 app_data_dir）：用户常以为退出了。
+    // 标记写失败不影响主流程，下回再提示一次即可。
+    let need_hint = app
+        .path()
+        .app_data_dir()
+        .map(|d| !d.join("tray_hint_shown").exists())
+        .unwrap_or(false);
+    if need_hint {
+        let _ = app.emit(crate::contracts::events::TRAY_FIRST_MINIMIZE, ());
+        if let Ok(dir) = app.path().app_data_dir() {
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(dir.join("tray_hint_shown"), "1");
+        }
+    }
+}
 /// 托盘动作（D-Bus 线程 → GTK 主线程）
 #[derive(Debug, Clone)]
 pub enum TrayAction {
