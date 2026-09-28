@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { useToastStore } from '../../stores/toast'
+import './ui/settings-shared.css'
 
 /** 「关于」页信息（只读，打开即显示） */
 interface AboutInfo {
@@ -110,48 +111,5 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.settings-scroll {
-  flex: 1;
-  overflow-y: auto;
-  padding: 14px 16px;
-}
-.settings-scroll::-webkit-scrollbar {
-  width: 6px;
-}
-.settings-scroll::-webkit-scrollbar-thumb {
-  background: var(--bg-active);
-  border-radius: 3px;
-}
-.card {
-  margin-bottom: 12px;
-}
-.card-title {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 14px;
-  color: var(--text-primary);
-  font-weight: 600;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.card-title .app-icon {
-  color: var(--accent);
-}
-.field-hint {
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--text-secondary);
-  background: var(--bg-primary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 8px 10px;
-  margin-bottom: 10px;
-}
-.field-hint code {
-  color: var(--accent);
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
-}
+/* 通用样式已收口至 ui/settings-shared.css，此处仅留文件特有样式（当前无） */
 </style>

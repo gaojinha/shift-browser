@@ -324,6 +324,7 @@ function onOverlaySelf() {
           ref="inputRef"
           v-model="input"
           class="ai-input"
+          aria-label="AI 提问输入框"
           :placeholder="aiStore.webqaMode ? '问本机 opencode：Enter 发送，Shift+Enter 换行' : '输入问题，Enter 发送，Shift+Enter 换行'"
           rows="1"
           @keydown="onKeydown"
@@ -533,11 +534,12 @@ function onOverlaySelf() {
 }
 .ai-msg.user .ai-bubble {
   background: var(--accent);
-  color: var(--text-primary);
+  color: var(--accent-contrast);
   border-bottom-right-radius: 2px;
 }
 .ai-msg.assistant .ai-bubble {
   background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
   color: var(--text-primary);
   border-bottom-left-radius: 2px;
 }
@@ -552,7 +554,8 @@ function onOverlaySelf() {
   color: var(--danger);
   font-size: 12px;
   padding: 6px 12px;
-  background: rgba(229, 57, 53, 0.1);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
   border-radius: 6px;
 }
 .ai-input-bar {

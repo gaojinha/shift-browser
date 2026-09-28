@@ -351,7 +351,7 @@ async function onExport() {
             </div>
             <div class="bm-actions">
               <button class="bm-cancel" @click="showFolderConfirm = false">取消</button>
-              <button class="bm-save danger-btn" @click="doDeleteFolder">删除</button>
+              <button class="bm-save danger" @click="doDeleteFolder">删除</button>
             </div>
           </div>
         </div>
@@ -498,11 +498,6 @@ async function onExport() {
   line-height: 1.7;
   margin-bottom: 4px;
 }
-.danger-btn {
-  background: var(--danger) !important;
-  border-color: var(--danger) !important;
-  color: #fff !important;
-}
 .bm-row {
   display: flex;
   align-items: center;
@@ -598,29 +593,5 @@ async function onExport() {
 .bm-field select:focus {
   border-color: var(--accent);
 }
-.bm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
-}
-.bm-cancel,
-.bm-save {
-  height: 28px;
-  padding: 0 14px;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  border: 1px solid var(--border-color);
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-}
-.bm-save {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-.bm-save:hover {
-  opacity: 0.9;
-}
+/* 通用 .bm-actions/.bm-cancel/.bm-save 已收口至 styles/components.css */
 </style>

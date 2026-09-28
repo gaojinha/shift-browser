@@ -504,29 +504,5 @@ async function onSaveEdit() {
 .bm-field input:focus {
   border-color: var(--accent);
 }
-.bm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
-}
-.bm-cancel,
-.bm-save {
-  height: 28px;
-  padding: 0 14px;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  border: 1px solid var(--border-color);
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-}
-.bm-save {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-.bm-save:hover {
-  opacity: 0.9;
-}
+/* 通用 .bm-actions/.bm-cancel/.bm-save 已收口至 styles/components.css */
 </style>

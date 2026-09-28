@@ -231,41 +231,7 @@ function cancelDelete() {
 .toolbar {
   margin-bottom: 10px;
 }
-.add-btn {
-  background: var(--bg-active);
-  color: var(--text-primary);
-  border: none;
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.add-btn:hover {
-  background: var(--text-secondary);
-}
-.add-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 12px;
-}
-.add-form input,
-.edit-input {
-  border: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 13px;
-  outline: none;
-}
-.add-form input:focus,
-.edit-input:focus {
-  border-color: var(--accent);
-}
+/* 通用 .add-btn/.add-form/.form-error/.save-btn 已收口至 styles/components.css */
 .color-row {
   display: flex;
   align-items: center;
@@ -291,42 +257,7 @@ function cancelDelete() {
   width: 14px;
   height: 14px;
 }
-.form-error {
-  color: var(--danger);
-  font-size: 12px;
-}
-.save-btn {
-  background: var(--accent);
-  color: var(--text-primary);
-  border: none;
-  border-radius: 6px;
-  padding: 8px;
-  font-size: 13px;
-  cursor: pointer;
-}
-.save-btn:hover {
-  background: #3a8eef;
-}
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 10px 12px;
-  gap: 8px;
-}
-.item-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
+/* 通用 .list/.item/.item-info/.item-actions/.mini-btn/.empty 已收口至 styles/components.css */
 .item-name {
   color: var(--text-primary);
   font-size: 13px;
@@ -342,39 +273,10 @@ function cancelDelete() {
   font-size: 11px;
   font-weight: normal;
 }
-.item-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
 .color-mini-row {
   display: flex;
   align-items: center;
   gap: 3px;
-}
-.mini-btn {
-  background: var(--bg-active);
-  color: var(--text-secondary);
-  border: none;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.mini-btn:hover {
-  background: var(--text-secondary);
-}
-.mini-btn.danger:hover {
-  background: #5c2b2b;
-  color: #ff8a8a;
-}
-.empty {
-  color: var(--text-muted);
-  font-size: 13px;
-  text-align: center;
-  padding: 24px 0;
 }
 /* 删除确认弹窗（嵌套在分组弹窗之上） */
 .dialog-overlay.inner {
@@ -383,41 +285,6 @@ function cancelDelete() {
 .confirm-dialog {
   width: min(360px, calc(100vw - 32px));
 }
-.confirm-text {
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.6;
-  margin: 0 0 16px;
-}
-.confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.bm-cancel,
-.bm-save {
-  height: 28px;
-  padding: 0 14px;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  border: none;
-}
-.bm-cancel {
-  background: var(--bg-active);
-  color: var(--text-secondary);
-}
-.bm-save {
-  background: var(--accent);
-  color: #fff;
-}
-.bm-save:hover {
-  filter: brightness(1.1);
-}
-.bm-save.danger {
-  background: #c62828;
-}
-.bm-save.danger:hover {
-  background: #b71c1c;
-}
+/* 通用 .confirm-text/.confirm-actions 已收口至 styles/components.css；
+   通用 .bm-cancel/.bm-save（含 .danger）已收口至 styles/components.css */
 </style>

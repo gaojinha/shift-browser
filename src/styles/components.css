@@ -1,0 +1,304 @@
+/* 弹窗内容区共享样式（2026-09 前端美化收口）
+   唯一来源：Downloads/Groups/Passwords 的 .list/.item/.mini-btn/.empty，
+   History/Session 的 .confirm-* 等重复块已删，统一从这里来。
+   各弹窗 SFC 只留文件特有样式。import 见 styles/main.css。 */
+
+/* —— 列表行 —— */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.item:hover {
+  border-color: var(--accent);
+}
+.item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* —— 小按钮 —— */
+.mini-btn {
+  background: var(--bg-active);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  min-height: 28px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.mini-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.mini-btn.primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-color: var(--accent);
+}
+.mini-btn.primary:hover {
+  background: var(--accent-hover);
+  color: var(--accent-contrast);
+  border-color: var(--accent-hover);
+}
+.mini-btn.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.mini-btn.danger:hover {
+  filter: brightness(1.12);
+  color: var(--danger);
+}
+/* 二次确认待命态：常显危险色，不依赖 hover（触屏无 hover 也看得见） */
+.mini-btn.danger.armed {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.mini-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.mini-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* —— 空态 —— */
+.empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 24px 12px;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+/* —— 二次确认行（删除确认等） —— */
+.confirm-text {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 4px;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.confirm-btn {
+  height: 30px;
+  padding: 0 14px;
+  background: var(--bg-active);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.confirm-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.confirm-btn.cancel {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+.confirm-btn.cancel:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+.confirm-btn.ok {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.confirm-btn.ok:hover {
+  filter: brightness(1.1);
+  color: #fff;
+}
+.confirm-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* —— 表单区：添加按钮 / 保存按钮 / 表单壳（分组/密码弹窗共用） —— */
+.add-btn {
+  background: var(--bg-active);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.add-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.save-btn {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-xs);
+  padding: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.save-btn:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.add-btn:focus-visible,
+.save-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.add-form input,
+.edit-input {
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: var(--radius-xs);
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.add-form input:focus,
+.edit-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.form-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+/* —— 书签编辑按钮（书签栏/书签弹窗/分组确认共用） —— */
+.bm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.bm-cancel,
+.bm-save {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: var(--radius-xs);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+}
+.bm-cancel:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+.bm-save {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+.bm-save:hover {
+  opacity: 0.9;
+}
+.bm-save.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.bm-save.danger:hover {
+  filter: brightness(1.1);
+  opacity: 1;
+}
+.bm-cancel:focus-visible,
+.bm-save:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* —— 等宽文本 —— */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* —— 减弱动态 —— */
+@media (prefers-reduced-motion: reduce) {
+  .mini-btn,
+  .confirm-btn,
+  .item {
+    transition-duration: 0.01ms !important;
+  }
+  /* 全局装饰动画一律静止（加载条/转圈/呼吸灯/弹窗入场） */
+  .load-bar,
+  .spinning,
+  .icon-spin,
+  .spinner,
+  .status-load-failed,
+  .cp-panel {
+    animation: none !important;
+  }
+}

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // 设置弹窗 · 扩展与自动化分区「用户脚本」入口卡（导航收口：打开独立 UserscriptsDialog）
+import './ui/settings-shared.css'
 defineEmits<{ (e: 'open'): void }>()
 </script>
 
@@ -16,5 +17,5 @@ defineEmits<{ (e: 'open'): void }>()
 </template>
 
 <style scoped>
-.card { margin-bottom: 12px; }.card-title { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--text-primary); font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }.card-title .app-icon { color: var(--accent); }.field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }.field-desc { flex: 1; font-size: 12px; color: var(--text-secondary); }.mini-btn { background: var(--bg-active); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 7px; padding: 5px 12px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; white-space: nowrap; }.mini-btn:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }.mini-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }.mini-btn.primary:hover { background: var(--accent-2); color: #fff; border-color: var(--accent-2); }
+/* 通用样式已收口至 ui/settings-shared.css，此处仅留文件特有样式（当前无） */
 </style>

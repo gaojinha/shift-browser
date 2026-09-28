@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { fixFor } from '../../utils/advice'
+import './ui/settings-shared.css'
 
 // ---- 系统自检（可观测性）：一键汇总版本/存储/运行时/能力状态 ----
 interface CheckItem {
@@ -87,119 +88,5 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.settings-scroll {
-  flex: 1;
-  overflow-y: auto;
-  padding: 14px 16px;
-}
-.settings-scroll::-webkit-scrollbar {
-  width: 6px;
-}
-.settings-scroll::-webkit-scrollbar-thumb {
-  background: var(--bg-active);
-  border-radius: 3px;
-}
-.card {
-  margin-bottom: 12px;
-}
-.selfcheck-btn {
-  float: right;
-  padding: 3px 10px;
-  font-size: 12px;
-  color: var(--accent);
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  cursor: pointer;
-}
-.selfcheck-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.selfcheck-summary {
-  margin: 8px 0 12px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-}
-.selfcheck-summary.ok {
-  background: var(--success-soft);
-  color: var(--success);
-}
-.selfcheck-summary.bad {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-.selfcheck-hint {
-  color: var(--text-muted);
-  font-size: 13px;
-  padding: 12px 0;
-}
-.selfcheck-error {
-  color: var(--danger);
-  font-size: var(--text-sm);
-  padding: 8px 0;
-}
-.selfcheck-group {
-  margin-bottom: 12px;
-}
-.selfcheck-group-title {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-}
-.selfcheck-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 3px 0;
-  font-size: 13px;
-}
-.selfcheck-mark {
-  flex-shrink: 0;
-}
-.selfcheck-name {
-  flex-shrink: 0;
-  min-width: 96px;
-  color: var(--text-primary);
-}
-.selfcheck-detail {
-  color: var(--text-muted);
-  word-break: break-all;
-}
-.selfcheck-fix {
-  font-size: 12px;
-  color: var(--warning);
-  padding: 2px 0 2px 24px;
-  line-height: 1.6;
-}
-.card-title {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 14px;
-  color: var(--text-primary);
-  font-weight: 600;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.card-title .app-icon {
-  color: var(--accent);
-}
-.field-hint {
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--text-secondary);
-  background: var(--bg-primary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 8px 10px;
-  margin-bottom: 10px;
-}
-.field-hint code {
-  color: var(--accent);
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
-}
+/* 通用样式已收口至 ui/settings-shared.css，此处仅留文件特有样式（当前无） */
 </style>

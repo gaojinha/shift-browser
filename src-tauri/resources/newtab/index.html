@@ -5,7 +5,15 @@
 <title>新标签页</title>
 <script>{{ipc_bridge}}</script>
 <style>
-  :root { --accent:#5b8cff; --accent-2:#7c5cff; }
+  :root {
+  --accent:#5b8cff; --accent-2:#7c5cff;
+  /* 设计令牌（2026-09 美化收口）：圆角 / 阴影 / 动效 / 字号阶梯，下方统一样式引用 */
+  --r-sm:8px; --r-md:12px; --r-lg:16px; --r-xl:20px; --r-full:999px;
+  --sh-sm:0 4px 14px rgba(0,0,0,0.22); --sh-md:0 8px 28px rgba(0,0,0,0.25); --sh-lg:0 16px 48px rgba(0,0,0,0.35);
+  --dur:0.18s; --ease:cubic-bezier(0.4,0,0.2,1);
+  --txt-1:#eef2fa; --txt-2:rgba(255,255,255,0.72); --txt-3:rgba(255,255,255,0.5); --txt-4:rgba(255,255,255,0.35);
+  --line:rgba(255,255,255,0.1); --glass:rgba(255,255,255,0.06); --glass-2:rgba(255,255,255,0.1);
+}
   * { margin:0; padding:0; box-sizing:border-box; }
   html,body { height:100%; }
   body { font-family:'PingFang SC','Microsoft YaHei',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:linear-gradient(135deg,#0d1220 0%,#111828 50%,#16233c 100%); color:#e2e8f0; min-height:100vh; overflow-x:hidden; overflow-y:auto; }
@@ -234,20 +242,62 @@
   .recent-title { font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:2px; }
   .recent-url { font-size:11px; color:rgba(255,255,255,0.5); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .footer { display:flex; justify-content:center; gap:12px; padding:20px 0 8px; border-top:1px solid rgba(255,255,255,0.08); margin-top:8px; }
+  /* ===== 美化收口（2026-09）：统一样式覆盖区，后来者胜，同选择器优先级下生效。
+     红线：不改类名/ID/占位符/JS，只收视觉与无障碍。 ===== */
+  ::selection { background:rgba(91,140,255,0.35); color:#fff; }
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.22); border-radius:var(--r-full); border:2px solid transparent; background-clip:content-box; }
+  ::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,0.35); background-clip:content-box; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  button:focus-visible, a:focus-visible, input:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(91,140,255,0.45); }
+  .icon-btn { border-radius:12px; transition:background var(--dur) var(--ease), transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+  .icon-btn:hover { background:var(--glass-2); transform:translateY(-1px); }
+  .icon-btn.active { background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#fff; box-shadow:0 4px 14px rgba(91,140,255,0.4); }
+  .search-box input { letter-spacing:0.2px; }
+  .search-box input:focus { background:rgba(255,255,255,0.16); border-color:var(--accent); box-shadow:0 0 0 3px rgba(91,140,255,0.25), 0 8px 32px rgba(0,0,0,0.22); }
+  .suggest-item { border-radius:var(--r-sm); margin:2px 6px; }
+  .suggest-item:hover { background:rgba(91,140,255,0.18); }
+  .section-head h2 { font-size:16px; }
+  .top-site { box-shadow:var(--sh-sm); }
+  .top-site:hover { background:var(--glass-2); transform:translateY(-4px); box-shadow:var(--sh-md); border-color:rgba(91,140,255,0.4); }
+  .info-card { box-shadow:var(--sh-md); }
+  .info-card:hover { transform:translateY(-3px); box-shadow:var(--sh-lg); border-color:rgba(91,140,255,0.35); }
+  .feed-item:hover, .recent-item:hover { border-color:rgba(91,140,255,0.35); }
+  .btn-mini, .uc-btn, .modal-btn, .feed-cat, .feed-toggle { transition:background var(--dur) var(--ease), filter var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+  .todo-add input:focus, .uc-form input:focus, .uc-section input:focus, .uc-inline input:focus, .modal-box input:focus, .qs-form input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(91,140,255,0.25); }
+  .fs-item:hover, .panel-link-item:hover, .todo-item:hover, .bookmark-item:hover { border-color:rgba(91,140,255,0.3); }
+  .fs-split-item.active { background:rgba(91,140,255,0.2); border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+  .uc-tab.active { box-shadow:var(--sh-sm); }
+  .hero h1 { letter-spacing:2px; text-shadow:0 2px 24px rgba(91,140,255,0.25); }
+  .hero .quote { text-wrap:balance; }
+  .toast { border:1px solid var(--line); }
+  .modal-box { box-shadow:var(--sh-lg); }
+  .empty { border:1px dashed rgba(255,255,255,0.18); border-radius:var(--r-md); }
+  @media (prefers-reduced-motion: reduce) {
+    .bg-layer { animation:none; }
+    *, *::before, *::after { animation-duration:0.01ms !important; transition-duration:0.01ms !important; }
+  }
+  @media (max-width:760px) {
+    .container { padding:28px 20px 16px; }
+    .hero h1 { font-size:30px; }
+    .info-card { width:100%; min-height:0; }
+    .feed-split { flex-direction:column; }
+    .feed-split-list { width:100%; max-height:40vh; }
+  }
 </style>
 </head>
 <body>
   {{bg_layer_html}}
-  <div class="icon-bar" id="iconBar">
-    <button class="icon-btn" data-panel="feed" title="资讯"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0V9"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg></button>
-    <button class="icon-btn" data-panel="bookmark" title="书签"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></button>
-    <button class="icon-btn" data-panel="todo" title="待办"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12l2 2 4-4"/></svg></button>
-    <button class="icon-btn" data-panel="recent" title="最近访问"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></button>
-    <button class="icon-btn" data-panel="quick" title="快捷访问"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></button>
-    <a class="icon-btn" href="world-nav.html" title="世界导航"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg></a>
-    <button class="icon-btn" id="aiBtn" title="AI 助手"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18.5 9.5l-4.7 1.9L12 16l-1.8-4.6L5.5 9.5l4.7-1.9z"/></svg></button>
-    <button class="icon-btn" id="settingsBtn" title="设置"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg></button>
-    <button class="icon-btn bottom" data-panel="profile" title="我的"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a7 7 0 0 1 14 0v1"/></svg></button>
+  <div class="icon-bar" id="iconBar" role="navigation" aria-label="启动页侧栏">
+    <button class="icon-btn" data-panel="feed" title="资讯" aria-label="资讯"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0V9"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg></button>
+    <button class="icon-btn" data-panel="bookmark" title="书签" aria-label="书签"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></button>
+    <button class="icon-btn" data-panel="todo" title="待办" aria-label="待办"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12l2 2 4-4"/></svg></button>
+    <button class="icon-btn" data-panel="recent" title="最近访问" aria-label="最近访问"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></button>
+    <button class="icon-btn" data-panel="quick" title="快捷访问" aria-label="快捷访问"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></button>
+    <a class="icon-btn" href="world-nav.html" title="世界导航" aria-label="世界导航"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg></a>
+    <button class="icon-btn" id="aiBtn" title="AI 助手" aria-label="AI 助手"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18.5 9.5l-4.7 1.9L12 16l-1.8-4.6L5.5 9.5l4.7-1.9z"/></svg></button>
+    <button class="icon-btn" id="settingsBtn" title="设置" aria-label="设置"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg></button>
+    <button class="icon-btn bottom" data-panel="profile" title="我的" aria-label="我的"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a7 7 0 0 1 14 0v1"/></svg></button>
   </div>
   <div class="main-layout">
     <div class="side-panel" id="sidePanel">
@@ -305,7 +355,7 @@
         </div>
       </div>
       <div class="search-box">
-        <input type="text" id="searchInput" placeholder="搜索或输入网址..." autocomplete="off" spellcheck="false">
+        <input type="text" id="searchInput" aria-label="搜索或输入网址..." placeholder="搜索或输入网址..." autocomplete="off" spellcheck="false">
         <span class="search-engine-tag" id="searchEngineTag"></span>
         <div class="suggest-box" id="suggestBox"></div>
       </div>

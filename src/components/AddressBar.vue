@@ -273,6 +273,7 @@ async function onReader() {
         v-model="addressInput"
         type="text"
         placeholder="输入网址或搜索..."
+        aria-label="地址栏"
         spellcheck="false"
         @input="onInput"
         @keydown="onKeydown"
@@ -515,6 +516,7 @@ async function onReader() {
 }
 .suggest-item.selected {
   background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 .suggest-item:hover {
   background: var(--bg-hover);

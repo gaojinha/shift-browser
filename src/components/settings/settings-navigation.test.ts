@@ -19,11 +19,13 @@ import {
 } from "./settingsNavigation";
 
 // 收集 settings 目录全部 SFC 中真实存在的 data-anchor
+// （含 SettingCard 的 anchor 属性透传：渲染为 div.card 的 data-anchor，静态扫描一并识别）
 const here = path.dirname(fileURLToPath(import.meta.url));
 const vueAnchors = new Set<string>();
 for (const f of readdirSync(here).filter((n) => n.endsWith(".vue"))) {
   const src = readFileSync(path.join(here, f), "utf8");
   for (const m of src.matchAll(/data-anchor="([^"]+)"/g)) vueAnchors.add(m[1]);
+  for (const m of src.matchAll(/<SettingCard[^>]*\banchor="([^"]+)"/g)) vueAnchors.add(m[1]);
 }
 const aiSectionSrc = readFileSync(path.join(here, "AiSection.vue"), "utf8");
 

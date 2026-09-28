@@ -156,74 +156,8 @@ async function onDelete(id: number) {
 .toolbar {
   margin-bottom: 10px;
 }
-.add-btn {
-  background: var(--bg-active);
-  color: var(--text-primary);
-  border: none;
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.add-btn:hover {
-  background: var(--text-secondary);
-}
-.add-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 12px;
-}
-.add-form input {
-  border: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 13px;
-  outline: none;
-}
-.add-form input:focus {
-  border-color: var(--accent);
-}
-.form-error {
-  color: var(--danger);
-  font-size: 12px;
-}
-.save-btn {
-  background: var(--accent);
-  color: var(--text-primary);
-  border: none;
-  border-radius: 6px;
-  padding: 8px;
-  font-size: 13px;
-  cursor: pointer;
-}
-.save-btn:hover {
-  background: #3a8eef;
-}
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-.item-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
+/* 通用 .add-btn/.add-form/.form-error/.save-btn 已收口至 styles/components.css */
+/* 通用 .list/.item/.item-info/.item-actions/.mini-btn/.empty 已收口至 styles/components.css */
 .item-domain {
   color: var(--text-primary);
   font-size: 13px;
@@ -233,12 +167,6 @@ async function onDelete(id: number) {
   color: var(--text-muted);
   font-size: 12px;
 }
-.item-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
 .revealed {
   color: var(--accent);
   font-size: 12px;
@@ -246,32 +174,5 @@ async function onDelete(id: number) {
   max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.mini-btn {
-  background: var(--bg-active);
-  color: var(--text-secondary);
-  border: none;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.mini-btn:hover {
-  background: var(--text-secondary);
-}
-.mini-btn.danger:hover {
-  background: #5c2b2b;
-  color: #ff8a8a;
-}
-/* 二次确认待命态：常显危险色，不依赖 hover（触屏无 hover 也看得见） */
-.mini-btn.danger.armed {
-  background: #5c2b2b;
-  color: #ff8a8a;
-}
-.empty {
-  color: var(--text-muted);
-  font-size: 13px;
-  text-align: center;
-  padding: 24px 0;
 }
 </style>

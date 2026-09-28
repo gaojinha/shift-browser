@@ -184,27 +184,7 @@ async function onReveal(path: string | null) {
 .dialog {
   width: min(520px, calc(100vw - 32px));
 }
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 10px 12px;
-  gap: 10px;
-}
-.item-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
-}
+/* 通用 .list/.item/.item-info/.item-actions/.mini-btn/.empty 已收口至 styles/components.css */
 .item-name {
   color: var(--text-primary);
   font-size: 13px;
@@ -243,12 +223,6 @@ async function onReveal(path: string | null) {
   font-size: 11px;
   flex-shrink: 0;
 }
-.item-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
 .state {
   font-size: var(--text-sm);
   padding: 2px 10px;
@@ -269,32 +243,5 @@ async function onReveal(path: string | null) {
 .state-cancel {
   color: var(--text-muted);
   background: var(--bg-secondary);
-}
-.mini-btn {
-  background: var(--bg-active);
-  color: var(--text-secondary);
-  border: none;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.mini-btn:hover {
-  background: var(--text-secondary);
-}
-.mini-btn.danger:hover {
-  background: #5c2b2b;
-  color: #ff8a8a;
-}
-/* 二次确认待命态：常显危险色，不依赖 hover */
-.mini-btn.danger.armed {
-  background: #5c2b2b;
-  color: #ff8a8a;
-}
-.empty {
-  color: var(--text-muted);
-  font-size: 13px;
-  text-align: center;
-  padding: 24px 0;
 }
 </style>

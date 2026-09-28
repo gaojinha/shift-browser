@@ -213,6 +213,7 @@ watch(
           v-model="query"
           class="cp-input"
           placeholder="输入命令、网址，或问 AI…"
+          aria-label="命令面板搜索"
           spellcheck="false"
           @input="onInput"
           @keydown="onKeydown"
@@ -265,6 +266,9 @@ watch(
   overflow: hidden;
   animation: cp-pop var(--dur) var(--ease-out);
 }
+.cp-panel:focus-within {
+  border-color: var(--accent);
+}
 @keyframes cp-pop {
   from {
     opacity: 0;
@@ -312,9 +316,12 @@ watch(
 }
 .cp-empty {
   padding: 24px;
+  margin: 6px;
   text-align: center;
   color: var(--text-muted);
   font-size: var(--text-base);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
 }
 .cp-item {
   display: flex;
@@ -327,6 +334,7 @@ watch(
 }
 .cp-item.active {
   background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 .cp-icon {
   width: 28px;

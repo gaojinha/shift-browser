@@ -2,6 +2,7 @@
 // 设置弹窗 · 扩展与自动化分区「定时任务」卡（IA 重组：原 GeneralSection 三块）
 import { useSettingsStore } from '../../stores/settings'
 import { useSettingsSet } from '../../composables/useSettingsSet'
+import './ui/settings-shared.css'
 
 const settingsStore = useSettingsStore()
 const { onSet } = useSettingsSet()
@@ -76,5 +77,5 @@ function fillTpl(k: string) {
 </template>
 
 <style scoped>
-.card { margin-bottom: 12px; }.card-title { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--text-primary); font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }.card-title .app-icon { color: var(--accent); }.field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }.field-desc { flex: 1; font-size: 12px; color: var(--text-secondary); }.field label { font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }.task-num { width: 72px; height: 28px; padding: 0 8px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font-size: 12px; outline: none; }.task-num:focus { border-color: var(--accent); }.kw-block { margin: 4px 0 12px 0; padding: 10px 12px; background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: 8px; }.kw-hint { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; line-height: 1.4; }.tpl-row { display: flex; gap: 8px; margin-bottom: 8px; }.net-rules { width: 100%; box-sizing: border-box; min-height: 64px; padding: 8px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font-size: 12px; font-family: monospace; resize: vertical; outline: none; }.net-rules:focus { border-color: var(--accent); }
+/* 通用样式已收口至 ui/settings-shared.css，此处仅留文件特有样式（当前无） */
 </style>

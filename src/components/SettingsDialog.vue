@@ -234,6 +234,7 @@ watch(
 }
 .settings-search input:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .search-results {
   display: flex;
@@ -305,6 +306,16 @@ watch(
   color: var(--accent);
   font-weight: 600;
 }
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+}
 .nav-item.active .nav-icon {
   color: var(--accent);
 }
@@ -332,6 +343,7 @@ watch(
   display: flex;
   flex-direction: column;
   min-height: 0;
+  background: var(--bg-elevated-2);
 }
 .settings-scroll {
   flex: 1;

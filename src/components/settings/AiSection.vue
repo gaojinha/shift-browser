@@ -8,6 +8,7 @@ import { useSettingsStore } from '../../stores/settings'
 import { useSettingsSet } from '../../composables/useSettingsSet'
 import McpSection from './McpSection.vue'
 import WebmcpCard from './WebmcpCard.vue'
+import './ui/settings-shared.css'
 
 type AiTabId = 'model' | 'mcp' | 'labs'
 
@@ -286,17 +287,5 @@ watch(
 </template>
 
 <style scoped>
-.ai-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }.ai-tabs { display: flex; gap: 4px; padding: 10px 16px 0; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }.ai-tab { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; font-size: 12.5px; color: var(--text-secondary); background: transparent; border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; cursor: pointer; transition: all 0.15s; }.ai-tab:hover { color: var(--text-primary); background: var(--bg-hover); }.ai-tab.active { color: var(--accent); background: var(--accent-soft); border-color: var(--border-subtle); font-weight: 600; }.settings-scroll { flex: 1; overflow-y: auto; padding: 14px 16px; min-height: 0; }.settings-scroll::-webkit-scrollbar { width: 6px; }.settings-scroll::-webkit-scrollbar-thumb { background: var(--bg-active); border-radius: 3px; }.card { margin-bottom: 12px; }.card-title { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--text-primary); font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }.card-title .app-icon { color: var(--accent); }.field-row { display: flex; gap: 12px; }
-.field-row .field { flex: 1; }
-.field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }.field-desc { flex: 1; font-size: 12px; color: var(--text-secondary); }.field-hint { font-size: 12px; line-height: 1.6; color: var(--text-secondary); background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }.field-hint code { color: var(--accent); font-family: var(--font-mono, monospace); font-size: 11px; }.field label { font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }.field input,
-.field select { flex: 1; max-width: 300px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary); border-radius: 7px; padding: 7px 11px; font-size: 13px; outline: none; transition: border-color 0.15s; -webkit-appearance: none; appearance: none; }.field select { padding-right: 26px; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='%23c6d0df' d='M2.5 4.5L6 8l3.5-3.5'/></svg>"); background-repeat: no-repeat; background-position: right 8px center; background-size: 12px; }.field input:focus,
-.field select:focus { border-color: var(--accent); }
-/* 本机 opencode 状态区（多行文本，不走 .field 的两端对齐单行布局） */
-.field.oc-status { align-items: flex-start; }
-.oc-status-body { flex: 1; max-width: 300px; display: flex; flex-direction: column; gap: 4px; }
-.oc-msg { font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
-.oc-msg.oc-ok { color: var(--success, #3fb950); }
-.oc-msg.oc-err { color: var(--danger, #f85149); }
-.oc-retry { margin-left: 6px; padding: 1px 10px; font-size: 11.5px; color: var(--accent); background: transparent; border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; }
-.oc-retry:hover { background: var(--bg-hover); }
+/* 通用样式已收口至 ui/settings-shared.css，此处仅留文件特有样式（当前无） */
 </style>

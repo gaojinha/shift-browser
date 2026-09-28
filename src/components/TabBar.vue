@@ -481,7 +481,7 @@ function onFaviconError(e: Event) {
         <span v-else class="pin-icon" title="已固定">📌</span>
         <span v-if="tab.private" class="priv-mark" title="无痕标签">🕶</span>
             <span class="title">{{ tab.title || '启动页' }}</span>
-        <button class="close-btn" title="关闭标签" @click="onTabClose($event, tab.id)">×</button>
+        <button class="close-btn" title="关闭标签" aria-label="关闭标签" @click="onTabClose($event, tab.id)">×</button>
       </div>
 
       <!-- 分组 -->
@@ -530,7 +530,7 @@ function onFaviconError(e: Event) {
             />
             <span v-else class="pin-icon" title="已固定">📌</span>
             <span class="title">{{ tab.title || '启动页' }}</span>
-            <button class="close-btn" title="关闭标签" @click="onTabClose($event, tab.id)">
+            <button class="close-btn" title="关闭标签" aria-label="关闭标签" @click="onTabClose($event, tab.id)">
               ×
             </button>
           </div>

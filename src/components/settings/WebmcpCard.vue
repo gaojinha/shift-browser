@@ -3,6 +3,7 @@
 import { onMounted, ref } from 'vue'
 import { errText, invokeOk } from '../../utils/invoke'
 import { useToastStore } from '../../stores/toast'
+import './ui/settings-shared.css'
 
 const webmcpPolyfill = ref(false)
 async function loadWebmcpPolyfill() {
@@ -56,5 +57,5 @@ onMounted(loadWebmcpPolyfill)
 </template>
 
 <style scoped>
-.card { margin-bottom: 12px; }.card-title { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--text-primary); font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }.card-title .app-icon { color: var(--accent); }.field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }.field label { font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }.switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }.switch input { opacity: 0; width: 0; height: 0; }.slider { position: absolute; cursor: pointer; inset: 0; background: var(--bg-active); border-radius: 10px; transition: 0.2s; }.slider::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: var(--text-muted); border-radius: 50%; transition: 0.2s; }.switch input:checked + .slider { background: var(--accent); }.switch input:checked + .slider::before { transform: translateX(16px); background: #fff; }.exp-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; font-size: 10px; font-weight: 600; color: #ffb454; background: rgba(255, 180, 84, 0.14); border: 1px solid rgba(255, 180, 84, 0.35); border-radius: 999px; vertical-align: 1px; }.webmcp-hint { width: 100%; }.kw-hint { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; line-height: 1.4; }.kw-hint code { color: var(--accent); font-family: var(--font-mono, monospace); font-size: 11px; }
+/* 通用样式已收口至 ui/settings-shared.css，此处仅留文件特有样式（当前无） */
 </style>

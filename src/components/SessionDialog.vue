@@ -323,35 +323,5 @@ async function onSave() {
   min-width: 260px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
 }
-.confirm-text {
-  font-size: 13px;
-  color: var(--text-primary);
-  margin-bottom: 14px;
-  line-height: 1.6;
-}
-.confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.confirm-btn {
-  height: 30px;
-  padding: 0 14px;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  border: 1px solid var(--border-color);
-}
-.confirm-btn.cancel {
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-}
-.confirm-btn.ok {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
-}
-.confirm-btn:hover {
-  filter: brightness(1.1);
-}
+/* 通用 .confirm-text/.confirm-actions/.confirm-btn 已收口至 styles/components.css */
 </style>
