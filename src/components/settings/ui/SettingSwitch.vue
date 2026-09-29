@@ -1,21 +1,23 @@
 <script setup lang="ts">
-// 设置页公共开关：无障碍 label + focus 光圈 + 统一样式
-defineProps<{
+// 设置页公共开关：接口不变（checked + change），内核换 UiSwitch（Reka 底座）。
+// 调用方（Appearance/General）一行不用改；其余 7 处手搓 .switch 留待推广期统一收口。
+import { computed } from 'vue'
+import UiSwitch from '@/components/ui/UiSwitch.vue'
+
+const props = defineProps<{
   checked: boolean
   label: string
 }>()
 const emit = defineEmits<{
   (e: 'change', value: boolean): void
 }>()
-function onChange(e: Event) {
-  emit('change', (e.target as HTMLInputElement).checked)
-}
+
+const model = computed({
+  get: () => props.checked,
+  set: (v: boolean) => emit('change', v),
+})
 </script>
 
 <template>
-  <label class="switch">
-    <span class="sr-only">{{ label }}</span>
-    <input type="checkbox" :checked="checked" :aria-label="label" @change="onChange" />
-    <span class="slider"></span>
-  </label>
+  <UiSwitch v-model="model" :label="label" />
 </template>

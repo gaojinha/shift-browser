@@ -1,9 +1,21 @@
 <script setup lang="ts">
-// 命令栏（Ctrl+K 万能入口）——阶段 3.1 交互形态
+// 命令栏（Ctrl+K 万能入口）——阶段 3.1 交互形态 + shadcn 试点 2（Reka Combobox 底座）
 // 一个输入框统一入口：执行浏览器命令 / 切换标签 / 搜索并打开历史 / 直接打开网址 / 问 AI。
 // 注意：child webview 是 GTK 部件盖在 Vue UI 上，打开时必须隐藏所有标签 webview，否则被页面盖住。
+//
+// Reka 接管的部分：上下键高亮、回车选中、悬停高亮、高亮项自动滚入视野、无障碍 listbox 语义。
+// 自己保留的部分：多源候选计算（query 驱动，ignoreFilter）、选中派发 execute()、
+//   webview 显隐、输入框聚焦、中文输入法组字保护（isComposing 时按键不下沉到 Reka）。
 import { computed, nextTick, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import {
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxRoot,
+  ComboboxViewport,
+} from 'reka-ui'
 import { setWebviewVisible } from '../utils/webview'
 import { useTabsStore } from '../stores/tabs'
 import type { HistoryEntry } from '../types/history'
@@ -29,10 +41,8 @@ interface Item {
 }
 
 const query = ref('')
-const activeIndex = ref(0)
 const historyEntries = ref<HistoryEntry[]>([])
-const inputRef = ref<HTMLInputElement | null>(null)
-const listRef = ref<HTMLElement | null>(null)
+const inputRef = ref<InstanceType<typeof ComboboxInput> | null>(null)
 
 /** 内置命令（kind=command，value 交给 App 派发） */
 const COMMANDS: Item[] = [
@@ -124,30 +134,7 @@ const items = computed<Item[]>(() => {
   return out.slice(0, 50)
 })
 
-function scrollActiveIntoView() {
-  nextTick(() => {
-    const el = listRef.value?.querySelector<HTMLElement>('.cp-item.active')
-    el?.scrollIntoView({ block: 'nearest' })
-  })
-}
-
-function onInput() {
-  activeIndex.value = 0
-}
-
-function move(delta: number) {
-  const n = items.value.length
-  if (n === 0) return
-  activeIndex.value = (activeIndex.value + delta + n) % n
-  scrollActiveIntoView()
-}
-
-function execute(item?: Item) {
-  const it = item ?? items.value[activeIndex.value]
-  if (!it) {
-    emit('close')
-    return
-  }
+function execute(it: Item) {
   if (it.kind === 'command') emit('command', it.value)
   else if (it.kind === 'tab') tabsStore.switchTab(it.value)
   else if (it.kind === 'history' || it.kind === 'url') tabsStore.createTab(it.value)
@@ -155,26 +142,14 @@ function execute(item?: Item) {
   emit('close')
 }
 
-function onKeydown(e: KeyboardEvent) {
-  // 组字中：方向键/Enter/Esc 交给输入法候选框，不抢跑
-  if (e.isComposing) return
-  if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    e.stopPropagation()
-    move(1)
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    e.stopPropagation()
-    move(-1)
-  } else if (e.key === 'Enter') {
-    e.preventDefault()
-    e.stopPropagation()
-    execute()
-  } else if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopPropagation()
-    emit('close')
-  }
+/** 中文输入法组字中：所有按键都不下沉到 Reka，交给候选框（捕获阶段拦） */
+function guardComposing(e: KeyboardEvent) {
+  if (e.isComposing) e.stopPropagation()
+}
+
+/** 空结果回车 = 关面板（与旧版 execute() 无候选即关一致；有候选时 Reka 选中走 @select） */
+function onEnterKey() {
+  if (items.value.length === 0) emit('close')
 }
 
 async function loadHistory() {
@@ -191,11 +166,12 @@ watch(
   async (v) => {
     if (v) {
       query.value = ''
-      activeIndex.value = 0
       historyEntries.value = []
       await setWebviewVisible(false, 'command-palette')
       loadHistory()
-      nextTick(() => inputRef.value?.focus())
+      nextTick(() => {
+        ;(inputRef.value?.$el as HTMLElement | undefined)?.focus?.()
+      })
     } else {
       await setWebviewVisible(true, 'command-palette')
     }
@@ -205,39 +181,40 @@ watch(
 
 <template>
   <div v-if="show" class="cp-overlay" @mousedown.self="emit('close')">
-    <div class="cp-panel">
-      <div class="cp-input-row">
+    <!-- 命令菜单官方形态：常开 + 自过滤关闭 + 选中默认行为拦截走 execute() -->
+    <ComboboxRoot :open="true" :ignore-filter="true" model-value="" class="cp-panel">
+      <div class="cp-input-row" @keydown.capture="guardComposing">
         <span class="cp-search">⌕</span>
-        <input
+        <ComboboxInput
           ref="inputRef"
           v-model="query"
           class="cp-input"
           placeholder="输入命令、网址，或问 AI…"
           aria-label="命令面板搜索"
           spellcheck="false"
-          @input="onInput"
-          @keydown="onKeydown"
+          @keydown.enter="onEnterKey"
         />
         <span class="cp-esc">Esc</span>
       </div>
-      <div ref="listRef" class="cp-list">
-        <div v-if="items.length === 0" class="cp-empty">没有匹配项</div>
-        <div
-          v-for="(it, i) in items"
-          :key="it.key"
-          class="cp-item"
-          :class="{ active: i === activeIndex }"
-          @mousemove="activeIndex = i"
-          @click="execute(it)"
-        >
-          <span class="cp-icon">{{ it.icon }}</span>
-          <span class="cp-text">
-            <span class="cp-title">{{ it.title }}</span>
-            <span v-if="it.subtitle" class="cp-sub">{{ it.subtitle }}</span>
-          </span>
-        </div>
-      </div>
-    </div>
+      <ComboboxContent class="cp-list-wrap" @escape-key-down="emit('close')">
+        <ComboboxViewport class="cp-list">
+          <ComboboxEmpty class="cp-empty">没有匹配项</ComboboxEmpty>
+          <ComboboxItem
+            v-for="it in items"
+            :key="it.key"
+            :value="it.key"
+            class="cp-item"
+            @select.prevent="execute(it)"
+          >
+            <span class="cp-icon">{{ it.icon }}</span>
+            <span class="cp-text">
+              <span class="cp-title">{{ it.title }}</span>
+              <span v-if="it.subtitle" class="cp-sub">{{ it.subtitle }}</span>
+            </span>
+          </ComboboxItem>
+        </ComboboxViewport>
+      </ComboboxContent>
+    </ComboboxRoot>
   </div>
 </template>
 
@@ -310,6 +287,10 @@ watch(
   padding: 2px 7px;
   line-height: 1.4;
 }
+/* Reka Content 内联渲染：穿透布局，视觉与旧版一致 */
+.cp-list-wrap {
+  display: contents;
+}
 .cp-list {
   overflow-y: auto;
   padding: 6px;
@@ -332,9 +313,11 @@ watch(
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease);
 }
-.cp-item.active {
+/* 高亮态由 Reka data-highlighted 驱动（替代旧 .active 类） */
+.cp-item[data-highlighted] {
   background: var(--accent-soft);
   box-shadow: inset 0 0 0 1px var(--accent);
+  outline: none;
 }
 .cp-icon {
   width: 28px;
@@ -349,7 +332,7 @@ watch(
   border: 1px solid var(--hairline);
   border-radius: var(--radius-xs);
 }
-.cp-item.active .cp-icon {
+.cp-item[data-highlighted] .cp-icon {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
@@ -366,7 +349,7 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.cp-item.active .cp-title {
+.cp-item[data-highlighted] .cp-title {
   font-weight: 600;
 }
 .cp-sub {
