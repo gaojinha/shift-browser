@@ -16,17 +16,23 @@ import {
 } from 'reka-ui'
 import { cn } from '@/lib/utils'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     title: string
     description?: string
     /** 面板宽度，默认 min(400px, 100vw-48px) */
     width?: string
+    /** 打开时是否自动聚焦首个可聚焦元素（表单类弹窗建议 true） */
+    autoFocus?: boolean
   }>(),
-  { description: '', width: '' },
+  { description: '', width: '', autoFocus: true },
 )
 
 const open = defineModel<boolean>('open', { required: true })
+
+function onOpenAutoFocus(e: Event) {
+  if (!props.autoFocus) e.preventDefault()
+}
 </script>
 
 <template>
@@ -36,11 +42,16 @@ const open = defineModel<boolean>('open', { required: true })
       <DialogContent
         :class="cn('ui-dialog')"
         :style="width ? { width } : undefined"
-        @open-auto-focus.prevent
+        @open-auto-focus="onOpenAutoFocus"
       >
         <div class="ui-dialog-header">
           <DialogTitle class="ui-dialog-title">{{ title }}</DialogTitle>
-          <DialogClose class="close-btn" aria-label="关闭">×</DialogClose>
+          <div class="ui-dialog-header-right">
+            <div v-if="$slots.actions" class="ui-dialog-actions">
+              <slot name="actions" />
+            </div>
+            <DialogClose class="close-btn" aria-label="关闭">×</DialogClose>
+          </div>
         </div>
         <DialogDescription v-if="description" class="ui-dialog-desc">
           {{ description }}
@@ -90,7 +101,19 @@ const open = defineModel<boolean>('open', { required: true })
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   margin-bottom: 10px;
+}
+.ui-dialog-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.ui-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .ui-dialog-title {
   margin: 0;

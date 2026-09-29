@@ -9,10 +9,19 @@ import { useBookmarksStore } from '../stores/bookmarks'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
 import { useConfirmDelete } from '../composables/useConfirmDelete'
+import UiDialog from './ui/UiDialog.vue'
 import type { Bookmark } from '../types/bookmark'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+/** 外层显隐（UiDialog 双向绑定：关即 emit close） */
+const showModel = computed({
+  get: () => props.show,
+  set: (v: boolean) => {
+    if (!v) emit('close')
+  },
+})
 
 const bookmarksStore = useBookmarksStore()
 const tabsStore = useTabsStore()
@@ -91,6 +100,13 @@ async function onDelete(b: Bookmark) {
 
 // 编辑
 const editTarget = ref<Bookmark | null>(null)
+/** 编辑弹窗显隐（对象转布尔，关即清空） */
+const editModel = computed({
+  get: () => editTarget.value !== null,
+  set: (v: boolean) => {
+    if (!v) editTarget.value = null
+  },
+})
 const editForm = ref({ title: '', url: '', folderId: 'none' })
 function onEdit(b: Bookmark) {
   editTarget.value = b
@@ -211,20 +227,17 @@ async function onExport() {
 </script>
 
 <template>
-  <Transition name="fade">
-    <div v-if="show" class="dialog-overlay" @click.self="emit('close')">
-      <div class="dialog bm-dialog">
-        <div class="dialog-header">
-          <span>书签管理器</span>
-          <div class="header-actions">
-            <button class="h-btn" title="导入书签（Chrome/Firefox 导出的 HTML）" @click="onImport">📥 导入</button>
-            <button class="h-btn" title="导出为 Netscape HTML 到下载目录" @click="onExport">📤 导出</button>
-            <button class="h-btn accent" @click="onAdd">＋ 添加书签</button>
-            <button class="h-btn" @click="onNewFolder">📁 新建文件夹</button>
-            <button class="close-btn" aria-label="关闭" @click="emit('close')">×</button>
-          </div>
-        </div>
-        <div class="dialog-body bm-body">
+  <!-- 书签管理器：外层 UiDialog（680px 宽，动作组进 header-actions 槽） -->
+  <UiDialog v-model:open="showModel" title="书签管理器" width="min(680px, calc(100vw - 48px))">
+    <template #actions>
+      <div class="header-actions">
+        <button class="h-btn" title="导入书签（Chrome/Firefox 导出的 HTML）" @click="onImport">📥 导入</button>
+        <button class="h-btn" title="导出为 Netscape HTML 到下载目录" @click="onExport">📤 导出</button>
+        <button class="h-btn accent" @click="onAdd">＋ 添加书签</button>
+        <button class="h-btn" @click="onNewFolder">📁 新建文件夹</button>
+      </div>
+    </template>
+    <div class="bm-body">
           <div class="bm-toolbar">
             <input
               v-model="query"
@@ -273,16 +286,10 @@ async function onExport() {
             </div>
           </div>
         </div>
-      </div>
+  </UiDialog>
 
       <!-- 编辑弹窗 -->
-      <div v-if="editTarget" class="dialog-overlay inner" @click.self="editTarget = null">
-        <div class="dialog bm-edit-dialog">
-          <div class="dialog-header">
-            <span>编辑书签</span>
-            <button class="close-btn" aria-label="关闭" @click="editTarget = null">×</button>
-          </div>
-          <div class="dialog-body">
+      <UiDialog v-model:open="editModel" title="编辑书签" width="min(360px, calc(100vw - 32px))">
             <label class="bm-field">
               <span>标题</span>
               <input v-model="editForm.title" type="text" spellcheck="false" />
@@ -302,18 +309,10 @@ async function onExport() {
               <button class="bm-cancel" @click="editTarget = null">取消</button>
               <button class="bm-save" @click="onSaveEdit">保存</button>
             </div>
-          </div>
-        </div>
-      </div>
+  </UiDialog>
 
       <!-- 添加弹窗 -->
-      <div v-if="addOpen" class="dialog-overlay inner" @click.self="addOpen = false">
-        <div class="dialog bm-edit-dialog">
-          <div class="dialog-header">
-            <span>添加书签</span>
-            <button class="close-btn" aria-label="关闭" @click="addOpen = false">×</button>
-          </div>
-          <div class="dialog-body">
+      <UiDialog v-model:open="addOpen" title="添加书签" width="min(360px, calc(100vw - 32px))">
             <label class="bm-field">
               <span>标题</span>
               <input v-model="addForm.title" type="text" spellcheck="false" placeholder="书签标题" />
@@ -333,18 +332,14 @@ async function onExport() {
               <button class="bm-cancel" @click="addOpen = false">取消</button>
               <button class="bm-save" @click="onSaveAdd">添加</button>
             </div>
-          </div>
-        </div>
-      </div>
+  </UiDialog>
 
       <!-- 删除文件夹确认弹窗 -->
-      <div v-if="showFolderConfirm" class="dialog-overlay inner" @click.self="showFolderConfirm = false">
-        <div class="dialog bm-edit-dialog">
-          <div class="dialog-header">
-            <span>删除文件夹</span>
-            <button class="close-btn" aria-label="关闭" @click="showFolderConfirm = false">×</button>
-          </div>
-          <div class="dialog-body">
+      <UiDialog
+        v-model:open="showFolderConfirm"
+        title="删除文件夹"
+        width="min(360px, calc(100vw - 32px))"
+      >
             <div class="bm-confirm-text">
               确定删除文件夹「{{ folderDeleteTarget?.name }}」？
               <br />其中的 {{ folderDeleteTarget ? folderCount(folderDeleteTarget.id) : 0 }} 个书签和子文件夹将一并删除，此操作不可恢复。
@@ -353,23 +348,12 @@ async function onExport() {
               <button class="bm-cancel" @click="showFolderConfirm = false">取消</button>
               <button class="bm-save danger" @click="doDeleteFolder">删除</button>
             </div>
-          </div>
-        </div>
-      </div>
-
-      </div>
-  </Transition>
+  </UiDialog>
 </template>
 
 <style scoped>
-/* 弹窗基础样式走全局（App.vue 的 .dialog-overlay/.dialog/.dialog-header/.dialog-body），
-   这里只保留宽度差异 + 书签管理器专属元素，全部用主题 CSS 变量（深/浅色主题通用） */
-.dialog-overlay.inner {
-  z-index: 1100;
-}
-.bm-dialog {
-  width: min(680px, calc(100vw - 48px));
-}
+/* 弹窗基础样式走 UiDialog（Reka 底座），
+   这里只保留书签管理器专属元素，全部用主题 CSS 变量（深/浅色主题通用） */
 .header-actions {
   display: flex;
   align-items: center;
@@ -566,9 +550,6 @@ async function onExport() {
 .op-btn.danger.armed {
   color: var(--danger);
   font-weight: 700;
-}
-.bm-edit-dialog {
-  width: min(360px, calc(100vw - 32px));
 }
 .bm-field {
   display: flex;
