@@ -82,19 +82,9 @@
   } catch (e) {}
 
   try {
-    // ---- scheduler（最小可用桩：yield/postTask 走微任务，语义不骗人）----
-    if (!window.scheduler) {
-      var scheduler = {
-        yield: function () {
-          return Promise.resolve();
-        },
-        postTask: function (cb) {
-          return Promise.resolve().then(function () {
-            return typeof cb === 'function' ? cb() : undefined;
-          });
-        },
-      };
-      def(window, 'scheduler', scheduler);
-    }
+    // ---- scheduler（2026-09-29 禁用：最小桩语义不完整，GitHub React 重度依赖
+    // 任务调度，桩导致主线程卡死 ANR。userAgentData/deviceMemory 保留。
+    // 如需恢复，需实现完整 TaskController/signal/优先级语义后再开。----
+    void 0;
   } catch (e) {}
 })();
