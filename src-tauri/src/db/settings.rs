@@ -143,7 +143,18 @@ pub async fn set_setting(db: tauri::State<'_, Db>, key: String, value: String) -
     .await?;
     // 性能 P0：同步更新缓存，保持一致性
     crate::db::settings_cache::update(&key, &value);
+    // 开发者工具开关即时生效（免重启）：新开 webview 创建时读静态值，已开标签关掉重开即可
+    sync_devtools_static(&key, &value);
     Ok(())
+}
+
+/// 开关类运行期静态同步：目前仅开发者工具（enable_devtools）需要。
+/// 落库成功后调用——失败/回滚路径不调，静态与库永不分叉。
+fn sync_devtools_static(key: &str, value: &str) {
+    if key == "enable_devtools" {
+        crate::engine::webview::DEVTOOLS_ENABLED
+            .store(value == "true", std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// 校验键是否允许前端删除（敏感键 + 白名单双重把关）
@@ -216,6 +227,7 @@ async fn set_settings_bulk_inner(db: &Db, settings: Vec<Setting>) -> DbResult<()
     // 性能 P0：commit 成功后统一同步缓存（避免回滚时缓存与库不一致）
     for (key, value) in cache_updates {
         crate::db::settings_cache::update(&key, &value);
+        sync_devtools_static(&key, &value);
     }
     Ok(())
 }
