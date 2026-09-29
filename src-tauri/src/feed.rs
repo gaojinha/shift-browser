@@ -55,6 +55,10 @@ async fn pinned_client_for(url: &str) -> Result<reqwest::Client, String> {
         .timeout(std::time::Duration::from_secs(
             crate::contracts::timeout::FEED_FETCH_SECS,
         ))
+        // 建连上限（单边地址族卡住时快速让路给另一族，见 contracts::timeout::CONNECT_TIMEOUT_SECS）
+        .connect_timeout(std::time::Duration::from_secs(
+            crate::contracts::timeout::CONNECT_TIMEOUT_SECS,
+        ))
         .user_agent(format!(
             "ShiftBrowser/{} (RSS reader)",
             env!("CARGO_PKG_VERSION")

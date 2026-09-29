@@ -161,7 +161,10 @@ fn client(creds: &Credentials) -> Result<reqwest::Client, AppError> {
     }
     reqwest::Client::builder()
         .default_headers(headers)
-        .connect_timeout(Duration::from_secs(5))
+        // 建连上限走 contracts 单源（原 5s 字面量收口，值不变）
+        .connect_timeout(Duration::from_secs(
+            crate::contracts::timeout::CONNECT_TIMEOUT_SECS,
+        ))
         .build()
         .map_err(|e| AppError::net(format!("opencode 客户端初始化失败：{e}")))
 }

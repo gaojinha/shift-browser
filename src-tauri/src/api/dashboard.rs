@@ -188,7 +188,12 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
                 .gateway_error_json();
         }
     };
-    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(120));
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        // 建连上限（单边地址族卡住时快速让路给另一族，见 contracts::timeout::CONNECT_TIMEOUT_SECS）
+        .connect_timeout(std::time::Duration::from_secs(
+            crate::contracts::timeout::CONNECT_TIMEOUT_SECS,
+        ));
     if let Some(addrs) = &pinned {
         builder = builder.resolve_to_addrs(&resolve_key, addrs);
     }

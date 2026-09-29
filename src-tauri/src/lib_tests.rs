@@ -247,6 +247,13 @@ mod tests {
         for (k, _) in crate::contracts::timeout::ALL {
             assert!(text.contains(k), "constants.ts 缺超时键 {k}");
         }
+        // 建连上限：后端专用（不进前端 ALL），取值必须收敛在合理区间——
+        // 太小内网/弱网误杀，太大则单边地址族卡住时吃光整单总超时（2026-09-29 双栈复盘）
+        let ct = crate::contracts::timeout::CONNECT_TIMEOUT_SECS;
+        assert!(
+            (1..=15).contains(&ct),
+            "CONNECT_TIMEOUT_SECS={ct} 超出合理区间 1..=15"
+        );
         // 快捷键：前端组合键串必须出现
         for (_, v) in crate::contracts::shortcuts::ALL {
             assert!(text.contains(v), "constants.ts 缺快捷键 {v}");

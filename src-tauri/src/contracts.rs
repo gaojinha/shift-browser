@@ -223,6 +223,10 @@ pub mod limits {
 
 /// 超时 / 间隔（语义命名，杜绝"6 秒是什么？"的裸数字——改前先看名字）
 pub mod timeout {
+    /// TCP/TLS 建连上限（后端专用，不进前端契约：前端无对应消费，硬塞 ALL 反而制造漂移）。
+    /// 5 秒与 webqa.rs 既有 `connect_timeout(5s)` 同源统一：单边地址族（常见为 IPv6）
+    /// 卡住时快速失败，把机会让给另一地址族（hyper 双栈回退），而不是吃光整单总超时。
+    pub const CONNECT_TIMEOUT_SECS: u64 = 5;
     /// webview IPC 往返等待（采集页面内容 / 执行动作）
     pub const WEBVIEW_IPC_SECS: u64 = 6;
     /// webview 就绪等待

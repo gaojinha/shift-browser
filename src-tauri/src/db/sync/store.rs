@@ -135,6 +135,10 @@ pub(super) fn http_client() -> DbResult<reqwest::Client> {
         .timeout(std::time::Duration::from_secs(
             crate::contracts::timeout::SYNC_REQUEST_SECS,
         ))
+        // 建连上限（单边地址族卡住时快速让路给另一族，见 contracts::timeout::CONNECT_TIMEOUT_SECS）
+        .connect_timeout(std::time::Duration::from_secs(
+            crate::contracts::timeout::CONNECT_TIMEOUT_SECS,
+        ))
         .user_agent(format!(
             "ShiftBrowser/{} (E2E sync)",
             env!("CARGO_PKG_VERSION")

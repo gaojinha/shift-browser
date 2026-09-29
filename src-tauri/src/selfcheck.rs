@@ -68,6 +68,49 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// 解析 /proc/net/if_inet6 文本，返回（全局单播地址数，总地址数）。
+/// 行格式：32位hex地址 + 接口索引hex + 前缀长hex + 范围scope hex + 标志hex + 网卡名。
+/// scope 0x00=全局，0x10=本机回环(::1)、0x20=链路本地(fe80::/10)，只数全局。
+fn parse_if_inet6(text: &str) -> (usize, usize) {
+    let mut global = 0usize;
+    let mut total = 0usize;
+    for line in text.lines() {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() < 6 {
+            continue;
+        }
+        if f[0].len() != 32 || !f[0].chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        total += 1;
+        if u8::from_str_radix(f[3], 16).unwrap_or(0xff) == 0x00 {
+            global += 1;
+        }
+    }
+    (global, total)
+}
+
+/// IPv6 本地栈自检项（建议性，永不报 bad、不影响 healthy）。
+#[cfg(target_os = "linux")]
+fn ipv6_stack_item() -> CheckItem {
+    match std::fs::read_to_string("/proc/net/if_inet6") {
+        Ok(text) => {
+            let (global, _) = parse_if_inet6(&text);
+            if global > 0 {
+                CheckItem::ok("IPv6", format!("就绪（全局地址 {} 个）", global))
+            } else {
+                CheckItem::ok("IPv6", "本机无全局地址，出网走 IPv4".to_string())
+            }
+        }
+        Err(_) => CheckItem::ok("IPv6", "未启用（出网走 IPv4）".to_string()),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ipv6_stack_item() -> CheckItem {
+    CheckItem::ok("IPv6", "当前平台不探测".to_string())
+}
+
 /// 版本与环境信息
 fn check_versions(app: &tauri::AppHandle) -> Vec<CheckItem> {
     let mut items = Vec::new();
@@ -94,6 +137,12 @@ fn check_versions(app: &tauri::AppHandle) -> Vec<CheckItem> {
         "操作系统",
         format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
     ));
+
+    // IPv6 本地栈（2026-09-29 丁钉后台 web.js 加载失败复盘：单边地址族卡住是常因）。
+    // 纯本地读取（/proc，不出网、零遥测），只报事实：本机有无全局 IPv6 地址。
+    // 建议性，不影响 healthy——无 v6 时出网走 IPv4 本就是正道；有 v6 但远端抖动时，
+    // 建连上限（contracts::timeout::CONNECT_TIMEOUT_SECS）负责快速切换地址族。
+    items.push(ipv6_stack_item());
 
     // 应用数据目录（权限/路径问题排查）
     match app.path().app_data_dir() {
@@ -320,5 +369,23 @@ mod tests {
         assert_eq!(a.name, "x");
         let b = CheckItem::bad("y", "坏了");
         assert!(!b.ok);
+    }
+
+    #[test]
+    fn parse_if_inet6_counts_global_only() {
+        // 回环(::1 scope 10) + 链路本地(fe80 scope 20) + 全局(2001 scope 00)各一
+        let text = "00000000000000000000000000000001 01 80 10 80 lo\n\
+                    fe800000000000000000000000000001 02 40 20 80 eth0\n\
+                    240887260000001d0003000000000011 02 40 00 00 eth0\n";
+        assert_eq!(super::parse_if_inet6(text), (1, 3));
+        // 残行/非法行跳过不计数
+        assert_eq!(super::parse_if_inet6("garbage line\n\n"), (0, 0));
+        assert_eq!(super::parse_if_inet6(""), (0, 0));
+    }
+
+    #[test]
+    fn ipv6_probe_never_fails_health() {
+        // 建议性探针：任何情况下不得报 bad（healthy 语义不受影响）
+        assert!(super::ipv6_stack_item().ok);
     }
 }

@@ -173,9 +173,14 @@ pub(crate) async fn agnes_chat_impl(
         .map_err(|e| classify_pin_error(&e))?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
-    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(
-        req.timeout_secs.unwrap_or(90),
-    ));
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            req.timeout_secs.unwrap_or(90),
+        ))
+        // 建连上限（单边地址族卡住时快速让路给另一族，见 contracts::timeout::CONNECT_TIMEOUT_SECS）
+        .connect_timeout(std::time::Duration::from_secs(
+            crate::contracts::timeout::CONNECT_TIMEOUT_SECS,
+        ));
     if let Some(addrs) = &pinned {
         builder = builder.resolve_to_addrs(&resolve_key, addrs);
     }
@@ -242,9 +247,14 @@ where
         .map_err(|e| classify_pin_error(&e))?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
-    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(
-        req.timeout_secs.unwrap_or(120),
-    ));
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            req.timeout_secs.unwrap_or(120),
+        ))
+        // 建连上限（单边地址族卡住时快速让路给另一族，见 contracts::timeout::CONNECT_TIMEOUT_SECS）
+        .connect_timeout(std::time::Duration::from_secs(
+            crate::contracts::timeout::CONNECT_TIMEOUT_SECS,
+        ));
     if let Some(addrs) = &pinned {
         builder = builder.resolve_to_addrs(&resolve_key, addrs);
     }

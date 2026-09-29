@@ -30,6 +30,10 @@ fn client() -> &'static Client {
             .timeout(std::time::Duration::from_secs(
                 crate::contracts::timeout::TRANSLATE_SECS,
             ))
+            // 建连上限（单边地址族卡住时快速让路给另一族，见 contracts::timeout::CONNECT_TIMEOUT_SECS）
+            .connect_timeout(std::time::Duration::from_secs(
+                crate::contracts::timeout::CONNECT_TIMEOUT_SECS,
+            ))
             .build()
             .unwrap_or_else(|e| {
                 log::error!(

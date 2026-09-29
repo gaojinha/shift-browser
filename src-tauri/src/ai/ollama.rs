@@ -62,6 +62,10 @@ struct ChatStreamDelta {
 fn client(timeout_secs: u64) -> Result<reqwest::Client, AiError> {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))
+        // 建连上限（回环地址瞬连，此处仅为全仓统一口径，见 contracts::timeout::CONNECT_TIMEOUT_SECS）
+        .connect_timeout(std::time::Duration::from_secs(
+            crate::contracts::timeout::CONNECT_TIMEOUT_SECS,
+        ))
         .build()
         .map_err(|e| AiError::Internal(format!("HTTP 客户端创建失败: {}", e)))
 }

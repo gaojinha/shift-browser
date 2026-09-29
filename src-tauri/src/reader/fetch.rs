@@ -63,6 +63,8 @@ fn fetch_and_extract(url: &str) -> Result<readability::extractor::Product, Strin
 /// 用系统 curl 抓取，手动跟随重定向并逐跳 SSRF 校验
 pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<String, String> {
     let mut cur = url.to_string();
+    // 建连上限走 contracts 单源：单边地址族卡住时快速失败换下一 --resolve 地址
+    let connect_to = crate::contracts::timeout::CONNECT_TIMEOUT_SECS.to_string();
     for _ in 0..5 {
         // P0-6：每一跳（含上一跳 Location）都先解析+校验并生成 --resolve pin。
         // curl 建连只能连本次解析出且校验为公网的地址，不再自行二次解析，
@@ -80,6 +82,7 @@ pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<S
             "-w",
             "%{http_code} %{redirect_url}",
         ]);
+        cmd.arg("--connect-timeout").arg(&connect_to);
         for p in &pins {
             cmd.args(["--resolve", p]);
         }
@@ -103,6 +106,7 @@ pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<S
         // 2xx：拿正文（同一 host，沿用同一 pin 集合）
         let mut cmd2 = std::process::Command::new("curl");
         cmd2.args(["-s", "--compressed", "--max-time", "20"]);
+        cmd2.arg("--connect-timeout").arg(&connect_to);
         for p in &pins {
             cmd2.args(["--resolve", p]);
         }
