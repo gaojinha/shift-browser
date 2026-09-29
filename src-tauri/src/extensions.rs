@@ -425,7 +425,12 @@ pub async fn inject_to_webview(app: &AppHandle, label: &str) {
         // Chrome 指纹补齐也要补（首屏三条路：UserScript 赶不上当次导航、
         // re_inject 即时 eval 时 document 常未就绪，只有这里 document 必就绪）。
         if compat_on {
-            crate::engine::webview::eval_js(&webview, COMPAT_CHROME_JS);
+            crate::engine::webview::eval_js_with(&webview, COMPAT_CHROME_JS, |r| match r {
+                Ok(_) => {
+                    log::info!("[extensions] 指纹补齐注入成功");
+                }
+                Err(e) => log::info!("[extensions] 指纹补齐注入失败: {}", e),
+            });
         }
         // 诊断探针：确认翻译菜单脚本是否真的在页面里执行了
         crate::engine::webview::eval_js_with(
