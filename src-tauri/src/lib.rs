@@ -289,6 +289,7 @@ pub fn run() {
             tabs::commands::get_tabs_version,
             tabs::commands::create_tabs_batch,
             tabs::commands::set_webview_visible,
+            tabs::commands::page_backdrop_shot,
             tabs::commands::update_tab,
             tabs::commands::reload_tab,
             tabs::commands::reorder_tabs,

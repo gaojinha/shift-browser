@@ -237,6 +237,79 @@ pub async fn open_devtools(
     Ok(())
 }
 
+/// 活动标签可见区快照（data URL，前端菜单底垫用）。
+///
+/// 背景：HTML 下拉菜单盖不住原生标签 webview，弹菜单必须先隐藏 webview，
+/// 露出来的内容区兜底是深蓝渐变（整屏纯蓝既吓人又像坏了）。前端在隐藏瞬间调
+/// 本命令抓一张快照垫在底下，菜单关即撤——失败静默（无底垫=老样子），绝不挡菜单。
+/// 与开放 API `screenshot`（落盘 PNG）不同：本命令只走内存、不落盘、不治理配额。
+#[tauri::command]
+pub async fn page_backdrop_shot(
+    app: AppHandle,
+    state: tauri::State<'_, TabManager>,
+) -> CommandResult<String> {
+    let active = state
+        .read_state()
+        .active_id
+        .clone()
+        .ok_or_else(|| AppError::validation("当前没有活动标签"))?;
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| AppError::internal("主窗口不存在"))?;
+    let label = format!("tab-{}", active);
+    let wv = window
+        .get_webview(&label)
+        .ok_or_else(|| AppError::internal("活动标签的 webview 不存在"))?;
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<Vec<u8>, String>>();
+    let dispatched = wv.with_webview(move |pwv| {
+        use webkit2gtk::WebViewExt;
+        let gtk_wv = pwv.inner().clone();
+        // GTK 对象非 Send → GTK 主上下文里跑，结果经 oneshot 回传（与 shot.rs 同模式）
+        gtk::glib::MainContext::default().spawn_local(async move {
+            let res = match gtk_wv
+                .snapshot_future(
+                    webkit2gtk::SnapshotRegion::Visible,
+                    webkit2gtk::SnapshotOptions::NONE,
+                )
+                .await
+            {
+                Ok(surface) => {
+                    let mut buf = Vec::new();
+                    surface
+                        .write_to_png(&mut buf)
+                        .map_err(|e| format!("编码 PNG 失败: {}", e))
+                        .map(|_| buf)
+                }
+                Err(e) => Err(format!("截图失败: {}", e)),
+            };
+            let _ = tx.send(res);
+        });
+    });
+    if dispatched.is_err() {
+        return Err(AppError::internal("截图调度失败").into());
+    }
+    let png = match tokio::time::timeout(
+        std::time::Duration::from_secs(crate::contracts::timeout::WEBVIEW_IPC_SECS),
+        rx,
+    )
+    .await
+    {
+        Ok(Ok(Ok(bytes))) => bytes,
+        Ok(Ok(Err(e))) => return Err(AppError::internal(e).into()),
+        _ => return Err(AppError::timeout("快照超时").into()),
+    };
+    Ok(png_data_url(&png))
+}
+
+/// PNG 字节 → `data:image/png;base64,…`（纯函数，供单测锁定前缀与可逆性）。
+fn png_data_url(png: &[u8]) -> String {
+    use base64::Engine as _;
+    format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png)
+    )
+}
+
 /// 固定/取消固定标签（原版 tab-pin IPC）
 
 #[tauri::command]
@@ -288,4 +361,23 @@ pub async fn start_drag_window(app: AppHandle) -> CommandResult<()> {
     window
         .start_dragging()
         .map_err(|e| AppError::internal(e.to_string()).into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// data URL 前缀与 base64 可逆性（前端直接当背景图用，前缀错则整张底垫失效）。
+    #[test]
+    fn png_data_url_roundtrip() {
+        // 最小 PNG（1x1，8 字节签名 + IHDR，随手造的合法头即可，只验编解码）
+        let png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02];
+        let url = png_data_url(&png);
+        assert!(url.starts_with("data:image/png;base64,"), "缺 data URL 前缀");
+        use base64::Engine as _;
+        let back = base64::engine::general_purpose::STANDARD
+            .decode(url.trim_start_matches("data:image/png;base64,"))
+            .expect("base64 必须可解");
+        assert_eq!(back, png, "base64 往返必须一致");
+    }
 }

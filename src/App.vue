@@ -34,10 +34,12 @@ import { useSettingsStore } from './stores/settings'
 import { useWorkspacesStore } from './stores/workspaces'
 import { useAIStore } from './stores/ai'
 import { useToastStore } from './stores/toast'
+import { useBackdropStore } from './stores/backdrop'
 // 布局常量单一来源（build.rs 由 src-tauri/src/constants.rs 生成）→ 注入 CSS 变量
 import { EVENTS, LAYOUT, SHORTCUTS } from './constants'
 
 const tabsStore = useTabsStore()
+const backdropStore = useBackdropStore()
 const groupsStore = useGroupsStore()
 const settingsStore = useSettingsStore()
 const workspacesStore = useWorkspacesStore()
@@ -712,7 +714,14 @@ watch(
         />
         <BookmarksBar v-if="settingsStore.showBookmarksBar" @open-manager="showBookmarks = true" />
         <!-- 内容区：webview 由 Rust 按内容区几何盖住此区域（top 随书签栏/垂直标签变化） -->
-        <div class="content-area" id="contentArea"></div>
+        <!-- 菜单底垫：弹菜单隐藏 webview 时垫一张当前页快照，不露深蓝兜底 -->
+        <div class="content-area" id="contentArea">
+          <div
+            v-if="backdropStore.image"
+            class="page-backdrop"
+            :style="{ backgroundImage: `url(${backdropStore.image})` }"
+          ></div>
+        </div>
         <StatusBar
           @open-downloads="showDownloads = true"
           @open-settings="openSettings()"
@@ -776,6 +785,14 @@ watch(
   flex: 1;
   position: relative;
   background: var(--bg-app);
+}
+/* 菜单底垫：当前页快照铺满内容区（快照尺寸=隐藏瞬间的内容区尺寸） */
+.page-backdrop {
+  position: absolute;
+  inset: 0;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  pointer-events: none;
 }
 </style>
 
