@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::{json, Value};
 use sqlx::sqlite::SqlitePool;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 use super::McpServerRow;
@@ -31,30 +31,44 @@ pub(super) struct McpConnection {
     server_name: String,
 }
 
-/// 带单行上限的 stdout 读取（`read_until` + 长度检查）：
+/// 带单行上限的 stdout 读取（逐块累积，不会先分配整行）：
 /// - 返回 `Ok(None)` 表示 EOF（进程已退出）；
 /// - 单行（含换行符）超过 `MCP_MAX_LINE_BYTES` 直接报错，不再缓冲。
-async fn read_line_limited(
-    reader: &mut BufReader<tokio::process::ChildStdout>,
+async fn read_line_limited<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    max_bytes: usize,
 ) -> Result<Option<String>, String> {
     let mut buf: Vec<u8> = Vec::new();
-    let n = reader
-        .read_until(b'\n', &mut buf)
-        .await
-        .map_err(|e| format!("MCP 读取失败: {}", e))?;
-    if n == 0 {
-        return Ok(None);
+    loop {
+        let available = reader
+            .fill_buf()
+            .await
+            .map_err(|e| format!("MCP 读取失败: {}", e))?;
+        if available.is_empty() {
+            if buf.is_empty() {
+                return Ok(None);
+            }
+            return String::from_utf8(buf)
+                .map(Some)
+                .map_err(|e| format!("MCP 响应非 UTF-8: {}", e));
+        }
+
+        let count = available
+            .iter()
+            .position(|b| *b == b'\n')
+            .map_or(available.len(), |i| i + 1);
+        if buf.len().saturating_add(count) > max_bytes {
+            return Err(format!("MCP 单行响应超限（上限 {} 字节）", max_bytes));
+        }
+        let has_newline = available[count - 1] == b'\n';
+        buf.extend_from_slice(&available[..count]);
+        reader.consume(count);
+        if has_newline {
+            return String::from_utf8(buf)
+                .map(Some)
+                .map_err(|e| format!("MCP 响应非 UTF-8: {}", e));
+        }
     }
-    if buf.len() > crate::contracts::limits::MCP_MAX_LINE_BYTES {
-        return Err(format!(
-            "MCP 单行响应超限（{} 字节，上限 {} 字节）",
-            buf.len(),
-            crate::contracts::limits::MCP_MAX_LINE_BYTES
-        ));
-    }
-    String::from_utf8(buf)
-        .map(Some)
-        .map_err(|e| format!("MCP 响应非 UTF-8: {}", e))
 }
 
 impl McpConnection {
@@ -117,21 +131,34 @@ impl McpConnection {
             }
             // 单行读取 timeout：server 不发换行时不等死，到时即报错释放连接锁，
             // 后续同一 server 的调用不再排队卡住
-            let line = tokio::time::timeout(
+            let line_result = tokio::time::timeout(
                 std::time::Duration::from_secs(crate::contracts::timeout::MCP_REQUEST_SECS),
-                read_line_limited(&mut self.stdout),
+                read_line_limited(
+                    &mut self.stdout,
+                    crate::contracts::limits::MCP_MAX_LINE_BYTES,
+                ),
             )
-            .await
-            .map_err(|_| {
-                format!(
-                    "MCP server '{}' 读取超时（{}s）：{}",
-                    self.server_name,
-                    crate::contracts::timeout::MCP_REQUEST_SECS,
-                    method
-                )
-            })?
-            .map_err(|e| format!("MCP 读取失败: {}", e))?
-            .ok_or_else(|| format!("MCP server '{}' 进程已退出", self.server_name))?;
+            .await;
+            let line = match line_result {
+                Err(_) => {
+                    let error = format!(
+                        "MCP server '{}' 读取超时（{}s）：{}",
+                        self.server_name,
+                        crate::contracts::timeout::MCP_REQUEST_SECS,
+                        method
+                    );
+                    self.kill().await;
+                    return Err(error);
+                }
+                Ok(Err(error)) => {
+                    self.kill().await;
+                    return Err(error);
+                }
+                Ok(Ok(None)) => {
+                    return Err(format!("MCP server '{}' 进程已退出", self.server_name));
+                }
+                Ok(Ok(Some(line))) => line,
+            };
             if line.trim().is_empty() {
                 continue;
             }
@@ -160,8 +187,7 @@ pub(super) fn connections() -> &'static Mutex<HashMap<i64, Arc<tokio::sync::Mute
 /// 首次连接串行锁（per-server）：`connect` 的缓存检查与插入之间隔着异步握手，
 /// 并发请求会各自 spawn 子进程（最后只留一个，白白浪费进程）。同一 server 的首次
 /// 连接在此排队，不同 server 互不阻塞。锁本身无状态，server 删除后残留条目可接受。
-static CONNECT_LOCKS: OnceLock<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>> =
-    OnceLock::new();
+static CONNECT_LOCKS: OnceLock<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
 
 pub(super) fn connect_lock(server_id: i64) -> Arc<tokio::sync::Mutex<()>> {
     let mut map = CONNECT_LOCKS
@@ -249,12 +275,11 @@ pub(super) async fn connect(
 
     // 握手期间可能被删除/禁用：insert 前查 DB 确认仍存在且启用，否则 kill 丢弃，
     // 不留已删除 server 的活动连接（与 remove/set_enabled 的拿锁删除配合）
-    let enabled: Option<i64> =
-        sqlx::query_scalar("SELECT enabled FROM mcp_servers WHERE id = ?")
-            .bind(row.id)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| format!("MCP server 状态复核失败: {}", e))?;
+    let enabled: Option<i64> = sqlx::query_scalar("SELECT enabled FROM mcp_servers WHERE id = ?")
+        .bind(row.id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("MCP server 状态复核失败: {}", e))?;
     if enabled != Some(1) {
         conn.kill().await;
         return Err(format!(
@@ -266,4 +291,31 @@ pub(super) async fn connect(
     let conn = Arc::new(tokio::sync::Mutex::new(conn));
     connections().lock().unwrap().insert(row.id, conn.clone());
     Ok(conn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_line_limited;
+    use tokio::io::BufReader;
+
+    #[tokio::test]
+    async fn limited_line_reader_accepts_boundary_and_eof() {
+        let mut reader = BufReader::new(std::io::Cursor::new(b"abc\nlast".to_vec()));
+        assert_eq!(
+            read_line_limited(&mut reader, 4).await.unwrap(),
+            Some("abc\n".to_string())
+        );
+        assert_eq!(
+            read_line_limited(&mut reader, 4).await.unwrap(),
+            Some("last".to_string())
+        );
+        assert_eq!(read_line_limited(&mut reader, 4).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn limited_line_reader_rejects_overlong_line() {
+        let mut reader = BufReader::new(std::io::Cursor::new(b"abcde\nnext\n".to_vec()));
+        let error = read_line_limited(&mut reader, 4).await.unwrap_err();
+        assert!(error.contains("上限 4 字节"));
+    }
 }

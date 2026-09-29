@@ -257,20 +257,75 @@ impl Db {
                     .await?;
 
             if applied.is_none() {
-                // 在事务中执行迁移
-                let mut tx = pool.begin().await?;
-                sqlx::raw_sql(sql).execute(&mut *tx).await?;
-                sqlx::query("INSERT INTO _migrations (version, name) VALUES (?, ?)")
-                    .bind(version)
-                    .bind(name)
-                    .execute(&mut *tx)
-                    .await?;
-                tx.commit().await?;
+                Self::apply_migration(pool, version, name, sql).await?;
                 log::info!("[ShiftBrowser] 迁移 v{} {} 完成", version, name);
             }
         }
 
         Ok(())
+    }
+
+    async fn apply_migration(
+        pool: &SqlitePool,
+        version: i64,
+        name: &str,
+        sql: &str,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = pool.begin().await?;
+        sqlx::raw_sql(sql).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO _migrations (version, name) VALUES (?, ?)")
+            .bind(version)
+            .bind(name)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn failed_migration_rolls_back_sql_and_version_record() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE sample (value INTEGER NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO sample (value) VALUES (1)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE _migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let result = Db::apply_migration(
+            &pool,
+            21,
+            "rollback_test",
+            "UPDATE sample SET value = 2; INSERT INTO missing_table VALUES (1);",
+        )
+        .await;
+        assert!(result.is_err());
+
+        let value: i64 = sqlx::query_scalar("SELECT value FROM sample")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let recorded: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM _migrations WHERE version = 21")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(value, 1);
+        assert_eq!(recorded, 0);
     }
 }
 

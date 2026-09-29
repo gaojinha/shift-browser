@@ -21,7 +21,7 @@ function makePage() {
 }
 
 describe('指纹补齐脚本', () => {
-  it('缺件补齐：userAgentData/deviceMemory/scheduler 出现且形状正确', () => {
+  it('缺件补齐：userAgentData/deviceMemory 出现且形状正确，scheduler 保持禁用', () => {
     const w = makePage()
     ;(w.eval as (s: string) => void)(JS)
     const nav = w.navigator as Record<string, unknown>
@@ -36,7 +36,7 @@ describe('指纹补齐脚本', () => {
     expect(uad.platform).toBe('Linux')
     expect(uad.brands.map((b) => b.brand)).toContain('Google Chrome')
     expect(nav['deviceMemory']).toBe(8)
-    expect(w['scheduler']).toBeTruthy()
+    expect(w['scheduler']).toBeUndefined()
     return (uad.getHighEntropyValues(['platform']) as Promise<Record<string, unknown>>).then(
       (he) => {
         expect(he['platform']).toBe('Linux')

@@ -4,7 +4,7 @@
 //! 每一跳都解析+校验公网并生成 --resolve pin，DNS-rebinding 无法在校验后换内网。
 //! readability::extract 为纯解析（blocking，跑在 spawn_blocking 里）。
 
-/// 抓正文超时（readability 内部 reqwest 无超时配置，外层兜底）
+/// 阅读模式网络抓取超时
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// 抓取并解析正文（带超时 + 净化）
@@ -26,61 +26,95 @@ pub(super) async fn scrape_article(url: &str) -> Result<readability::extractor::
     // 日志脱敏（2026-09-29）：只记 scheme://host，路径/query 常含搜索词/token。
     // 此前 `url.clone()` 名为 url_for_log 实为完整 URL，直接落日志。
     let url_for_log = crate::redact_url(&url);
-    let mut handle = tokio::task::spawn_blocking(move || fetch_and_extract(&url));
-    // 超时后 abort 后台任务（2026-09-29）：此前 timeout 只放弃等待，spawn_blocking
-    // 照跑不误，慢站重复触发累积后台线程+curl 子进程。abort 后 blocking 线程等当前
-    // curl --max-time（每跳 20s）退出，不无限累积。
-    let r = tokio::time::timeout(FETCH_TIMEOUT, &mut handle).await;
-    match r {
-        Ok(Ok(Ok(product))) => Ok(product),
-        Ok(Ok(Err(e))) => {
-            // 记日志便于定位（此前静默返回，用户只看到"提取不出正文"）
-            log::warn!("[reader] 抓取/提取失败: {} -> {}", url_for_log, e);
-            Err(e)
-        }
+    let html = match tokio::time::timeout(FETCH_TIMEOUT, fetch_article_html(&url)).await {
+        Ok(Ok(html)) => html,
         Ok(Err(e)) => {
-            log::warn!("[reader] 抓取线程异常: {} -> {}", url_for_log, e);
-            Err("正文提取线程异常".to_string())
+            log::warn!("[reader] 抓取/提取失败: {} -> {}", url_for_log, e);
+            return Err(e);
         }
-        Err(_) => {
-            handle.abort();
-            Err("抓取正文超时（20 秒），可能是慢站或网络问题".to_string())
-        }
-    }
+        Err(_) => return Err("抓取正文超时（20 秒），可能是慢站或网络问题".to_string()),
+    };
+    let parsed = url::Url::parse(&url).map_err(|e| format!("URL 解析失败: {}", e))?;
+    tokio::task::spawn_blocking(move || {
+        readability::extractor::extract(&mut html.as_bytes(), &parsed)
+            .map_err(|e| format!("正文提取失败: {}", e))
+    })
+    .await
+    .map_err(|e| {
+        log::warn!("[reader] 正文提取线程异常: {} -> {}", url_for_log, e);
+        "正文提取线程异常".to_string()
+    })?
+    .map_err(|e| {
+        log::warn!("[reader] 正文提取失败: {} -> {}", url_for_log, e);
+        e
+    })
 }
 
-/// 抓 HTML + readability 纯解析（blocking，必须在 spawn_blocking 里跑）
-/// 2026-09-19：改用系统 curl 抓取——reqwest/rustls 的 TLS 指纹被部分站点 WAF
-/// 识别为爬虫（understandingwar.org 等返回 403），curl/OpenSSL 指纹被主流站信任。
-/// 手动跟随重定向（最多 5 跳），每跳做 SSRF 校验，防重定向绕过。
-fn fetch_and_extract(url: &str) -> Result<readability::extractor::Product, String> {
+async fn fetch_article_html(url: &str) -> Result<String, String> {
     const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
-    // UA 按站点覆盖选（2026-09-29）：ua_for(host)，B站等配 Windows UA 过风控；
-    // 无覆盖 fallback 默认 Linux UA。useragent 内存缓存启动时载入，同步可调。
     let site_ua = url::Url::parse(url)
         .ok()
         .and_then(|u| u.host_str().map(crate::useragent::ua_for))
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| BROWSER_UA.to_string());
-    // UA 双保险：站点 UA 优先（多数站正常）；若被反爬拦（非 2xx），
-    // 回退默认 UA（个别站反着来，如 understandingwar.org 拦浏览器 UA 放行默认 UA）。
-    // 412 风控停手：风控拒绝不重试（多打一次加重风控），直接返回需浏览器验证。
-    let html = match curl_fetch_with_redirects(url, Some(site_ua.as_str())) {
-        Ok(h) => h,
-        Err(e) => {
-            if e.contains("412") {
-                return Err(format!("{}（站点风控拒绝，未重试；请在浏览器页面完成验证后读取）", e));
-            }
-            curl_fetch_with_redirects(url, None)?
-        }
-    };
-    let parsed = url::Url::parse(url).map_err(|e| format!("URL 解析失败: {}", e))?;
-    readability::extractor::extract(&mut html.as_bytes(), &parsed)
-        .map_err(|e| format!("正文提取失败: {}", e))
+    match curl_fetch_with_redirects(url, Some(site_ua.as_str())).await {
+        Ok(h) => Ok(h),
+        Err(e) if e.contains("412") => Err(format!(
+            "{}（站点风控拒绝，未重试；请在浏览器页面完成验证后读取）",
+            e
+        )),
+        Err(_) => curl_fetch_with_redirects(url, None).await,
+    }
 }
 
 /// 用系统 curl 抓取，手动跟随重定向并逐跳 SSRF 校验
-pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<String, String> {
+async fn curl_output_limited(
+    command: &mut tokio::process::Command,
+    max_bytes: usize,
+) -> Result<(std::process::ExitStatus, Vec<u8>), String> {
+    use tokio::io::AsyncReadExt;
+
+    let mut child = command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("调用 curl 失败: {}", e))?;
+    let Some(mut stdout) = child.stdout.take() else {
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+        return Err("无法读取 curl 响应".to_string());
+    };
+    let mut output = Vec::with_capacity(max_bytes.min(64 * 1024));
+    let mut chunk = [0u8; 16 * 1024];
+    loop {
+        let n = match stdout.read(&mut chunk).await {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) => {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return Err(format!("读取 curl 响应失败: {}", e));
+            }
+        };
+        if output.len().saturating_add(n) > max_bytes {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Err(format!("网页响应超过 {} 字节上限", max_bytes));
+        }
+        output.extend_from_slice(&chunk[..n]);
+    }
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("等待 curl 退出失败: {}", e))?;
+    Ok((status, output))
+}
+
+pub(crate) async fn curl_fetch_with_redirects(
+    url: &str,
+    ua: Option<&str>,
+) -> Result<String, String> {
     let mut cur = url.to_string();
     // 建连上限走 contracts 单源：单边地址族卡住时快速失败换下一 --resolve 地址
     let connect_to = crate::contracts::timeout::CONNECT_TIMEOUT_SECS.to_string();
@@ -88,9 +122,9 @@ pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<S
         // P0-6：每一跳（含上一跳 Location）都先解析+校验并生成 --resolve pin。
         // curl 建连只能连本次解析出且校验为公网的地址，不再自行二次解析，
         // DNS-rebinding 无法在校验之后把目标换成 127.0.0.1/169.254.169.254。
-        let pins = curl_pin_args(&cur)?;
+        let pins = curl_pin_args(&cur).await?;
         // 单跳探测：拿状态码 + 重定向目标（curl 不带 -L 不自动跟随）
-        let mut cmd = std::process::Command::new("curl");
+        let mut cmd = tokio::process::Command::new("curl");
         cmd.args([
             "-s",
             "--compressed",
@@ -109,8 +143,15 @@ pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<S
             cmd.args(["-A", u]);
         }
         cmd.arg(&cur);
-        let out = cmd.output().map_err(|e| format!("调用 curl 失败: {}", e))?;
-        let meta = String::from_utf8_lossy(&out.stdout);
+        let (status, stdout) = curl_output_limited(
+            &mut cmd,
+            crate::contracts::limits::READER_MAX_REDIRECT_METADATA_BYTES,
+        )
+        .await?;
+        if !status.success() {
+            return Err(format!("curl 重定向探测失败: {:?}", status.code()));
+        }
+        let meta = String::from_utf8_lossy(&stdout);
         let mut parts = meta.trim().splitn(2, ' ');
         let code: u16 = parts.next().unwrap_or("0").parse().unwrap_or(0);
         let loc = parts.next().unwrap_or("").trim().to_string();
@@ -123,7 +164,7 @@ pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<S
             return Err(format!("抓取失败: HTTP {}", code));
         }
         // 2xx：拿正文（同一 host，沿用同一 pin 集合）
-        let mut cmd2 = std::process::Command::new("curl");
+        let mut cmd2 = tokio::process::Command::new("curl");
         cmd2.args(["-s", "--compressed", "--max-time", "20"]);
         cmd2.arg("--connect-timeout").arg(&connect_to);
         for p in &pins {
@@ -133,13 +174,15 @@ pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<S
             cmd2.args(["-A", u]);
         }
         cmd2.arg(&cur);
-        let out2 = cmd2
-            .output()
-            .map_err(|e| format!("调用 curl 失败: {}", e))?;
-        if !out2.status.success() {
-            return Err(format!("抓取失败: curl 退出码 {:?}", out2.status.code()));
+        let (status, stdout) = curl_output_limited(
+            &mut cmd2,
+            crate::contracts::limits::READER_MAX_ARTICLE_BYTES,
+        )
+        .await?;
+        if !status.success() {
+            return Err(format!("抓取失败: curl 退出码 {:?}", status.code()));
         }
-        let html = String::from_utf8_lossy(&out2.stdout).to_string();
+        let html = String::from_utf8_lossy(&stdout).to_string();
         if html.is_empty() {
             return Err("抓取结果为空".to_string());
         }
@@ -153,8 +196,7 @@ pub(crate) fn curl_fetch_with_redirects(url: &str, ua: Option<&str>) -> Result<S
 /// - 域名：用系统解析器只解析这一次，任一结果落内网即整体拒绝（双答 DNS
 ///   混入 127.0.0.1/169.254.169.254 时拒绝），全部公网才返回 pin 列表；
 ///   curl 拿到 pin 后建连阶段不再二次解析，TOCTOU 闭合
-fn curl_pin_args(url: &str) -> Result<Vec<String>, String> {
-    use std::net::ToSocketAddrs;
+async fn curl_pin_args(url: &str) -> Result<Vec<String>, String> {
     let parsed = url::Url::parse(url).map_err(|_| "URL 不合法".to_string())?;
     let raw = parsed
         .host_str()
@@ -165,10 +207,14 @@ fn curl_pin_args(url: &str) -> Result<Vec<String>, String> {
         reject_private_ip(&ip)?;
         return Ok(Vec::new());
     }
-    let sock: Vec<_> = (host, port)
-        .to_socket_addrs()
-        .map_err(|e| format!("DNS 解析失败: {} ({})", host, e))?
-        .collect();
+    let sock: Vec<_> = tokio::time::timeout(
+        std::time::Duration::from_secs(crate::contracts::timeout::DNS_LOOKUP_SECS),
+        tokio::net::lookup_host((host, port)),
+    )
+    .await
+    .map_err(|_| format!("DNS 解析超时: {}", host))?
+    .map_err(|e| format!("DNS 解析失败: {} ({})", host, e))?
+    .collect();
     let addrs = crate::ai::check_resolved_ips(host, sock.iter().map(|s| s.ip()), port)?;
     Ok(addrs
         .iter()
@@ -215,7 +261,11 @@ pub(crate) async fn validate_public_url(url: &str) -> Result<(), String> {
     )
     .await
     .map_err(|_| {
-        log::warn!("[reader] DNS 解析超时（{}s）: {}", crate::contracts::timeout::DNS_LOOKUP_SECS, host);
+        log::warn!(
+            "[reader] DNS 解析超时（{}s）: {}",
+            crate::contracts::timeout::DNS_LOOKUP_SECS,
+            host
+        );
         format!("DNS 解析超时: {}", host)
     })?
     .map_err(|e| {
@@ -259,41 +309,45 @@ mod tests {
         );
     }
 
-    #[test]
-    fn curl_pin_args_rejects_internal_ip_literals() {
+    #[tokio::test]
+    async fn curl_pin_args_rejects_internal_ip_literals() {
         // 本机/元数据/IPv6 环回字面量直接拒绝
-        assert!(curl_pin_args("http://127.0.0.1:19701/").is_err());
-        assert!(curl_pin_args("https://169.254.169.254/latest/meta-data").is_err());
-        assert!(curl_pin_args("https://[::1]/").is_err());
-        assert!(curl_pin_args("https://[fe80::1]/").is_err());
+        assert!(curl_pin_args("http://127.0.0.1:19701/").await.is_err());
+        assert!(curl_pin_args("https://169.254.169.254/latest/meta-data")
+            .await
+            .is_err());
+        assert!(curl_pin_args("https://[::1]/").await.is_err());
+        assert!(curl_pin_args("https://[fe80::1]/").await.is_err());
     }
 
-    #[test]
-    fn curl_pin_args_rejects_ipv4_mapped_v6_literal() {
+    #[tokio::test]
+    async fn curl_pin_args_rejects_ipv4_mapped_v6_literal() {
         // 回归：旧 reject_private_ip 对 ::ffff:127.0.0.1 按"看似公网的 v6"误放行
-        assert!(curl_pin_args("https://[::ffff:127.0.0.1]/").is_err());
-        assert!(curl_pin_args("https://[::ffff:169.254.169.254]/").is_err());
+        assert!(curl_pin_args("https://[::ffff:127.0.0.1]/").await.is_err());
+        assert!(curl_pin_args("https://[::ffff:169.254.169.254]/")
+            .await
+            .is_err());
         assert!(
             reject_private_ip(&"::ffff:192.168.0.1".parse::<std::net::IpAddr>().unwrap()).is_err()
         );
     }
 
-    #[test]
-    fn curl_pin_args_public_ip_literal_needs_no_pin() {
+    #[tokio::test]
+    async fn curl_pin_args_public_ip_literal_needs_no_pin() {
         // 公网 IP 字面量无 DNS 面：空 pin 列表，curl 直连
         assert_eq!(
-            curl_pin_args("https://1.1.1.1/").unwrap(),
+            curl_pin_args("https://1.1.1.1/").await.unwrap(),
             Vec::<String>::new()
         );
         assert_eq!(
-            curl_pin_args("https://[2606:4700::1111]/").unwrap(),
+            curl_pin_args("https://[2606:4700::1111]/").await.unwrap(),
             Vec::<String>::new()
         );
     }
 
-    #[test]
-    fn curl_pin_args_rejects_bad_urls() {
-        assert!(curl_pin_args("not a url").is_err());
-        assert!(curl_pin_args("file:///etc/passwd").is_err());
+    #[tokio::test]
+    async fn curl_pin_args_rejects_bad_urls() {
+        assert!(curl_pin_args("not a url").await.is_err());
+        assert!(curl_pin_args("file:///etc/passwd").await.is_err());
     }
 }

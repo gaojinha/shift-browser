@@ -212,9 +212,7 @@ pub mod urls {
     /// 单一判定口径：uri-notify、page_load、历史记录三处共用。
     pub fn is_pseudo_page(u: &str) -> bool {
         let lower = u.trim_start().to_lowercase();
-        lower.starts_with("data:")
-            || lower.starts_with("about:")
-            || lower.starts_with("blank:")
+        lower.starts_with("data:") || lower.starts_with("about:") || lower.starts_with("blank:")
     }
 
     /// (前端常量名, URL) —— 供 build.rs 生成前端 `URLS`
@@ -238,6 +236,10 @@ pub mod limits {
     /// 通信，工具返回可能含大文本，与 HTTP_MAX_BODY（8MB）同级；超限直接报错断开，
     /// 防恶意 server 用超大行/无换行输出耗尽内存。
     pub const MCP_MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
+    /// 阅读模式文章 HTML 响应体上限。
+    pub const READER_MAX_ARTICLE_BYTES: usize = 4 * 1024 * 1024;
+    /// 阅读模式重定向探测输出（状态码与 Location）上限。
+    pub const READER_MAX_REDIRECT_METADATA_BYTES: usize = 64 * 1024;
 }
 
 /// 超时 / 间隔（语义命名，杜绝"6 秒是什么？"的裸数字——改前先看名字）

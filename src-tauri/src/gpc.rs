@@ -94,13 +94,10 @@ pub async fn check_gpc_json(origin: &str) -> GpcSiteStatus {
         return fail(origin, url, format!("拒绝访问：{}", e), Some(e));
     }
 
-    let u = url.clone();
-    let fetched =
-        tokio::task::spawn_blocking(move || crate::reader::curl_fetch_with_redirects(&u, None))
-            .await;
+    let fetched = crate::reader::curl_fetch_with_redirects(&url, None).await;
 
     match fetched {
-        Ok(Ok(raw)) => match parse_gpc_json(&raw) {
+        Ok(raw) => match parse_gpc_json(&raw) {
             Ok((declared, last_update)) => GpcSiteStatus {
                 origin: origin.to_string(),
                 url,
@@ -112,8 +109,7 @@ pub async fn check_gpc_json(origin: &str) -> GpcSiteStatus {
             },
             Err(e) => fail(origin, url, format!("gpc.json 无法解析：{}", e), Some(e)),
         },
-        Ok(Err(e)) => fail(origin, url, "站点未提供 GPC 声明文件".to_string(), Some(e)),
-        Err(e) => fail(origin, url, "抓取线程异常".to_string(), Some(e.to_string())),
+        Err(e) => fail(origin, url, "站点未提供 GPC 声明文件".to_string(), Some(e)),
     }
 }
 
