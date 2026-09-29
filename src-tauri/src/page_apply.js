@@ -125,7 +125,7 @@
   var byId = {};
   for (var p = 0; p < pairs.length; p++) byId[pairs[p].id] = pairs[p];
 
-  var applied = 0, mismatched = 0, notFound = 0, badMarkers = 0;
+  var applied = 0, mismatched = 0, notFound = 0, badMarkers = 0, keptStructure = 0;
   var els3 = document.querySelectorAll('*');
   for (var i3 = 0; i3 < els3.length; i3++) {
     var el3 = els3[i3];
@@ -158,8 +158,24 @@
     var onlyA = el3.children.length === 1 &&
                 el3.children[0].tagName === 'A' &&
                 norm(el3.children[0].textContent) === cur;
-    if (onlyA) el3.children[0].textContent = pr.translated;
-    else el3.textContent = pr.translated;
+    if (onlyA) { el3.children[0].textContent = pr.translated; applied++; continue; }
+    // 有元素子节点（图标链接/图片/嵌套块等）时绝不整段拍平——textContent 赋值会
+    // 把子元素（含 <a> 链接）整个删掉，这正是"翻完链接点不开"的成因。只换直接
+    // 文本子节点（译文放第一段，其余清空），子元素原样保留；没有直接文本可换
+    // （如文字全在嵌套块里）则跳过并计数，保功能优先。顶层的原文比对已过，
+    // 这里不再二次校验。
+    if (el3.children.length > 0) {
+      var tns = [];
+      for (var c3 = 0; c3 < el3.childNodes.length; c3++) {
+        if (el3.childNodes[c3].nodeType === 3) tns.push(el3.childNodes[c3]);
+      }
+      if (!tns.length) { keptStructure++; continue; }
+      tns[0].nodeValue = pr.translated;
+      for (var c4 = 1; c4 < tns.length; c4++) tns[c4].nodeValue = '';
+      applied++;
+      continue;
+    }
+    el3.textContent = pr.translated;
     applied++;
   }
 
@@ -190,7 +206,8 @@
     applied: applied,
     mismatched: mismatched,
     notFound: notFound,
-    badMarkers: badMarkers
+    badMarkers: badMarkers,
+    keptStructure: keptStructure
   });
  } catch (e) {
   return JSON.stringify({ error: '写回脚本异常: ' + (e && e.message ? e.message : e) });

@@ -240,8 +240,7 @@ describe('整页汉化：注入脚本 DOM 行为', () => {
     expect(p.text()).not.toContain('【第')
   })
 
-  it('页面自己改过的节点不覆盖（轮播/虚拟列表防护）', () => {
-    const p = makePage('<!doctype html><html><body><p>original text</p></body></html>')
+  it('页面自己改过的节点不覆盖（轮播/虚拟列表防护）', () => {    const p = makePage('<!doctype html><html><body><p>original text</p></body></html>')
     const c = p.collect()
     // 传入的 orig 与页面当前内容不符 → 必须跳过，不能拿译文盖掉新内容
     const res = p.apply('apply', {
@@ -278,5 +277,50 @@ describe('整页汉化：注入脚本 DOM 行为', () => {
     expect(texts).toContain('English needs translation')
     // 纯中文：不浪费一轮翻译
     expect(texts).not.toContain('这是一个中文段落')
+  })
+
+  /**
+   * 回归（2026-09-29 高哥实锤）：翻完链接点不开。
+   *
+   * 成因：兜底段（div 裸文本 + 图标链接/图片）走无标记路径，旧实现整段
+   * textContent 拍平，子元素（含 <a>）一起被删。现在只换直接文本子节点，
+   * 子元素原样保留。
+   */
+  it('无标记写回：图标链接/图片子元素必须保住，译文进直接文本', () => {
+    const p = makePage(
+      '<!doctype html><html><body><div>Read more <a href="/help"></a> today now</div></body></html>',
+    )
+    const segs = p.collect().segments as Array<{ id: string; text: string; markers: unknown }>
+    expect(segs.length).toBe(1)
+    expect(segs[0].markers).toBeNull()
+    const res = p.apply('apply', {
+      pairs: [{ id: segs[0].id, orig: segs[0].text, translated: '多读今天' }],
+      attrs: [],
+    })
+    expect(res.applied).toBe(1)
+    expect(p.text()).toContain('多读今天')
+    // 空链接还在，href 没丢
+    expect(p.html()).toContain('href="/help"')
+    // 还原后逐字节回来
+    p.apply('restore', null)
+    expect(p.html()).toContain('Read more')
+    expect(p.html()).toContain('href="/help"')
+  })
+
+  /** 无标记写回：文字全在嵌套块里（无直接文本）则跳过并计数，不碰结构 */
+  it('无标记写回：无直接文本可换则跳过，keptStructure 计数', () => {
+    const p = makePage(
+      '<!doctype html><html><body><li><div>nested block words here</div></li></body></html>',
+    )
+    const origHtml = p.html()
+    const segs = p.collect().segments as Array<{ id: string; text: string; markers: unknown }>
+    expect(segs.length).toBe(1)
+    const res = p.apply('apply', {
+      pairs: [{ id: segs[0].id, orig: segs[0].text, translated: '嵌套文本' }],
+      attrs: [],
+    })
+    expect(res.applied).toBe(0)
+    expect(res.keptStructure).toBe(1)
+    expect(p.html()).toBe(origHtml)
   })
 })

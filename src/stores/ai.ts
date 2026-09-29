@@ -482,6 +482,7 @@ ${AI_BEHAVIOR_RULES}`
         // ---- 3. 共享状态：写回串行链 / 子块拼装表 / 计数 ----
         let appliedTotal = 0
         let mismatchedTotal = 0
+        let keptTotal = 0
         let applyError: string | null = null
         let done = cachePairs.length + cacheAttrs.length
         let batchesDone = 0
@@ -501,16 +502,18 @@ ${AI_BEHAVIOR_RULES}`
           const run = writeChain
             .then(async () => {
               if (pairs.length === 0 && attrs.length === 0) return
-              const ap = await zhCall<{ applied: number; mismatched: number }>(
-                'page_apply_translation',
-                {
-                  tab_id: tabId ?? null,
-                  mode: 'apply',
-                  payload: { pairs, attrs },
-                },
-              )
+              const ap = await zhCall<{
+                applied: number
+                mismatched: number
+                keptStructure?: number
+              }>('page_apply_translation', {
+                tab_id: tabId ?? null,
+                mode: 'apply',
+                payload: { pairs, attrs },
+              })
               appliedTotal += ap.applied || 0
               mismatchedTotal += ap.mismatched || 0
+              keptTotal += ap.keptStructure || 0
               if ((ap.applied || 0) > 0) this.zhApplied = true
             })
             .catch((e) => {
@@ -748,10 +751,11 @@ ${AI_BEHAVIOR_RULES}`
               ? `（其中 ${cachePairs.length + cacheAttrs.length} 处来自本地翻译记忆）`
               : ''
           const skippedNote = mismatchedTotal ? `（${mismatchedTotal} 处页面已变动，跳过）` : ''
+          const keptNote = keptTotal ? `（${keptTotal} 处为保链接/图片原样保留原文）` : ''
           this.messages.push({
             role: 'assistant',
             content:
-              `已汉化本页：${appliedTotal} 处${hitNote}${skippedNote}。` +
+              `已汉化本页：${appliedTotal} 处${hitNote}${skippedNote}${keptNote}。` +
               (failedCount > 0 ? `另有 ${failedCount} 处没翻出来，保留原文。` : '') +
               (this.zhCancel ? '已按你的要求停下。' : ''),
           })
