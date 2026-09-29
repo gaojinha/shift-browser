@@ -22,6 +22,8 @@ pub struct AriaElement {
     /// 元素角色（role 属性或推导角色，如 button/link/checkbox/combobox）
     pub role: String,
     /// 程序化名称：aria-label > aria-labelledby 解析文本 > 可见文本
+    /// 注：快照脚本必须拼 `name`（历史脚本曾拼 `label` 导致反序列化缺字段崩，
+    /// 2026-09-30 修；快照为实时数据不落盘，无需兼容旧字段）。
     pub name: String,
     /// 标签名（button/input/a/…）用于定位回查
     pub tag: String,
@@ -235,7 +237,7 @@ const SNAPSHOT_JS: &str = r#"
     if (!label) continue; // 无名称的 aria 元素对 Agent 无用，跳过（骨架信号）
     ariaList.push({
       role: ae.getAttribute('role') || ae.tagName.toLowerCase(),
-      label: label.slice(0, 60),
+      name: label.slice(0, 60),
       tag: ae.tagName.toLowerCase(),
       hidden: ae.getAttribute('aria-hidden') === 'true'
     });

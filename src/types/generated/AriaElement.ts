@@ -12,6 +12,8 @@ export type AriaElement = {
 role: string, 
 /**
  * 程序化名称：aria-label > aria-labelledby 解析文本 > 可见文本
+ * 注：快照脚本必须拼 `name`（历史脚本曾拼 `label` 导致反序列化缺字段崩，
+ * 2026-09-30 修；快照为实时数据不落盘，无需兼容旧字段）。
  */
 name: string, 
 /**

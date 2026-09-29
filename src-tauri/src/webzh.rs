@@ -729,23 +729,36 @@ pub(super) async fn collect_for_api(app: &AppHandle, req: &Value) -> Value {
 }
 
 /// `page_apply_translation` 的 api.sock 包装。参数同上（req 里带 mode/payload）。
+/// 校验（2026-09-30 实测补）：mode 必填且只认 apply/restore；apply 必须带 payload
+/// （此前缺 mode 默认吞成 apply、无 payload 照样 ok:true，是写类接口漏校验）。
 pub(super) async fn apply_for_api(app: &AppHandle, req: &Value) -> Value {
     let tab_id = req
         .get("tab_id")
         .and_then(|v| v.as_str())
         .map(str::to_string);
-    let mode = req
-        .get("mode")
-        .and_then(|v| v.as_str())
-        .unwrap_or("apply")
-        .to_string();
-    let payload: Option<ApplyPayload> = req.get("payload").and_then(|v| {
-        if v.is_null() {
-            None
-        } else {
-            serde_json::from_value::<ApplyPayload>(v.clone()).ok()
+    let mode = match req.get("mode").and_then(|v| v.as_str()) {
+        Some(m) => m.to_string(),
+        None => {
+            return crate::error::AppError::validation("缺少 mode（apply|restore）").error_json()
         }
-    });
+    };
+    if mode != "apply" && mode != "restore" {
+        return crate::error::AppError::validation("mode 只能是 apply 或 restore").error_json();
+    }
+    let payload: Option<ApplyPayload> = match (mode.as_str(), req.get("payload")) {
+        ("apply", None) => {
+            return crate::error::AppError::validation("apply 必须带 payload").error_json()
+        }
+        ("apply", Some(v)) if v.is_null() => {
+            return crate::error::AppError::validation("apply 必须带 payload").error_json()
+        }
+        (_, Some(v)) if v.is_null() => None,
+        (_, Some(v)) => match serde_json::from_value::<ApplyPayload>(v.clone()) {
+            Ok(p) => Some(p),
+            Err(_) => return crate::error::AppError::validation("payload 解析失败").error_json(),
+        },
+        (_, None) => None,
+    };
     let r = page_apply_translation(app.clone(), tab_id, mode, payload).await;
     json!({
         "ok": r.ok,

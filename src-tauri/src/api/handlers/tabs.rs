@@ -100,6 +100,9 @@ async fn with_id(
         return AppError::internal("标签管理器不可用").error_json();
     };
     match action(app, state, id).await {
+        // id 不存在时底层回 Ok(None)： successful-null 会让调用方分不清，
+        // 与 pin/mute 的「标签不存在」报错对齐，统一转 E_VALIDATION（2026-09-30 实测补）。
+        Ok(None) => AppError::validation("标签不存在").error_json(),
         Ok(t) => json!({"ok": true, "data": t}),
         Err(e) => AppError::from(e).error_json(),
     }
