@@ -308,6 +308,15 @@ pub async fn execute_agent_action(
             }
             wv.navigate(parsed)
                 .map_err(|e| format!("导航失败: {}", e))?;
+            // 存量同步（与 navigate_tab/切标签兑现同口径）：AI 驱使跳转后存的 url
+            // 若还是旧的，标签栏与地址栏就两岔；加载完成信号会再对一次，这里先对齐。
+            state.mutate(|s| {
+                if let Some(t) = s.tabs.get_mut(&id) {
+                    t.url = url.clone();
+                    t.title = url.clone();
+                }
+            });
+            let _ = app.emit(crate::contracts::events::TABS_UPDATED, ());
             return Ok(format!("已跳转到 {}", url));
         }
         "back" => {
