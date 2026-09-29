@@ -18,6 +18,11 @@ src-tauri/resources/libshift_web_extension.so
 *.db
 *.db-wal
 *.db-shm
+# 本地工具/笔记目录（不入库，2026-09-29 决策）：编辑器配置、CI、纠错笔记、设计文档
+.atomcode/
+.github/
+.learnings/
+.trae/
 # AtomCode local-scope configs (machine-specific)
 .atomcode/local/
 # AtomCode 安装状态（机器特定，不入库）
