@@ -162,17 +162,11 @@ fn inject_extensions(
                 crate::engine::content_filter::apply_to_manager(&manager);
                 // 翻译原生桥（CSP 免疫 · 2026-09-21）：注册脚本消息处理器。
                 // 站点 CSP 的 img-src 会拦 `img.src='shift://__translate__/…'`，故翻译脚本改走
-                // 原生消息（不受 CSP 约束）。按 webview label 去重，避免重复连接累积。
-                {
-                    use std::collections::HashSet;
-                    use std::sync::{Mutex, OnceLock};
-                    static BRIDGED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-                    let first = BRIDGED
-                        .get_or_init(|| Mutex::new(HashSet::new()))
-                        .lock()
-                        .map(|mut s| s.insert(label_for_bridge.clone()))
-                        .unwrap_or(false);
-                    if first && manager.register_script_message_handler("shiftTranslate") {
+                // 原生消息（不受 CSP 约束）。去重靠 register 自身返回值（同 manager 重复
+                // 注册返回 false，不断连接；新 manager（休眠唤醒/会话恢复重建的 webview，
+                // label 会复用）返回 true，必须重新连接——此前按 label 常驻去重，
+                // 重建的 webview 永远没桥，整页翻译静默死亡（2026-09-29 高哥实锤）。
+                if manager.register_script_message_handler("shiftTranslate") {
                         let app_msg = app_for_bridge.clone();
                         let label_msg = label_for_bridge.clone();
                         manager.connect_script_message_received(
@@ -188,7 +182,6 @@ fn inject_extensions(
                         );
                         log::info!("[translate-native] 原生桥已注册: {}", label_for_bridge);
                     }
-                }
                 manager.remove_all_scripts();
                 manager.remove_all_style_sheets();
                 // 选区缓存监听：**常驻** document_start UserScript（所有 frame、

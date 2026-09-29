@@ -30,8 +30,10 @@ if (!window.__sbTrSend) {
         q += '&' + k + '=' + encodeURIComponent(params[k]);
       }
     }
+    // 路径归一（与 context_translate.js 同口径）：防拼出 //batch 被后端拒收。
+    var clean = String(path || '').replace(/^\/+/, '');
     var img = new Image();
-    img.src = 'shift://__translate__/' + path + '?' + q;
+    img.src = 'shift://__translate__/' + clean + '?' + q;
   };
 }
 

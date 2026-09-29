@@ -48,8 +48,7 @@ describe('右键翻译菜单', () => {
     expect(w.document.getElementById('__sb_tr_host')).toBeNull()
   })
 
-  it('普通页面右键弹自定义菜单，且页面原有节点一个不少', () => {
-    const w = makePage(
+  it('普通页面右键弹自定义菜单，且页面原有节点一个不少', () => {    const w = makePage(
       '<!doctype html><html><body><p>hello <a href="/x">link</a></p></body></html>',
     )
     const before = w.document.body.innerHTML
@@ -60,4 +59,44 @@ describe('右键翻译菜单', () => {
     expect(w.document.querySelector('a')!.getAttribute('href')).toBe('/x')
     expect(before).toContain('<a href="/x">link</a>')
   })
+
+describe('备用通道地址归一（2026-09-29 双斜杠实锤）', () => {
+  function sender() {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+      runScripts: 'outside-only', url: 'https://example.com/',
+    })
+    const w = dom.window as unknown as Record<string, unknown>
+    // 只取 __sbTrSend 定义（整文件 eval 会注册右键监听，不影响本用例）
+    const src = JS.slice(0, JS.indexOf('(function () {'))
+    ;(w.eval as (s: string) => void)(src)
+    const urls: string[] = []
+    // 桩 Image：只收 src，不真发请求；同时删掉原生桥，走备用通道
+    ;(w as Record<string, unknown>).Image = class {
+      set src(v: string) {
+        urls.push(v)
+      }
+    }
+    delete (w as Record<string, unknown>).webkit
+    return { w, urls }
+  }
+
+  it("带前导斜杠的 path 不拼出双斜杠（'/batch'→'/batch'）", () => {
+    const { w, urls } = sender()
+    const send = w.__sbTrSend as (p: string, q: unknown, c: string) => void
+    send('/batch', { texts: '["hi"]' }, 'cb1')
+    expect(urls).toHaveLength(1)
+    expect(urls[0]).toContain('shift://__translate__/batch?')
+    expect(urls[0]).not.toContain('//batch')
+    expect(urls[0]).toContain('callback=cb1')
+  })
+
+  it('不带斜杠的 path 保持原样（whole-page/text）', () => {
+    const { w, urls } = sender()
+    const send = w.__sbTrSend as (p: string, q: unknown, c: string) => void
+    send('whole-page', {}, 'cb2')
+    send('text', { text: 'hi' }, 'cb3')
+    expect(urls[0]).toContain('shift://__translate__/whole-page?')
+    expect(urls[1]).toContain('shift://__translate__/text?')
+  })
+})
 })

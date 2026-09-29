@@ -34,8 +34,11 @@ if (!window.__sbTrSend) {
         q += '&' + k + '=' + encodeURIComponent(params[k]);
       }
     }
+    // 路径归一：调用方可能带前导斜杠（whole_page 的 '/batch'），不归一会拼出
+    // shift://__translate__//batch，后端判"未知子路径"静默丢弃（2026-09-29 实锤）。
+    var clean = String(path || '').replace(/^\/+/, '');
     var img = new Image();
-    img.src = 'shift://__translate__/' + path + '?' + q;
+    img.src = 'shift://__translate__/' + clean + '?' + q;
   };
 }
 
