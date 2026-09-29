@@ -10,6 +10,19 @@ use super::super::WEB_CRASH_COOLDOWN;
 use crate::engine::webview::WebViewBackend;
 use webkit2gtk::WebViewExt;
 
+/// 崩溃错误页（data: 内联，无外部资源）：渲染进程连崩且在冷却窗内时展示。
+/// 按 Ctrl+R 手动刷新。标题"网页崩溃"会同步到标签栏（title-notify 照常）。
+const CRASH_ERROR_HTML: &str = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">\
+<title>网页崩溃</title><style>body{background:#0e1626;color:#e9eef8;\
+font:15px/1.7 -apple-system,\"PingFang SC\",\"Microsoft YaHei\",sans-serif;\
+display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}\
+.box{max-width:520px;padding:32px;text-align:center}\
+h1{font-size:22px;margin:0 0 12px}p{color:#bcc8dd;margin:8px 0}\
+code{color:#8a97b0;font-size:13px}</style></head><body><div class=\"box\">\
+<h1>网页崩溃了</h1><p>这个页面短时间内多次崩溃，已停止自动重载。</p>\
+<p>按 Ctrl+R 手动刷新试试；一直崩就是这个站与当前引擎犯冲。</p>\
+<code>ShiftBrowser · 崩溃保护</code></div></body></html>";
+
 /// 给新建 child webview 接 GTK 信号：加载失败 / TLS 错误 / 权限 / 崩溃恢复 / 标题同步。
 /// 监听 WebKit title 变化 → 实时同步标签标题（on_page_load 的 host 只是初始占位）
 pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &str) {
@@ -29,12 +42,14 @@ pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &s
                 failing_uri,
                 err.message()
             );
-            // 阻止 WebKit 默认错误页显示（返回 true = 阻止默认行为）
+            // 放行 WebKit 默认错误页（返回 false = 不阻止默认行为）：打不开就该去
+            // 错误页（含重试），而不是静默白屏/旧页。TLS 走下面的专用拦截（有危险
+            // 站点 UI），不受影响。事件照发，前端提示条照常。
             let _ = app_fail.emit(
                 crate::contracts::events::PAGE_LOAD_FAILED,
                 (tab_id_fail.clone(), failing_uri.to_string()),
             );
-            true
+            false
         });
         // TLS 证书错误拦截（P2 · 2026-09-22）：缓存证书 + 通知前端弹"危险站点"页；
         // 返回 true 阻止 WebKit 默认错误页，是否放行交给前端"继续前往"决定。
@@ -81,6 +96,12 @@ pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &s
             if allow_reload {
                 log::info!("[tabs] 自动重载崩溃标签: {}", tab_id_crash);
                 crate::engine::webview::WebViewBackend::reload(webview);
+            } else {
+                // 30s 内连崩：不再自动重载（防崩溃循环），改载中文错误页——
+                // 无响应/崩溃就该去错误页，而不是白屏干等，更不能弹应用级强退框。
+                // data: 伪页面不进存量 url/历史（uri-notify/page_load 有同口径 guard）。
+                log::warn!("[tabs] 崩溃冷却中，载错误页: {}", tab_id_crash);
+                webview.load_html(CRASH_ERROR_HTML, None);
             }
         });
         // 地址监听与标题监听各持一份 owned 拷贝（'static 闭包不借函数参数）
@@ -136,7 +157,9 @@ pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &s
                 return;
             };
             let uri = uri.trim().to_string();
-            if uri.is_empty() {
+            // 伪页面（崩溃错误页 data:/空白页）不进存量：否则地址栏变 data:...。
+            // 口径见 contracts::urls::is_pseudo_page（page_load/历史共用）。
+            if uri.is_empty() || crate::contracts::urls::is_pseudo_page(&uri) {
                 return;
             }
             let changed = {

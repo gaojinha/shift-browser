@@ -342,6 +342,21 @@ mod tests {
     }
 }
 
+/// 伪页面判定（崩溃错误页隔离 · 2026-09-29）：data:/about:/blank: 不进存量 url、
+/// 不记历史；三处（uri-notify/page_load/历史）共用同一口径，改口径只改一处。
+#[test]
+fn pseudo_page_classification() {
+    use crate::contracts::urls::is_pseudo_page;
+    assert!(is_pseudo_page("data:text/html,<h1>x</h1>"));
+    assert!(is_pseudo_page("DATA:text/html,x"));
+    assert!(is_pseudo_page("about:blank"));
+    assert!(!is_pseudo_page("https://example.com/"));
+    assert!(!is_pseudo_page("shift://newtab"));
+    assert!(!is_pseudo_page("http://192.168.1.1/"));
+    // 含 data 子串的正常站不能误杀
+    assert!(!is_pseudo_page("https://data.example.com/"));
+}
+
 /// TS 类型契约导出（P2）：把 Rust struct 导出为 TS interface，
 /// 消除前端 `src/types/*.ts` 手写与本端 struct 的漂移。
 /// 生成物落在 `src/types/generated/`（由 cargo test 触发）。

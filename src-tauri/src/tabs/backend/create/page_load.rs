@@ -122,20 +122,26 @@ pub(super) fn handle_page_load(
         let url_str = url.to_string();
         let title_opt = Some(title.clone());
 
+        // 伪页面（崩溃错误页 data:/空白页）不进存量 url、不记历史：
+        // 否则地址栏变 data:...、历史里多一堆垃圾。标题照常走（标签栏显示"网页崩溃"是对的）。
+        // 口径见 contracts::urls::is_pseudo_page（uri-notify 共用）。
+        let is_pseudo = crate::contracts::urls::is_pseudo_page(url.as_str());
         // 无痕标签 / AI 标签一律不记历史（N1：AI 读 100 页不污染用户浏览历史；无痕 2026-09-22）。
         // 用标志位而非提前 return，保证前端同步事件照常发出（AI 标签也要显示在标签栏）。
-        let mut skip_history = false;
+        let mut skip_history = is_pseudo;
         if let Some(state) = app.try_state::<TabManager>() {
             state.mutate(|s| {
                 if let Some(tab) = s.tabs.get_mut(tab_id) {
-                    tab.url = url.to_string();
+                    if !is_pseudo {
+                        tab.url = url.to_string();
+                    }
                     // 仅当还没有真标题（title-notify 未触发过）时用 host 占位，避免覆盖 document.title
                     if tab.title.is_empty() || tab.title == tab.url {
                         tab.title = title;
                     }
                 }
                 if let Some(t) = s.tabs.get(tab_id) {
-                    skip_history = t.private || t.origin == "ai";
+                    skip_history = skip_history || t.private || t.origin == "ai";
                 }
             });
         }

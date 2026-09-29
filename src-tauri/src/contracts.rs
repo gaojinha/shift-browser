@@ -206,6 +206,16 @@ pub mod urls {
         u.starts_with(NEWTAB) || u.contains(NEWTAB_MARKER)
     }
 
+    /// 是否为伪页面 URL（错误页/空白页：崩溃错误页 data:、about:blank 等）。
+    /// 这类页面绝不能写入标签存量 url（否则地址栏变 data:...）、绝不能记历史。
+    /// 单一判定口径：uri-notify、page_load、历史记录三处共用。
+    pub fn is_pseudo_page(u: &str) -> bool {
+        let lower = u.trim_start().to_lowercase();
+        lower.starts_with("data:")
+            || lower.starts_with("about:")
+            || lower.starts_with("blank:")
+    }
+
     /// (前端常量名, URL) —— 供 build.rs 生成前端 `URLS`
     pub const ALL: &[(&str, &str)] = &[
         ("NEWTAB", NEWTAB),
