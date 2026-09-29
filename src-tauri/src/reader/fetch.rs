@@ -55,11 +55,24 @@ pub(super) async fn scrape_article(url: &str) -> Result<readability::extractor::
 /// 手动跟随重定向（最多 5 跳），每跳做 SSRF 校验，防重定向绕过。
 fn fetch_and_extract(url: &str) -> Result<readability::extractor::Product, String> {
     const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
-    // UA 双保险：浏览器 UA 优先（多数站正常）；若被反爬拦（非 2xx），
-    // 回退默认 UA（个别站反着来，如 understandingwar.org 拦浏览器 UA 放行默认 UA）
-    let html = match curl_fetch_with_redirects(url, Some(BROWSER_UA)) {
+    // UA 按站点覆盖选（2026-09-29）：ua_for(host)，B站等配 Windows UA 过风控；
+    // 无覆盖 fallback 默认 Linux UA。useragent 内存缓存启动时载入，同步可调。
+    let site_ua = url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(crate::useragent::ua_for))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| BROWSER_UA.to_string());
+    // UA 双保险：站点 UA 优先（多数站正常）；若被反爬拦（非 2xx），
+    // 回退默认 UA（个别站反着来，如 understandingwar.org 拦浏览器 UA 放行默认 UA）。
+    // 412 风控停手：风控拒绝不重试（多打一次加重风控），直接返回需浏览器验证。
+    let html = match curl_fetch_with_redirects(url, Some(site_ua.as_str())) {
         Ok(h) => h,
-        Err(_) => curl_fetch_with_redirects(url, None)?,
+        Err(e) => {
+            if e.contains("412") {
+                return Err(format!("{}（站点风控拒绝，未重试；请在浏览器页面完成验证后读取）", e));
+            }
+            curl_fetch_with_redirects(url, None)?
+        }
     };
     let parsed = url::Url::parse(url).map_err(|e| format!("URL 解析失败: {}", e))?;
     readability::extractor::extract(&mut html.as_bytes(), &parsed)

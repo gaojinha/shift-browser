@@ -23,7 +23,19 @@
 
   try {
     var nav = window.navigator;
-    // ---- userAgentData（Chromium 系标准形状，desktop Linux）----
+    // ---- 平台推导（2026-09-29）：按站点 UA 覆盖动态对齐 ----
+    // 注入全局不分站点，JS 按 location.host 查 __SHIFT_SITE_OVERRIDES__ 表；
+    // 有覆盖则按覆盖 UA 推平台（Windows/macOS），否则 Linux。
+    // 否则"UA 说 Windows、指纹说 Linux"被风控识破（B站 412 类）。
+    var __plat = 'Linux', __arch = 'x86';
+    try {
+      var __ov = window.__SHIFT_SITE_OVERRIDES__ || {};
+      var __h = (location.host || '').toLowerCase();
+      var __ua = __ov[__h] || __ov[__h.replace(/^www\./, '')] || '';
+      if (/windows/i.test(__ua)) { __plat = 'Windows'; __arch = 'x86'; }
+      else if (/macintosh|mac os/i.test(__ua)) { __plat = 'macOS'; __arch = 'arm'; }
+    } catch (e) {}
+    // ---- userAgentData（Chromium 系标准形状）----
     if (nav && !nav.userAgentData) {
       var brands = [
         { brand: 'Chromium', version: '142' },
@@ -38,13 +50,13 @@
       var uad = {
         brands: brands,
         mobile: false,
-        platform: 'Linux',
+        platform: __plat,
         getHighEntropyValues: function (hints) {
           var out = {
             brands: brands,
             mobile: false,
-            platform: 'Linux',
-            architecture: 'x86',
+            platform: __plat,
+            architecture: __arch,
             bitness: '64',
             model: '',
             uaFullVersion: '142.0.0.0',
@@ -58,7 +70,7 @@
       // 桌面端 toJSON 按规范返回 brands/mobile/platform
       try {
         uad.toJSON = function () {
-          return { brands: brands, mobile: false, platform: 'Linux' };
+          return { brands: brands, mobile: false, platform: __plat };
         };
       } catch (e) {}
       def(nav, 'userAgentData', uad);

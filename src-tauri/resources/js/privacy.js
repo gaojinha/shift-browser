@@ -320,20 +320,37 @@
   } catch (e) {}
   try {
     // Client Hints JS API：抹掉精确的平台版本/架构
+    // 平台/brands 与站点 UA 对齐（2026-09-29）：按 location.host 查覆盖表，
+    // 有覆盖则按覆盖 UA 推平台与 Chrome 主版本，否则 fallback 全局值/Linux
+    var __shiftPlat = 'Linux';
+    var __shiftBrands = null;
+    try {
+      var __ov = window.__SHIFT_SITE_OVERRIDES__ || {};
+      var __h = (location.host || '').toLowerCase();
+      var __ua = __ov[__h] || __ov[__h.replace(/^www\./, '')] || '';
+      if (/windows/i.test(__ua)) { __shiftPlat = 'Windows'; }
+      else if (/macintosh|mac os/i.test(__ua)) { __shiftPlat = 'macOS'; }
+      var __m = /Chrome\/(\d+)/.exec(__ua);
+      if (__m) {
+        __shiftBrands = [{ brand: 'Not_A Brand', version: '24' },
+                         { brand: 'Chromium', version: __m[1] },
+                         { brand: 'Google Chrome', version: __m[1] }];
+      }
+    } catch (e) {}
     if (navigator.userAgentData) {
       var uad = navigator.userAgentData;
       try {
         Object.defineProperty(navigator, 'userAgentData', {
           get: function () {
             return {
-              brands: window.__SHIFT_UA_BRANDS__ || uad.brands,
+              brands: __shiftBrands || window.__SHIFT_UA_BRANDS__ || uad.brands,
               mobile: false,
-              platform: 'Linux',
+              platform: __shiftPlat,
               getHighEntropyValues: function () {
-                return Promise.resolve({ platform: 'Linux', platformVersion: '',
+                return Promise.resolve({ platform: __shiftPlat, platformVersion: '',
                                          architecture: '', model: '', uaFullVersion: '' });
               },
-              toJSON: function () { return { brands: window.__SHIFT_UA_BRANDS__ || uad.brands, mobile: false, platform: 'Linux' }; }
+              toJSON: function () { return { brands: __shiftBrands || window.__SHIFT_UA_BRANDS__ || uad.brands, mobile: false, platform: __shiftPlat }; }
             };
           },
           configurable: true

@@ -46,6 +46,15 @@ fn overrides() -> &'static Mutex<HashMap<String, String>> {
     SITE_OVERRIDES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// 站点覆盖表 JSON（注入页面供 JS 按 location.host 动态对齐指纹用；
+/// 注入是全局的、不分站点，JS 运行时自己查表，见 adblock wl_prefix 与 compat 脚本）
+pub fn overrides_json() -> String {
+    overrides()
+        .lock()
+        .map(|m| serde_json::to_string(&*m).unwrap_or_else(|_| "{}".into()))
+        .unwrap_or_else(|_| "{}".into())
+}
+
 /// 生效 UA：站点覆盖优先，其次全局，最后默认
 pub fn ua_for(host: &str) -> String {
     if !host.is_empty() {
