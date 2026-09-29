@@ -52,6 +52,21 @@ impl TabManager {
             );
           }
           child_gtk.set_size_request(w as i32, h as i32);
+          // 滚轮诊断开关（2026-09-29）：SHIFT_SCROLL_DEBUG=1 时，Fixed 容器与 child
+          // webview 的滚轮事件都打 info 日志。对比两者定位事件卡在哪层：
+          // - fixed 有、child 无 = 事件被中间 widget 吃掉（覆盖层/透明层盖住）
+          // - 两者都有但页面不滚 = WebKit/DOM 层问题（页面劫持 wheel/内容不可滚）
+          let scroll_dbg = std::env::var("SHIFT_SCROLL_DEBUG").is_ok();
+          if scroll_dbg {
+            fixed.connect_scroll_event(|_, event| {
+              let (dx, dy) = event.delta();
+              log::info!(
+                "[tabs] fixed scroll(top): delta=({:.2},{:.2}) dir={:?}",
+                dx, dy, event.direction()
+              );
+              false.into() // 不拦截，只观测
+            });
+          }
           // 焦点跟踪：页面（child webview）获得焦点 —— 此时前端收不到按键，GTK 层兜底转发
           child_gtk.connect_focus_in_event(|_, _| {
             UI_FOCUSED.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -103,14 +118,74 @@ impl TabManager {
           });
           // 滚轮事件：GTK 滚轮事件发给鼠标下的 widget，但 reparent 后若 webview 未聚焦，
           // DOM 滚动可能不生效（与链接点击同源的输入窗口问题）。滚动时强制聚焦 + 记录日志诊断。
-          child_gtk.connect_scroll_event(|wv, event| {
+// 兜底补滚节流器（2026-09-29）：B站等站点 JS 吞 wheel 事件（preventDefault），
+// 事件到 webview 但页面不滚。此处 100ms 检查一次：位置未变则 scrollBy 补滚。
+          // 正常页面 WebKit 100ms 内必滚动，不误伤。
+          let scroll_check = std::rc::Rc::new(std::cell::Cell::new(
+            std::time::Instant::now() - std::time::Duration::from_secs(1),
+          ));
+          child_gtk.connect_scroll_event(move |wv, event| {
               let (dx, dy) = event.delta();
-              // 滚轮事件最密集 → debug 级（每次滚动都 info 会刷爆日志）
-              log::debug!(
+              // 滚轮事件最密集 → 平时 debug 级（每次滚动都 info 会刷爆日志）；
+              // 诊断开关开时打 info，直接进应用日志文件
+              if scroll_dbg {
+                log::info!(
                   "[tabs] child scroll: delta=({:.2},{:.2}) dir={:?}",
                   dx, dy, event.direction()
-              );
+                );
+                // DOM 滚动状态诊断：内容高度/overflow/滚动元素/当前滚动位置，
+                // 判断页面不可滚还是事件被 JS 吞掉
+                let js = "(function(){var de=document.documentElement;var b=document.body;var se=document.scrollingElement;return 'y='+Math.round(window.scrollY)+' ih='+window.innerHeight+' de_sh='+(de?de.scrollHeight:0)+' b_sh='+(b?b.scrollHeight:0)+' de_ov='+(de?getComputedStyle(de).overflowY:'?')+' b_ov='+(b?getComputedStyle(b).overflowY:'?')+' se='+(se?se.tagName:'?');})()";
+                crate::engine::webview::eval_js_with(wv, js, move |res| {
+                  if let Ok(info) = res {
+                    log::info!("[tabs] 滚动DOM: {}", info);
+                  }
+                });
+              } else {
+                log::debug!(
+                  "[tabs] child scroll: delta=({:.2},{:.2}) dir={:?}",
+                  dx, dy, event.direction()
+                );
+              }
               wv.grab_focus();
+              // 兜底补滚：事件到 webview 但 100ms 后滚动位置未变（JS 吞事件），
+              // 主动 scrollBy 补滚。GTK smooth delta 单位约行，1 行按 100px 换算。
+              // 横纵一起对比（scrollY*1000+scrollX 合成）。100ms 节流，性能可接受。
+              let now = std::time::Instant::now();
+              if now.duration_since(scroll_check.get()) >= std::time::Duration::from_millis(100)
+                && (dy != 0.0 || dx != 0.0)
+              {
+                scroll_check.set(now);
+                let wv2 = wv.clone();
+                let dx_px = (dx * 100.0) as i32;
+                let dy_px = (dy * 100.0) as i32;
+                crate::engine::webview::eval_js_with(
+                  wv,
+                  "(function(){return Math.round(window.scrollY*1000+window.scrollX);})()",
+                  move |r0| {
+                    let Ok(y0) = r0 else { return };
+                    let wv3 = wv2.clone();
+                    gtk::glib::timeout_add_local_once(
+                      std::time::Duration::from_millis(100),
+                      move || {
+                        let wv4 = wv3.clone();
+                        crate::engine::webview::eval_js_with(
+                          &wv3,
+                          "(function(){return Math.round(window.scrollY*1000+window.scrollX);})()",
+                          move |r1| {
+                            let Ok(y1) = r1 else { return };
+                            if y0 == y1 {
+                              let js = format!("window.scrollBy({dx_px},{dy_px})");
+                              crate::engine::webview::eval_js(&wv4, &js);
+                              log::debug!("[tabs] 兜底补滚: dx={dx_px} dy={dy_px}");
+                            }
+                          },
+                        );
+                      },
+                    );
+                  },
+                );
+              }
               // 诊断：打印视口高度 vs 内容高度（判断 WebKit 是否错误识别页面高度）
               static SCROLL_DIAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
               if !SCROLL_DIAG.swap(true, std::sync::atomic::Ordering::SeqCst) {
