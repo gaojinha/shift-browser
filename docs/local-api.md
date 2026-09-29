@@ -131,7 +131,7 @@ curl -s -X POST http://127.0.0.1:19701/v1/chat/completions \
 | `{"cmd":"active_tab"}` | `{"ok":true,"data":Tab\|null}` | 取当前活动标签 |
 | `{"cmd":"open_url","url":"https://…"}` | `{"ok":true,"data":Tab}` | 新标签打开网址 |
 | `{"cmd":"close_tab","id":"…"}` | `{"ok":true,"data":Tab\|null}` | 关标签（返回接管的活动标签） |
-| `{"cmd":"tabs/close_ai"}` | `{"ok":true,"data":{"closed":[…],"count":N}}` | 关闭**所有 AI 标签**（`origin=ai`，开放 API 打开的那些）——绝不碰用户标签。AI 读完回收现场用 |
+| `{"cmd":"tabs/close_ai"}` | `{"ok":true,"data":{"closed":[…],"count":N}}` | 关闭**所有 AI 标签**（`origin=ai`，即 `open_and_read` 开的那些）——绝不碰用户标签。注意：`open_url` / `new_tab` / `search` 开的是**用户标签**（不受 AI 逐跳 SSRF 约束、会计入历史），需用 `close_tab` 逐个关。AI 读完回收现场用 |
 | `{"cmd":"audit/reads","limit":50}` | `{"ok":true,"data":[{id,ts,cmd,url,tab_id,ok,error_code,origin}…]}` | 查询最近 AI 操作审计（**只记命令/url/结果码，不含页面内容**）。所有 API 命令自动入库（元命令与 `audit/reads` 自身除外）。保留策略：只留最近 5000 条（`AUDIT_KEEP`，记录时同事务裁剪，表不无限增长） |
 | `{"cmd":"audit/egress"}` | `{"ok":true,"data":{processes,connections:[{pid,proto,remote_ip,remote_port,state}…],distinct_remotes,loopback,external,checked_at}}` | 网络外发审计：列出本应用及子进程当前 TCP 外联端点（只读 /proc、零出网），核对"浏览器连了哪儿" |
 | `{"cmd":"extract","selector":".item","fields":["text","href"],"limit":100}` | `{"ok":true,"data":{selector,total,returned,truncated,items:[…]}}` | 按选择器结构化提取（固定模板，非任意 JS）。`fields` 白名单 `text`/`href`/`src`/`alt`/`title`/`data-*`；`tab_id` 可选（缺省活动标签） |

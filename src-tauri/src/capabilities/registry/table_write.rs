@@ -36,7 +36,7 @@ pub(super) fn defs() -> Vec<ToolDef> {
     ),
     tool(
       "tabs/close_ai",
-      "关闭所有 AI 标签（origin=ai）——只回收开放 API 打开的标签，绝不碰用户标签。AI 读完后清理现场用。",
+      "关闭所有 AI 标签（origin=ai，即 open_and_read 开的那些）——绝不碰用户标签。注意：open_url/new_tab/search 开的是用户标签（不受 SSRF 逐跳约束、会计入历史），需用 close_tab 逐个关。AI 读完后清理现场用。",
       json!({}),
       vec![],
       Risk::Write,
