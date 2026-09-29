@@ -10,7 +10,8 @@ const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 /// 抓取并解析正文（带超时 + 净化）
 /// 2026-09-19 修复：不再用 readability::extractor::scrape（其内置 reqwest 0.11 blocking，
 /// 无 UA 配置且兼容性差，对部分站点误报 UnexpectedError）。
-/// 改为自己用 reqwest 0.12 抓 HTML（可设 UA/超时/重定向），再调 extract 纯解析。
+/// 改为系统 curl 抓 HTML（TLS 指纹可信，手动跟随重定向逐跳 pin），再调 extract 纯解析。
+/// （注：此前注释误写"reqwest 0.12"，实际为 curl，2026-09-29 订正）
 pub(super) async fn scrape_article(url: &str) -> Result<readability::extractor::Product, String> {
     // P2：只允许 http/https——fetch_article/enter_reader_mode 共用入口，
     // 显式拒绝 file:/javascript: 等 scheme（readability 内部 reqwest 不认其他
@@ -22,12 +23,14 @@ pub(super) async fn scrape_article(url: &str) -> Result<readability::extractor::
     // 此前任意 URL 都能让本机 reqwest 去抓，可被用来探测内网/云元数据（169.254.169.254）。
     validate_public_url(url).await?;
     let url = url.to_string();
-    let url_for_log = url.clone();
-    let r = tokio::time::timeout(
-        FETCH_TIMEOUT,
-        tokio::task::spawn_blocking(move || fetch_and_extract(&url)),
-    )
-    .await;
+    // 日志脱敏（2026-09-29）：只记 scheme://host，路径/query 常含搜索词/token。
+    // 此前 `url.clone()` 名为 url_for_log 实为完整 URL，直接落日志。
+    let url_for_log = crate::redact_url(&url);
+    let mut handle = tokio::task::spawn_blocking(move || fetch_and_extract(&url));
+    // 超时后 abort 后台任务（2026-09-29）：此前 timeout 只放弃等待，spawn_blocking
+    // 照跑不误，慢站重复触发累积后台线程+curl 子进程。abort 后 blocking 线程等当前
+    // curl --max-time（每跳 20s）退出，不无限累积。
+    let r = tokio::time::timeout(FETCH_TIMEOUT, &mut handle).await;
     match r {
         Ok(Ok(Ok(product))) => Ok(product),
         Ok(Ok(Err(e))) => {
@@ -39,7 +42,10 @@ pub(super) async fn scrape_article(url: &str) -> Result<readability::extractor::
             log::warn!("[reader] 抓取线程异常: {} -> {}", url_for_log, e);
             Err("正文提取线程异常".to_string())
         }
-        Err(_) => Err("抓取正文超时（20 秒），可能是慢站或网络问题".to_string()),
+        Err(_) => {
+            handle.abort();
+            Err("抓取正文超时（20 秒），可能是慢站或网络问题".to_string())
+        }
     }
 }
 
@@ -167,7 +173,7 @@ fn curl_resolve_value(host: &str, port: u16, ip: std::net::IpAddr) -> String {
 /// - 域名 host 做 DNS 解析后逐一校验，任一解析结果落在内网即拒绝
 pub(crate) async fn validate_public_url(url: &str) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| {
-        log::warn!("[reader] URL 解析失败: {} -> {}", url, e);
+        log::warn!("[reader] URL 解析失败: {} -> {}", crate::redact_url(url), e);
         "URL 格式不合法".to_string()
     })?;
     let raw_host = parsed
@@ -187,14 +193,23 @@ pub(crate) async fn validate_public_url(url: &str) -> Result<(), String> {
         return r;
     }
     // 域名：异步解析全部 A/AAAA，统一走 ai::check_resolved_ips——任一落内网
-    // 或解析结果为空都拒绝（P0-6 fail-closed；旧实现空结果会被误放行）
-    let sock: Vec<_> = tokio::net::lookup_host((host.as_str(), 80))
-        .await
-        .map_err(|e| {
-            log::warn!("[reader] DNS 解析失败: {} -> {}", host, e);
-            format!("DNS 解析失败: {}", host)
-        })?
-        .collect();
+    // 或解析结果为空都拒绝（P0-6 fail-closed；旧实现空结果会被误放行）。
+    // DNS 超时（2026-09-29）：lookup_host 无内置超时，包 DNS_LOOKUP_SECS，
+    // 超时按解析失败拒绝（fail-closed）。
+    let sock: Vec<_> = tokio::time::timeout(
+        std::time::Duration::from_secs(crate::contracts::timeout::DNS_LOOKUP_SECS),
+        tokio::net::lookup_host((host.as_str(), 80)),
+    )
+    .await
+    .map_err(|_| {
+        log::warn!("[reader] DNS 解析超时（{}s）: {}", crate::contracts::timeout::DNS_LOOKUP_SECS, host);
+        format!("DNS 解析超时: {}", host)
+    })?
+    .map_err(|e| {
+        log::warn!("[reader] DNS 解析失败: {} -> {}", host, e);
+        format!("DNS 解析失败: {}", host)
+    })?
+    .collect();
     if let Err(e) = crate::ai::check_resolved_ips(&host, sock.iter().map(|s| s.ip()), 80) {
         log::warn!("[reader] SSRF 拦截域名解析: {}", e);
         return Err(e);

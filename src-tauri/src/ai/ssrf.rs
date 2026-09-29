@@ -201,11 +201,17 @@ pub(crate) async fn resolve_pin_for_https(
         let addrs = check_resolved_ips(&host, std::iter::once(std::net::IpAddr::V4(v4)), port)?;
         return Ok((host, Some(addrs)));
     }
-    // 域名：只解析这一次，校验全部结果，随后 pin 死交给调用方
-    let sock: Vec<_> = tokio::net::lookup_host((host.as_str(), port))
-        .await
-        .map_err(|e| format!("域名解析失败: {host} ({e})"))?
-        .collect();
+    // 域名：只解析这一次，校验全部结果，随后 pin 死交给调用方。
+    // DNS 超时（2026-09-29）：lookup_host 无内置超时，系统 DNS 卡住时永久挂起；
+    // 超时按解析失败处理（fail-closed）。此处是 AI/网关/可达验证的共用解析入口。
+    let sock: Vec<_> = tokio::time::timeout(
+        std::time::Duration::from_secs(crate::contracts::timeout::DNS_LOOKUP_SECS),
+        tokio::net::lookup_host((host.as_str(), port)),
+    )
+    .await
+    .map_err(|_| format!("域名解析超时（{}s）: {host}", crate::contracts::timeout::DNS_LOOKUP_SECS))?
+    .map_err(|e| format!("域名解析失败: {host} ({e})"))?
+    .collect();
     let addrs = check_resolved_ips(&host, sock.iter().map(|s| s.ip()), port)?;
     Ok((host, Some(addrs)))
 }

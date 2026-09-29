@@ -293,7 +293,7 @@ pub async fn switch_tab(
     // 休眠标签的恢复：webview 此前已被销毁释放内存，这里按保存的 URL 重建。
     // 重建后需重新注入扩展/隐私防护脚本，并重新计算布局（create_webview 内部处理）。
     if is_hibernated {
-        log::info!("[perf] 唤醒休眠标签: id={} url={}", id, hibernated_url);
+        log::info!("[perf] 唤醒休眠标签: id={} url={}", id, crate::redact_url(&hibernated_url));
         TabManager::create_webview(&app, &id, &hibernated_url, hibernated_private)?;
         state.mutate(|s| {
             if let Some(t) = s.tabs.get_mut(&id) {

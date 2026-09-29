@@ -29,7 +29,44 @@ mod tests;
 #[path = "mcp/transport.rs"]
 mod transport;
 
-use transport::{connect, connections};
+use transport::{connect, connect_lock, connections};
+
+/// 审计日志参数上限（字符）：arguments 完整 JSON 可能很大，截断后存库；
+/// 前端审计页直接渲染此字段，截断同时防页面卡死
+const AUDIT_ARGS_MAX_CHARS: usize = 4000;
+
+/// 审计参数脱敏（纯函数，可单测）：敏感键（token/password/secret/key/auth 等，
+/// 大小写不敏感、子串匹配）的值替换为 `****`，递归处理嵌套对象与数组。
+/// 防访问令牌等随工具调用参数明文落库并在审计页展示。
+pub(crate) fn redact_arguments(v: &Value) -> Value {
+    const SENSITIVE: &[&str] = &[
+        "token",
+        "password",
+        "passwd",
+        "secret",
+        "api_key",
+        "apikey",
+        "auth",
+        "credential",
+        "private_key",
+    ];
+    match v {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, val)| {
+                    let kl = k.to_lowercase();
+                    if SENSITIVE.iter().any(|s| kl.contains(s)) {
+                        (k.clone(), Value::String("****".to_string()))
+                    } else {
+                        (k.clone(), redact_arguments(val))
+                    }
+                })
+                .collect(),
+        ),
+        Value::Array(arr) => Value::Array(arr.iter().map(redact_arguments).collect()),
+        _ => v.clone(),
+    }
+}
 
 /// DB 里的 server 配置行
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,8 +161,19 @@ pub async fn remove_server(pool: &SqlitePool, id: i64) -> CommandResult<()> {
         .execute(pool)
         .await
         .map_err(|e| AppError::db(format!("删除 MCP server 失败: {}", e)))?;
-    // 断开缓存连接（drop 后子进程随 stdin 关闭退出）
-    connections().lock().unwrap().remove(&id);
+    // 拿连接锁后断开（2026-09-29）：保证握手中的 connect 完成（insert 前 DB 复核会拦）
+    // 再删，不留已删除 server 的活动连接；取出连接并 kill 子进程（顽固进程兜底）。
+    // try_lock 失败说明有请求正在用——不 kill 误伤，连接随最后 Arc drop 关闭。
+    let conn_lock = connect_lock(id);
+    let _guard = conn_lock.lock().await;
+    // 先取出再判断：if let 会把 scrutinee 临时 guard 延长到块结束导致 !Send，
+    // 存变量让 std guard 在语句结束即释放
+    let removed = connections().lock().unwrap().remove(&id);
+    if let Some(conn) = removed {
+        if let Ok(mut c) = conn.try_lock() {
+            c.kill().await;
+        }
+    }
     Ok(())
 }
 
@@ -139,7 +187,14 @@ pub async fn set_server_enabled(pool: &SqlitePool, id: i64, enabled: bool) -> Co
         .await
         .map_err(|e| AppError::db(format!("更新 MCP server 状态失败: {}", e)))?;
     if !enabled {
-        connections().lock().unwrap().remove(&id);
+        let conn_lock = connect_lock(id);
+        let _guard = conn_lock.lock().await;
+        let removed = connections().lock().unwrap().remove(&id);
+        if let Some(conn) = removed {
+            if let Ok(mut c) = conn.try_lock() {
+                c.kill().await;
+            }
+        }
     }
     Ok(())
 }
@@ -262,13 +317,20 @@ pub async fn call_tool(
         Err(e) => (false, e.clone()),
     };
     let summary: String = text.chars().take(200).collect();
+    // 审计参数脱敏 + 截断（2026-09-29）：敏感键值替换为 ****，超长截断；
+    // get_audit_log 原样返回此字段，前端审计页直接渲染，写库时脱敏即全链路脱敏
+    let args_str: String = redact_arguments(&arguments)
+        .to_string()
+        .chars()
+        .take(AUDIT_ARGS_MAX_CHARS)
+        .collect();
     let _ = sqlx::query(
     "INSERT INTO tool_audit_log (server_id, server_name, tool_name, arguments, result_summary, success) VALUES (?, ?, ?, ?, ?, ?)",
   )
   .bind(row.id)
   .bind(&row.name)
   .bind(tool_name)
-  .bind(arguments.to_string())
+  .bind(args_str)
   .bind(&summary)
   .bind(if success { 1 } else { 0 })
   .execute(pool)

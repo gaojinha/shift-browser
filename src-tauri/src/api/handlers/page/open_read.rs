@@ -54,18 +54,64 @@ async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
     // 入口 + 最终 URL 双次复核把窗口压到最小，残余风险见 net_guard.rs 模块注释。
     if host.parse::<std::net::IpAddr>().is_err() {
         let port = parsed.port_or_known_default().unwrap_or(80);
-        let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
-            .await
-            .map(|it| it.collect())
-            .map_err(|_| {
-                AppError::permission(format!("域名解析失败，已拒绝：{host}")).error_json()
-            })?;
+        // DNS 超时（2026-09-29）：lookup_host 无内置超时，包 DNS_LOOKUP_SECS，
+        // 超时按解析失败拒绝（fail-closed）
+        let addrs: Vec<std::net::SocketAddr> = tokio::time::timeout(
+            std::time::Duration::from_secs(crate::contracts::timeout::DNS_LOOKUP_SECS),
+            tokio::net::lookup_host((host.as_str(), port)),
+        )
+        .await
+        .map_err(|_| {
+            AppError::permission(format!(
+                "域名解析超时（{}s），已拒绝：{host}",
+                crate::contracts::timeout::DNS_LOOKUP_SECS
+            ))
+            .error_json()
+        })?
+        .map_err(|_| {
+            AppError::permission(format!("域名解析失败，已拒绝：{host}")).error_json()
+        })?
+        .collect();
         if let Err(e) = crate::ai::check_resolved_ips(&host, addrs.iter().map(|s| s.ip()), port) {
             log::warn!("[open_and_read] SSRF 拦截域名解析: {}", e);
             return Err(AppError::permission(e).error_json());
         }
     }
     Ok(())
+}
+
+/// 读取前可达验证（DNS rebinding 纵深，2026-09-29）：
+/// 入口解析、WebKit 加载、最终复核是三次独立 DNS 查询，TTL=0 攻击可让复核看公网、
+// 加载走内网。此处把 final_url 域名 pin 到本次解析出的公网 IP 并发 HEAD 验证——
+/// 只有该公网 IP 当前真实可达才放行读取。任何 HTTP 响应（2xx/3xx/4xx/5xx）都算可达，
+/// 只有建连/解析/超时失败才拦（正常公网站点无误报）。
+/// IP 字面量无 rebinding 面（pin 返回 None），直接放行（私有的入口 guard 已拦）。
+async fn verify_reachable(url: &str) -> Result<(), Value> {
+    let (resolve_key, pinned) = crate::ai::resolve_pin_for_https(url).await.map_err(|e| {
+        AppError::permission(format!("可达验证解析失败，已拒绝：{e}")).error_json()
+    })?;
+    let Some(addrs) = pinned else {
+        return Ok(());
+    };
+    let builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            crate::contracts::timeout::HTTP_READ_TIMEOUT_SECS,
+        ))
+        .connect_timeout(std::time::Duration::from_secs(
+            crate::contracts::timeout::CONNECT_TIMEOUT_SECS,
+        ))
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(&resolve_key, &addrs);
+    let client = builder
+        .build()
+        .map_err(|e| AppError::net(format!("可达验证客户端创建失败: {}", e)).error_json())?;
+    match client.head(url).send().await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(AppError::permission(format!(
+            "可达验证失败（pin 的公网 IP 不可达，可能 DNS 已翻转）：{e}"
+        ))
+        .error_json()),
+    }
 }
 
 /// 打开 URL 并读取页面（P0 杀招命令 · 方案 §4.1）。
@@ -208,12 +254,15 @@ pub(crate) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
         }
     }
 
-    // 2b) O1 重定向逐跳/最终 URL 复核：加载后的真实 URL 再跑一遍 SSRF 守卫。
+    // 2b) O1 重定向逐跳/最终 URL 复核：加载后的真实 URL 无条件再跑一遍 SSRF 守卫。
     //     公开页跳转到内网（重定向绕过入口校验）→ 读取前拦截并回收，绝不让内网内容外流。
-    //     注意：仅当 final_url 是 http/https 且与入口不同才复核——新标签未加载完时为
-    //     `about:blank`（非 http），不应触发拦截（修复 2026-09-25：曾误伤所有读取）。
+    //     注意：仅当 final_url 是 http/https 才复核——新标签未加载完时为 `about:blank`
+    //     （非 http），不应触发拦截（修复 2026-09-25：曾误伤所有读取）。
+    //     DNS rebinding（2026-09-29 修复）：不能只复核「URL 文本变化」的情况——攻击者用
+    //     双答 DNS 让入口解析到公网、WebKit 加载时解析到内网，此时 final_url 文本与入口
+    //     相同但仍实际连接了内网。故无条件复核（每次重新解析 + 校验），把窗口压到最小。
     let final_is_http = final_url.starts_with("http://") || final_url.starts_with("https://");
-    if final_is_http && final_url != url {
+    if final_is_http {
         if let Err(resp) = guard_url(app, &final_url).await {
             // 复核失败：回收刚开的标签（复用标签不关，避免误关用户标签）
             if !reused {
@@ -226,6 +275,25 @@ pub(crate) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
                 .and_then(|v| v.as_str())
                 .unwrap_or("重定向到内网地址被拦截");
             return AppError::permission(format!("重定向复核拦截（{final_url}）：{msg}"))
+                .error_json();
+        }
+    }
+
+    // 2c) 读取前可达验证（DNS rebinding 纵深）：复核解析与 WebKit 实际加载仍是两次
+    //     独立查询，TTL=0 攻击可让复核看公网、加载走内网。此处 pin 公网 IP 发 HEAD 验证，
+    //     把穿透条件从"复核时配合"收紧到"复核+验证两次都配合"。失败同样回收标签。
+    if final_is_http {
+        if let Err(resp) = verify_reachable(&final_url).await {
+            if !reused {
+                if let Some(st) = app.try_state::<crate::tabs::TabManager>() {
+                    let _ = crate::tabs::commands::close_tab(app.clone(), st, tab_id.clone()).await;
+                }
+            }
+            let msg = resp
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("可达验证失败");
+            return AppError::permission(format!("可达验证拦截（{final_url}）：{msg}"))
                 .error_json();
         }
     }

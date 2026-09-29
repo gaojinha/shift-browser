@@ -69,10 +69,16 @@ async fn pinned_client_for(url: &str) -> Result<reqwest::Client, String> {
             return Err(format!("订阅源指向内网/保留地址，已拦截：{}", host));
         }
     } else {
-        let sock: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
-            .await
-            .map_err(|e| format!("DNS 解析失败: {} ({})", host, e))?
-            .collect();
+        // DNS 超时（2026-09-29）：lookup_host 无内置超时，包 DNS_LOOKUP_SECS，
+        // 超时按解析失败拒绝（fail-closed）
+        let sock: Vec<std::net::SocketAddr> = tokio::time::timeout(
+            std::time::Duration::from_secs(crate::contracts::timeout::DNS_LOOKUP_SECS),
+            tokio::net::lookup_host((host.as_str(), port)),
+        )
+        .await
+        .map_err(|_| format!("DNS 解析超时（{}s）: {host}", crate::contracts::timeout::DNS_LOOKUP_SECS))?
+        .map_err(|e| format!("DNS 解析失败: {} ({})", host, e))?
+        .collect();
         let addrs = crate::ai::check_resolved_ips(&host, sock.iter().map(|s| s.ip()), port)?;
         builder = builder.resolve_to_addrs(&host, &addrs);
     }

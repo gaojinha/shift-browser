@@ -175,7 +175,7 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
     // 网关变成携带密钥打内网的跳板。
     let base = base.trim();
     if let Err(e) = crate::ai::validate_base_url(base) {
-        log::warn!("[api] 模型网关上游地址被安全策略拒绝: {} ({})", e, base);
+        log::warn!("[api] 模型网关上游地址被安全策略拒绝: {} ({})", e, crate::redact_url(base));
         return AppError::permission(format!("上游地址未通过安全校验: {e}")).gateway_error_json();
     }
     // P0-6：域名解析后 pin 死公网地址，消除"校验时解析一次、发送时再解析一次"
@@ -183,7 +183,7 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
     let (resolve_key, pinned) = match crate::ai::resolve_pin_for_https(base).await {
         Ok(v) => v,
         Err(e) => {
-            log::warn!("[api] 模型网关注解/pin 上游地址失败: {} ({})", e, base);
+            log::warn!("[api] 模型网关注解/pin 上游地址失败: {} ({})", e, crate::redact_url(base));
             return AppError::permission(format!("上游地址未通过安全校验: {e}"))
                 .gateway_error_json();
         }
@@ -193,7 +193,11 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
         // 建连上限（单边地址族卡住时快速让路给另一族，见 contracts::timeout::CONNECT_TIMEOUT_SECS）
         .connect_timeout(std::time::Duration::from_secs(
             crate::contracts::timeout::CONNECT_TIMEOUT_SECS,
-        ));
+        ))
+        // SSRF（P0-5 同口径）：禁自动重定向——重定向目标不经过 validate_base_url /
+        // resolve_pin_for_https 校验，跟随会把 API Key 与请求体带到未校验地址。
+        // 与 feed.rs 一致（Policy::none），上游 chat/completions 返回 3xx 属异常，按错误处理。
+        .redirect(reqwest::redirect::Policy::none());
     if let Some(addrs) = &pinned {
         builder = builder.resolve_to_addrs(&resolve_key, addrs);
     }

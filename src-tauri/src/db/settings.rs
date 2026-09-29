@@ -207,6 +207,11 @@ async fn set_settings_bulk_inner(db: &Db, settings: Vec<Setting>) -> DbResult<()
         if !is_allowed(&s.key) {
             continue;
         }
+        // 内部键拒绝（2026-09-29）：与 set_setting 单项入口同口径——vault_idle_lock_minutes /
+        // todos 仅专用命令读写，批量导入静默跳过（不整批失败，与本函数其他检查一致）
+        if crate::contracts::settings::is_internal(&s.key) {
+            continue;
+        }
         // 掩码回写防护（与 set_setting 一致）：凭据键收到掩码形态（读回值）
         // 时跳过——防止"读全部→改→整表存"把真实值覆盖成掩码串。
         // 批量场景静默跳过（不整批失败），单键 set 才报错。
@@ -404,5 +409,144 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(hp, "https://example.com");
+    }
+
+    /// 休眠默认值迁移（v18 hibernate_defaults）回归测试：正向 + 幂等 + 手工值不碰。
+    /// 迁移只动旧默认值（30→10、0→8），用户手工改过的值必须原样保留。
+    #[tokio::test]
+    async fn test_hibernate_defaults_migration() {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+        async fn new_pool(dir: &tempfile::TempDir, name: &str) -> sqlx::SqlitePool {
+            let options = SqliteConnectOptions::new()
+                .filename(dir.path().join(name))
+                .create_if_missing(true);
+            SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(options)
+                .await
+                .unwrap()
+        }
+        async fn insert(pool: &sqlx::SqlitePool, k: &str, v: &str) {
+            sqlx::query("INSERT INTO settings (key, value) VALUES (?, ?)")
+                .bind(k)
+                .bind(v)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+        async fn get_value(pool: &sqlx::SqlitePool, key: &str) -> String {
+            sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
+                .bind(key)
+                .fetch_one(pool)
+                .await
+                .unwrap()
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let sql = include_str!("../../migrations/20260928000000_hibernate_defaults.sql");
+
+        // 场景 A（正向 + 幂等 + 无关键不碰）：旧默认值 30/0 迁移为 10/8，跑两遍不破坏
+        let pool_a = new_pool(&dir, "a.db").await;
+        sqlx::query(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT)",
+        )
+        .execute(&pool_a)
+        .await
+        .unwrap();
+        insert(&pool_a, "tab_hibernate_minutes", "30").await;
+        insert(&pool_a, "tab_hibernate_count", "0").await;
+        insert(&pool_a, "homepage", "https://example.com").await;
+        sqlx::raw_sql(sql).execute(&pool_a).await.unwrap();
+        sqlx::raw_sql(sql).execute(&pool_a).await.unwrap(); // 幂等：重复执行
+        assert_eq!(get_value(&pool_a, "tab_hibernate_minutes").await, "10", "旧默认值 30 应迁移为 10");
+        assert_eq!(get_value(&pool_a, "tab_hibernate_count").await, "8", "旧默认值 0 应迁移为 8");
+        assert_eq!(get_value(&pool_a, "homepage").await, "https://example.com", "无关键不得被改动");
+
+        // 场景 B（手工改过的不碰）：值非旧默认值，迁移后必须原样保留
+        let pool_b = new_pool(&dir, "b.db").await;
+        sqlx::query(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT)",
+        )
+        .execute(&pool_b)
+        .await
+        .unwrap();
+        insert(&pool_b, "tab_hibernate_minutes", "5").await;
+        insert(&pool_b, "tab_hibernate_count", "12").await;
+        sqlx::raw_sql(sql).execute(&pool_b).await.unwrap();
+        assert_eq!(get_value(&pool_b, "tab_hibernate_minutes").await, "5", "手工改过的 5 不得被覆盖");
+        assert_eq!(get_value(&pool_b, "tab_hibernate_count").await, "12", "手工改过的 12 不得被覆盖");
+    }
+
+    /// 批量入口 internal 键防护（2026-09-29）：与 set_setting 单项入口同口径，
+    /// vault_idle_lock_minutes / todos 仅专用命令读写，批量导入必须静默跳过
+    #[tokio::test]
+    async fn test_set_settings_bulk_skips_internal_keys() {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+        let dir = tempfile::tempdir().unwrap();
+        let options = SqliteConnectOptions::new()
+            .filename(dir.path().join("bulk_internal.db"))
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // 预置 internal 键旧值：批量写入不得覆盖
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('vault_idle_lock_minutes', '15')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let db = Db {
+            pool: pool.clone(),
+            feed_pool: pool.clone(),
+            key_path: dir.path().join("master.key"),
+            vault_path: dir.path().join("vault.key"),
+            master_key: tokio::sync::Mutex::new(None),
+        };
+
+        set_settings_bulk_inner(
+            &db,
+            vec![
+                Setting {
+                    key: "vault_idle_lock_minutes".into(),
+                    value: "0".into(), // 试图关闭自动锁定，必须被跳过
+                },
+                Setting {
+                    key: "todos".into(),
+                    value: "[\"evil\"]".into(), // 绕过专用命令，必须被跳过
+                },
+                Setting {
+                    key: "homepage".into(),
+                    value: "https://example.com".into(), // 普通键正常写入
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+        let lock: String =
+            sqlx::query_scalar("SELECT value FROM settings WHERE key = 'vault_idle_lock_minutes'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(lock, "15", "internal 键不得被批量覆盖");
+        let todos: Option<String> =
+            sqlx::query_scalar("SELECT value FROM settings WHERE key = 'todos'")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        assert!(todos.is_none(), "internal 键不得被批量新增");
+        let hp: String = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'homepage'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(hp, "https://example.com", "普通键正常写入");
     }
 }

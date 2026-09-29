@@ -129,3 +129,21 @@ fn to_openai_tools_format() {
     assert_eq!(openai[0]["function"]["description"], "读取文件");
     assert!(openai[0]["function"]["parameters"]["type"].is_string());
 }
+
+/// 审计参数脱敏：敏感键值替换为 ****，普通键保留，嵌套与数组递归处理
+#[test]
+fn redact_arguments_masks_sensitive_keys() {
+    let v = json!({
+        "text": "hello",
+        "api_token": "sk-secret-123",
+        "nested": { "Password": "p@ss", "count": 3 },
+        "items": [{ "auth": "bearer-xyz" }, { "name": "ok" }],
+    });
+    let r = redact_arguments(&v);
+    assert_eq!(r["text"], "hello", "普通键保留");
+    assert_eq!(r["api_token"], "****", "token 子串匹配脱敏");
+    assert_eq!(r["nested"]["Password"], "****", "大小写不敏感脱敏");
+    assert_eq!(r["nested"]["count"], 3, "嵌套普通键保留");
+    assert_eq!(r["items"][0]["auth"], "****", "数组内脱敏");
+    assert_eq!(r["items"][1]["name"], "ok", "数组内普通键保留");
+}

@@ -71,7 +71,15 @@ pub async fn warmup(pool: &SqlitePool) {
     for k in WHITELIST {
         query = query.bind(*k);
     }
-    let rows: Vec<(String, String)> = query.fetch_all(pool).await.unwrap_or_default();
+    let rows: Vec<(String, String)> = match query.fetch_all(pool).await {
+        Ok(r) => r,
+        // 预热失败打 warn（2026-09-29）：此前 unwrap_or_default 静默吞错，缓存空跑，
+        // 调用方全走回源且无感知。降级行为不变（空缓存），但让问题可观测。
+        Err(e) => {
+            log::warn!("[settings-cache] 白名单预热失败（缓存空跑，调用方回源）: {}", e);
+            Vec::new()
+        }
+    };
     let mut map = HashMap::with_capacity(rows.len());
     for (k, v) in rows {
         map.insert(k, v);
@@ -90,11 +98,16 @@ pub async fn warmup(pool: &SqlitePool) {
 /// 读设置（白名单 → 缓存优先；非白名单 → 直接回源不缓存）
 pub async fn get(pool: &SqlitePool, key: &str) -> Option<String> {
     if !is_cachable(key) {
-        // 非白名单（敏感/裸写低频键）：永不进缓存，避免脏读
+        // 非白名单（敏感/裸写低频键）：永不进缓存，避免脏读。
+        // 查询失败打 warn（2026-09-29）：此前 .ok().flatten() 静默吞错，调用方
+        // 无法区分"键不存在"与"DB 出错"，降级用默认值。行为不变，可观测。
         return sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = ?")
             .bind(key)
             .fetch_optional(pool)
             .await
+            .map_err(|e| {
+                log::warn!("[settings-cache] 回源失败 key={}（调用方用默认）: {}", key, e);
+            })
             .ok()
             .flatten();
     }
@@ -104,11 +117,14 @@ pub async fn get(pool: &SqlitePool, key: &str) -> Option<String> {
             return Some(v.clone());
         }
     }
-    // 回源 + 回填
+    // 回源 + 回填（失败打 warn，见上，行为不变）
     let v: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
         .bind(key)
         .fetch_optional(pool)
         .await
+        .map_err(|e| {
+            log::warn!("[settings-cache] 回源失败 key={}（调用方用默认）: {}", key, e);
+        })
         .ok()
         .flatten();
     if let Some(val) = &v {

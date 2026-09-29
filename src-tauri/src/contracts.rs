@@ -231,6 +231,13 @@ pub mod urls {
 pub mod limits {
     /// 同时建页上限：WebKit 建页是重操作，恢复会话 20 连建时排队，防内存与主线程被打爆
     pub const TAB_CREATE_CONCURRENCY: usize = 4;
+    /// HTTP API 同时处理的连接上限（后端专用，不进前端契约）。LAN 绑定（0.0.0.0）时
+    /// 防止白名单 IP 客户端挂大量不完整连接耗尽 task/套接字/缓冲区（DoS 面）。
+    pub const HTTP_MAX_CONCURRENT: usize = 16;
+    /// MCP server 单行 stdout 上限（字节，后端专用，不进前端契约）。MCP 是本地进程
+    /// 通信，工具返回可能含大文本，与 HTTP_MAX_BODY（8MB）同级；超限直接报错断开，
+    /// 防恶意 server 用超大行/无换行输出耗尽内存。
+    pub const MCP_MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
 }
 
 /// 超时 / 间隔（语义命名，杜绝"6 秒是什么？"的裸数字——改前先看名字）
@@ -265,6 +272,13 @@ pub mod timeout {
     pub const READ_PAGE_SECS: u64 = 10;
     /// 数据库 busy 等待
     pub const DB_BUSY_SECS: u64 = 10;
+    /// DNS 单次解析上限（后端专用，不进前端契约）。`lookup_host` 无内置超时，
+    /// 系统 DNS 卡住时会永久挂起调用方；SSRF 校验/订阅抓取/页面读取/网络诊断
+    /// 的解析都必须包此超时，超时按解析失败处理（fail-closed，拒绝而非放行）。
+    pub const DNS_LOOKUP_SECS: u64 = 5;
+    /// HTTP API 单连接完整读取请求头+body 的上限（后端专用，不进前端契约）。
+    /// 防止白名单 IP 客户端发半个请求就挂连，长期占用异步任务与缓冲区（DoS 面）。
+    pub const HTTP_READ_TIMEOUT_SECS: u64 = 10;
     /// 单实例 URL 转发等待（毫秒）
     pub const SINGLE_INSTANCE_WAIT_MS: u64 = 300;
     /// 默认浏览器启动等待（毫秒）

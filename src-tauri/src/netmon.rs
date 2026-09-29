@@ -132,10 +132,15 @@ pub async fn net_diagnose() -> NetDiagnosis {
     } else {
         ping_once(&gateway).await
     };
-    let dns_ok = tokio::net::lookup_host(("www.bing.com", 443))
-        .await
-        .map(|mut it| it.next().is_some())
-        .unwrap_or(false);
+    // DNS 超时（2026-09-29）：lookup_host 无内置超时，诊断命令不能无限等；
+    // 超时按 dns_ok=false（诊断降级，不抛错）
+    let dns_ok = tokio::time::timeout(
+        std::time::Duration::from_secs(crate::contracts::timeout::DNS_LOOKUP_SECS),
+        tokio::net::lookup_host(("www.bing.com", 443)),
+    )
+    .await
+    .map(|r| r.map(|mut it| it.next().is_some()).unwrap_or(false))
+    .unwrap_or(false);
     let remote_ms = measure_ping().await;
     NetDiagnosis {
         iface_ok,

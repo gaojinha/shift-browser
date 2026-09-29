@@ -180,7 +180,11 @@ pub(crate) async fn agnes_chat_impl(
         // 建连上限（单边地址族卡住时快速让路给另一族，见 contracts::timeout::CONNECT_TIMEOUT_SECS）
         .connect_timeout(std::time::Duration::from_secs(
             crate::contracts::timeout::CONNECT_TIMEOUT_SECS,
-        ));
+        ))
+        // SSRF（P0-5 同口径）：禁自动重定向——重定向目标不经过 validate_base_url /
+        // resolve_pin_for_https 校验，跟随会把 Authorization 头与对话内容带到未校验地址。
+        // 与 feed.rs 一致（Policy::none），上游 chat/completions 返回 3xx 属异常，按错误处理。
+        .redirect(reqwest::redirect::Policy::none());
     if let Some(addrs) = &pinned {
         builder = builder.resolve_to_addrs(&resolve_key, addrs);
     }
@@ -254,7 +258,11 @@ where
         // 建连上限（单边地址族卡住时快速让路给另一族，见 contracts::timeout::CONNECT_TIMEOUT_SECS）
         .connect_timeout(std::time::Duration::from_secs(
             crate::contracts::timeout::CONNECT_TIMEOUT_SECS,
-        ));
+        ))
+        // SSRF（P0-5 同口径）：禁自动重定向——重定向目标不经过 validate_base_url /
+        // resolve_pin_for_https 校验，跟随会把 Authorization 头与对话内容带到未校验地址。
+        // 与 feed.rs 一致（Policy::none），上游 chat/completions 返回 3xx 属异常，按错误处理。
+        .redirect(reqwest::redirect::Policy::none());
     if let Some(addrs) = &pinned {
         builder = builder.resolve_to_addrs(&resolve_key, addrs);
     }

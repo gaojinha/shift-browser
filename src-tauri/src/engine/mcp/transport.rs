@@ -24,12 +24,48 @@ pub(super) struct McpConnection {
     #[allow(dead_code)]
     child: tokio::process::Child,
     stdin: tokio::process::ChildStdin,
-    stdout: tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    /// stdout 缓冲读（不用 `Lines`：其内部缓冲无长度限制，恶意 server 用超大行
+    /// 可耗尽内存；此处用 `read_until` + `MCP_MAX_LINE_BYTES` 显式限长）
+    stdout: BufReader<tokio::process::ChildStdout>,
     next_id: AtomicU64,
     server_name: String,
 }
 
+/// 带单行上限的 stdout 读取（`read_until` + 长度检查）：
+/// - 返回 `Ok(None)` 表示 EOF（进程已退出）；
+/// - 单行（含换行符）超过 `MCP_MAX_LINE_BYTES` 直接报错，不再缓冲。
+async fn read_line_limited(
+    reader: &mut BufReader<tokio::process::ChildStdout>,
+) -> Result<Option<String>, String> {
+    let mut buf: Vec<u8> = Vec::new();
+    let n = reader
+        .read_until(b'\n', &mut buf)
+        .await
+        .map_err(|e| format!("MCP 读取失败: {}", e))?;
+    if n == 0 {
+        return Ok(None);
+    }
+    if buf.len() > crate::contracts::limits::MCP_MAX_LINE_BYTES {
+        return Err(format!(
+            "MCP 单行响应超限（{} 字节，上限 {} 字节）",
+            buf.len(),
+            crate::contracts::limits::MCP_MAX_LINE_BYTES
+        ));
+    }
+    String::from_utf8(buf)
+        .map(Some)
+        .map_err(|e| format!("MCP 响应非 UTF-8: {}", e))
+}
+
 impl McpConnection {
+    /// 强制终止子进程（顽固进程不因 stdin EOF 退出时的兜底；握手失败/remove 路径用）。
+    /// kill 后短暂 wait 收尸，避免僵尸进程；wait 超时也不阻塞调用方。
+    pub(super) async fn kill(&mut self) {
+        let _ = self.child.kill().await;
+        let _ =
+            tokio::time::timeout(std::time::Duration::from_millis(100), self.child.wait()).await;
+    }
+
     /// JSON-RPC 通知（无 id，server 不应答——如 notifications/initialized）
     async fn notify(&mut self, method: &str, params: Value) -> Result<(), String> {
         let req = json!({
@@ -49,7 +85,9 @@ impl McpConnection {
     }
 
     /// JSON-RPC 请求（阻塞读直到 id 匹配的响应；忽略 notification）
-    /// 加 30s 超时保护：server 卡死/不响应时返回错误，不挂起调用方
+    /// 双层超时保护：整体 deadline（MCP_REQUEST_SECS）+ 单行读取 timeout——
+    /// deadline 只在循环迭代开始检查，server 卡住不发换行时 `next_line().await`
+    /// 会永久挂起（旧实现缺陷），故每次读取必须用 `tokio::time::timeout` 约束。
     pub(super) async fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let req = json!({
@@ -77,12 +115,23 @@ impl McpConnection {
                     self.server_name, method
                 ));
             }
-            let line = self
-                .stdout
-                .next_line()
-                .await
-                .map_err(|e| format!("MCP 读取失败: {}", e))?
-                .ok_or_else(|| format!("MCP server '{}' 进程已退出", self.server_name))?;
+            // 单行读取 timeout：server 不发换行时不等死，到时即报错释放连接锁，
+            // 后续同一 server 的调用不再排队卡住
+            let line = tokio::time::timeout(
+                std::time::Duration::from_secs(crate::contracts::timeout::MCP_REQUEST_SECS),
+                read_line_limited(&mut self.stdout),
+            )
+            .await
+            .map_err(|_| {
+                format!(
+                    "MCP server '{}' 读取超时（{}s）：{}",
+                    self.server_name,
+                    crate::contracts::timeout::MCP_REQUEST_SECS,
+                    method
+                )
+            })?
+            .map_err(|e| format!("MCP 读取失败: {}", e))?
+            .ok_or_else(|| format!("MCP server '{}' 进程已退出", self.server_name))?;
             if line.trim().is_empty() {
                 continue;
             }
@@ -108,12 +157,35 @@ pub(super) fn connections() -> &'static Mutex<HashMap<i64, Arc<tokio::sync::Mute
     CONNECTIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// 首次连接串行锁（per-server）：`connect` 的缓存检查与插入之间隔着异步握手，
+/// 并发请求会各自 spawn 子进程（最后只留一个，白白浪费进程）。同一 server 的首次
+/// 连接在此排队，不同 server 互不阻塞。锁本身无状态，server 删除后残留条目可接受。
+static CONNECT_LOCKS: OnceLock<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>> =
+    OnceLock::new();
+
+pub(super) fn connect_lock(server_id: i64) -> Arc<tokio::sync::Mutex<()>> {
+    let mut map = CONNECT_LOCKS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap();
+    map.entry(server_id)
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
+
 /// 建立（或复用）连接：spawn 进程 + initialize 握手
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 pub(super) async fn connect(
-    _pool: &SqlitePool,
+    pool: &SqlitePool,
     row: &McpServerRow,
 ) -> Result<Arc<tokio::sync::Mutex<McpConnection>>, String> {
+    if let Some(conn) = connections().lock().unwrap().get(&row.id) {
+        return Ok(conn.clone());
+    }
+    // per-server 串行化首次连接：握手完成前其他并发请求在此排队，不重复 spawn
+    let conn_lock = connect_lock(row.id);
+    let _connect_guard = conn_lock.lock().await;
+    // 双重检查：排队期间可能已有其他请求完成连接
     if let Some(conn) = connections().lock().unwrap().get(&row.id) {
         return Ok(conn.clone());
     }
@@ -141,13 +213,13 @@ pub(super) async fn connect(
     let mut conn = McpConnection {
         child,
         stdin,
-        stdout: BufReader::new(stdout).lines(),
+        stdout: BufReader::new(stdout),
         next_id: AtomicU64::new(1),
         server_name: row.name.clone(),
     };
 
-    // initialize 握手
-    let result = conn
+    // initialize 握手（失败即 kill 子进程，不留残留进程）
+    let result = match conn
         .request(
             "initialize",
             json!({
@@ -156,7 +228,14 @@ pub(super) async fn connect(
               "clientInfo": { "name": "shift-browser", "version": env!("CARGO_PKG_VERSION") },
             }),
         )
-        .await?;
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            conn.kill().await;
+            return Err(e);
+        }
+    };
     let server_name = result
         .get("serverInfo")
         .and_then(|s| s.get("name"))
@@ -167,6 +246,22 @@ pub(super) async fn connect(
 
     // initialized 通知（MCP 协议要求，无 id 不应答）
     let _ = conn.notify("notifications/initialized", json!({})).await;
+
+    // 握手期间可能被删除/禁用：insert 前查 DB 确认仍存在且启用，否则 kill 丢弃，
+    // 不留已删除 server 的活动连接（与 remove/set_enabled 的拿锁删除配合）
+    let enabled: Option<i64> =
+        sqlx::query_scalar("SELECT enabled FROM mcp_servers WHERE id = ?")
+            .bind(row.id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| format!("MCP server 状态复核失败: {}", e))?;
+    if enabled != Some(1) {
+        conn.kill().await;
+        return Err(format!(
+            "MCP server '{}' 已被删除或停用，连接已丢弃",
+            row.name
+        ));
+    }
 
     let conn = Arc::new(tokio::sync::Mutex::new(conn));
     connections().lock().unwrap().insert(row.id, conn.clone());

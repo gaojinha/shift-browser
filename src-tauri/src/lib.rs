@@ -112,7 +112,19 @@ pub fn run() {
                 .filter(|a| a.starts_with("http://") || a.starts_with("https://"))
                 .cloned()
                 .collect();
-            log::info!("[single-instance] 已有实例收到新实例参数: {:?}", argv);
+            // argv 可能含带 token/query 的完整 URL：http/https 参数只记 scheme://host，
+// 非 URL 参数原样（redact_url 对非 URL 返回"<非URL>"会丢信息，故只脱敏 URL）
+            let safe_argv: Vec<String> = argv
+                .iter()
+                .map(|a| {
+                    if a.starts_with("http://") || a.starts_with("https://") {
+                        crate::redact_url(a)
+                    } else {
+                        a.clone()
+                    }
+                })
+                .collect();
+            log::info!("[single-instance] 已有实例收到新实例参数: {:?}", safe_argv);
             if !urls.is_empty() {
                 log::info!("[single-instance] 转发外部链接 {} 个", urls.len());
                 let app_handle = app.clone();

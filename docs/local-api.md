@@ -86,6 +86,10 @@ curl -s -X POST http://127.0.0.1:19701/api -H "Authorization: Bearer $TOKEN" \
 > - **安全策略**：LAN 绑定要求 `api_allowed_ips` 非空；白名单为空时拒绝 LAN 绑定、
 >   自动退回 `127.0.0.1`（日志 `[api] 拒绝绑定 LAN`）——防止"绑了 0.0.0.0 却只有
 >   token 一道防线"。
+> - ⚠️ **明文传输警告**：LAN API 为明文 HTTP（无 TLS），Bearer token 与请求/响应内容
+>   以明文传输，同一局域网可嗅探窃取。**仅在可信网络（家庭/办公内网）使用**；
+>   不可信网络（公共 WiFi 等）请走 VPN 或 ssh 隧道（如 `ssh -L 19701:127.0.0.1:19701 user@host`），
+>   不要直接暴露 LAN 绑定。
 
 ### 模型网关（OpenAI 兼容）
 

@@ -65,9 +65,20 @@ pub(crate) fn spawn_http(app: AppHandle, tokens: auth::ApiTokenShared) {
     let host = if lan { "0.0.0.0" } else { "127.0.0.1" };
     if lan {
         log::info!("[api] HTTP 已绑 0.0.0.0，IP 白名单: {}", allowed_ips);
+        // 明文传输警告（2026-09-29）：LAN API 无 TLS，Bearer token 与请求/响应内容
+        // 以明文传输，同一局域网可嗅探。仅在可信网络使用；不可信网络请走 VPN/ssh 隧道。
+        // 不上 TLS 的原因：家庭网威胁模型下白名单+token+限速已够；TLS 需证书管理且
+        // 破坏现有客户端兼容（curl/脚本都要改）。记为已知架构限制。
+        log::error!(
+            "[api] 安全警告：LAN API 为明文 HTTP（无 TLS），token 与数据可被局域网窃听！仅在可信网络使用，不可信网络请走 VPN/ssh 隧道"
+        );
     }
     // LAN 认证失败限速状态（仅绑定 0.0.0.0 时有意义，本机绑定下 peer 全是 loopback 不计数）
     let guard = Arc::new(auth::LoginGuard::default());
+    // 并发连接上限（LAN 绑定下防白名单 IP 挂大量半连接耗资源，见 contracts::limits）
+    let sem = Arc::new(tokio::sync::Semaphore::new(
+        crate::contracts::limits::HTTP_MAX_CONCURRENT,
+    ));
     tauri::async_runtime::spawn(async move {
         let addr = format!("{}:{}", host, port);
         let listener = match tokio::net::TcpListener::bind(&addr).await {
@@ -98,28 +109,51 @@ pub(crate) fn spawn_http(app: AppHandle, tokens: auth::ApiTokenShared) {
             let app = app.clone();
             let tokens = tokens.clone();
             let guard = guard.clone();
+            let sem = sem.clone();
             tauri::async_runtime::spawn(async move {
-                // 完整读取请求（头部可能跨 TCP 包；body 按 Content-Length 读满——
-                // 旧实现只读一次 64KB，长对话经模型网关转发必然 JSON 截断）
-                let (head, body) = match read_http_request(&mut stream).await {
-                    HttpReq::Complete(h, b) => (h, b),
-                    HttpReq::TooLarge => {
-                        write_http(
-                            &mut stream,
-                            413,
-                            "Payload Too Large",
-                            "application/json",
-                            "",
-                            AppError::validation("请求体过大（上限 8MB）")
-                                .gateway_error_json()
-                                .to_string()
-                                .as_bytes(),
-                        )
-                        .await;
+                // 并发闸门（DoS 防护）：满员立即断开，不排队不占资源；permit 随 task 结束释放
+                let _permit = match sem.try_acquire_owned() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        log::warn!("[api] 并发连接已满（{}），断开 peer={}", crate::contracts::limits::HTTP_MAX_CONCURRENT, peer_ip);
                         return;
                     }
-                    HttpReq::Bad => return,
                 };
+                // 完整读取请求（头部可能跨 TCP 包；body 按 Content-Length 读满——
+                // 旧实现只读一次 64KB，长对话经模型网关转发必然 JSON 截断）。
+                // 读超时（DoS 防护）：防白名单 IP 发半个请求挂连，长期占用 task/缓冲区。
+                let read_fut = read_http_request(&mut stream);
+                let (head, body) =
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(
+                            crate::contracts::timeout::HTTP_READ_TIMEOUT_SECS,
+                        ),
+                        read_fut,
+                    )
+                    .await
+                    {
+                        Ok(HttpReq::Complete(h, b)) => (h, b),
+                        Ok(HttpReq::TooLarge) => {
+                            write_http(
+                                &mut stream,
+                                413,
+                                "Payload Too Large",
+                                "application/json",
+                                "",
+                                AppError::validation("请求体过大（上限 8MB）")
+                                    .gateway_error_json()
+                                    .to_string()
+                                    .as_bytes(),
+                            )
+                            .await;
+                            return;
+                        }
+                        Ok(HttpReq::Bad) => return,
+                        Err(_) => {
+                            log::warn!("[api] 读取请求超时（{}s）断开 peer={}", crate::contracts::timeout::HTTP_READ_TIMEOUT_SECS, peer_ip);
+                            return;
+                        }
+                    };
                 // 请求行：method 与 target（target 可能带 query；path 取问号前）
                 let request_line = head.lines().next().unwrap_or("");
                 let mut rl = request_line.split_whitespace();
