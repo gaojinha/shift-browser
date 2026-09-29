@@ -187,6 +187,8 @@ function onAddressEnter() {
   const active = tabsStore.activeTab
   if (!active) return
 
+  // 先关下拉（下拉开着时网页层是隐藏的，不关的话导航了也看不见，跟没打开一样）
+  closeSuggestions()
   const engine = settingsStore.get('search_engine') || 'bing'
   const { url } = resolveInputTarget(input, engine)
   if (!url) return
