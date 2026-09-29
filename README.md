@@ -4,8 +4,10 @@
 
 ShiftBrowser 是一款基于 **Tauri 2 + Rust + Vue 3** 的 AI 增强型桌面浏览器。它不是"又一个浏览器"，而是在 WebKitGTK 之上构建的、面向多任务与 AI 协作的个人工作空间：本地数据自持、AI 助手能读页面 / 调工具 / 在授权下执行任务、隐私能力可验证。
 
-**当前版本：v5.8.2**（平台：Linux / GTK）
+**当前版本：v5.8.3**（平台：Linux / GTK）
 
+> **v5.8.3 更新**：安全加固 + 体验修复批次——Copilot 十轮审计 21 项修复（AI 上游禁重定向、`open_and_read` 无条件复核 + 可达验证、HTTP 读超时/并发上限、MCP 超时/单行上限/连接锁、日志 6 处脱敏、bulk 拒 internal 键、DNS 独立超时、LAN 明文警告）；B站滚轮失灵兜底补滚；指纹与站点 UA 对齐；阅读模式结构化文本提取；GitHub 卡死（scheduler 桩禁用）；15 站兼容性测试全过（`docs/site-compat-plan.md`）。
+>
 > **v5.8.2 更新**：前端视觉收口批次——设置页 15 子件通用样式收口（`settings-shared.css` + 4 公共件，净删约 800 行重复）；启动页设计令牌 + 无障碍补齐；9 个弹窗列表/按钮/确认行收口（`styles/components.css`）；命令面板/地址栏/AI 气泡打磨；浅色主题对比度修复。零契约改动、后端零改动。
 >
 > **v5.8.1 更新**：R1 工程质量批次——CI 接入前端测试门禁；大文件拆分（`page.rs`、`capabilities/registry.rs`）；命令面错误类型化第二批；前端事件监听/定时器泄漏治理（`useManagedListeners`）；阅读模式 CSP 去除 `unsafe-inline`（sha256 白名单）；新增性能基线采集脚本与基线报告（冷启 / 恢复耗时 / RSS / 包体）。

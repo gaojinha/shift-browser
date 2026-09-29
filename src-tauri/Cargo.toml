@@ -3,7 +3,7 @@ name = "shift-browser"
 # 2026-09-22（打包收口）：本 crate 同时产出主浏览器 + shift-browser-mcp 两个 bin；
 # tauri CLI 打 bundle 时必须知道哪个是主程序 → 显式点名，避免 "failed to find main binary"
 default-run = "shift-browser"
-version = "5.8.2"
+version = "5.8.3"
 description = "Shift Browser - AI 增强型浏览器（Tauri 重构版）"
 authors = ["OpenClaw Team"]
 license = "MIT OR Apache-2.0"
