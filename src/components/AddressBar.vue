@@ -23,6 +23,11 @@ function focusInput() {
   inputEl.value?.select()
 }
 defineExpose({ focusInput })
+
+/** 鼠标点进地址栏：Chrome式全选旧地址，直接敲新地址盖掉；已聚焦时再点不触发，不抢光标 */
+function onInputFocus() {
+  inputEl.value?.select()
+}
 const isLoading = computed(
   () => !!tabsStore.loadingTabId && tabsStore.loadingTabId === tabsStore.activeTabId,
 )
@@ -279,6 +284,7 @@ async function onReader() {
         spellcheck="false"
         @input="onInput"
         @keydown="onKeydown"
+        @focus="onInputFocus"
         @blur="onBlur"
       />
       <div v-if="isLoading" class="load-bar"></div>
