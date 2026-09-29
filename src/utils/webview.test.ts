@@ -94,4 +94,59 @@ describe("setWebviewVisible", () => {
     // 覆盖层已清零，晚到的快照不得盖上来
     expect(useBackdropStore().image).toBeNull();
   });
-});
+
+  it("底垫：暖缓存命中则零闪烁（隐藏时不再抓）", async () => {
+    vi.mocked(invoke).mockImplementation(((cmd: string) =>
+      cmd === "page_backdrop_shot"
+        ? Promise.resolve("data:image/png;base64,WARM")
+        : Promise.resolve(undefined)) as never)
+    const mod = await import("./webview")
+    const { useBackdropStore } = await import("../stores/backdrop")
+    const { useTabsStore } = await import("../stores/tabs")
+    mod.resetWebviewHiders()
+    const tabs = useTabsStore()
+    tabs.tabs = [
+      {
+        id: "a", url: "https://a.com/", title: "a", favicon: "",
+        is_active: true, is_pinned: false, is_muted: false,
+        hibernated: false, private: false, groupId: null,
+      },
+    ]
+    tabs.activeTabId = "a"
+    mod.warmBackdrop()
+    await flush()
+    vi.mocked(invoke).mockClear()
+    await mod.setWebviewVisible(false, "menu")
+    expect(vi.mocked(invoke).mock.calls.filter((c) => c[0] === "page_backdrop_shot")).toHaveLength(0)
+    expect(useBackdropStore().image).toBe("data:image/png;base64,WARM")
+    await mod.setWebviewVisible(true, "menu")
+    expect(useBackdropStore().image).toBeNull()
+  })
+
+  it("底垫：切标签后缓存键对不上，重新现抓", async () => {
+    vi.mocked(invoke).mockImplementation(((cmd: string) =>
+      cmd === "page_backdrop_shot"
+        ? Promise.resolve("data:image/png;base64,SHOT")
+        : Promise.resolve(undefined)) as never)
+    const mod = await import("./webview")
+    const { useBackdropStore } = await import("../stores/backdrop")
+    const { useTabsStore } = await import("../stores/tabs")
+    mod.resetWebviewHiders()
+    const tabs = useTabsStore()
+    const mk = (id: string, url: string) => ({
+      id, url, title: id, favicon: "",
+      is_active: false, is_pinned: false, is_muted: false,
+      hibernated: false, private: false, groupId: null,
+    })
+    tabs.tabs = [mk("a", "https://a.com/"), mk("b", "https://b.com/")]
+    tabs.activeTabId = "a"
+    mod.warmBackdrop()
+    await flush()
+    tabs.activeTabId = "b"
+    vi.mocked(invoke).mockClear()
+    await mod.setWebviewVisible(false, "menu")
+    await flush()
+    expect(vi.mocked(invoke).mock.calls.filter((c) => c[0] === "page_backdrop_shot")).toHaveLength(1)
+    expect(useBackdropStore().image).toBe("data:image/png;base64,SHOT")
+  })
+})

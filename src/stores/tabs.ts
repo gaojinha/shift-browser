@@ -4,6 +4,7 @@ import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { invokeOk, errText } from '../utils/invoke'
+import { warmBackdrop } from '../utils/webview'
 import type { Tab } from '../types/tab'
 import type { Session, SessionTab } from '../types/session'
 import { useGroupsStore } from './groups'
@@ -695,6 +696,8 @@ export const useTabsStore = defineStore('tabs', {
         // 记下后端版本：轮询凭它差分跳过（失败不清零，下轮重对）
         const v = await invokeOk<number>('get_tabs_version').catch(() => null)
         if (v !== null) this.lastTabVersion = v
+        // 底垫预热：页面可见且稳定时后台抓一张，弹菜单直接贴、不闪（藏着时不抓，抓到的是蓝屏）
+        warmBackdrop()
         // 性能 P2（2026-09-22）：兜底轮询**不再**查 get_nav_state（该命令需 GTK 主线程）。
         // 导航状态改由事件驱动：切标签 / 页面加载完成 / 前进后退时调 syncNavState()。
         // （SPA pushState 等无事件场景，由 15s 轮询里的 syncNavState 兜底，见 startPolling）

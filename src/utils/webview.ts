@@ -5,12 +5,43 @@
 // 后端仍用单调递增 seq 令牌丢弃乱序指令。
 import { invokeOk } from './invoke'
 import { useBackdropStore } from '../stores/backdrop'
+import { useTabsStore } from '../stores/tabs'
 
 let seq = 0
 /** 当前隐藏网页的覆盖层来源集合，为空 = 网页可见 */
 const hiders = new Set<string>()
 /** 底垫抓取令牌：菜单关得比快照快时，晚到的快照直接丢掉，不盖新页面 */
 let backdropToken = 0
+/** 底垫暖缓存：藏着时抓的是蓝屏，所以只在页面可见且稳定时后台预热（菜单开直接贴，不闪） */
+let backdropCache = { key: '', url: '', at: 0 }
+/** 暖缓存有效期（毫秒）：过期重抓；页面切了/地址变了直接失效 */
+const BACKDROP_CACHE_MS = 30000
+/** 两次后台预热最小间隔（毫秒）：同步事件频繁时不打爆截图 */
+const BACKDROP_WARM_GAP_MS = 15000
+let lastWarmAt = 0
+
+/** 当前活动标签的底垫键（id+url 对不上=页面变了，缓存作废） */
+function backdropKey(): string | null {
+  const active = useTabsStore().activeTab
+  if (!active || !active.url) return null
+  return `${active.id}\n${active.url}`
+}
+
+/** 后台预热底垫（syncTabs 尾巴调用）：可见才抓，失败静默 */
+export function warmBackdrop() {
+  if (hiders.size > 0) return
+  const key = backdropKey()
+  if (!key) return
+  const now = Date.now()
+  if (backdropCache.key === key && now - backdropCache.at < BACKDROP_CACHE_MS) return
+  if (now - lastWarmAt < BACKDROP_WARM_GAP_MS) return
+  lastWarmAt = now
+  invokeOk<string>('page_backdrop_shot')
+    .then((shot) => {
+      if (shot) backdropCache = { key, url: shot, at: Date.now() }
+    })
+    .catch(() => {})
+}
 
 /**
  * 设置所有标签页 webview 显隐（引用计数版）
@@ -22,17 +53,23 @@ export function setWebviewVisible(visible: boolean, source: string = 'anonymous'
   if (!visible) {
     const wasVisible = hiders.size === 0
     hiders.add(source)
-    // 首个覆盖层：抓一张当前页快照垫底，免得露出深蓝兜底。fire-and-forget，
-    // 失败静默（无底垫=老样子）；令牌防"菜单已关、快照晚到"盖错地方。
+    // 首个覆盖层：暖缓存命中直接贴（零闪烁）；未命中则现抓（令牌防晚到盖错），
+    // 抓到即入缓存，下次同页直接贴。失败静默（无底垫=老样子）。
     if (wasVisible) {
-      const token = ++backdropToken
-      invokeOk<string>('page_backdrop_shot')
-        .then((url) => {
-          if (token === backdropToken && hiders.size > 0 && url) {
-            useBackdropStore().set(url)
-          }
-        })
-        .catch(() => {})
+      const key = backdropKey()
+      if (key && backdropCache.key === key && Date.now() - backdropCache.at < BACKDROP_CACHE_MS) {
+        useBackdropStore().set(backdropCache.url)
+      } else {
+        const token = ++backdropToken
+        invokeOk<string>('page_backdrop_shot')
+          .then((url) => {
+            if (token === backdropToken && hiders.size > 0 && url) {
+              useBackdropStore().set(url)
+              if (key) backdropCache = { key, url, at: Date.now() }
+            }
+          })
+          .catch(() => {})
+      }
     }
     // 有意静默：显隐是高频可丢弃指令（有 seq 令牌保证最终一致），单次失败由后续指令覆盖自愈
     return invokeOk('set_webview_visible', { visible: false, seq, source }).catch(() => {})

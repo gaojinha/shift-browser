@@ -83,6 +83,9 @@ pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &s
                 crate::engine::webview::WebViewBackend::reload(webview);
             }
         });
+        // 地址监听与标题监听各持一份 owned 拷贝（'static 闭包不借函数参数）
+        let app_for_uri = app2.clone();
+        let id_for_uri = tab_id.clone();
         // 监听 WebKit title 变化 → 实时同步标签标题
         wv.connect_title_notify(move |webview| {
             if let Some(t) = webview.title() {
@@ -123,6 +126,41 @@ pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &s
                 if changed {
                     let _ = app2.emit(crate::contracts::events::TABS_UPDATED, ());
                 }
+            }
+        });
+        // 监听 WebKit 地址变化 → 实时同步标签地址（与 title-notify 对称）。
+        // 单页应用内路由（pushState/replaceState）只换地址不整页加载，
+        // 没有它地址栏永远是旧的，标签栏名字（标题）却已是新的——两岔。
+        wv.connect_uri_notify(move |webview| {
+            let Some(uri) = WebViewBackend::uri(webview) else {
+                return;
+            };
+            let uri = uri.trim().to_string();
+            if uri.is_empty() {
+                return;
+            }
+            let changed = {
+                if let Some(state) = app_for_uri.try_state::<TabManager>() {
+                    let need = state
+                        .read_state()
+                        .tabs
+                        .get(&id_for_uri)
+                        .map(|t| t.url != uri)
+                        .unwrap_or(false);
+                    if need {
+                        state.mutate(|s| {
+                            if let Some(tab) = s.tabs.get_mut(&id_for_uri) {
+                                tab.url = uri;
+                            }
+                        });
+                    }
+                    need
+                } else {
+                    false
+                }
+            };
+            if changed {
+                let _ = app_for_uri.emit(crate::contracts::events::TABS_UPDATED, ());
             }
         });
     });
