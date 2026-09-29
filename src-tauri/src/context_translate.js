@@ -231,9 +231,18 @@ if (!window.__sbTrSend) {
   // ---------- 右键拦截 ----------
   // 无论是否选中文字都弹自定义菜单：保证"翻译整个页面"入口永远可用。
   // 自定义菜单里补齐了复制/刷新/后退/前进等原生常用项，不丢失功能。
+  // 但输入类元素（输入框/密码框/多行文本/下拉/富文本）必须放行原生菜单：
+  // 自定义菜单里没有"粘贴/剪切/全选"，拦了就是把用户吃饭的家伙没收了。
   document.addEventListener(
     'contextmenu',
     function (ev) {
+      var t = ev.target;
+      var tag = t && t.tagName;
+      // 输入类元素放行原生菜单：属性与状态双查（contenteditable 在部分内核只认属性）
+      var ce = t && (t.isContentEditable ||
+        (t.getAttribute && t.getAttribute('contenteditable') !== null &&
+          t.getAttribute('contenteditable') !== 'false'));
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || ce) return;
       var sel = String(window.getSelection ? window.getSelection().toString() : '').trim();
       ev.preventDefault();
       ev.stopPropagation();
