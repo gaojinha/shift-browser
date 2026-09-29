@@ -5,6 +5,7 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import { useSettingsStore } from '../../stores/settings'
 import { useSettingsSet } from '../../composables/useSettingsSet'
 import { useToastStore } from '../../stores/toast'
+import SettingSwitch from './ui/SettingSwitch.vue'
 import './ui/settings-shared.css'
 
 const settingsStore = useSettingsStore()
@@ -75,42 +76,33 @@ async function copyRotatedToken() {
                 <span class="field-desc">
                   开放 API 的 eval 命令；默认关。开启后本机脚本/持 token 者可执行任意 JS
                 </span>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('api_allow_eval') === 'true'"
-                    @change="onSet('api_allow_eval', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-                  />
-                  <span class="slider"></span>
-                </label>
+                <SettingSwitch
+                  :checked="settingsStore.get('api_allow_eval') === 'true'"
+                  label="允许 API 执行 JS（危险）"
+                  @change="(v) => onSet('api_allow_eval', v ? 'true' : 'false')"
+                />
               </div>
               <div class="field">
                 <label>API 只读模式</label>
                 <span class="field-desc">
                   开启后拒绝一切写命令（打开页面/填表/点击/导航变更等全部拒绝），只允许读取类命令；适合只做监控/采集的调用方。即时生效
                 </span>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('api_readonly') === 'true'"
-                    @change="onSet('api_readonly', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-                  />
-                  <span class="slider"></span>
-                </label>
+                <SettingSwitch
+                  :checked="settingsStore.get('api_readonly') === 'true'"
+                  label="API 只读模式"
+                  @change="(v) => onSet('api_readonly', v ? 'true' : 'false')"
+                />
               </div>
               <div class="field">
                 <label>允许 API 页面交互（危险）</label>
                 <span class="field-desc">
                   允许 click / fill / scroll / dismiss 等页面交互命令；默认关。即使开启，写类动作在只读模式下仍被拒绝。即时生效
                 </span>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('api_agent_actions') === 'true'"
-                    @change="onSet('api_agent_actions', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-                  />
-                  <span class="slider"></span>
-                </label>
+                <SettingSwitch
+                  :checked="settingsStore.get('api_agent_actions') === 'true'"
+                  label="允许 API 页面交互（危险）"
+                  @change="(v) => onSet('api_agent_actions', v ? 'true' : 'false')"
+                />
               </div>
               <div class="field">
                 <label>开放 API 端口</label>
@@ -129,14 +121,11 @@ async function copyRotatedToken() {
                 <span class="field-desc">
                   默认只绑 127.0.0.1；开启后局域网可达（务必保管 token）；改完重启生效
                 </span>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('api_bind_lan') === 'true'"
-                    @change="onSet('api_bind_lan', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-                  />
-                  <span class="slider"></span>
-                </label>
+                <SettingSwitch
+                  :checked="settingsStore.get('api_bind_lan') === 'true'"
+                  label="开放 API 绑局域网（危险）"
+                  @change="(v) => onSet('api_bind_lan', v ? 'true' : 'false')"
+                />
               </div>
               <div class="field">
                 <label>API IP 白名单</label>
@@ -156,14 +145,11 @@ async function copyRotatedToken() {
                 <span class="field-desc">
                   POST /v1/chat/completions → 转发到 AI provider，其它程序可用同一模型（耗你的额度）
                 </span>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="settingsStore.get('api_model_gateway') === 'true'"
-                    @change="onSet('api_model_gateway', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-                  />
-                  <span class="slider"></span>
-                </label>
+                <SettingSwitch
+                  :checked="settingsStore.get('api_model_gateway') === 'true'"
+                  label="允许模型网关（消耗额度）"
+                  @change="(v) => onSet('api_model_gateway', v ? 'true' : 'false')"
+                />
               </div>
               <div class="field">
                 <label>状态面板与 token</label>

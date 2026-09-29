@@ -3,6 +3,7 @@
 import { onMounted, ref } from 'vue'
 import { errText, invokeOk } from '../../utils/invoke'
 import { useToastStore } from '../../stores/toast'
+import SettingSwitch from './ui/SettingSwitch.vue'
 import './ui/settings-shared.css'
 
 const webmcpPolyfill = ref(false)
@@ -38,14 +39,11 @@ onMounted(loadWebmcpPolyfill)
       <label>
         WebMCP polyfill <span class="exp-badge" v-if="webmcpPolyfill">试验中</span>
       </label>
-      <label class="switch">
-        <input
-          type="checkbox"
-          :checked="webmcpPolyfill"
-          @change="onToggleWebmcpPolyfill"
-        />
-        <span class="slider"></span>
-      </label>
+      <SettingSwitch
+        :checked="webmcpPolyfill"
+        label="WebMCP polyfill"
+        @change="() => onToggleWebmcpPolyfill()"
+      />
       <div class="kw-hint webmcp-hint">
         试验特性（阶段 1.5）· 默认关。开启后向页面注入
         <code>navigator.modelContext.registerTool</code> polyfill，捕获网站声明的 WebMCP

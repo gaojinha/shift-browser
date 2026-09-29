@@ -8,6 +8,7 @@ import { useSettingsSet } from '../../composables/useSettingsSet'
 import { usePrivacyAudit } from '../../composables/usePrivacyAudit'
 import { useToastStore } from '../../stores/toast'
 import PrivacyDataCard from './PrivacyDataCard.vue'
+import SettingSwitch from './ui/SettingSwitch.vue'
 import './ui/settings-shared.css'
 
 const emit = defineEmits<{ (e: 'openCerts'): void }>()
@@ -247,25 +248,19 @@ onMounted(() => {
       <div class="field">
         <label>GPC 请求头（Sec-GPC: 1）</label>
         <span class="field-desc">W3C Global Privacy Control：网络层告诉站点「别卖我的数据」</span>
-        <label class="switch">
-          <input
-            type="checkbox"
-            :checked="settingsStore.get('gpc_header') !== 'false'"
-            @change="onSet('gpc_header', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-          />
-          <span class="slider"></span>
-        </label>
+        <SettingSwitch
+          :checked="settingsStore.get('gpc_header') !== 'false'"
+          label="GPC 请求头（Sec-GPC: 1）"
+          @change="(v) => onSet('gpc_header', v ? 'true' : 'false')"
+        />
       </div>
       <div class="field">
         <label>广告拦截</label>
-        <label class="switch">
-          <input
-            type="checkbox"
-            :checked="settingsStore.get('adblock_enabled') !== 'false'"
-            @change="onToggleAdblock"
-          />
-          <span class="slider"></span>
-        </label>
+        <SettingSwitch
+          :checked="settingsStore.get('adblock_enabled') !== 'false'"
+          label="广告拦截"
+          @change="() => onToggleAdblock()"
+        />
       </div>
       <div class="kw-block" v-if="settingsStore.get('adblock_enabled') !== 'false'">
         <div class="kw-hint">

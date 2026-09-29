@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { useExtensionsStore } from '../../stores/extensions'
 import { useToastStore } from '../../stores/toast'
 import type { Extension } from '../../types/extension'
+import SettingSwitch from './ui/SettingSwitch.vue'
 import './ui/settings-shared.css'
 
 const extensionsStore = useExtensionsStore()
@@ -87,10 +88,11 @@ onMounted(() => {
                   <div class="ext-actions">
                     <span v-if="e.js_count" class="ext-badge">JS</span>
                     <span v-if="e.css_count" class="ext-badge">CSS</span>
-                    <label class="switch">
-                      <input type="checkbox" :checked="e.enabled" @change="onToggleExtension(e)" />
-                      <span class="slider"></span>
-                    </label>
+                    <SettingSwitch
+                      :checked="e.enabled"
+                      :label="`启用扩展 ${e.name}`"
+                      @change="() => onToggleExtension(e)"
+                    />
                     <button class="mini-btn danger" @click="onDeleteExtension(e.id)">删除</button>
                   </div>
                 </div>

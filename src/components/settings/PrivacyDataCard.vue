@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useSettingsStore } from '../../stores/settings'
 import { useSettingsSet } from '../../composables/useSettingsSet'
 import { useToastStore } from '../../stores/toast'
+import SettingSwitch from './ui/SettingSwitch.vue'
 import './ui/settings-shared.css'
 
 const emit = defineEmits<{ (e: 'openCerts'): void }>()
@@ -158,14 +159,11 @@ onMounted(loadUa)
     <div class="card-title"><AppIcon name="trash" :size="14" /> 历史与清理</div>
     <div class="field">
       <label>记录浏览历史</label>
-      <label class="switch">
-        <input
-          type="checkbox"
-          :checked="settingsStore.get('record_history') !== 'false'"
-          @change="onSet('record_history', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-        />
-        <span class="slider"></span>
-      </label>
+      <SettingSwitch
+        :checked="settingsStore.get('record_history') !== 'false'"
+        label="记录浏览历史"
+        @change="(v) => onSet('record_history', v ? 'true' : 'false')"
+      />
     </div>
     <div class="field danger-field">
       <label>历史记录</label>

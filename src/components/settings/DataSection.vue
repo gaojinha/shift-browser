@@ -6,6 +6,7 @@ import { useSettingsStore } from '../../stores/settings'
 import { useSettingsSet } from '../../composables/useSettingsSet'
 import { useVault } from '../../composables/useVault'
 import { useSync } from '../../composables/useSync'
+import SettingSwitch from './ui/SettingSwitch.vue'
 import './ui/settings-shared.css'
 
 const settingsStore = useSettingsStore()
@@ -168,14 +169,11 @@ onMounted(() => {
       </div>
       <div class="field">
         <label>启动锁屏（每次启动输入账号密码解锁，数据不受影响）</label>
-        <label class="switch">
-          <input
-            type="checkbox"
-            :checked="settingsStore.get('lock_enabled') === 'true'"
-            @change="onSet('lock_enabled', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
-          />
-          <span class="slider"></span>
-        </label>
+        <SettingSwitch
+          :checked="settingsStore.get('lock_enabled') === 'true'"
+          label="启动锁屏（每次启动输入账号密码解锁，数据不受影响）"
+          @change="(v) => onSet('lock_enabled', v ? 'true' : 'false')"
+        />
       </div>
     </div>
   </div>
