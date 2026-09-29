@@ -190,6 +190,26 @@ pub(crate) fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
         }
     }
 
+    // 主循环看门狗（诊断用 · 2026-09-29）：系统"无响应"框只在主循环数秒不转时出现，
+    // 但它不说是哪卡的。这里每秒打一次点，恢复后若间隔 ≥5s 就记一条 warn，
+    // 下次再卡直接看日志时间线，不用猜。只记日志，不做任何干预。
+    gtk::glib::timeout_add_seconds_local(1, || {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static LAST_TICK: AtomicU64 = AtomicU64::new(0);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let prev = LAST_TICK.swap(now, Ordering::Relaxed);
+        if prev != 0 && now.saturating_sub(prev) >= 5 {
+            log::warn!(
+                "[watchdog] 主循环停顿约 {} 秒（系统可能已弹无响应框），前后日志即现场",
+                now - prev
+            );
+        }
+        gtk::glib::ControlFlow::Continue
+    });
+
     Ok(())
 }
 
