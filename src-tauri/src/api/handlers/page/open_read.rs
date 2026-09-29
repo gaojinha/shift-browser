@@ -280,21 +280,17 @@ pub(crate) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
     }
 
     // 2c) 读取前可达验证（DNS rebinding 纵深）：复核解析与 WebKit 实际加载仍是两次
-    //     独立查询，TTL=0 攻击可让复核看公网、加载走内网。此处 pin 公网 IP 发 HEAD 验证，
-    //     把穿透条件从"复核时配合"收紧到"复核+验证两次都配合"。失败同样回收标签。
+    //     独立查询，TTL=0 攻击可让复核看公网、加载走内网。此处 pin 公网 IP 发 HEAD 验证。
+    //     失败降级为警告放行（2026-09-29 实测）：CDN IP 轮换/边缘节点波动导致偶发
+    //     连接失败，百度/B站/微博等 1/3 正常站点被误拦；入口+复核两道 fail-closed
+    //     还在，可达验证作为纵深只告警不拦截。标签不回收，直接读取。
     if final_is_http {
         if let Err(resp) = verify_reachable(&final_url).await {
-            if !reused {
-                if let Some(st) = app.try_state::<crate::tabs::TabManager>() {
-                    let _ = crate::tabs::commands::close_tab(app.clone(), st, tab_id.clone()).await;
-                }
-            }
             let msg = resp
                 .get("error")
                 .and_then(|v| v.as_str())
                 .unwrap_or("可达验证失败");
-            return AppError::permission(format!("可达验证拦截（{final_url}）：{msg}"))
-                .error_json();
+            log::warn!("[open_and_read] 可达验证未通过，放行读取（{final_url}）：{msg}");
         }
     }
 
