@@ -358,6 +358,12 @@ export const useTabsStore = defineStore('tabs', {
         for (const t of this.tabs) {
           t.is_active = t.id === id
         }
+        // 用回返回的最新 Tab（延迟加载兑现/页面跳转后存量 url 可能已变），
+        // 否则地址栏拿着旧 url、标签栏拿着新标题，切标签就两岔了
+        const idx = this.tabs.findIndex((t) => t.id === id)
+        if (idx !== -1 && tab) {
+          this.tabs[idx] = { ...tab, is_active: true, groupId: this.tabs[idx].groupId ?? null }
+        }
         this.activeTabId = id
         // 修复（2026-09-22）：切标签后从 WebKit 同步真实导航状态（原为乐观猜测）
         this.syncNavState()

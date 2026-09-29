@@ -321,6 +321,15 @@ pub async fn switch_tab(
     // 延迟加载兑现：占位页切出来时载真址并销账（点当前标签同样触发，不只切页）
     let deferred: Option<String> = state.mutate(|s| s.deferred_loads.remove(&id));
     if let Some(real_url) = deferred {
+        // 存的 url/title 同步成真址：webview 已经去往真址，存量不跟的话标签栏
+        // （标题）与地址栏（存量 url）各说各话，且前端切标签时看到的就是旧数。
+        // 标题随后会被页面真标题覆盖（load 信号），这里先对齐地址。
+        state.mutate(|s| {
+            if let Some(t) = s.tabs.get_mut(&id) {
+                t.url = real_url.clone();
+                t.title = real_url.clone();
+            }
+        });
         if let Some(window) = app.get_window("main") {
             if let Some(wv) = window.get_webview(&format!("tab-{}", id)) {
                 match real_url.parse::<tauri::Url>() {
@@ -332,6 +341,12 @@ pub async fn switch_tab(
                 }
             }
         }
+        // 推一次同步：加载完成信号到来前，前端先拿到真址，不用干等
+        // （加载失败时更不会有完成信号，不推就一直是旧数）。
+        let _ = app.emit(
+            crate::contracts::events::TABS_UPDATED,
+            (),
+        );
     }
 
     state.touch_active(&id);

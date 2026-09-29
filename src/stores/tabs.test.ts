@@ -250,6 +250,31 @@ describe('switchTab', () => {
     expect(s.activeTabId).toBe('a')
     expect(s.tabs[0].is_active).toBe(true)
   })
+
+  it('回写返回体：延迟兑现后存量url已变，切过去直接用新数（标签栏/地址栏不两岔）', async () => {
+    const s = useTabsStore()
+    // 前端列表还是旧数（占位页），后端切时已兑现成真址并返回
+    s.tabs = [
+      makeTab('a', { is_active: true, url: 'https://a.com/', title: 'a' }),
+      makeTab('b', { url: 'shift://newtab', title: '启动页' }),
+    ]
+    s.activeTabId = 'a'
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'switch_tab') {
+        return Promise.resolve(
+          makeTab('b', { is_active: true, url: 'https://real.com/', title: 'https://real.com/' }),
+        )
+      }
+      if (cmd === 'get_nav_state') return Promise.resolve({ canGoBack: true, canGoForward: false })
+      return Promise.resolve(undefined)
+    })
+    await s.switchTab('b')
+    // 地址栏取值源（activeTab.url）必须已是真址
+    expect(s.activeTab?.url).toBe('https://real.com/')
+    // 分组归属不能丢（Rust 回来没 groupId 字段）
+    expect(s.tabs[1].groupId).toBeNull()
+    expect(s.tabs[1].is_active).toBe(true)
+  })
 })
 
 describe('休眠轮询', () => {
