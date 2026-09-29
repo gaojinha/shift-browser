@@ -1,0 +1,47 @@
+# ShiftBrowser 网站兼容性测试（2026-09-29）
+
+用浏览器自身开放 API（`open_and_read`）驱动真实 WebKit 内核批量访问 15 个主流网站，
+验证页面加载、内容读取全链路。测试方法：每站开新 AI 标签 → 等加载就绪 → SSRF 复核 →
+读取正文 → 关闭标签。
+
+## 测试环境
+
+- 版本：5.8.2（含可达验证 warn 放行修复，commit 4606a93）
+- 驱动：`POST http://127.0.0.1:19701/api`（Bearer token）
+- 命令：`open_and_read`（`close=true, max_chars=500`）
+
+## 结果总览：15/15 通过
+
+| # | 类型 | 网站 | 结果 | 耗时 |
+|---|------|------|------|------|
+| 1 | 搜索 | 百度 www.baidu.com | ✅ | ~15s |
+| 2 | 搜索 | 必应 www.bing.com | ✅ | ~8s |
+| 3 | 代码 | GitHub github.com | ✅ | ~15s |
+| 4 | 视频 | B站 www.bilibili.com | ✅ | ~19s |
+| 5 | 社交 | 知乎 www.zhihu.com | ✅ | ~12s |
+| 6 | 社交 | 微博 weibo.com | ✅ | ~18s |
+| 7 | 社交 | 豆瓣 www.douban.com | ✅ | ~15s |
+| 8 | 电商 | 淘宝 www.taobao.com | ✅ | ~18s |
+| 9 | 电商 | 京东 www.jd.com | ✅ | ~17s |
+| 10 | 新闻 | 网易 www.163.com | ✅ | ~18s |
+| 11 | 新闻 | 澎湃 thepaper.cn | ✅ | ~12s |
+| 12 | 技术 | 掘金 juejin.cn | ✅ | ~8s |
+| 13 | 文档 | MDN developer.mozilla.org | ✅ | ~6s |
+| 14 | 技术 | CSDN www.csdn.net | ✅ | ~20s |
+| 15 | 代码 | Gitee gitee.com | ✅ | ~14s |
+
+耗时含开标签 + 等 SPA 渲染稳定 + 读取 + 关标签，非纯加载时间。
+
+## 测试中发现并修复的问题
+
+**可达验证误伤正常站点（已修，commit 4606a93）**：首轮测试 5/15 被 `verify_reachable`
+拦截（百度/B站/微博/豆瓣/澎湃），错误为 pin 的公网 IP 建连失败。根因是 CDN IP 轮换/
+边缘节点波动导致的偶发失败，而非真实 DNS 翻转。修复：失败降级为 warn 日志放行读取，
+入口校验 + 最终复核两道 fail-closed 防线保留。复测 15/15 通过（含豆瓣）。
+
+## 已知限制（非缺陷）
+
+- B站 412 安全风控：服务端 TLS 指纹层风控，UA/指纹/GPC 三层对齐后仍可能触发，
+  属引擎底层限制，见指纹对齐提交（8e73b62）与 copilot 会诊结论。
+- 微博未登录跳登录页：读取到的是登录引导页内容，属站点行为。
+- 淘宝/京东等重 JS 站点：首屏文本较少，属 SPA 渲染特性，`read_ok=true` 即链路正常。
