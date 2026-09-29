@@ -207,8 +207,6 @@ function cancelDelete() {
         </div>
         <div v-else-if="groupsStore.loading" class="empty loading-hint">加载中…</div>
         <div v-else class="empty">还没有分组。右键标签 → 新建分组并移动，或点"+ 新建分组"</div>
-      </div>
-    </div>
 
     <!-- 删除确认弹窗（内层 UiDialog，顶层展示，z 层由 Reka 接管） -->
     <UiDialog
