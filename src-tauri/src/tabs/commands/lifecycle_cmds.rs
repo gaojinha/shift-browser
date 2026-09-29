@@ -142,6 +142,9 @@ pub async fn create_tab(
         let _ = TabManager::set_webview_visible(&app, &id, true);
     }
 
+    // 建完推同步：API 开的标签前端不知情（切过去都找不到），推一次即跟上。
+    // 会话恢复连建时会有 N 次，前端是事件驱动单次同步，开销可接受。
+    let _ = app.emit(crate::contracts::events::TABS_UPDATED, ());
     Ok(tab)
 }
 
@@ -234,6 +237,8 @@ pub async fn close_tab(
     }
 
     let s = state.read_state();
+    // 关完推同步：AI 关的标签前端不知情，不推就留 ghost 标签到下次轮询。
+    let _ = app.emit(crate::contracts::events::TABS_UPDATED, ());
     Ok(next_id.and_then(|nid| s.tabs.get(&nid).cloned()))
 }
 
@@ -260,6 +265,8 @@ pub async fn close_all_tabs(
     for id in ids {
         TabManager::destroy_webview(&app, &id);
     }
+    // 清完推同步：工作区切换等批量清空后前端一次跟上。
+    let _ = app.emit(crate::contracts::events::TABS_UPDATED, ());
     Ok(snapshot)
 }
 
@@ -341,16 +348,13 @@ pub async fn switch_tab(
                 }
             }
         }
-        // 推一次同步：加载完成信号到来前，前端先拿到真址，不用干等
-        // （加载失败时更不会有完成信号，不推就一直是旧数）。
-        let _ = app.emit(
-            crate::contracts::events::TABS_UPDATED,
-            (),
-        );
+        // 推一次同步已并到函数尾（无条件），这里不再重复推。
     }
 
     state.touch_active(&id);
     let s = state.read_state();
+    // 切完推同步：API 驱使的切换前端不知情，不推就靠 15s 轮询，标签栏高亮/地址栏慢半拍。
+    let _ = app.emit(crate::contracts::events::TABS_UPDATED, ());
     Ok(s.tabs.get(&id).cloned())
 }
 

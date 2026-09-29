@@ -3,7 +3,7 @@
 
 use super::super::*;
 use crate::error::{AppError, CommandResult};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// 翻译当前活动标签的整个页面（供前端「翻译当前页面」按钮调用）
 /// 复用既有整页翻译脚本：脚本自包含（进度浮层 + 分批调 shift://__translate__/batch + 回填 DOM），
@@ -83,6 +83,8 @@ pub async fn navigate_tab(
             tab = Some(t.clone());
         }
     });
+    // 导航完推同步：API 驱使的导航前端不知情，地址栏/标题慢半拍。
+    let _ = app.emit(crate::contracts::events::TABS_UPDATED, ());
     Ok(tab)
 }
 
