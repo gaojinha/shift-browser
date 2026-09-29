@@ -9,8 +9,8 @@ import type { HistoryEntry } from '../types/history'
 import TranslateProgress from './TranslateProgress.vue'
 import SpaceSwitcher from './SpaceSwitcher.vue'
 import AppIcon from './AppIcon.vue'
-// 搜索引擎 URL 模板（单一来源，与设置弹窗/新标签页/开放 API 同源）
-import { SEARCH_URLS } from '../constants'
+// 认址纯函数（URL 识别 / 默认协议 / 搜索分流，单测见 utils/address.test.ts）
+import { resolveInputTarget } from '../utils/address'
 import { setWebviewVisible } from '../utils/webview'
 
 const tabsStore = useTabsStore()
@@ -51,9 +51,9 @@ watch(
   { immediate: true },
 )
 
-// ===== 搜索建议下拉（历史 + 书签） =====
+// ===== 搜索建议下拉（直达 + 历史 + 书签） =====
 interface Suggestion {
-  type: 'bookmark' | 'history'
+  type: 'direct' | 'bookmark' | 'history'
   title: string
   url: string
   id: number
@@ -82,6 +82,13 @@ function onInput() {
         ),
       ])
       const merged: Suggestion[] = [
+        // 首条直达：回车/点击直接打开当前输入（URL 或搜索），不用先选
+        {
+          type: 'direct' as const,
+          title: directTitle(q),
+          url: directTarget(q),
+          id: -1,
+        },
         ...bks.slice(0, 5).map((b) => ({ type: 'bookmark' as const, title: b.title, url: b.url, id: b.id })),
         ...his.slice(0, 8).map((h) => ({
           type: 'history' as const,
@@ -154,14 +161,18 @@ function onBlur() {
   window.setTimeout(closeSuggestions, 150)
 }
 
-/** 判断输入是否像 URL（域名/含点/localhost/IP/host:port），而不是搜索词 */
-function looksLikeUrl(input: string): boolean {
-  return (
-    input.includes('.') ||
-    /^localhost(:\d+)?$/i.test(input) ||
-    /^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(input) ||
-    /^[a-zA-Z0-9-]+:\d+$/.test(input)
-  )
+/** 直达项目标：与回车逻辑同一份（内网 http / 公网 https / 搜索分流） */
+function directTarget(q: string): string {
+  const engine = settingsStore.get('search_engine') || 'bing'
+  return resolveInputTarget(q, engine).url
+}
+
+/** 直达项标题：超长截断，搜索与打开一眼区分 */
+function directTitle(q: string): string {
+  const engine = settingsStore.get('search_engine') || 'bing'
+  const { isSearch } = resolveInputTarget(q, engine)
+  const short = q.length > 40 ? q.slice(0, 40) + '…' : q
+  return `${isSearch ? '搜索' : '打开'}：${short}`
 }
 
 /** 地址栏回车：输入 URL 或搜索 */
@@ -171,18 +182,9 @@ function onAddressEnter() {
   const active = tabsStore.activeTab
   if (!active) return
 
-  let url = input
-  // 无协议时补全 https://
-  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(input)) {
-    // 带空格或不像 URL → 走搜索（用设置的搜索引擎）
-    if (/\s/.test(input) || !looksLikeUrl(input)) {
-      const engine = settingsStore.get('search_engine') || 'bing'
-      const base = SEARCH_URLS[engine] ?? SEARCH_URLS.bing
-      url = `${base}${encodeURIComponent(input)}`
-    } else {
-      url = `https://${input}`
-    }
-  }
+  const engine = settingsStore.get('search_engine') || 'bing'
+  const { url } = resolveInputTarget(input, engine)
+  if (!url) return
   tabsStore.navigateTab(active.id, url)
 }
 
@@ -289,7 +291,7 @@ async function onReader() {
           @mousedown.prevent="openSuggestion(s)"
         >
           <span class="suggest-icon">
-            <AppIcon :name="s.type === 'bookmark' ? 'folder' : 'clock'" :size="12" />
+            <AppIcon :name="s.type === 'bookmark' ? 'folder' : s.type === 'direct' ? 'arrowRight' : 'clock'" :size="12" />
           </span>
           <span class="suggest-title">{{ s.title }}</span>
           <span class="suggest-url">{{ s.url }}</span>

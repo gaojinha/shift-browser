@@ -3,7 +3,7 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { invokeOk } from '../utils/invoke'
+import { invokeOk, errText } from '../utils/invoke'
 import type { Tab } from '../types/tab'
 import type { Session, SessionTab } from '../types/session'
 import { useGroupsStore } from './groups'
@@ -391,7 +391,7 @@ export const useTabsStore = defineStore('tabs', {
         }
       } catch (e) {
         console.error('[tabs] 导航失败:', e)
-        useToastStore().error('页面导航失败')
+        useToastStore().error(`页面导航失败：${errText(e)}`)
         if (this.loadingTabId === id) this.loadingTabId = null
       }
     },
