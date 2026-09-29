@@ -25,7 +25,7 @@ pub(super) struct McpConnection {
     child: tokio::process::Child,
     stdin: tokio::process::ChildStdin,
     /// stdout 缓冲读（不用 `Lines`：其内部缓冲无长度限制，恶意 server 用超大行
-    /// 可耗尽内存；此处用 `read_until` + `MCP_MAX_LINE_BYTES` 显式限长）
+    /// 可耗尽内存；此处逐块读取并按 `MCP_MAX_LINE_BYTES` 显式限长）
     stdout: BufReader<tokio::process::ChildStdout>,
     next_id: AtomicU64,
     server_name: String,

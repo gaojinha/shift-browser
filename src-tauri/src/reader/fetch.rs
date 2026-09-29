@@ -191,7 +191,7 @@ pub(crate) async fn curl_fetch_with_redirects(
     Err("重定向次数过多".to_string())
 }
 
-/// 同步解析一跳 URL 并生成 curl `--resolve` pin（P0-6，重定向逐跳调用）。
+/// 异步解析一跳 URL 并生成 curl `--resolve` pin（P0-6，重定向逐跳调用）。
 /// - IP 字面量：校验公网后返回空列表（无 DNS 面，curl 直连即可）
 /// - 域名：用系统解析器只解析这一次，任一结果落内网即整体拒绝（双答 DNS
 ///   混入 127.0.0.1/169.254.169.254 时拒绝），全部公网才返回 pin 列表；
