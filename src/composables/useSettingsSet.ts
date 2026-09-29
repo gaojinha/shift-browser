@@ -36,6 +36,15 @@ export function useSettingsSet() {
         useToastStore().error('保存网络层配置失败')
       }
     }
+    // Chrome 指纹补齐开关：写库后立即重注（已加载标签即时生效，幂等）
+    if (key === 'compat_chrome_fp') {
+      try {
+        await invokeOk('set_compat_chrome_fp', { enabled: value === 'true' })
+      } catch (e) {
+        console.error('[settings] 指纹补齐开关同步失败:', e)
+        useToastStore().error('指纹补齐切换失败')
+      }
+    }
     // 启动页相关设置：保存后重新生成新标签页 HTML
     if (key === 'show_bg' || key === 'font_size' || key === 'search_engine') {
       try {

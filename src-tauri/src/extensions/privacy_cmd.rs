@@ -45,7 +45,7 @@ pub async fn set_privacy_whitelist(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, None);
+    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
     Ok(())
 }
 
@@ -77,7 +77,28 @@ pub async fn set_webmcp_polyfill(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, None);
+    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
+    Ok(())
+}
+
+/// 设置 Chrome 指纹补齐开关（存设置 + 立即重新注入；默认开，关后回原生）
+#[tauri::command]
+pub async fn set_compat_chrome_fp(
+    db: State<'_, Db>,
+    app: AppHandle,
+    enabled: bool,
+) -> CommandResult<()> {
+    log::info!("[extensions] set_compat_chrome_fp: {}", enabled);
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ('compat_chrome_fp', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(if enabled { "true" } else { "false" })
+    .execute(&db.pool)
+    .await
+    .map_err(|e| AppError::db(e.to_string()))?;
+    let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
+    inject_extensions(&app, items, webmcp_on, enabled, None);
     Ok(())
 }
 
@@ -130,7 +151,7 @@ pub async fn set_privacy_shield_level(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, None);
+    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
     Ok(())
 }
 
@@ -185,7 +206,7 @@ pub async fn set_privacy_fp_mode(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, None);
+    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
     Ok(())
 }
 
@@ -217,7 +238,7 @@ pub async fn set_privacy_shield_enabled(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, None);
+    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
     Ok(())
 }
 
@@ -249,7 +270,7 @@ pub async fn set_adblock_enabled(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, None);
+    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
     Ok(())
 }
 
@@ -296,7 +317,7 @@ pub async fn set_adblock_keywords(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, None);
+    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
     Ok(())
 }
 

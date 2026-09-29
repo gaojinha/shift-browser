@@ -154,7 +154,7 @@ pub async fn load_extension(
     );
     // 注入（重新注入全部启用扩展，保持一致性）
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, None);
+    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
     Ok(ExtensionInfo {
         id,
         name,
@@ -214,7 +214,7 @@ pub async fn set_extension_enabled(
         .await
         .map_err(|e| e.to_string())?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, None);
+    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
     Ok(())
 }
 
@@ -224,6 +224,6 @@ pub async fn delete_extension(db: State<'_, Db>, app: AppHandle, id: i64) -> Res
     log::info!("[extensions] delete_extension: id={}", id);
     ext_db::delete(&db, id).await.map_err(|e| e.to_string())?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, None);
+    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
     Ok(())
 }

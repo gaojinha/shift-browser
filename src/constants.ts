@@ -43,6 +43,7 @@ export const SETTINGS_SCHEMA = {
   show_bg: { default: 'true', kind: 'bool', sensitive: false, desc: '启动页显示壁纸' },
   render_disable_dmabuf: { default: 'false', kind: 'bool', sensitive: false, desc: '禁用 DMA-BUF 渲染（修视频闪烁，但禁用会导致微博等重合成站点崩溃，默认关；改后需重启）' },
   enable_devtools: { default: 'false', kind: 'bool', sensitive: false, desc: '开发者工具（F12 调试面板；开后新开标签生效，已开标签关掉重开）' },
+  compat_chrome_fp: { default: 'true', kind: 'bool', sensitive: false, desc: 'Chrome 指纹补齐（userAgentData/deviceMemory/scheduler；缺件站点如验证墙更易通过，关后回原生）' },
   show_lunar: { default: 'true', kind: 'bool', sensitive: false, desc: '启动页显示农历' },
   show_quote: { default: 'true', kind: 'bool', sensitive: false, desc: '启动页显示每日一句' },
   show_weather: { default: 'true', kind: 'bool', sensitive: false, desc: '启动页显示天气' },

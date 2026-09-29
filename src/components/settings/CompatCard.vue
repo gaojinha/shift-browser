@@ -26,6 +26,20 @@ const { onSet } = useSettingsSet()
       </label>
     </div>
     <div class="field">
+      <label>Chrome 指纹补齐</label>
+      <span class="field-desc">
+        补上 WebKit 缺的 <b>userAgentData / deviceMemory / scheduler</b>（值照桌面 Chrome），验证墙类站点更易通过。关后回原生，改后已开标签即时生效。
+      </span>
+      <label class="switch">
+        <input
+          type="checkbox"
+          :checked="settingsStore.get('compat_chrome_fp') !== 'false'"
+          @change="onSet('compat_chrome_fp', ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+        />
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="field">
       <label>禁用 DMA-BUF 渲染</label>
       <span class="field-desc">
         可修复部分机型的视频闪烁，<b>但禁用后打开微博等重合成页面会导致浏览器崩溃</b>（2026-09-26 实测），默认关闭。<b>改后需重启生效</b>。

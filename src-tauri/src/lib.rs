@@ -381,6 +381,8 @@ pub fn run() {
             // WebMCP polyfill 试验（阶段 1.5）
             extensions::privacy_cmd::set_webmcp_polyfill,
             extensions::privacy_cmd::get_webmcp_polyfill,
+            // Chrome 指纹补齐（2026-09-29 Turnstile 确诊缺口，默认开）
+            extensions::privacy_cmd::set_compat_chrome_fp,
             // 隐私防护统计（防护看得见）
             extensions::get_privacy_stats,
             extensions::reset_privacy_stats,

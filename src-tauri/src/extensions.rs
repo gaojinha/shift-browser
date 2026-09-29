@@ -78,6 +78,10 @@ const CONTEXT_TRANSLATE_JS: &str = include_str!("context_translate.js");
 /// 脚本自身幂等（__sbSelWatch），与另外两条注入路径重复执行也无害。
 const SELWATCH_JS: &str = include_str!("page_selwatch.js");
 
+/// Chrome 指纹补齐脚本（2026-09-29 Turnstile 确诊缺口）：userAgentData /
+/// deviceMemory / scheduler。document_start + 全帧注入，幂等（__sbCompatFP）。
+const COMPAT_CHROME_JS: &str = include_str!("compat_chrome.js");
+
 /// 内置隐私防护脚本（P0：GPC + 反指纹随机化 + WebRTC 防泄露）
 ///
 /// 设计要点（依据 Brave/Tor 的公开实践）：
@@ -110,6 +114,7 @@ fn inject_extensions(
     app: &AppHandle,
     items: Vec<(Option<String>, Option<String>)>,
     webmcp_on: bool,
+    compat_on: bool,
     only_label: Option<&str>,
 ) {
     // 注意：主窗口是 Window 类型（tabs.rs 用 get_window("main")），
@@ -197,6 +202,21 @@ fn inject_extensions(
                 );
                 manager.add_script(&selwatch);
                 crate::engine::webview::eval_js(&webview, SELWATCH_JS);
+                // Chrome 指纹补齐（2026-09-29 Turnstile 确诊缺口）：userAgentData /
+                // deviceMemory / scheduler 三件在 WebKitGTK 缺失，验证墙拿它们打分。
+                // document_start + 全帧（含验证 iframe），网站 feature-detect 前到位。
+                // 开关见设置 compat_chrome_fp（默认开），已加载标签即时 eval 生效。
+                if compat_on {
+                    let compat = UserScript::new(
+                        COMPAT_CHROME_JS,
+                        UserContentInjectedFrames::AllFrames,
+                        UserScriptInjectionTime::Start,
+                        allow_list,
+                        &[],
+                    );
+                    manager.add_script(&compat);
+                    crate::engine::webview::eval_js(&webview, COMPAT_CHROME_JS);
+                }
                 // WebMCP polyfill 试验（阶段 1.5）：document_start 注入（网站脚本
                 // feature-detect 前），捕获 registerTool 声明。可开关，默认关。
                 if webmcp_on {
@@ -278,8 +298,22 @@ pub async fn re_inject_one(app: &AppHandle, label: &str) {
     re_inject_filtered(app, Some(label.to_string())).await;
 }
 
+/// Chrome 指纹补齐开关读取（默认开；缺行/读失败按开处理，与 contracts 默认值同口径）。
+/// 注入路径与开关命令共用，单源防两处手写漂移。
+pub(crate) async fn compat_enabled(db: &Db) -> bool {
+    sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'compat_chrome_fp'")
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|(v,)| v != "false")
+        .unwrap_or(true)
+}
+
 async fn re_inject_filtered(app: &AppHandle, only: Option<String>) {
     let db = app.state::<Db>();
+    // 指纹补齐开关（默认开；缺行按开处理，与 contracts 默认值同口径）
+    let compat_on = compat_enabled(&db).await;
     match adblock::collect_enabled_items(&db).await {
         Ok((items, webmcp_on)) => {
             log::info!(
@@ -289,7 +323,7 @@ async fn re_inject_filtered(app: &AppHandle, only: Option<String>) {
                     .unwrap_or_default(),
                 items.len()
             );
-            inject_extensions(app, items.clone(), webmcp_on, only.as_deref());
+            inject_extensions(app, items.clone(), webmcp_on, compat_on, only.as_deref());
             // 延迟重试 evaluate：页面加载中 evaluate 会失败（document 未就绪）。
             // page_load_finished 事件对部分页面（如 understandingwar.org）不触发，
             // 所以不能只靠 Finished 补注入——这里 1s/3s/8s 重试，页面加载完必然命中。
