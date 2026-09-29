@@ -1,6 +1,8 @@
 //! 页面内容/状态读取 handler（R1 三次拆分 · 2026-09-25）：
 //! read_page（固定采集脚本的多模式读取）与 read_status（只读就绪态元信息）。
 
+use html5ever::tendril::TendrilSink;
+use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
@@ -122,6 +124,13 @@ pub(crate) async fn read_page(app: &AppHandle, req: &Value) -> Value {
             .and_then(|u| u.as_str())
             .unwrap_or("")
             .to_string();
+        let page_title = v.get("title").and_then(|t| t.as_str()).unwrap_or("");
+        let og_title = v
+            .get("meta")
+            .and_then(|m| m.get("og"))
+            .and_then(|og| og.get("title"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("");
         let url_obj = match url::Url::parse(&page_url) {
             Ok(u) => u,
             Err(_) => return AppError::internal("页面 URL 不合法").error_json(),
@@ -145,8 +154,13 @@ pub(crate) async fn read_page(app: &AppHandle, req: &Value) -> Value {
         if product.text.is_empty() && product.content.is_empty() {
             return AppError::validation("未提取到正文，页面可能不是文章页").error_json();
         }
-        let text = product
-            .text
+        let extracted_text = html_to_structured_text(&product.content);
+        let source_text = if extracted_text.is_empty() {
+            &product.text
+        } else {
+            &extracted_text
+        };
+        let text = source_text
             .chars()
             .take(max_chars as usize)
             .collect::<String>();
@@ -158,10 +172,10 @@ pub(crate) async fn read_page(app: &AppHandle, req: &Value) -> Value {
         let data = json!({
             "mode": "article",
             "url": page_url,
-            "title": product.title,
+            "title": article_title(&product.title, page_title, og_title),
             "text": text,
             "content": content,
-            "truncated": product.text.len() > text.len() || product.content.len() > content.len(),
+            "truncated": source_text.len() > text.len() || product.content.len() > content.len(),
         });
         let resp = serde_json::to_vec(&json!({"ok": true, "data": data})).unwrap_or_default();
         if resp.len() > 4_000_000 {
@@ -181,6 +195,112 @@ pub(crate) async fn read_page(app: &AppHandle, req: &Value) -> Value {
             .error_json();
     }
     json!({"ok": true, "data": v})
+}
+
+fn article_title(extracted: &str, page: &str, open_graph: &str) -> String {
+    [extracted, page, open_graph]
+        .into_iter()
+        .map(str::trim)
+        .find(|title| !title.is_empty())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn html_to_structured_text(html: &str) -> String {
+    fn visit(node: &Handle, out: &mut String) {
+        let tag = match &node.data {
+            NodeData::Text { contents } => {
+                out.push_str(&contents.borrow());
+                return;
+            }
+            NodeData::Element { name, .. } => name.local.as_ref(),
+            _ => "",
+        };
+        if matches!(tag, "script" | "style" | "noscript") {
+            return;
+        }
+        let is_block = matches!(
+            tag,
+            "address"
+                | "article"
+                | "aside"
+                | "blockquote"
+                | "dd"
+                | "div"
+                | "dl"
+                | "dt"
+                | "fieldset"
+                | "figcaption"
+                | "figure"
+                | "footer"
+                | "form"
+                | "h1"
+                | "h2"
+                | "h3"
+                | "h4"
+                | "h5"
+                | "h6"
+                | "header"
+                | "hr"
+                | "li"
+                | "main"
+                | "ol"
+                | "p"
+                | "pre"
+                | "section"
+                | "table"
+                | "tr"
+                | "ul"
+        );
+        if is_block {
+            out.push('\n');
+        }
+        for child in node.children.borrow().iter() {
+            visit(child, out);
+        }
+        if is_block || tag == "br" {
+            out.push('\n');
+        } else if tag == "td" || tag == "th" {
+            out.push('\t');
+        }
+    }
+
+    fn normalize(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut pending_space = false;
+        let mut pending_newlines = 0usize;
+        for ch in text.chars() {
+            if ch.is_whitespace() {
+                if ch == '\n' || ch == '\r' {
+                    pending_newlines = (pending_newlines + 1).min(2);
+                    pending_space = false;
+                } else if pending_newlines == 0 {
+                    pending_space = true;
+                }
+                continue;
+            }
+            if pending_newlines > 0 {
+                while out.ends_with(' ') {
+                    out.pop();
+                }
+                if !out.is_empty() {
+                    out.push_str(&"\n".repeat(pending_newlines));
+                }
+                pending_newlines = 0;
+                pending_space = false;
+            } else if pending_space && !out.is_empty() {
+                out.push(' ');
+                pending_space = false;
+            }
+            out.push(ch);
+        }
+        out.trim().to_string()
+    }
+
+    let dom = html5ever::parse_document(RcDom::default(), Default::default()).one(html);
+    let mut text = String::with_capacity(html.len());
+    visit(&dom.document, &mut text);
+    normalize(&text)
 }
 
 /// 读取标签页状态与脱敏元信息（纯读，不返回页面内容）。
@@ -273,4 +393,36 @@ pub(crate) async fn read_status(app: &AppHandle, req: &Value) -> Value {
         "hints": probe.get("hints").cloned().unwrap_or(json!([])),
         "counts": probe.get("counts").cloned().unwrap_or(json!({})),
     }})
+}
+
+#[cfg(test)]
+mod article_tests {
+    use super::{article_title, html_to_structured_text};
+
+    #[test]
+    fn article_title_falls_back_to_page_then_open_graph_title() {
+        assert_eq!(
+            article_title("  ", "Document title", "Open Graph title"),
+            "Document title"
+        );
+        assert_eq!(
+            article_title("", " ", "Open Graph title"),
+            "Open Graph title"
+        );
+        assert_eq!(
+            article_title("Extracted title", "Document title", "Open Graph title"),
+            "Extracted title"
+        );
+    }
+
+    #[test]
+    fn article_text_preserves_block_boundaries_and_decodes_entities() {
+        let text = html_to_structured_text(
+            "<h1>Heading</h1><p>First &amp; paragraph.</p><p>Second<br>line.</p><ul><li>One</li><li>Two</li></ul>",
+        );
+        assert_eq!(
+            text,
+            "Heading\n\nFirst & paragraph.\n\nSecond\nline.\n\nOne\n\nTwo"
+        );
+    }
 }
