@@ -1,16 +1,25 @@
 <script setup lang="ts">
 // 标签分组管理弹窗
 // 与 PasswordsDialog 一样：组件在 App.vue 始终挂载，用 watch(props.show) 控制显示副作用
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { setWebviewVisible } from '../utils/webview'
 import { useGroupsStore } from '../stores/groups'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
+import UiDialog from './ui/UiDialog.vue'
 // 分组色板（单一来源）
 import { UI } from '../constants'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+/** 外层显隐（UiDialog 双向绑定：关即 emit close） */
+const showModel = computed({
+  get: () => props.show,
+  set: (v: boolean) => {
+    if (!v) emit('close')
+  },
+})
 
 const groupsStore = useGroupsStore()
 const tabsStore = useTabsStore()
@@ -115,6 +124,13 @@ async function onDelete(id: number) {
 
 // 删除确认弹窗（防止误删分组）
 const confirmTarget = ref<{ id: number; name: string } | null>(null)
+/** 删除确认显隐（对象转布尔，关即清空） */
+const confirmModel = computed({
+  get: () => confirmTarget.value !== null,
+  set: (v: boolean) => {
+    if (!v) confirmTarget.value = null
+  },
+})
 function askDelete(g: { id: number; name: string }) {
   confirmTarget.value = { id: g.id, name: g.name }
 }
@@ -124,20 +140,13 @@ function cancelDelete() {
 </script>
 
 <template>
-  <Transition name="fade">
-  <div class="dialog-overlay" v-if="props.show" @click.self="emit('close')">
-    <div class="dialog">
-      <div class="dialog-header">
-        <span>标签分组</span>
-        <button class="close-btn" aria-label="关闭" @click="emit('close')">✕</button>
-      </div>
-
-      <div class="dialog-body">
-        <div class="toolbar">
-          <button class="add-btn" @click="showAdd = !showAdd">
-            {{ showAdd ? '收起' : '+ 新建分组' }}
-          </button>
-        </div>
+  <!-- 标签分组：外层 UiDialog（520px 宽）；新建按钮进 header-actions 槽 -->
+  <UiDialog v-model:open="showModel" title="标签分组" width="min(520px, calc(100vw - 32px))">
+    <template #actions>
+      <button class="add-btn" @click="showAdd = !showAdd">
+        {{ showAdd ? '收起' : '+ 新建分组' }}
+      </button>
+    </template>
 
         <form v-if="showAdd" class="add-form" @submit.prevent="onCreate">
           <input v-model="form.name" placeholder="分组名称（如 工作、娱乐）" />
@@ -201,36 +210,22 @@ function cancelDelete() {
       </div>
     </div>
 
-    <!-- 删除确认弹窗 -->
-    <div v-if="confirmTarget" class="dialog-overlay inner" @click.self="cancelDelete">
-      <div class="dialog confirm-dialog">
-        <div class="dialog-header">
-          <span>删除分组</span>
-          <button class="close-btn" aria-label="关闭" @click="cancelDelete">×</button>
-        </div>
-        <div class="dialog-body">
-          <p class="confirm-text">
-            确定删除分组「{{ confirmTarget.name }}」吗？组内标签将回到未分组。
-          </p>
-          <div class="confirm-actions">
-            <button class="bm-cancel" @click="cancelDelete">取消</button>
-            <button class="bm-save danger" @click="onDelete(confirmTarget.id)">删除</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  </Transition>
+    <!-- 删除确认弹窗（内层 UiDialog，顶层展示，z 层由 Reka 接管） -->
+    <UiDialog
+      v-model:open="confirmModel"
+      title="删除分组"
+      :description="`确定删除分组「${confirmTarget?.name}」吗？组内标签将回到未分组。`"
+    >
+      <template #footer>
+        <button class="bm-cancel" @click="cancelDelete">取消</button>
+        <button class="bm-save danger" @click="onDelete(confirmTarget!.id)">删除</button>
+      </template>
+    </UiDialog>
+  </UiDialog>
 </template>
 
 <style scoped>
-/* 分组弹窗比默认弹窗宽一点（520px） */
-.dialog {
-  width: min(520px, calc(100vw - 32px));
-}
-.toolbar {
-  margin-bottom: 10px;
-}
+/* 弹窗基础样式走 UiDialog（Reka 底座），这里只保留分组业务样式 */
 /* 通用 .add-btn/.add-form/.form-error/.save-btn 已收口至 styles/components.css */
 .color-row {
   display: flex;
@@ -278,13 +273,5 @@ function cancelDelete() {
   align-items: center;
   gap: 3px;
 }
-/* 删除确认弹窗（嵌套在分组弹窗之上） */
-.dialog-overlay.inner {
-  z-index: 1100;
-}
-.confirm-dialog {
-  width: min(360px, calc(100vw - 32px));
-}
-/* 通用 .confirm-text/.confirm-actions 已收口至 styles/components.css；
-   通用 .bm-cancel/.bm-save（含 .danger）已收口至 styles/components.css */
+/* 通用 .bm-cancel/.bm-save（含 .danger）已收口至 styles/components.css */
 </style>

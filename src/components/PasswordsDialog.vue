@@ -2,14 +2,23 @@
 // 密码管理弹窗
 // 注意：child webview 是 GTK 部件盖在 Vue UI 上，弹窗会被页面盖住。
 // 因此挂载时隐藏所有标签 webview，卸载时恢复。
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { setWebviewVisible } from '../utils/webview'
 import { usePasswordsStore } from '../stores/passwords'
 import { useToastStore } from '../stores/toast'
 import { useConfirmDelete } from '../composables/useConfirmDelete'
+import UiDialog from './ui/UiDialog.vue'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+/** 外层显隐（UiDialog 双向绑定：关即 emit close） */
+const showModel = computed({
+  get: () => props.show,
+  set: (v: boolean) => {
+    if (!v) emit('close')
+  },
+})
 
 const passwordsStore = usePasswordsStore()
 const toastStore = useToastStore()
@@ -99,20 +108,13 @@ async function onDelete(id: number) {
 </script>
 
 <template>
-  <Transition name="fade">
-  <div class="dialog-overlay" v-if="props.show" @click.self="emit('close')">
-    <div class="dialog">
-      <div class="dialog-header">
-        <span>密码管理</span>
-        <button class="close-btn" aria-label="关闭" @click="emit('close')">✕</button>
-      </div>
-
-      <div class="dialog-body">
-        <div class="toolbar">
-          <button class="add-btn" @click="showAdd = !showAdd">
-            {{ showAdd ? '收起' : '+ 添加密码' }}
-          </button>
-        </div>
+  <!-- 密码管理：外层 UiDialog；添加按钮进 header-actions 槽 -->
+  <UiDialog v-model:open="showModel" title="密码管理" width="min(520px, calc(100vw - 32px))">
+    <template #actions>
+      <button class="add-btn" @click="showAdd = !showAdd">
+        {{ showAdd ? '收起' : '+ 添加密码' }}
+      </button>
+    </template>
 
         <form v-if="showAdd" class="add-form" @submit.prevent="onAdd">
           <input v-model="form.domain" placeholder="域名（如 example.com）" />
@@ -146,16 +148,11 @@ async function onDelete(id: number) {
         </div>
         <div v-else-if="!passwordsStore.loaded" class="empty loading-hint">加载中…</div>
         <div v-else class="empty">还没有保存的密码</div>
-      </div>
-    </div>
-  </div>
-  </Transition>
+  </UiDialog>
 </template>
 
 <style scoped>
-.toolbar {
-  margin-bottom: 10px;
-}
+/* 弹窗基础样式走 UiDialog（Reka 底座），这里只保留密码业务样式 */
 /* 通用 .add-btn/.add-form/.form-error/.save-btn 已收口至 styles/components.css */
 /* 通用 .list/.item/.item-info/.item-actions/.mini-btn/.empty 已收口至 styles/components.css */
 .item-domain {

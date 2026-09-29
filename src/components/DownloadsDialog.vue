@@ -2,7 +2,7 @@
 // 下载管理弹窗
 // 注意：child webview 是 GTK 部件盖在 Vue UI 上，弹窗会被页面盖住。
 // 因此显示时隐藏所有标签 webview（同 PasswordsDialog），关闭时恢复。
-import { onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener'
 import { setWebviewVisible } from '../utils/webview'
@@ -10,10 +10,19 @@ import { useDownloadsStore } from '../stores/downloads'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
 import { useConfirmDelete } from '../composables/useConfirmDelete'
+import UiDialog from './ui/UiDialog.vue'
 import { EVENTS } from '../constants'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+/** 外层显隐（UiDialog 双向绑定：关即 emit close） */
+const showModel = computed({
+  get: () => props.show,
+  set: (v: boolean) => {
+    if (!v) emit('close')
+  },
+})
 
 const downloadsStore = useDownloadsStore()
 const confirmDelete = useConfirmDelete()
@@ -125,15 +134,8 @@ async function onReveal(path: string | null) {
 </script>
 
 <template>
-  <Transition name="fade">
-  <div class="dialog-overlay" v-if="props.show" @click.self="emit('close')">
-    <div class="dialog">
-      <div class="dialog-header">
-        <span>下载管理</span>
-        <button class="close-btn" aria-label="关闭" @click="emit('close')">✕</button>
-      </div>
-
-      <div class="dialog-body">
+  <!-- 下载管理：外层 UiDialog（520px 宽） -->
+  <UiDialog v-model:open="showModel" title="下载管理" width="min(520px, calc(100vw - 32px))">
         <div class="list" v-if="downloadsStore.list.length > 0">
           <div v-for="d in downloadsStore.list" :key="d.id" class="item">
             <div class="item-info">
@@ -173,17 +175,11 @@ async function onReveal(path: string | null) {
         </div>
         <div v-else-if="downloadsStore.loading" class="empty loading-hint">加载中…</div>
         <div v-else class="empty">还没有下载记录</div>
-      </div>
-    </div>
-  </div>
-  </Transition>
+  </UiDialog>
 </template>
 
 <style scoped>
-/* 下载弹窗比默认弹窗宽一点（520px） */
-.dialog {
-  width: min(520px, calc(100vw - 32px));
-}
+/* 弹窗基础样式走 UiDialog（Reka 底座），这里只保留下载业务样式 */
 /* 通用 .list/.item/.item-info/.item-actions/.mini-btn/.empty 已收口至 styles/components.css */
 .item-name {
   color: var(--text-primary);

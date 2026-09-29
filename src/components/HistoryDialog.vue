@@ -2,15 +2,24 @@
 // 历史管理弹窗（Ctrl+H 打开）
 // 注意：child webview 是 GTK 部件盖在 Vue UI 上，弹窗会被页面盖住。
 // 因此挂载时隐藏所有标签 webview，卸载时恢复。
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { setWebviewVisible } from '../utils/webview'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
+import UiDialog from './ui/UiDialog.vue'
 import type { HistoryEntry } from '../types/history'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+/** 外层显隐（UiDialog 双向绑定：关即 emit close） */
+const showModel = computed({
+  get: () => props.show,
+  set: (v: boolean) => {
+    if (!v) emit('close')
+  },
+})
 
 const tabsStore = useTabsStore()
 const toastStore = useToastStore()
@@ -119,14 +128,9 @@ function hostOf(url: string): string {
 </script>
 
 <template>
-  <Transition name="fade">
-    <div v-if="show" class="dialog-overlay" @click.self="emit('close')">
-      <div class="dialog">
-        <div class="dialog-header">
-          <span>浏览历史</span>
-          <button class="close-btn" aria-label="关闭" @click="emit('close')">×</button>
-        </div>
-        <div class="dialog-body history-body">
+  <!-- 浏览历史：外层 UiDialog；清空确认走内层 UiDialog（footer 放按钮） -->
+  <UiDialog v-model:open="showModel" title="浏览历史" width="min(520px, calc(100vw - 32px))">
+    <div class="history-body">
           <div class="history-toolbar">
             <input
               v-model="query"
@@ -158,19 +162,18 @@ function hostOf(url: string): string {
             </div>
           </div>
         </div>
-        <!-- 自定义确认弹窗（覆盖在 dialog 之上） -->
-        <div v-if="showConfirm" class="confirm-overlay">
-          <div class="confirm-box">
-            <div class="confirm-text">确定清空全部浏览历史？此操作不可恢复。</div>
-            <div class="confirm-actions">
-              <button class="confirm-btn cancel" @click="showConfirm = false">取消</button>
-              <button class="confirm-btn ok" @click="doClearAll">清空</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </Transition>
+        <!-- 自定义确认弹窗（内层 UiDialog，顶层展示，z 层由 Reka 接管） -->
+        <UiDialog
+          v-model:open="showConfirm"
+          title="清空历史"
+          description="确定清空全部浏览历史？此操作不可恢复。"
+        >
+          <template #footer>
+            <button class="confirm-btn cancel" @click="showConfirm = false">取消</button>
+            <button class="confirm-btn ok" @click="doClearAll">清空</button>
+          </template>
+        </UiDialog>
+  </UiDialog>
 </template>
 
 <style scoped>
@@ -289,23 +292,6 @@ function hostOf(url: string): string {
   color: var(--danger);
   background: var(--bg-active);
 }
-.confirm-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--scrim);
-  border-radius: var(--radius-md);
-  z-index: 10;
-}
-.confirm-box {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 18px 20px;
-  min-width: 260px;
-  box-shadow: var(--shadow-pop);
-}
-/* 通用 .confirm-text/.confirm-actions/.confirm-btn 已收口至 styles/components.css */
+/* 弹窗基础样式走 UiDialog（Reka 底座），这里只保留历史业务样式 */
+/* 通用 .confirm-btn 已收口至 styles/components.css */
 </style>
