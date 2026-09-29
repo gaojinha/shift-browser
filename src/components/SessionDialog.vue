@@ -7,6 +7,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { setWebviewVisible } from '../utils/webview'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
+import UiDialog from './ui/UiDialog.vue'
 import type { Session, SessionTab } from '../types/session'
 
 const props = defineProps<{ show: boolean }>()
@@ -176,18 +177,17 @@ async function onSave() {
           </div>
         </div>
 
-        <!-- 删除确认弹窗 -->
-        <div v-if="showConfirm" class="confirm-overlay">
-          <div class="confirm-box">
-            <div class="confirm-text">
-              确定删除会话「{{ deleteTarget?.name }}」？此操作不可恢复。
-            </div>
-            <div class="confirm-actions">
-              <button class="confirm-btn cancel" @click="showConfirm = false">取消</button>
-              <button class="confirm-btn ok" @click="doDelete">删除</button>
-            </div>
-          </div>
-        </div>
+        <!-- 删除确认弹窗（shadcn 试点：UiDialog；Esc/点遮罩关闭与焦点管理由 Reka 接管） -->
+        <UiDialog
+          v-model:open="showConfirm"
+          title="删除会话"
+          :description="`确定删除会话「${deleteTarget?.name}」？此操作不可恢复。`"
+        >
+          <template #footer>
+            <button class="confirm-btn cancel" @click="showConfirm = false">取消</button>
+            <button class="confirm-btn ok" @click="doDelete">删除</button>
+          </template>
+        </UiDialog>
       </div>
     </div>
   </Transition>
@@ -304,24 +304,6 @@ async function onSave() {
 .op-btn.danger:hover {
   color: var(--danger);
   border-color: var(--danger);
-}
-.confirm-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
-  border-radius: 10px;
-  z-index: 10;
-}
-.confirm-box {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  padding: 18px 20px;
-  min-width: 260px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
 }
 /* 通用 .confirm-text/.confirm-actions/.confirm-btn 已收口至 styles/components.css */
 </style>
