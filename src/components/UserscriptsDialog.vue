@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // 用户脚本管理（Tampermonkey 风格 · 阶段3.2 平台化）
 // 注意：child webview 是 GTK 部件盖在 Vue UI 上，弹窗打开时必须隐藏 webview。
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { setWebviewVisible } from '../utils/webview'
 import { useToastStore } from '../stores/toast'
+import UiDialog from './ui/UiDialog.vue'
 
 interface Userscript {
   id: number
@@ -18,6 +19,14 @@ interface Userscript {
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 const toast = useToastStore()
+
+/** 外层显隐（UiDialog 双向绑定：关即 emit close） */
+const showModel = computed({
+  get: () => props.show,
+  set: (v: boolean) => {
+    if (!v) emit('close')
+  },
+})
 
 const list = ref<Userscript[]>([])
 const editing = ref<Userscript | null>(null)
@@ -106,14 +115,14 @@ async function remove(u: Userscript) {
 </script>
 
 <template>
-  <div v-if="show" class="us-overlay" @mousedown.self="emit('close')">
-    <div class="us-panel">
-      <div class="us-head">
-        <b>用户脚本</b>
-        <span class="us-sub">Tampermonkey 风格 · 按 matches 匹配页面注入</span>
-        <button class="us-btn" @click="emit('close')">✕</button>
-      </div>
-      <div class="us-body">
+  <!-- 用户脚本：外层 UiDialog（760px 宽）；左右分栏原样搬进默认槽 -->
+  <UiDialog
+    v-model:open="showModel"
+    title="用户脚本"
+    description="Tampermonkey 风格 · 按 matches 匹配页面注入"
+    width="min(760px, calc(100vw - 48px))"
+  >
+    <div class="us-body">
         <div class="us-list">
           <button class="us-btn primary full" @click="startAdd">＋ 新建脚本</button>
           <div v-if="list.length === 0" class="us-empty">还没有用户脚本</div>
@@ -152,43 +161,12 @@ async function remove(u: Userscript) {
             <button v-if="editing" class="us-btn" @click="startAdd">取消编辑</button>
           </div>
         </div>
-      </div>
     </div>
-  </div>
+  </UiDialog>
 </template>
 
 <style scoped>
-.us-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-overlay);
-  background: rgba(0, 0, 0, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.us-panel {
-  width: min(760px, 92vw);
-  height: min(560px, 84vh);
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  overflow: hidden;
-}
-.us-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.us-sub {
-  flex: 1;
-  font-size: 11px;
-  color: var(--text-muted);
-}
+/* 弹窗基础样式走 UiDialog（Reka 底座），这里只保留用户脚本业务样式 */
 .us-body {
   flex: 1;
   display: flex;

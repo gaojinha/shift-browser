@@ -2,7 +2,7 @@
 // 会话管理弹窗：列出/恢复/删除已保存的标签页会话，保存当前为命名会话
 // 注意：child webview 是 GTK 部件盖在 Vue UI 上，弹窗会被页面盖住，
 // 因此挂载时隐藏所有标签 webview，卸载时恢复。
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { setWebviewVisible } from '../utils/webview'
 import { useTabsStore } from '../stores/tabs'
@@ -12,6 +12,14 @@ import type { Session, SessionTab } from '../types/session'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+/** 外层显隐（UiDialog 双向绑定：关即 emit close） */
+const showModel = computed({
+  get: () => props.show,
+  set: (v: boolean) => {
+    if (!v) emit('close')
+  },
+})
 
 const tabsStore = useTabsStore()
 const toastStore = useToastStore()
@@ -139,14 +147,9 @@ async function onSave() {
 </script>
 
 <template>
-  <Transition name="fade">
-    <div v-if="show" class="dialog-overlay" @click.self="emit('close')">
-      <div class="dialog ss-dialog">
-        <div class="dialog-header">
-          <span>会话管理</span>
-          <button class="close-btn" aria-label="关闭" @click="emit('close')">×</button>
-        </div>
-        <div class="dialog-body ss-body">
+  <!-- 会话管理：外层 UiDialog（560px 宽）；删除确认是内层 UiDialog（已试点） -->
+  <UiDialog v-model:open="showModel" title="会话管理" width="min(560px, calc(100vw - 48px))">
+    <div class="ss-body">
           <div class="ss-save">
             <input
               v-model="saveName"
@@ -188,15 +191,11 @@ async function onSave() {
             <button class="confirm-btn ok" @click="doDelete">删除</button>
           </template>
         </UiDialog>
-      </div>
-    </div>
-  </Transition>
+  </UiDialog>
 </template>
 
 <style scoped>
-.ss-dialog {
-  width: min(560px, calc(100vw - 48px));
-}
+/* 弹窗基础样式走 UiDialog（Reka 底座），这里只保留会话业务样式 */
 .ss-body {
   display: flex;
   flex-direction: column;

@@ -7,6 +7,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { setWebviewVisible } from '../utils/webview'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toast'
+import UiDialog from './ui/UiDialog.vue'
 import GeneralSection from './settings/GeneralSection.vue'
 import SelfCheckSection from './settings/SelfCheckSection.vue'
 import AboutSection from './settings/AboutSection.vue'
@@ -36,6 +37,14 @@ const emit = defineEmits<{
 }>()
 
 const settingsStore = useSettingsStore()
+
+/** 外层显隐（UiDialog 双向绑定：关即 emit close） */
+const showModel = computed({
+  get: () => props.show,
+  set: (v: boolean) => {
+    if (!v) emit('close')
+  },
+})
 
 // 当前激活栏目；AI 栏记住子页签（深链 ai#mcp 打开时初始落到 MCP）
 const activeSection = ref<SectionId>('general')
@@ -108,14 +117,10 @@ watch(
 </script>
 
 <template>
-  <Transition name="fade">
-  <div class="dialog-overlay" v-if="props.show" @click.self="emit('close')">
-    <div class="dialog settings-dialog">
-      <div class="dialog-header">
-        <span class="dialog-title"><AppIcon name="gear" :size="15" /> 设置</span>
-        <button class="close-btn" aria-label="关闭" @click="emit('close')">✕</button>
-      </div>
-      <div class="dialog-body settings-body">
+  <!-- 设置：外层 UiDialog（860px 宽）；固定高度包一层，左右导航+内容原样搬入 -->
+  <UiDialog v-model:open="showModel" title="设置" width="min(860px, calc(100vw - 48px))">
+    <div class="settings-wrap">
+      <div class="settings-body">
         <!-- 左侧导航 -->
         <div class="settings-nav">
           <div class="settings-search">
@@ -182,17 +187,16 @@ watch(
         </div>
       </div>
     </div>
-  </div>
-  </Transition>
+  </UiDialog>
 </template>
 
 <style scoped>
-.settings-dialog {
-  width: min(860px, calc(100vw - 48px));
+/* 弹窗基础样式走 UiDialog（Reka 底座）；固定高度包一层，内容区自己滚动 */
+.settings-wrap {
   height: min(660px, calc(100vh - 96px));
   display: flex;
   flex-direction: column;
-  border-radius: var(--radius-lg);
+  min-height: 0;
 }
 .settings-body {
   display: flex;

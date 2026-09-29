@@ -6,6 +6,7 @@ import { useBookmarksStore } from '../stores/bookmarks'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
 import { useConfirmDelete } from '../composables/useConfirmDelete'
+import UiDialog from './ui/UiDialog.vue'
 import type { Bookmark } from '../types/bookmark'
 
 const bookmarksStore = useBookmarksStore()
@@ -102,6 +103,13 @@ async function onBookmark() {
 // ===== 右键菜单 + 编辑弹窗 =====
 const menu = ref<{ x: number; y: number; bookmark: Bookmark | null } | null>(null)
 const editTarget = ref<Bookmark | null>(null)
+/** 编辑弹窗显隐（对象转布尔，关即清空） */
+const editModel = computed({
+  get: () => editTarget.value !== null,
+  set: (v: boolean) => {
+    if (!v) closeEdit()
+  },
+})
 
 // 统一同步 GTK 层 webview：菜单、下拉菜单或编辑弹窗任一打开就隐藏，全关才恢复。
 // 不用 watch——异步时序会竞争（菜单关闭的恢复和弹窗打开的隐藏互相覆盖）。
@@ -277,29 +285,21 @@ async function onSaveEdit() {
       </template>
     </div>
 
-    <!-- 编辑弹窗 -->
-    <div v-if="editTarget" class="dialog-overlay" @click.self="closeEdit">
-      <div class="dialog bm-edit-dialog">
-        <div class="dialog-header">
-          <span>编辑书签</span>
-          <button class="close-btn" aria-label="关闭" @click="closeEdit">×</button>
-        </div>
-        <div class="dialog-body">
-          <label class="bm-field">
-            <span>标题</span>
-            <input v-model="editForm.title" type="text" spellcheck="false" />
-          </label>
-          <label class="bm-field">
-            <span>网址</span>
-            <input v-model="editForm.url" type="text" spellcheck="false" />
-          </label>
-          <div class="bm-actions">
-            <button class="bm-cancel" @click="closeEdit">取消</button>
-            <button class="bm-save" @click="onSaveEdit">保存</button>
-          </div>
-        </div>
+    <!-- 编辑弹窗（UiDialog，顶层展示） -->
+    <UiDialog v-model:open="editModel" title="编辑书签" width="min(360px, calc(100vw - 32px))">
+      <label class="bm-field">
+        <span>标题</span>
+        <input v-model="editForm.title" type="text" spellcheck="false" />
+      </label>
+      <label class="bm-field">
+        <span>网址</span>
+        <input v-model="editForm.url" type="text" spellcheck="false" />
+      </label>
+      <div class="bm-actions">
+        <button class="bm-cancel" @click="closeEdit">取消</button>
+        <button class="bm-save" @click="onSaveEdit">保存</button>
       </div>
-    </div>
+    </UiDialog>
   </div>
 </template>
 
@@ -480,9 +480,7 @@ async function onSaveEdit() {
 .menu-item.danger {
   color: var(--danger);
 }
-.bm-edit-dialog {
-  width: min(360px, calc(100vw - 32px));
-}
+/* 弹窗基础样式走 UiDialog（Reka 底座），这里只保留书签栏业务样式 */
 .bm-field {
   display: flex;
   flex-direction: column;

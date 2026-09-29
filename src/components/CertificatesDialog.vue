@@ -1,14 +1,23 @@
 <script setup lang="ts">
 // 证书中心：当前网页证书（P1）+ 监测列表/例外/事件（P3）
 // 注意：child webview 是 GTK 部件盖在 Vue UI 上，弹窗必须隐藏 webview，否则被页面盖住。
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { invokeOk, errText } from '../utils/invoke'
 import { setWebviewVisible } from '../utils/webview'
 import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
+import UiDialog from './ui/UiDialog.vue'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+/** 外层显隐（UiDialog 双向绑定：关即 emit close） */
+const showModel = computed({
+  get: () => props.show,
+  set: (v: boolean) => {
+    if (!v) emit('close')
+  },
+})
 
 const tabsStore = useTabsStore()
 const toastStore = useToastStore()
@@ -165,12 +174,8 @@ watch(
 </script>
 
 <template>
-  <div v-if="show" class="cert-mask" @click.self="emit('close')">
-    <div class="cert-box">
-      <div class="cert-head">
-        <h3>🔐 证书中心</h3>
-        <button class="cert-close" @click="emit('close')">✕</button>
-      </div>
+  <!-- 证书中心：外层 UiDialog（720px 宽）；页签+内容原样搬进默认槽 -->
+  <UiDialog v-model:open="showModel" title="🔐 证书中心" width="min(720px, calc(100vw - 32px))">
 
       <div class="cert-tabs">
         <button :class="{ on: tab === 'current' }" @click="tab = 'current'">当前网页</button>
@@ -289,77 +294,11 @@ watch(
           </div>
         </template>
       </div>
-    </div>
-  </div>
+  </UiDialog>
 </template>
 
 <style scoped>
-.cert-mask {
-  position: fixed;
-  inset: 0;
-  background: var(--scrim);
-  z-index: var(--z-overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(6px);
-}
-.cert-box {
-  width: 720px;
-  max-width: min(720px, calc(100vw - 32px));
-  max-height: 80vh;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: var(--shadow-dialog);
-  animation: cert-pop var(--dur) var(--ease-out);
-}
-@keyframes cert-pop {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-.cert-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--hairline);
-}
-.cert-head h3 {
-  margin: 0;
-  font-size: var(--text-lg);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.cert-close {
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-xs);
-  color: var(--text-muted);
-  font-size: 15px;
-  cursor: pointer;
-  transition:
-    background var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
-}
-.cert-close:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
+/* 弹窗基础样式走 UiDialog（Reka 底座），这里只保留证书业务样式 */
 .cert-tabs {
   display: flex;
   gap: 6px;
