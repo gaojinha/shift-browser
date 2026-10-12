@@ -235,7 +235,7 @@ async function onSave() {
 .ss-btn.accent {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .ss-btn.accent:hover {
   opacity: 0.9;
@@ -292,7 +292,7 @@ async function onSave() {
   border: 1px solid var(--border-color);
   background: var(--bg-primary);
   color: var(--text-secondary);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   font-size: 12px;
 }

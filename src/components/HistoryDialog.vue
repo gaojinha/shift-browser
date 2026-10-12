@@ -195,7 +195,7 @@ function hostOf(url: string): string {
   background: var(--bg-primary);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   font-size: 13px;
   outline: none;
 }
@@ -208,7 +208,7 @@ function hostOf(url: string): string {
   background: var(--bg-hover);
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
   cursor: pointer;
   flex-shrink: 0;
@@ -233,7 +233,7 @@ function hostOf(url: string): string {
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   transition: background 0.15s;
 }

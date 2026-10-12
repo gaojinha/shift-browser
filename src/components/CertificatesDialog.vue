@@ -174,8 +174,8 @@ watch(
 </script>
 
 <template>
-  <!-- 证书中心：外层 UiDialog（720px 宽）；页签+内容原样搬进默认槽 -->
-  <UiDialog v-model:open="showModel" title="🔐 证书中心" width="min(720px, calc(100vw - 32px))">
+  <!-- 证书中心：外层 UiDialog（720px 宽）；二层弹窗，层叠高于设置 -->
+  <UiDialog v-model:open="showModel" title="🔐 证书中心" width="min(720px, calc(100vw - 32px))" layer="var(--z-dialog-top)">
 
       <div class="cert-tabs">
         <button :class="{ on: tab === 'current' }" @click="tab = 'current'">当前网页</button>
@@ -416,7 +416,7 @@ watch(
 }
 .btn-x:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .cert-table {
   width: 100%;

@@ -242,7 +242,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
 }
 .space-mini.danger:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .space-divider {
   height: 1px;

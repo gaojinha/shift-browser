@@ -106,7 +106,7 @@
 .confirm-text {
   color: var(--text-secondary);
   font-size: 13px;
-  line-height: 1.6;
+  line-height: var(--leading-base);
   margin-bottom: 4px;
 }
 .confirm-actions {
@@ -146,11 +146,11 @@
 .confirm-btn.ok {
   background: var(--danger);
   border-color: var(--danger);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .confirm-btn.ok:hover {
   filter: brightness(1.1);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .confirm-btn:focus-visible {
   outline: none;
@@ -268,7 +268,7 @@
 .bm-save.danger {
   background: var(--danger);
   border-color: var(--danger);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .bm-save.danger:hover {
   filter: brightness(1.1);

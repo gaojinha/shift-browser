@@ -4,6 +4,7 @@
    各组件 scoped 样式统一引用，替代散落硬编码。 */
 :root {
   /* 圆角 */
+  --radius-2xs: 4px;
   --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 10px;
@@ -33,11 +34,40 @@
   --text-lg: 16px;
   --text-xl: 20px;
 
+  /* 行高三档：tight 紧凑列表 / base 正文默认 / relaxed 说明文字 */
+  --leading-tight: 1.4;
+  --leading-base: 1.55;
+  --leading-relaxed: 1.65;
+
+  /* 间距（8点网格为主，兼容 18px 弹窗内边距） */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 18px;
+
+  /* 字体栈（与 main.css 全局保持一致，组件内引用变量即可） */
+  --font-sans:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    'PingFang SC',
+    'Microsoft YaHei',
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, 'PingFang SC', 'Microsoft YaHei', monospace;
+
+  /* 弹窗宽度三档：sm 通用确认 / md 老弹窗与侧翻面板 / lg 命令面板 */
+  --dialog-sm: 400px;
+  --dialog-md: 480px;
+  --dialog-lg: 640px;
+
   /* 层级（从低到高：业务浮层 < 右侧面板 < 全局提示 < 安全警告） */
   --z-sticky: 100;
   --z-dropdown: 1000;
   --z-menu: 2000;
   --z-overlay: 4000;
+  /* 二层弹窗（证书中心从设置里开）：高于普通弹窗，低于右侧面板 */
+  --z-dialog-top: 5000;
   /* 右侧面板（翻译/AI，同时只开一个，互不压） */
   --z-sidepanel: 9000;
   /* 全局提示（错误/成功反馈，高于业务浮层，低于安全警告） */

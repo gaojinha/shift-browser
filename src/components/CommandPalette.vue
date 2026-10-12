@@ -232,7 +232,7 @@ watch(
   padding-top: 12vh;
 }
 .cp-panel {
-  width: min(640px, 92vw);
+  width: min(var(--dialog-lg), 92vw);
   max-height: 60vh;
   display: flex;
   flex-direction: column;
@@ -273,7 +273,7 @@ watch(
   outline: none;
   background: transparent;
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: var(--text-md);
 }
 .cp-input::placeholder {
   color: var(--text-muted);
@@ -285,7 +285,7 @@ watch(
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xs);
   padding: 2px 7px;
-  line-height: 1.4;
+  line-height: var(--leading-tight);
 }
 /* Reka Content 内联渲染：穿透布局，视觉与旧版一致 */
 .cp-list-wrap {
@@ -335,7 +335,7 @@ watch(
 .cp-item[data-highlighted] .cp-icon {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .cp-text {
   display: flex;

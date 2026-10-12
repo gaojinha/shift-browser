@@ -99,11 +99,12 @@ async function answer(allow: boolean) {
   backdrop-filter: blur(6px);
 }
 .perm-box {
+  /* 安全类特例：440px 宽 + 大内边距，显眼压住一切，不跟普通弹窗统一 */
   width: 440px;
   max-width: 92vw;
   background: rgba(28, 40, 64, 0.98);
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   padding: 24px 26px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
@@ -117,40 +118,40 @@ async function answer(allow: boolean) {
 }
 .perm-head h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--text-md);
   color: #fff;
 }
 .perm-lead {
   margin: 14px 0 6px;
-  font-size: 13px;
-  color: #ddd;
-  line-height: 1.7;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  line-height: var(--leading-relaxed);
 }
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 .hl {
-  color: #ffb14e;
+  color: var(--warning);
 }
 .perm-tip {
-  margin: 0 0 12px;
-  font-size: 12px;
-  color: #93a4bd;
-  line-height: 1.6;
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  line-height: var(--leading-base);
 }
 .perm-use {
   margin: 0 0 6px;
-  font-size: 12px;
-  color: #c9d6e8;
-  line-height: 1.6;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: var(--leading-base);
 }
 .perm-remember {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: #bbb;
-  margin-bottom: 16px;
+  gap: var(--space-sm);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  margin-bottom: var(--space-lg);
   cursor: pointer;
 }
 .perm-actions {
@@ -161,10 +162,11 @@ async function answer(allow: boolean) {
 .btn-allow {
   flex: 1;
   padding: 11px;
-  border-radius: 12px;
-  font-size: 14px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
   cursor: pointer;
 }
+/* 以下按钮色为安全深蓝底专用，深浅主题下底色不变 */
 .btn-deny {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;

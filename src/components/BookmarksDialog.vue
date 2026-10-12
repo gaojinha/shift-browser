@@ -363,7 +363,7 @@ async function onExport() {
   height: 26px;
   padding: 0 10px;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: var(--bg-hover);
   color: var(--text-secondary);
   font-size: 12px;
@@ -383,7 +383,7 @@ async function onExport() {
 .h-btn.accent {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .h-btn.accent:hover {
   opacity: 0.9;
@@ -453,7 +453,7 @@ async function onExport() {
   align-items: center;
   gap: 8px;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 .bm-folder-row:hover {
   background: var(--bg-active);
@@ -479,7 +479,7 @@ async function onExport() {
 .bm-confirm-text {
   font-size: 13px;
   color: var(--text-primary);
-  line-height: 1.7;
+  line-height: var(--leading-relaxed);
   margin-bottom: 4px;
 }
 .bm-row {
@@ -566,7 +566,7 @@ async function onExport() {
   background: var(--bg-primary);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   font-size: 13px;
   outline: none;
 }

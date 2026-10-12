@@ -193,7 +193,7 @@ async function remove(u: Userscript) {
   align-items: center;
   gap: 8px;
   padding: 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: var(--bg-primary);
 }
 .us-item.active {
@@ -229,7 +229,7 @@ async function remove(u: Userscript) {
 .us-input,
 .us-code {
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: var(--bg-primary);
   color: var(--text-primary);
   font-size: 12px;
@@ -254,7 +254,7 @@ async function remove(u: Userscript) {
   height: 28px;
   padding: 0 12px;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: var(--bg-primary);
   color: var(--text-secondary);
   cursor: pointer;
@@ -266,12 +266,12 @@ async function remove(u: Userscript) {
 }
 .us-btn.primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
 }
 .us-btn.danger:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .us-btn.full {
   width: 100%;

@@ -100,10 +100,10 @@ onUnmounted(() => {
   height: 26px;
   padding: 0 8px;
   margin-right: 6px;
-  border-radius: 6px;
-  background: #1a73e8;
-  color: #fff;
-  font-size: 11px;
+  border-radius: var(--radius-xs);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: var(--text-xs);
   flex-shrink: 0;
   white-space: nowrap;
   cursor: pointer;
@@ -111,7 +111,7 @@ onUnmounted(() => {
 }
 .tp-engine {
   background: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+  border-radius: var(--radius-2xs);
   padding: 1px 5px;
   font-size: 10px;
   flex-shrink: 0;
@@ -127,19 +127,20 @@ onUnmounted(() => {
 .tp-fill {
   height: 100%;
   width: 0%;
-  background: #fff;
+  background: var(--accent-contrast);
   border-radius: 3px;
-  transition: width 0.3s;
+  transition: width var(--dur-slow);
 }
 .tp-pct {
   font-weight: 700;
   flex-shrink: 0;
 }
 .tp-info {
-  color: #e3f2fd;
+  color: var(--accent-contrast);
   flex-shrink: 0;
 }
 .tp-fails {
+  /* 蓝底专用浅红，白色底上对比不足所以不用 danger 原色 */
   color: #ffcdd2;
   flex-shrink: 0;
 }

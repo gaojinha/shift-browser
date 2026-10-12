@@ -2,221 +2,712 @@
 
 > AI 时代的个人网络操作系统 —— 数据主权归用户、AI 原生、可自托管。
 
-ShiftBrowser 是一款基于 **Tauri 2 + Rust + Vue 3** 的 AI 增强型桌面浏览器。它不是"又一个浏览器"，而是在 WebKitGTK 之上构建的、面向多任务与 AI 协作的个人工作空间：本地数据自持、AI 助手能读页面 / 调工具 / 在授权下执行任务、隐私能力可验证。
+ShiftBrowser 是一个基于 Tauri 2 + Rust + Vue 3 的桌面端 AI 浏览器项目。它不是单纯的“浏览器应用”，而是在 WebKitGTK 上构建的、面向多任务协作与 AI 自动化的本地工作空间：页面内容可被本地理解、AI 助手可调用工具与执行动作、并在明确授权下完成浏览器级操作。
 
-**当前版本：v5.8.3**（平台：Linux / GTK）
-
-> **v5.8.3 更新**：安全加固 + 体验修复批次——Copilot 十轮审计 21 项修复（AI 上游禁重定向、`open_and_read` 无条件复核 + 可达验证、HTTP 读超时/并发上限、MCP 超时/单行上限/连接锁、日志 6 处脱敏、bulk 拒 internal 键、DNS 独立超时、LAN 明文警告）；B站滚轮失灵兜底补滚；指纹与站点 UA 对齐；阅读模式结构化文本提取；GitHub 卡死（scheduler 桩禁用）；15 站兼容性测试全过（`docs/site-compat-plan.md`）。
->
-> **v5.8.2 更新**：前端视觉收口批次——设置页 15 子件通用样式收口（`settings-shared.css` + 4 公共件，净删约 800 行重复）；启动页设计令牌 + 无障碍补齐；9 个弹窗列表/按钮/确认行收口（`styles/components.css`）；命令面板/地址栏/AI 气泡打磨；浅色主题对比度修复。零契约改动、后端零改动。
->
-> **v5.8.1 更新**：R1 工程质量批次——CI 接入前端测试门禁；大文件拆分（`page.rs`、`capabilities/registry.rs`）；命令面错误类型化第二批；前端事件监听/定时器泄漏治理（`useManagedListeners`）；阅读模式 CSP 去除 `unsafe-inline`（sha256 白名单）；新增性能基线采集脚本与基线报告（冷启 / 恢复耗时 / RSS / 包体）。
->
-> **v5.8.0 更新**：开放 API 页面读取能力全量落地——工具 26→43 再到 48（`open_and_read` 原子读、`extract`/`reader`/`translate`/`snapshot`、交互动作 `action/*`；现 27 读 + 21 写 = 48，以 `registry_tests.rs` 为准）；三层权限（只读放行 / 交互开关 / 内网 SSRF 入口+逐跳拦截）；标签来源治理（AI 标签不写历史、上限 10、`tabs/close_ai`）；审计持久化（`ai_audit`）。
+当前版本：v5.8.3
+平台：Linux / GTK
 
 ---
 
-## 特性
+## 1. 项目定位
 
-### 核心浏览器
+ShiftBrowser 的定位可以概括为三层：
 
-- **多标签页**：单窗口内嵌多 webview（GtkOverlay + GtkFixed 绝对定位布局），标签拖拽排序、固定标签、逐标签静音、鼠标中键关闭
-- **地址栏**：URL / 搜索词智能识别，书签 + 历史联合建议下拉，键盘导航（↑↓ / Enter / Esc）
-- **书签**：书签栏 + 管理面板，文件夹、右键编辑 / 删除 / 新建文件夹
-- **历史记录**：Ctrl+H 历史面板（搜索 / 单条删除 / 清空），记录开关可整体关闭
-- **标签分组**：颜色分组、折叠展开、跨组拖拽归组，随会话持久化
-- **工作区**：多套独立标签集合（类似 Chrome 配置文件），切换自动保存 / 恢复
-- **会话**：自动保存 + 命名会话（Ctrl+Shift+S），重启恢复上次现场
-- **下载**：真实进度跟踪、完成后打开 / 定位文件、记录自动清理，落盘目录跟随系统 XDG 下载目录（中文系统即 `~/下载`）
-- **阅读模式**：正文提取（readability）+ HTML 净化（ammonia 白名单，防 XSS）
-- **翻译**：划词 + 整页翻译，Google / Bing 引擎可切换、失败自动回退（Ctrl+Shift+T）
-- **全局快捷键**：Ctrl+T / W / R / L / H、Ctrl+Tab 前后切换、F12 开发者工具 —— GTK 顶层统一路由，焦点在网页时也生效
-- **启动页**：Bing 每日壁纸、RSS 资讯聚合（62 源：URL 去重 / 编码自动探测 / 标题质量过滤 / 失败重试）、快捷访问、天气
-- **系统托盘**：关闭窗口 = 缩托盘（不退出），托盘左键单击显隐窗口；菜单四项：显示/隐藏窗口 · 下载管理 · 密码库 · 退出（ksni 走 D-Bus SNI，图标用应用自身图标）
-- **默认浏览器**：设置页一键设为默认（xdg-settings 集成），desktop 文件声明 MimeType + `%U`，外部链接启动自动开新标签
-- **单实例**：已有实例运行时新实例退出并把命令行 URL 转发给已有实例开新标签 + 窗口前置（tauri-plugin-single-instance）
-- **登录持久化**：Cookie 落盘（cookies.sqlite），重启保留登录态
+1. 浏览器内核层
+   - 多标签页、地址栏、书签、历史、下载、工作区、会话恢复
+   - WebKitGTK 提供真实网页渲染能力
+   - 负责导航、页面生命周期、布局、事件、交互控制
 
-### AI 原生内核
+2. AI 原生层
+   - 页面快照、本地语义理解
+   - AI 侧边栏、Provider 抽象、Agent 执行动作
+   - MCP / Open API / tool registry 统一能力入口
 
-- **AI 侧边栏**：对话问答、流式输出、停止生成、思考态 / 失败回显
-- **页面理解**：本地语义快照（正文 / 表单 / 可交互元素 / 链接），AI 对话前自动附带页面上下文，提取全程本地不出网
-- **多推理 Provider**：OpenAI 兼容协议（默认 AGNES AI），Provider 抽象层 + 模型路由，本地模型接口预留
-- **MCP 客户端**：接入本地 MCP server（stdio / JSON-RPC 2.0，30s 超时保护），工具白名单 + 调用审计日志
-- **Agent 执行层**：动作白名单（click / fill / scroll / read / wait / navigate / back / snapshot / submit）、**每步人工确认**、仅当前标签、密码框拒绝读写、参数 JSON 序列化防注入
-- **多步任务编排**：`browser_action_plan` 整体确认 + 按序执行，动作回放 / 整批重试（断点续跑）
-- **AI 友好度检测**：对齐 Lighthouse Agentic Browsing 四信号（WebMCP 工具注册 / 无障碍树 / CLS / llms.txt）
-- **WebMCP polyfill 试验**（默认关闭）：捕获网站 WebMCP 工具声明，只捕获不伪造能力
-- **MCP Server**：独立二进制 `shift-browser-mcp`（MCP 2025-03-26 stdio / newline-delimited JSON-RPC），48 个工具（27 读 + 21 写，数以 `capabilities/registry_tests.rs` 为准）与开放 API 同名同参，直连 Unix socket 零依赖；任何 MCP 客户端（opencode / Claude Desktop 等）配一行即驱动浏览器，eval / tool_call 不暴露
+3. 本地数据与安全层
+   - SQLite 持久化
+   - 密码、证书、会话、设置、审计日志
+   - SSRF/内网拦截、TLS 检查、权限白名单、内容过滤、GPC
 
-### 隐私与安全
-
-- **广告拦截 2.0**：引擎级内容过滤（`WebKitUserContentFilterStore`，手写 FFI 对接），79 条内置网络层规则 + 自定义关键词，规则变更免重启即时生效
-- **反指纹 2.0**：加噪 / 统一化双模式 + 指纹自测面板（"信任需要证明"）
-- **GPC**：`Sec-GPC: 1` 请求头 + `/.well-known/gpc.json` 站点声明感知
-- **零遥测审计**：全量网络出口清单，可验证"无外联"
-- **密码库**：AES-256-GCM 字段级加密 + 主密码，主密钥独立文件（权限 600，损坏绝不静默重建），settings 敏感键前端不可见 / 掩码
-- **数据保护**：数据目录 700 / 数据库文件 600，settings 读写白名单，CSP 全面配置
-- **本地账号**：PBKDF2-SHA512（21 万迭代，旧账号验证成功后自动透明升级）
-- **AI 调用 SSRF 防护**：仅允许 https、拒绝内网 / 本机地址
-- **证书管理**：查看站点 TLS 证书（颁发者 / 有效期 / DNS 名 / 指纹 / 例外状态），自签 / 过期 / 主机名不匹配时拦截并提示，用户可一键放行并落库例外（gio GTlsCertificate，glib v2_70 特性）
-
-### 可观测性
-
-- **自检（selfcheck）**：18 项只读体检（版本环境 / 数据存储 / 运行时 / 能力状态，环境组含 IPv6 本地栈探针），设置页一键查看，启动自动执行
-- **结构化日志**：tauri-plugin-log，分级 + 模块 + 时间戳
-- **E2E 冒烟**：`scripts/smoke.sh` 10 项关键链路检查（自检健康 / 引擎版本 / 快捷键 / 布局 / reparent / 注入 / 无 panic），防架构解耦回归
+这使得它既是一款浏览器，也是一种“本地优先、AI 驱动、可审计”的网络操作平台。
 
 ---
 
-## 技术栈
+## 2. 产品特点
+
+### 2.1 浏览器基础能力
+
+- 多标签页与多 WebView 组合布局
+- 地址栏与搜索词智能判断
+- 书签栏与书签管理面板
+- 历史记录与清理
+- 标签分组、工作区、会话恢复
+- 下载管理与本地文件定位
+- 阅读模式、页面提取与净化
+- 按需翻译、跨网页理解
+- 快捷键、全局命令、托盘集成
+- 启动页、RSS 聚合、快捷入口
+- 默认浏览器设置和单实例管理
+
+### 2.2 AI 原生能力
+
+- AI 侧边栏对话
+- 页面上下文理解
+- Agent 自动化执行（click/fill/scroll/read/...）
+- 工具调用与动作白名单
+- 多 Provider 抽象（OpenAI 兼容协议）
+- MCP Client / MCP Server
+- WebMCP 能力捕获与边界治理
+- 自动任务编排与断点续跑
+
+### 2.3 安全与隐私能力
+
+- 内容过滤与广告拦截
+- 反指纹与 UA/指纹治理
+- GPC 请求头与站点声明支持
+- 零遥测审计与网络出口收集
+- 密码库加密与主密码保护
+- 证书检查、异常放行与保存
+- 明确的 SSRF 和内网访问限制
+- 本地账号与 PBKDF2 安全哈希
+
+### 2.4 可观测性与工程治理
+
+- Selfcheck 自检
+- 结构化日志
+- 兼容性测试与 smoke 测试
+- 统一常量/契约/能力表治理
+- build.rs + ts-rs 自动生成前端类型
+
+---
+
+## 3. 技术栈
 
 | 层 | 技术 |
 |---|---|
-| 桌面框架 | Tauri 2.11（`unstable` 多 webview + `custom-protocol`） |
-| 渲染引擎 | WebKitGTK 2.52（GTK 3；GtkOverlay + GtkFixed 多 webview 布局） |
-| 前端 | Vue 3 + TypeScript + Pinia + Tailwind CSS 4 + Vite |
-| 数据库 | SQLite（sqlx 0.8 异步连接池，WAL 模式，自建迁移系统） |
-| 加密 | aes-gcm / pbkdf2 / hmac-sha2 |
-| AI 通信 | reqwest（rustls，流式 SSE）· OpenAI 兼容协议 · MCP JSON-RPC 2.0 |
-| 契约生成 | `build.rs`（常量/契约 → TS）+ `ts-rs`（Rust struct → TS interface） |
+| 桌面应用框架 | Tauri 2 + Rust |
+| 浏览器内核 | WebKitGTK + GTK |
+| 前端 | Vue 3 + TypeScript + Pinia + Tailwind + Vite |
+| 数据库 | SQLite + sqlx |
+| AI 通信 | reqwest + OpenAI 兼容协议 + MCP JSON-RPC |
+| 安全 | AES-GCM / PBKDF2 / HMAC-SHA2 |
+| 契约生成 | ts-rs + build.rs |
 
-## 架构
+---
 
-```
-src/                    # Vue 3 前端
-├── App.vue             # 主布局：标签栏 / 地址栏 / 书签栏 / 内容区 / 状态栏
-├── components/         # TabBar / VerticalTabBar / AddressBar / AISidebar / CommandPalette(Ctrl+K) / SpaceSwitcher / SettingsDialog / CertificatesDialog 等管理弹窗
-├── stores/             # Pinia：tabs / bookmarks / ai / workspaces / settings / passwords / downloads / extensions / groups 等
-└── types/              # 与 Rust 端的跨端契约（语义快照等）
+## 4. 代码结构
 
-src-tauri/src/
-├── engine/             # 引擎抽象层（隔离 WebKitGTK 调用）
-│   ├── layout.rs       #   内容区几何：布局常量唯一事实来源 + ContentGeometry
-│   ├── webview.rs      #   webview 基础操作（设置 / JS 执行 / 导航状态 / 静音 / DevTools）
-│   ├── content.rs      #   页面理解：语义快照（本地 DOM 提取，不出网）
-│   ├── content_filter.rs # 引擎级内容过滤器（广告拦截 2.0，手写 FFI）
-│   ├── ai_provider.rs  #   推理 Provider 抽象（云端 AGNES + 本地 stub）
-│   ├── mcp.rs          #   MCP 客户端（stdio JSON-RPC 2.0）
-│   ├── agent.rs        #   Agent 执行层（动作白名单 + JS 模板防注入）
-│   ├── webmcp.rs       #   WebMCP polyfill（试验，默认关）
-│   └── llmstxt.rs      #   llms.txt 检测（Agentic Browsing 信号）
-├── db/                 # sqlx 数据层：bookmarks / history / passwords / sessions / settings / vault / sync / certificates / workspaces …
-├── tabs/             # TabManager：model（状态）/ backend（建页/布局/信号）/ commands（导航/生命周期），多 webview 生命周期 + WebKit 信号回调
-├── ai.rs               # AI 命令：对话 / 流式 / function calling 工具循环（≤6 轮）
-├── api/                # 开放 API（48 工具 + 7 元/旁路命令，Unix socket + HTTP 双形态，鉴权 / 只读 / IP 白名单）
-├── auto_tasks.rs       # 自动化任务（批量操作 / 定时任务 / Agent 编排）
-├── extensions.rs       # 用户脚本 / 样式注入（UserContentManager）
-├── feed.rs             # RSS 聚合（62 源，6 路并发，4MB 响应上限）
-├── reader.rs           # 阅读模式正文提取 + ammonia 净化
-├── translate.rs        # 翻译（选中文本 / 整页分批）
-├── tray.rs             # 系统托盘（ksni → D-Bus SNI）
-├── tls.rs              # 证书管理 / 监测 / 验证（P1-P3，gio GTlsCertificate）
-├── netmon.rs           # 网络出口监控（零遥测审计数据源）
-├── gpc.rs / audit.rs   # GPC 请求头 / 零遥测审计
-├── selfcheck.rs        # 只读自检
-├── bin/mcp_server.rs   # MCP Server 二进制（48 工具，stdio JSON-RPC 2.0）
-└── migrations/         # SQLite 迁移（版本 + 事务 + 记录表）
-```
-
-关键设计决策：
-
-- **不用前端 SQL**：SQLite 由 Rust 侧 sqlx 统一管理，前端经 `invoke()` 调命令，杜绝注入面
-- **引擎抽象层**：WebKitGTK 调用以 `engine/` 为收敛目标，业务模块直调正在收口中（残留见 `tabs/backend`、`tls`、`perms`、`api/handlers/page`，目标清零）
-- **多 webview 布局**：主 webview（Vue UI）+ 标签 webview 经 GtkFixed 绝对定位叠层，resize / 书签栏显隐 / AI 分屏由 `ContentGeometry` 一处算清
-- **Agent 安全铁律**：动作白名单、每步人工确认、仅当前标签、凭据永不外泄
-
-## 统一治理（单一事实来源）
-
-> 规划与实施记录：[docs/架构-能力与常量统一治理方案_2026-09-23.md](docs/架构-能力与常量统一治理方案_2026-09-23.md)
->
-> 开放生态（本地开放 API / MCP / WebMCP / 扩展）分析与优化：
-> [docs/开放生态分析与优化方案_2026-09-27.md](docs/开放生态分析与优化方案_2026-09-27.md) ·
-> WebMCP 与 WebKit 扩展职责边界 / 转正判据：
-> [docs/ADR-WebMCP与扩展职责边界_2026-09-27.md](docs/ADR-WebMCP与扩展职责边界_2026-09-27.md)
-
-### 为什么
-
-常量、跨端契约、工具、技能、插件原先散落各处，靠注释写"与后端一致"人肉同步。已修复的典型漂移：
-
-- 搜索引擎 URL **4 处**、默认 favicon **2 处**、布局高度**前端 + Rust + CSS 三层**各写一遍
-- 后端设置白名单 **41 键** ↔ 前端默认值 **24 键**（缺 17 个 → `get()` 回退空串导致显示失真）
-- MCP 工具 schema 手写 **200 行** + 工具名清单 **2 份** + Agent 动作表各写一遍
-- 前端 `snap.webmcpTools` vs 后端 `webmcp_tools`（字段名不匹配 → AI 上下文**静默失效**）
-
-### 机制
-
-```
-Rust 单一来源                    build.rs / 运行时生成              消费方
-──────────────────────────────────────────────────────────────────────────────
-src/constants.rs      ──────▶  src/constants.ts          ──▶ 前端 LAYOUT / SEARCH_ENGINES / UI / EVENTS / URLS / TIMEOUT / SHORTCUTS / SKILLS
-src/contracts.rs      ──────▶  （同上文件）                ──▶ 后端设置白名单 + 前端默认值（同源）
-src/capabilities.rs   ──────▶  capabilities/list API      ──▶ MCP Server 运行时拉取（零编译耦合）
-src/tabs.rs 等 struct ──────▶  src/types/generated/       ──▶ 前端类型（cargo test --lib ts_export）
-```
-
-- **`src/constants.rs`**：布局尺寸 / 搜索引擎 / 色板 / favicon（自包含，供 `build.rs` `include!`）
-- **`src/contracts.rs`**：跨端契约 —— 设置键（41）/ IPC 事件名（18）/ 内部 URL / 超时（14）/ 快捷键（12）/ 技能（4）
-- **`src/capabilities.rs`**：能力总表 —— 工具（25）/ Agent 动作（9）/ 技能（4）/ 插件形态（4）
-- **`src/types/generated/`**：由 `ts-rs` 从 Rust struct 生成（14 个类型），**前端零手写**
-
-### 怎么加 / 改（改一处，两端自动跟上）
-
-| 要加什么 | 改哪里 | 自动生效于 |
-|---|---|---|
-| MCP 工具 / 开放 API 命令 | `capabilities.rs`（schema）+ `api.rs`（实现） | MCP `tools/list`、API 分发 |
-| AI 技能 | `contracts.rs::skills` | 前端快捷入口按钮 + `skills/list` |
-| 设置项 | `contracts.rs::settings` | 后端白名单 + 前端默认值 |
-| 跨端类型 | Rust struct 加 `#[derive(TS)]` + 导出测试 | `src/types/generated/` |
-| 常量 / 快捷键 / 事件名 / 超时 | `constants.rs` / `contracts.rs` | 前端重新构建即得 |
-
-### 校验
-
-```bash
-cd src-tauri && cargo test --lib ts_export   # 重新生成 TS 类型
-cd src-tauri && cargo test --lib             # 含"防漂移"测试（IDS/ALL 与主表一致性等）
+```text
+.
+├── src/                             # Vue 3 前端
+│   ├── App.vue                      # 主应用布局
+│   ├── components/                  # 地址栏、AI 面板、书签栏、设置与弹窗等
+│   ├── stores/                      # Pinia 状态管理
+│   ├── constants.ts                 # 前端常量入口
+│   ├── types/                       # 类型定义
+│   ├── utils/                      # 工具函数
+│   └── styles/                      # 统一样式
+│
+├── src-tauri/
+│   ├── src/
+│   │   ├── lib.rs                   # 应用入口，注册命令和插件
+│   │   ├── app/                     # 启动、环境、panic、权限、初始化
+│   │   ├── tabs/                    # 标签页生命周期与浏览器页面管理
+│   │   ├── engine/                  # WebKit / 页面理解 / MCP / Agent / 内容过滤
+│   │   │   ├── webview.rs
+│   │   │   ├── layout.rs
+│   │   │   ├── content.rs
+│   │   │   ├── content_filter.rs
+│   │   │   ├── ai_provider.rs
+│   │   │   ├── mcp.rs
+│   │   │   ├── agent.rs
+│   │   │   ├── webmcp.rs
+│   │   │   └── llmstxt.rs
+│   │   ├── db/                      # SQLite 数据访问层
+│   │   ├── api/                     # API / OpenAPI / tools / handlers
+│   │   ├── ai.rs                    # AI 对话与工具链协调
+│   │   ├── auto_tasks.rs            # 自动化任务编排
+│   │   ├── reader.rs                # 阅读模式提取
+│   │   ├── translate.rs             # 翻译
+│   │   ├── tls.rs                  # TLS / 证书管理
+│   │   ├── tray.rs                 # 系统托盘
+│   │   ├── extensions.rs           # 用户脚本 / 扩展注入
+│   │   ├── feed.rs                 # RSS 聚合
+│   │   ├── netmon.rs               # 网络诊断与出口监测
+│   │   ├── net_guard.rs            # 网络白名单与防护
+│   │   ├── gpc.rs                  # GPC 处理
+│   │   ├── audit.rs                # 审计日志
+│   │   ├── selfcheck.rs            # 自检与健康检查
+│   │   ├── perms.rs                # 权限审批与白名单
+│   │   ├── default_browser.rs      # 默认浏览器设置
+│   │   ├── useragent.rs            # UA 处理
+│   │   ├── proto/                  # protocol / custom scheme 相关
+│   │   └── bin/
+│   │       └── mcp_server.rs       # 独立 MCP Server
+│   │
+│   ├── migrations/                 # SQLite schema / 迁移脚本
+│   ├── icons/                      # 应用图标
+│   ├── target/                     # 构建输出（本地）
+│   └── Cargo.toml
+│
+├── docs/                            # 设计文档
+├── package.json
+├── tsconfig.json
+├── vite.config.ts
+├── README.md
+├── rust-toolchain.toml
+└── .gitignore
 ```
 
 ---
 
-## 快速开始
+## 5. 架构分层
 
-### 前置依赖
+### 5.1 前端层（src/）
 
-- Rust 1.97.1（仓库 `rust-toolchain.toml` 已固定，rustup 自动切换）
-- Node.js ≥ 20
-- Linux 系统库：
+前端负责：
+
+- 应用框架与布局
+- 标签页 UI
+- 地址栏输入与快捷键入口
+- AI 侧边栏与对话展示
+- 书签/历史/下载/设置弹窗
+- 复杂状态管理
+
+它本身不直接管理 SQLite，不直接操作底层 WebKit；前端通过 Tauri invoke 调用后端命令获取能力。
+
+### 5.2 Tauri + Rust Runtime（src-tauri/src/lib.rs）
+
+这是系统总入口。它负责：
+
+- 注册 invoke handler
+- 安装日志、panic hook、环境初始化
+- 初始化单实例行为
+- 启动应用窗口
+- 绑定页面相关命令与数据命令
+
+它是整个浏览器运行时的控制中心。
+
+### 5.3 Tabs / WebView / Engine 层
+
+这是浏览器最核心的底层抽象：
+
+- TabManager 负责页面和状态生命周期
+- WebView 负责真实网页渲染
+- Engine 层封装与页面相关的底层能力，如：
+  - JS 执行
+  - 导航与状态查询
+  - 内容过滤
+  - 页面快照
+  - 交互控制
+  - 工具注册与能力收集
+
+它是浏览器能力吸收的核心层。
+
+### 5.4 数据层（db/ + migrations/）
+
+负责：
+
+- 书签、历史、下载、工作区、会话
+- 密码、证书、AI 审计
+- 设置项、用户配置、用户数据
+- 迁移与结构演化
+
+设计原则：
+
+- 数据以本地为优先
+- Rust 作为唯一控制入口
+- 前端不直接访问数据库
+
+### 5.5 AI 与自动化层
+
+这个层包含：
+
+- ai.rs
+- auto_tasks.rs
+- opencode_chat.rs
+- webqa.rs
+- webzh.rs
+- agent_cmd.rs
+- engine/agent.rs
+- engine/mcp.rs
+- engine/ai_provider.rs
+
+职责：
+
+- 提供模型调用接口
+- 读取页面上下文
+- 自动生成动作计划
+- 执行 click / fill / scroll / submit 等动作
+- 对接 MCP tools 和开放 API
+
+### 5.6 安全治理层
+
+横向管理整个系统的安全需要：
+
+- perms.rs：权限与请求审批
+- net_guard.rs：网络防护，内网地址过滤
+- netmon.rs：网络诊断与出口监控
+- tls.rs：证书检查和异常处理
+- audit.rs：审计日志
+- gpc.rs：隐私浏览标志处理
+- selfcheck.rs：自检工具
+
+安全能力不是独立“功能”，而是贯穿所有动作与入口。
+
+---
+
+## 6. 关键运行时流程
+
+### 6.1 启动流程
+
+1. 应用启动
+2. 安装 panic hook
+3. 执行环境初始化（env_setup）
+4. 配置日志与插件
+5. 注册 Tauri invoke handlers
+6. 创建主窗口和 TabManager
+7. 进入 UI 状态
+
+### 6.2 浏览网页流程
+
+1. 前端地址栏输入 URL / 搜索词
+2. 前端调用 Rust 的 tab 创建 / 跳转命令
+3. TabManager 创建 WebView / 绑定导航事件
+4. WebKit 请求页面并渲染
+5. 页面可被内容抽取器处理
+6. 内容抽取与安全规则检查同步执行
+7. 页面状态写入本地数据
+
+### 6.3 AI 对话与动作执行流程
+
+1. 用户在 AI 面板发起对话
+2. Rust 获取当前页面上下文快照
+3. AI Provider 生成响应或 tool call
+4. 调用 MCP / Open API / Agent Action
+5. Agent 对页面执行受控动作
+6. 执行前经过白名单、权限和上下文校验
+7. 返回结果给前端并记录审计日志
+
+### 6.4 数据落库流程
+
+- 历史记录、书签、设置、下载、证书、会话等均通过 Rust 层写入 SQLite
+- 迁移脚本维护结构演化
+- 关键状态可用于恢复、审计和隐私检查
+
+---
+
+## 7. 统一治理：为什么项目强调单一事实来源
+
+项目中有一组极重要的工程约束：
+
+- 常量不能散落在前后端各处
+- IPC 接口名不能随机手写
+- 设置项不能前端和后端不同步
+- Tool schema 和能力声明不能“各写一份”
+- 前后端类型不能靠人工维护
+
+因此项目引入了统一治理设计：
+
+- `src/constants.rs`：定义常量与关键配置
+- `src/contracts.rs`：维护跨端契约
+- `src/capabilities.rs`：维护能力清单
+- `build.rs`：生成前端对应常量和契约输出
+- `ts-rs`：生成前端 TS 类型
+
+目标是让 “Rust 作为唯一事实来源”，前端、API、MCP 能力和设置项都从同一来源产生，减少漂移和不一致。
+
+---
+
+## 8. 设计亮点
+
+### 8.1 本地优先
+
+- 数据保存在本地 SQLite
+- AI 能力本地上下文抽取
+- 除非必要，不依赖远程状态
+
+### 8.2 AI 可控
+
+- 自动动作通过白名单执行
+- 每步操作可审计
+- 当前页上下文只在需要时传入
+- 用户仍然处于“授权控制”的中心位置
+
+### 8.3 安全收益明显
+
+- SSRF 和内网访问保护
+- TLS 与证书异常检测
+- 隐私规则、GPC、内容净化
+- 审计日志与可追溯记录
+
+### 8.4 工程上有体系化思维
+
+- 统一能力表
+- 单一事实来源
+- 迁移和测试驱动
+- 多模块收口
+
+---
+
+## 9. 当前项目的主要工程风险
+
+项目非常强，但是复杂度也明显较高，主要风险集中在下面几个方面：
+
+1. Linux / GTK 偏强绑定
+   - 当前平台偏 Linux
+   - WebKitGTK 和 GTK 必须兼容性良好
+   - 这会限制跨平台演进
+
+2. 架构复杂度高
+   - 前端、浏览器内核、AI、数据库、安全治理交织
+   - 模块边界需要持续维护，否则容易出现耦合回退
+
+3. Tauri unstable API 风险
+   - 项目使用了 unstable 能力
+   - 升级 Tauri 版本时，底层行为可能变化
+
+4. 契约漂移风险
+   - 这是项目特别强调治理的原因
+   - 只要常量、契约或 schema 没有统一来源，就会出“看起来能用但实际上错位”的问题
+
+5. AI + 浏览器控制 + 本地系统访问叠加
+   - 这是强能力，但也是高风险面
+   - 必须持续维护白名单、权限、审计边界
+
+---
+
+## 10. 适合的工程定位
+
+从当前实现看，ShiftBrowser 更接近以下定位：
+
+- 本地优先的 AI 浏览器平台
+- 桌面端网络操作系统原型
+- 可扩展的 MCP / OpenAPI 浏览器控制运行时
+- AI 自动化浏览器的安全控制框架
+
+它已经不再是“普通浏览器”的范畴，而是一个自带 AI 代理能力和本地控制能力的网络工作台。
+
+---
+
+## 11. 快速开始
+
+### 依赖安装
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf
 ```
 
-### 开发模式
+### 安装前端依赖
 
 ```bash
 npm install
+```
+
+### 开发模式
+
+```bash
 cd src-tauri
-cargo tauri dev        # 自动拉起 vite(5173) + 编译运行
+cargo tauri dev
 ```
 
 ### 生产构建
 
 ```bash
-npm run build                    # vue-tsc 类型检查 + vite 构建 dist
+npm run build
 cd src-tauri && cargo build --release
 ```
 
-> **铁律**：Tauri release 把 `dist` 编译期嵌入二进制，改前端必须 `npm run build && cargo build --release`（前端在前），否则跑旧前端。
-
-### MCP Server 构建（可选）
+### MCP Server 构建
 
 ```bash
 cd src-tauri
-cargo build --release --bin shift-browser-mcp   # 生成 MCP Server 二进制（48 工具）
-cp target/release/shift-browser-mcp ~/.local/bin/   # 装到 PATH，供 MCP 客户端调用
+cargo build --release --bin shift-browser-mcp
 ```
 
-配置示例（opencode / Claude Desktop 等）：`{ "mcpServers": { "shift-browser": { "command": "shift-browser-mcp" } } }`，详见 [docs/local-api.md](docs/local-api.md)。
+---
+
+## 12. 结语
+
+ShiftBrowser 是一个典型的“高复杂度、AI 原生、桌面端、可扩展”的浏览器项目。它的价值在于：
+
+- 将浏览器从“展示网页工具”提升到“AI 能操作的本地数字工作空间”
+- 把传统浏览器的隐私、授权和本地数据治理做成第一等公民
+- 把 MCP / OpenAPI / Agent 跟浏览器动作真正打通
+
+从工程角度看，它已经具备相当强的系统设计基底；从产品角度看，它更像“下一代本地网络操作系统”的早期实现。
+
+如果你要持续迭代这个项目，最关键的原则是：
+
+- 继续收口 engine 与 tabs 的边界
+- 继续强化统一契约机制
+- 继续保持 AI 行为的白名单化与审计化
+- 明确平台范围和版本兼容策略
+
+---
+
+## 13. 开发者详细架构说明
+
+### 13.1 模块职责总表
+
+| 模块 | 主要职责 | 关键依赖 | 设计目标 |
+|---|---|---|---|
+| `src/` | 前端 UI / 状态 / 展示 | Vue, Pinia, Tauri invoke | 用户交互与界面展示 |
+| `src-tauri/src/lib.rs` | 总入口、插件注册、命令暴露 | Tauri, GTK | 系统启动与总控 |
+| `src-tauri/src/app/` | 启动环境、panic、初始化、文件加固 | Rust std, GTK | 稳定启动与安全基线 |
+| `src-tauri/src/tabs/` | tab 生命周期、webview 管理、导航控制 | WebKit, GTK | 标签页核心运行时 |
+| `src-tauri/src/engine/` | 页面理解、内容过滤、MCP、Agent | WebKit, reqwest | 浏览器能力的底层封装 |
+| `src-tauri/src/db/` | 本地数据库、数据访问 | SQLite, sqlx | 数据主权与状态保留 |
+| `src-tauri/src/api/` | Open API / tool handlers / RPC 入口 | Tauri, serde | 对外能力暴露 |
+| `src-tauri/src/ai.rs` | AI 编排、tool use、上下文 | OpenAI-compatible provider | 统一 AI 对话入口 |
+| `src-tauri/src/auto_tasks.rs` | 自动任务编排 | Rust async | 批量工作流运行 |
+| `src-tauri/src/extensions.rs` | 用户脚本/样式扩展 | WebView + DOM hooks | 扩展能力 |
+| `src-tauri/src/reader.rs` | 阅读模式提取 | readability + ammonia | 无干扰阅读 |
+| `src-tauri/src/translate.rs` | 翻译 | HTTP / provider | 页面理解增强 |
+| `src-tauri/src/tls.rs` | 证书检查与例外管理 | Gio, GTlsCertificate | 安全可验证性 |
+| `src-tauri/src/perms.rs` | 权限审批 | 规则存储 | 强制授权控制 |
+| `src-tauri/src/net_guard.rs` | 网络访问拦截 | IP / URL 解析 | SSRF 与隐私守护 |
+| `src-tauri/src/audit.rs` | 审计日志 | SQLite | 可追溯与安全分析 |
+| `src-tauri/src/selfcheck.rs` | 自检健康检查 | Rust std | 启动状态验证 |
+| `src-tauri/migrations/` | schema 版本管理 | SQLite SQL | 数据兼容与演化 |
+| `src-tauri/src/bin/mcp_server.rs` | 独立 MCP Server | JSON-RPC / stdio | 外部 client 驱动 |
+
+### 13.2 模块依赖图
+
+```text
+┌────────────────────────────────────────────────────────────────────┐
+│                         Frontend Layer (Vue 3)                    │
+│  src/                                                             │
+│  App.vue                                                          │
+│  components/*                                                     │
+│  stores/*                                                         │
+│  constants.ts                                                     │
+│  types/*                                                          │
+└───────────────────────────────────────┬────────────────────────────┘
+                                        │ invoke / emit
+                                        ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                    Tauri Runtime + Command Bridge                    │
+│  src-tauri/src/lib.rs                                             │
+│  app/*                                                            │
+│  misc_cmds, env_setup, panic_hook, harden, bootstrap              │
+└───────────────────────────────────────┬────────────────────────────┘
+                                        │
+                                        ├──────────────► Tabs / WebView Core
+                                        │                     │
+                                        │                     ▼
+                                        │          src-tauri/src/tabs/
+                                        │          TabManager + navigation lifecycle
+                                        │
+                                        ├──────────────► Engine Layer
+                                        │                     │
+                                        │                     ▼
+                                        │      src-tauri/src/engine/
+                                        │      webview.rs / content.rs / agent.rs / mcp.rs
+                                        │
+                                        ├──────────────► Data Layer
+                                        │                     │
+                                        │                     ▼
+                                        │       src-tauri/src/db/
+                                        │       bookmarks / history / settings / downloads / users
+                                        │
+                                        ├──────────────► AI & Automation Layer
+                                        │                     │
+                                        │                     ▼
+                                        │       ai.rs / auto_tasks.rs / webqa.rs / opencode_chat.rs
+                                        │
+                                        └──────────────► Security / Governance Layer
+                                                              │
+                                                              ▼
+                                           perms.rs / net_guard.rs / tls.rs
+                                           gpc.rs / audit.rs / selfcheck.rs
+```
+
+### 13.3 运行时调用链：从用户输入到 AI 自动操作
+
+```text
+用户输入 URL / 搜索词
+        │
+        ▼
+Frontend AddressBar / Command Palette
+        │
+        ├─ 解析输入类型：URL / 搜索 / 书签 / 历史
+        └─ 发送 Tauri invoke 请求
+        │
+        ▼
+Rust tabs::commands
+        │
+        ├─ 解析用户意图
+        ├─ 创建或复用 Tab
+        ├─ 绑定导航事件
+        ├─ 初始化 WebView
+        └─ 更新 tab state / session cache
+        │
+        ▼
+WebKitGTK WebView
+        │
+        ├─ 真实网页渲染
+        ├─ DOM / JS / 网页事件
+        └─ 网络请求与页面生命周期管理
+        │
+        ▼
+Engine content extraction / page snapshot
+        │
+        ├─ 抽取正文、链接、表单、元素结构
+        ├─ 安全检测（内容过滤、权限、内网检查）
+        └─ 产出页面快照用于 AI
+        │
+        ▼
+AI orchestration (ai.rs / engine/ai_provider.rs)
+        │
+        ├─ 读取页面快照 + 上下文
+        ├─ 路由 Provider
+        ├─ 选择 tool / action
+        ├─ 调用 MCP / OpenAPI / Agent action
+        └─ 执行受控动作（click/fill/scroll/navigation）
+        │
+        ▼
+Action whitelist + permission gate + audit log
+        │
+        ├─ 校验是否允许写当前标签
+        ├─ 校验是否允许访问该网站 / 该域名
+        ├─ 检查是否命中风险策略
+        └─ 记录审计事件
+        │
+        ▼
+前端展示结果 / 页面状态更新 / 数据持久化
+```
+
+### 13.4 关键边界设计
+
+#### 1) 前端不直接访问底层系统能力
+
+设计原则：
+- UI 层只负责展示交互
+- 真正的能力都集中在 Rust 后端
+- 这样能保证统一安全、权限和审计
+
+缺点：
+- 调用链更长
+- 前端与后端契约要求更严格
+
+#### 2) Engine 是统一封装层
+
+集中封装 WebKit 相关能力，避免各业务模块直接调用底层 WebKit API，减少耦合。
+
+典型职责：
+- 页面抽取
+- JS 执行
+- 视图管理
+- 内容过滤
+- 网页操作
+
+#### 3) AI 是“浏览器动作编排器”，不是独立魔法层
+
+AI 能力依赖：
+- 当前页面快照
+- 当前 tab 状态
+- tool registry
+- Agent action whitelist
+- permission gate
+
+也就是说，AI 的价值依赖浏览器运行时的真实上下文，不是脱离浏览器运作的“聊天插件”。
+
+#### 4) 安全是横切治理，不是单一模块
+
+关键安全能力在多个模块同时参与：
+- `perms.rs`：授权
+- `net_guard.rs`：网络防护
+- `tls.rs`：证书校验
+- `audit.rs`：审计
+- `content_filter.rs`：内容过滤
+- `selfcheck.rs`：状态健康检查
+
+### 13.5 统一治理设计的价值
+
+这一层是这个项目最重要的工程能力之一。它解决的是长期项目中最容易出现的问题：
+
+- 前端常量和后端常量不一致
+- IOC / IPC 事件名漂移
+- 设置键白名单不一致
+- tool schema 与 UI 能力不一致
+- 前后端 type definition 不一致
+
+项目通过以下方式控制：
+
+- `src/constants.rs`：定义规范常量与关键基础配置
+- `src/contracts.rs`：维护跨端契约
+- `src/capabilities.rs`：维护工具与技能能力表
+- `build.rs`：生成 TS 端常量与契约输出
+- `ts-rs`：从 Rust 类型生成前端 TS 类型
+
+理论上，改一处即可自动同步到前端所需的能力和默认值，减少“看起来功能可用，实际上配置漂移”的问题。
+
+### 13.6 数据流模型
+
+```text
+Browser UI
+   ↓
+Tauri invoke
+   ↓
+Rust command handlers
+   ↓
+TabManager / Engine / AI
+   ↓
+Local SQLite
+   ↓
+Persistence / restore / audit / security check
+```
+
+它体现出一个明确设计原则：
+
+- UI 不直接做数据治理
+- 页面控制不直接做数据库管理
+- AI 不直接越过权限边界执行任意动作
+- 所有改动都经过统一治理层
+
+### 13.7 技术演进方向
+
+未来如果继续迭代，建议从以下几个方向收口：
+
+1. 进一步收束 `tabs` 和 `engine` 的职责边界
+   - 避免 browser runtime 在多个模块中重复实现同类逻辑
+
+2. 继续强化统一契约与能力表
+   - 让所有工具、设置、事件、快捷键和 UI 入口都从同一套定义生成
+
+3. 把 AI 自动化动作继续收为“可审计、可回放、可回滚”的任务模型
+   - 让每一个 action 都可进行审计、重播、失败恢复
+
+4. 保持平台策略清晰
+   - 当前偏 Linux / GTK，后续若要扩展到其他平台，必须先把平台依赖抽离到统一接口层
+
+5. 安全由“补丁式”升级为“工程化”闭环
+   - 强制权鉴、网络过滤、证书校验、日志审计要由统一安全层持续维护，而不是分散修补
+
+---
+
+## 14. 总体判断
+
+ShiftBrowser 的最核心价值并不只是“浏览器做得像 App”，而是它把浏览器升级成：
+
+- 本地优先的网络工作平台
+- AI 可理解与操作的页面环境
+- 安全、审计、权限可控的 Web 自动化容器
+
+因此，它不是一款单纯的浏览器，而是一个正在构建中的“本地 AI 代理浏览器平台”。
+
+从工程实现上看，它已经具备：
+
+- 较完整的浏览器基础能力
+- 统一的 Rust 后端控制层
+- 一套正在完善的安全与治理框架
+- 较强的 AI / MCP / Open API 集成能力
+
+从工程成熟度上看，它还处于：
+
+- 有方向、有结构、有功能，但仍需持续收口和统一治理的阶段
+
+如果继续保持当前的架构治理思路，并把能力边界和安全边界持续收紧，这个项目很有可能成为真正可持续的下一代“本地浏览器 + AI 控制平台”。
 
 ### 测试与检查
 

@@ -227,7 +227,7 @@ watch(
   width: 100%;
   box-sizing: border-box;
   padding: 7px 10px;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   color: var(--text-primary);
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
@@ -352,7 +352,7 @@ watch(
 .settings-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 14px 16px;
+  padding: var(--space-lg) var(--space-lg);
   min-height: 0;
 }
 .settings-scroll::-webkit-scrollbar {

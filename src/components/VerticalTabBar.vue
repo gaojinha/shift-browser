@@ -143,7 +143,7 @@ function closeWin() {
 }
 .vtab-win.danger:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .vtab-btn {
   flex: 1;
@@ -239,6 +239,6 @@ function closeWin() {
 }
 .vtab-close:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 </style>

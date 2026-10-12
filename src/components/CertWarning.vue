@@ -131,13 +131,14 @@ async function goBack() {
   backdrop-filter: blur(6px);
 }
 .warn-box {
+  /* 安全类特例：620px 宽 + 大内边距，显眼压住一切，不跟普通弹窗统一 */
   width: 620px;
   max-width: 92vw;
   max-height: 84vh;
   overflow-y: auto;
   background: rgba(38, 22, 26, 0.98);
   border: 1px solid rgba(255, 90, 90, 0.4);
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
   padding: 28px 32px;
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
 }
@@ -150,53 +151,56 @@ async function goBack() {
   font-size: 30px;
 }
 .warn-head h2 {
+  /* 安全类特例：20px 大标题，警告一眼可见，不跟 14px 普通标题统一 */
   margin: 0;
-  font-size: 20px;
+  font-size: var(--text-xl);
   color: #ff8f8f;
 }
 .warn-lead {
   margin: 16px 0;
-  font-size: 13px;
-  color: #ddd;
-  line-height: 1.7;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  line-height: var(--leading-relaxed);
 }
 .warn-reasons {
-  padding: 12px 16px;
-  border-radius: 10px;
-  background: rgba(255, 90, 90, 0.12);
+  padding: var(--space-md) var(--space-lg);
+  border-radius: var(--radius-md);
+  /* 深红底专用浅粉文字，对比度高于 danger 原色 */
+  background: var(--danger-soft);
   border: 1px solid rgba(255, 90, 90, 0.28);
   color: #ffb3b3;
-  font-size: 13px;
-  line-height: 1.8;
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
 }
 .warn-verdicts {
   margin-top: 10px;
-  padding: 12px 16px;
-  border-radius: 10px;
-  background: rgba(255, 177, 78, 0.08);
+  padding: var(--space-md) var(--space-lg);
+  border-radius: var(--radius-md);
+  background: var(--warning-soft);
   border: 1px solid rgba(255, 177, 78, 0.3);
-  color: #ffd9a0;
-  font-size: 12px;
-  line-height: 1.8;
+  color: var(--warning);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
 }
 .warn-consequence {
   margin-top: 6px;
-  color: #ff9d9d;
+  color: var(--danger);
 }
 .warn-actions {
   display: flex;
-  gap: 12px;
+  gap: var(--space-md);
   margin-top: 22px;
 }
 .btn-primary,
 .btn-danger {
   flex: 1;
-  padding: 12px;
-  border-radius: 12px;
-  font-size: 14px;
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
   cursor: pointer;
   border: none;
 }
+/* 以下按钮/链接色为安全深红底专用，深浅主题下底色不变，文字保持浅色可读 */
 .btn-primary {
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
@@ -218,45 +222,45 @@ async function goBack() {
   cursor: default;
 }
 .btn-link {
-  margin-top: 16px;
+  margin-top: var(--space-lg);
   background: none;
   border: none;
-  color: #9fb3d1;
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
   cursor: pointer;
   padding: 0;
 }
 .btn-link:hover {
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .warn-detail {
-  margin-top: 12px;
-  padding: 12px 14px;
-  border-radius: 10px;
+  margin-top: var(--space-md);
+  padding: var(--space-md) 14px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.04);
 }
 .d-line {
   display: flex;
   gap: 10px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   padding: 4px 0;
 }
 .d-line .k {
   width: 56px;
   flex-shrink: 0;
-  color: #8a9bb5;
+  color: var(--text-muted);
 }
 .d-line .v {
-  color: #ddd;
+  color: var(--text-secondary);
   word-break: break-all;
 }
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 .warn-hint {
   margin: 10px 0 0;
-  font-size: 12px;
-  color: #9aa7bb;
-  line-height: 1.7;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  line-height: var(--leading-relaxed);
 }
 </style>

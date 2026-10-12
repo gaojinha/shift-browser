@@ -24,8 +24,10 @@ const props = withDefaults(
     width?: string
     /** 打开时是否自动聚焦首个可聚焦元素（表单类弹窗建议 true） */
     autoFocus?: boolean
+    /** 层叠高度，默认 z-overlay；二层弹窗（如证书中心）传 z-dialog-top */
+    layer?: string
   }>(),
-  { description: '', width: '', autoFocus: true },
+  { description: '', width: '', autoFocus: true, layer: '' },
 )
 
 const open = defineModel<boolean>('open', { required: true })
@@ -38,10 +40,10 @@ function onOpenAutoFocus(e: Event) {
 <template>
   <DialogRoot v-model:open="open">
     <DialogPortal>
-      <DialogOverlay class="ui-dialog-overlay" />
+      <DialogOverlay class="ui-dialog-overlay" :style="layer ? { zIndex: layer } : undefined" />
       <DialogContent
         :class="cn('ui-dialog')"
-        :style="width ? { width } : undefined"
+        :style="[width ? { width } : undefined, layer ? { zIndex: layer } : undefined]"
         @open-auto-focus="onOpenAutoFocus"
       >
         <div class="ui-dialog-header">
@@ -84,7 +86,7 @@ function onOpenAutoFocus(e: Event) {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: min(400px, calc(100vw - 48px));
+  width: min(var(--dialog-sm), calc(100vw - 48px));
   max-height: 80vh;
   overflow-y: auto;
   background: var(--bg-elevated);
@@ -92,7 +94,7 @@ function onOpenAutoFocus(e: Event) {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-dialog);
   z-index: var(--z-overlay);
-  padding: 16px 18px;
+  padding: var(--space-lg) var(--space-xl);
 }
 .ui-dialog[data-state='open'] {
   animation: ui-zoom-in var(--dur) var(--ease-out);
@@ -126,12 +128,12 @@ function onOpenAutoFocus(e: Event) {
   margin: 0 0 10px;
   color: var(--text-secondary);
   font-size: var(--text-sm);
-  line-height: 1.6;
+  line-height: var(--leading-base);
 }
 .ui-dialog-body {
   color: var(--text-primary);
   font-size: var(--text-base);
-  line-height: 1.6;
+  line-height: var(--leading-base);
 }
 .ui-dialog-footer {
   display: flex;

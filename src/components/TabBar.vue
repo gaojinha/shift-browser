@@ -713,7 +713,7 @@ function onFaviconError(e: Event) {
 }
 .tab .close-btn:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .tab.pinned {
   min-width: 34px;
@@ -849,7 +849,7 @@ function onFaviconError(e: Event) {
 }
 .wc-close:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 /* 右键菜单 */

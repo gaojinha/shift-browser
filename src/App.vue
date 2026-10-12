@@ -897,7 +897,7 @@ button:active:not(:disabled) {
   z-index: var(--z-dropdown);
 }
 .dialog {
-  width: min(480px, calc(100vw - 32px));
+  width: min(var(--dialog-md), calc(100vw - 32px));
   max-height: 80vh;
   background: var(--bg-elevated);
   border-radius: var(--radius-lg);
@@ -911,7 +911,7 @@ button:active:not(:disabled) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 18px;
+  padding: var(--space-lg) var(--space-xl);
   color: var(--text-primary);
   font-size: var(--text-md);
   font-weight: 600;
@@ -940,7 +940,7 @@ button:active:not(:disabled) {
   color: var(--text-primary);
 }
 .dialog-body {
-  padding: 14px 18px;
+  padding: var(--space-lg) var(--space-xl);
   overflow-y: auto;
 }
 

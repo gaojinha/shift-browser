@@ -362,7 +362,7 @@ async function diagnoseNet() {
   padding: 0 3px;
   border-radius: var(--radius-full);
   background: var(--danger);
-  color: #fff;
+  color: var(--accent-contrast);
   font-size: 9px;
   line-height: 14px;
   text-align: center;

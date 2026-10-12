@@ -37,7 +37,7 @@ const toastStore = useToastStore()
   padding: 11px 14px 11px 11px;
   border-radius: var(--radius-md);
   font-size: var(--text-base);
-  line-height: 1.5;
+  line-height: var(--leading-base);
   background: var(--bg-elevated);
   border: 1px solid var(--hairline);
   box-shadow: var(--shadow-pop);

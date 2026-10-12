@@ -15,15 +15,34 @@ const confirmDelete = useConfirmDelete()
 
 const emit = defineEmits<{ (e: 'open-manager'): void }>()
 
+/** 书签栏横向滚动容器：纵向滚轮转横向（内容多时滚轮可翻） */
+const listRef = ref<HTMLElement | null>(null)
+function onWheel(e: WheelEvent) {
+  const el = listRef.value
+  // 横向已在滚（触控板横滑）或内容没溢出：不拦截
+  if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+  if (!el || el.scrollWidth <= el.clientWidth) return
+  e.preventDefault()
+  // 行模式（部分内核滚轮按行报）：一行约 16px，像素模式直接用
+  const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY
+  el.scrollLeft += dy
+}
+
 // ===== 文件夹分组（书签栏像原版一样显示 📁 文件夹，点击展开书签）=====
 const folders = ref<{ id: number; name: string }[]>([])
 const folderMenu = ref<{ folderId: number; x: number; y: number } | null>(null)
 
 onMounted(async () => {
+  // 滚轮监听先绑：数据加载失败也不影响滚动
+  listRef.value?.addEventListener('wheel', onWheel, { passive: false })
   if (!bookmarksStore.loaded) {
     await bookmarksStore.loadBookmarks()
   }
   folders.value = await bookmarksStore.loadFolders()
+})
+
+onUnmounted(() => {
+  listRef.value?.removeEventListener('wheel', onWheel)
 })
 
 /** 有书签的文件夹才显示在书签栏 */
@@ -210,7 +229,7 @@ async function onSaveEdit() {
     :class="{ empty: bookmarksStore.bookmarks.length === 0 }"
     @contextmenu="onContextMenu($event, null)"
   >
-    <div class="bookmarks-list">
+    <div ref="listRef" class="bookmarks-list">
       <button
         v-for="f in foldersWithBookmarks"
         :key="f.id"
@@ -317,10 +336,12 @@ async function onSaveEdit() {
 }
 .bookmarks-list {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 2px;
   overflow-x: auto;
+  /* 横向滚动条藏起：滚轮横翻，不占地方 */
   scrollbar-width: none;
 }
 .bookmarks-list::-webkit-scrollbar {
@@ -450,10 +471,10 @@ async function onSaveEdit() {
 }
 .action-btn:hover {
   background: var(--bg-active);
-  color: #f0c040;
+  color: var(--warning);
 }
 .manage-btn:hover {
-  color: #4a9eff;
+  color: var(--accent);
 }
 .context-menu {
   position: fixed;
@@ -495,7 +516,7 @@ async function onSaveEdit() {
   background: var(--bg-primary);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   font-size: 13px;
   outline: none;
 }

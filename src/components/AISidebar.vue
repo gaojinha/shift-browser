@@ -461,7 +461,7 @@ function onOverlaySelf() {
 .zh-text {
   font-size: 12px;
   color: var(--text-primary);
-  line-height: 1.5;
+  line-height: var(--leading-base);
 }
 .zh-bar {
   margin-top: 6px;
@@ -516,7 +516,7 @@ function onOverlaySelf() {
   font-size: 13px;
   text-align: center;
   padding: 24px 12px;
-  line-height: 1.6;
+  line-height: var(--leading-base);
 }
 .ai-msg {
   display: flex;
@@ -532,7 +532,7 @@ function onOverlaySelf() {
   padding: 8px 12px;
   border-radius: 10px;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: var(--leading-base);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -560,7 +560,7 @@ function onOverlaySelf() {
   padding: 6px 12px;
   background: var(--danger-soft);
   border: 1px solid var(--danger);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 .ai-input-bar {
   display: flex;
@@ -605,15 +605,15 @@ function onOverlaySelf() {
   height: 32px;
   padding: 0 14px;
   background: var(--danger);
-  color: var(--text-primary);
+  color: var(--accent-contrast);
   border: none;
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
   cursor: pointer;
   flex-shrink: 0;
 }
 .ai-stop:hover {
-  background: #d32f2f;
+  filter: brightness(0.85);
 }
 /* ---- Markdown 渲染样式 ---- */
 .md-plain {
@@ -622,7 +622,7 @@ function onOverlaySelf() {
 }
 .md-body {
   font-size: 13px;
-  line-height: 1.65;
+  line-height: var(--leading-relaxed);
   word-break: break-word;
 }
 .md-body :deep(p) {
@@ -636,8 +636,9 @@ function onOverlaySelf() {
 .md-body :deep(h6) {
   margin: 8px 0 4px;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: var(--leading-tight);
 }
+/* 内容标题阶梯（渲染正文用，h1 16 > h2 15 > h3 14 > h4-h6 13，不跟弹窗标题统一） */
 .md-body :deep(h1) { font-size: 16px; }
 .md-body :deep(h2) { font-size: 15px; }
 .md-body :deep(h3) { font-size: 14px; }
@@ -673,9 +674,10 @@ function onOverlaySelf() {
 }
 .md-body :deep(.code-block) {
   margin: 6px 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   border: 1px solid var(--border-color);
+  /* 代码块恒用暗色主题，深浅模式下不变，保证代码可读 */
   background: #0d1117;
 }
 .md-body :deep(.code-header) {
@@ -687,15 +689,15 @@ function onOverlaySelf() {
   border-bottom: 1px solid var(--border-color);
 }
 .md-body :deep(.code-lang) {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
-  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-family: var(--font-mono);
 }
 .md-body :deep(.code-copy) {
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 2px 8px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-2xs);
   background: rgba(127, 127, 127, 0.25);
   color: var(--text-primary);
   cursor: pointer;
@@ -711,8 +713,9 @@ function onOverlaySelf() {
 .md-body :deep(pre code) {
   background: transparent;
   padding: 0;
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+  /* 代码恒用浅色字配暗底，深浅模式下不变 */
   color: #e6edf3;
   white-space: pre;
 }
@@ -731,7 +734,7 @@ function onOverlaySelf() {
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -741,7 +744,7 @@ function onOverlaySelf() {
 /* 随手问入口是主动作，给个可点的样子，别和"清空对话"一样灰 */
 .ai-webqa {
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   padding: 2px 8px;
   color: var(--accent, #4a9eff);
 }
@@ -754,7 +757,7 @@ function onOverlaySelf() {
 }
 .ai-hint {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   /* 状态提示可换行，按钮不跟着挪位置 */
   flex: 1 1 100%;
   text-align: right;
@@ -764,43 +767,43 @@ function onOverlaySelf() {
   margin: 8px 12px;
   padding: 10px 12px;
   background: var(--bg-primary);
-  border: 1px solid #e8a33d;
-  border-radius: 10px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-md);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 .agent-confirm-title {
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 600;
   margin-bottom: 4px;
 }
 .agent-confirm-desc {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   margin-bottom: 8px;
   word-break: break-all;
 }
 .agent-confirm-btns {
   display: flex;
-  gap: 8px;
+  gap: var(--space-sm);
 }
 .agent-confirm-allow {
   flex: 1;
   padding: 6px 0;
   border: none;
-  border-radius: 6px;
-  background: #2f9e44;
-  color: #fff;
-  font-size: 13px;
+  border-radius: var(--radius-xs);
+  background: var(--success);
+  color: var(--accent-contrast);
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .agent-confirm-deny {
   flex: 1;
   padding: 6px 0;
   border: none;
-  border-radius: 6px;
-  background: #e03131;
-  color: #fff;
-  font-size: 13px;
+  border-radius: var(--radius-xs);
+  background: var(--danger);
+  color: var(--accent-contrast);
+  font-size: var(--text-base);
   cursor: pointer;
 }
 </style>
