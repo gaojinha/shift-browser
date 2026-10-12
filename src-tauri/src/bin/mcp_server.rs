@@ -147,15 +147,22 @@ fn handle(msg: &Value) -> Option<Value> {
         }
         "tools/list" => {
             // 能力清单从浏览器拉取（单一来源在浏览器侧 capabilities.rs），
-            // 本进程不再手写 schema —— 避免"工具定义了却调不通"的两处漂移
-            let tools = match call_browser("capabilities/list", &json!({})) {
-                Ok(v) => v.get("tools").cloned().unwrap_or_else(|| json!([])),
-                Err(e) => {
-                    eprintln!("[mcp] capabilities/list 拉取失败: {}", e);
-                    json!([])
+            // 本进程不再手写 schema —— 避免"工具定义了却调不通"的两处漂移。
+            // 修复 2026-10-12：浏览器不可用时返回 JSON-RPC 结构化错误，而非
+            // 「空工具列表 + stderr 文本」——后者会让客户端（opencode）把 stderr
+            // 输出误判成"MCP 进程崩溃退出"，且空列表会被当成"服务器没有能力"。
+            match call_browser("capabilities/list", &json!({})) {
+                Ok(v) => {
+                    let tools = v.get("tools").cloned().unwrap_or_else(|| json!([]));
+                    resp["result"] = json!({ "tools": tools });
                 }
-            };
-            resp["result"] = json!({ "tools": tools });
+                Err(e) => {
+                    resp["error"] = json!({
+                        "code": -32000,
+                        "message": format!("浏览器 API 不可用（浏览器未运行或套接字未就绪）: {}", e)
+                    });
+                }
+            }
             Some(resp)
         }
         "tools/call" => {
@@ -213,5 +220,43 @@ fn main() {
             println!("{}", s);
             let _ = std::io::stdout().flush();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::handle;
+    use serde_json::json;
+
+    /// 浏览器不可用时（socket 路径指向不存在的文件），`tools/list` 必须返回
+    /// JSON-RPC 结构化错误对象——既不能回退成「空工具列表」（客户端会误判
+    /// 服务器没能力），也不能往 stderr 写文本（客户端会误判进程崩溃）。
+    /// 配套修复见 api.rs 绑定重试（2026-10-12）。
+    #[test]
+    fn tools_list_returns_jsonrpc_error_when_browser_unavailable() {
+        // 指向一个必定不存在的 socket 路径，保证 call_browser 必失败
+        std::env::set_var(
+            "SHIFT_BROWSER_SOCK",
+            "/tmp/shift-browser-mcp-test-nonexistent.sock",
+        );
+        let msg = json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {}
+        });
+        let resp = handle(&msg).expect("tools/list 带 id，必须返回响应");
+        std::env::remove_var("SHIFT_BROWSER_SOCK");
+
+        assert!(
+            resp.get("error").is_some(),
+            "浏览器不可用时 tools/list 应返回 error，实际: {resp}"
+        );
+        assert!(resp.get("result").is_none(), "不应返回 result 字段");
+        assert_eq!(
+            resp["error"]["code"].as_i64(),
+            Some(-32000),
+            "错误码应为 -32000（服务器错误）"
+        );
     }
 }

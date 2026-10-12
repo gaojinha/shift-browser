@@ -35,6 +35,11 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::sync::RwLock;
 
+/// 绑定监听器的最大尝试次数（含首次）。
+const BIND_MAX_ATTEMPTS: u32 = 5;
+/// 绑定失败后的退避基数（毫秒）：第 n 次失败等待 `n × 基数`。
+const BIND_RETRY_BACKOFF_MS: u64 = 50;
+
 /// 套接字路径（应用数据目录，与 vault.key/sync.key 同级）
 pub fn socket_path(app: &AppHandle) -> Option<PathBuf> {
     let db = app.try_state::<crate::db::Db>()?;
@@ -69,8 +74,6 @@ pub fn spawn(app: AppHandle) {
         log::warn!("[api] 无法确定套接字路径，开放 API 未启动");
         return;
     };
-    // 清理上次残留
-    let _ = std::fs::remove_file(&path);
     // 同时起本地 HTTP API（阶段4 自托管服务端套件最小版）——必须在下面 move app 之前克隆。
     // token/tickets 以 Tauri state 共享：rotate_api_token / create_dashboard_ticket
     // 两个命令与 HTTP 服务操作同一份运行期状态
@@ -83,12 +86,42 @@ pub fn spawn(app: AppHandle) {
         log::warn!("[api] api-token 初始化失败，HTTP API 未启动");
     }
     tauri::async_runtime::spawn(async move {
-        let listener = match UnixListener::bind(&path) {
-            Ok(l) => l,
-            Err(e) => {
-                log::warn!("[api] 绑定 {} 失败: {}", path.display(), e);
-                return;
+        // 绑定监听器（含残留清理 + 退避重试）。修复 2026-10-12：
+        // 旧实现在 setup 阶段同步 remove_file、在异步任务里 bind，两者分离存在竞态窗口；
+        // 且 bind 失败只 warn 不重试——一旦失败，整个进程生命周期内开放 API 哑火，
+        // 客户端（MCP）侧表现为 "Connection refused (os error 111)"。
+        let mut bound = None;
+        for attempt in 0..BIND_MAX_ATTEMPTS {
+            // 无条件清理残留：kill -9 杀进程时内核不会 unlink socket 文件，
+            // 残留文件会让后续 connect 直接得到 ECONNREFUSED
+            let _ = std::fs::remove_file(&path);
+            match UnixListener::bind(&path) {
+                Ok(l) => {
+                    bound = Some(l);
+                    break;
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[api] 绑定 {} 第 {}/{} 次失败: {}",
+                        path.display(),
+                        attempt + 1,
+                        BIND_MAX_ATTEMPTS,
+                        e
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        BIND_RETRY_BACKOFF_MS * (u64::from(attempt) + 1),
+                    ))
+                    .await;
+                }
             }
+        }
+        let Some(listener) = bound else {
+            log::error!(
+                "[api] 绑定 {} 重试 {} 次仍失败，开放 API 本次不可用",
+                path.display(),
+                BIND_MAX_ATTEMPTS
+            );
+            return;
         };
         // 权限 0600：仅本用户可连
         #[cfg(unix)]
