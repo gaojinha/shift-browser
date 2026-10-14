@@ -48,15 +48,13 @@ watch(menu, (v) => {
   }
 })
 
-// 菜单打开后：菜单项设为可编程聚焦（tabindex=-1，不占 Tab 序），焦点移入首项
+// 菜单打开后：焦点移入首项
 // （R4-6 包 2：菜单键盘可用——打开即可 ↑/↓ 选择、Enter 激活、Esc 关闭）
+// tabindex=-1 已在模板 :tabindex 绑定，此处只处理焦点
 watch(menuEl, async (el) => {
   if (!el) return
   await nextTick()
   const items = el.querySelectorAll<HTMLElement>('.menu-item')
-  items.forEach((it) => {
-    it.tabIndex = -1
-  })
   items[0]?.focus()
 })
 
@@ -663,33 +661,33 @@ function onFaviconError(e: Event) {
       @mousedown="onMenuMouseDown"
       @keydown="onMenuKeydown"
     >
-      <div class="menu-item" role="menuitem" @click="onMenuPin">📌 固定/取消固定</div>
-      <div class="menu-item" role="menuitem" @click="onMenuMute">🔇 静音/取消静音</div>
-      <div class="menu-item" role="menuitem" @click="onMenuSplit">
+      <div class="menu-item" role="menuitem" :tabindex="-1" @click="onMenuPin">📌 固定/取消固定</div>
+      <div class="menu-item" role="menuitem" :tabindex="-1" @click="onMenuMute">🔇 静音/取消静音</div>
+      <div class="menu-item" role="menuitem" :tabindex="-1" @click="onMenuSplit">
         {{ tabsStore.splitTabId === menu?.tabId ? '◫ 关闭分屏' : '◫ 在右侧分屏' }}
       </div>
       <div class="menu-divider" role="separator"></div>
-      <div class="menu-item" role="menuitem" @click="onMenuCloseTab">✕ 关闭标签</div>
-      <div class="menu-item" role="menuitem" @click="onMenuCloseOthers">关闭其他标签</div>
-      <div class="menu-item" role="menuitem" @click="onMenuCloseRight">关闭右侧标签</div>
-      <div class="menu-item" role="menuitem" @click="onMenuCloseSameDomain">关闭同域名标签</div>
-      <div class="menu-item" role="menuitem" @click="onMenuCloseDuplicates">关闭重复标签</div>
-      <div class="menu-item" role="menuitem" @click="onMenuMuteAll">🔇 全部静音/取消</div>
+      <div class="menu-item" role="menuitem" :tabindex="-1" @click="onMenuCloseTab">✕ 关闭标签</div>
+      <div class="menu-item" role="menuitem" :tabindex="-1" @click="onMenuCloseOthers">关闭其他标签</div>
+      <div class="menu-item" role="menuitem" :tabindex="-1" @click="onMenuCloseRight">关闭右侧标签</div>
+      <div class="menu-item" role="menuitem" :tabindex="-1" @click="onMenuCloseSameDomain">关闭同域名标签</div>
+      <div class="menu-item" role="menuitem" :tabindex="-1" @click="onMenuCloseDuplicates">关闭重复标签</div>
+      <div class="menu-item" role="menuitem" :tabindex="-1" @click="onMenuMuteAll">🔇 全部静音/取消</div>
       <div class="menu-divider" role="separator"></div>
-      <div class="menu-item" role="menuitem" @click="onMenuCopyUrl">🔗 复制网址</div>
+      <div class="menu-item" role="menuitem" :tabindex="-1" @click="onMenuCopyUrl">🔗 复制网址</div>
       <div class="menu-divider" role="separator"></div>
       <div class="menu-title" role="presentation">移动到分组</div>
       <div
         v-for="g in groupsStore.groups"
         :key="g.id"
-        class="menu-item" role="menuitem"
+        class="menu-item" role="menuitem" :tabindex="-1"
         @click="onMoveToGroup(g.id)"
       >
         <span class="menu-dot" :style="{ background: g.color }"></span>{{ g.name }}
       </div>
-      <div class="menu-item" role="menuitem" @click="onMoveToGroup(null)">取消分组</div>
+      <div class="menu-item" role="menuitem" :tabindex="-1" @click="onMoveToGroup(null)">取消分组</div>
       <div class="menu-divider" role="separator"></div>
-      <div class="menu-item accent" role="menuitem" @click="onNewGroupFromMenu">＋ 新建分组并移动</div>
+      <div class="menu-item accent" role="menuitem" :tabindex="-1" @click="onNewGroupFromMenu">＋ 新建分组并移动</div>
     </div>
   </div>
 </template>

@@ -1,235 +1,61 @@
 [
   {
     "scenario": "settings-dialog",
-    "ts": "2026-10-14T08:23:47.482Z",
+    "ts": "2026-10-14T08:46:57.779Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "command-palette",
-    "ts": "2026-10-14T08:23:51.545Z",
+    "ts": "2026-10-14T08:47:01.877Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "address-suggest",
-    "ts": "2026-10-14T08:23:55.165Z",
+    "ts": "2026-10-14T08:47:05.493Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "ai-sidebar",
-    "ts": "2026-10-14T08:23:59.112Z",
+    "ts": "2026-10-14T08:47:09.390Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "history-dialog",
-    "ts": "2026-10-14T08:24:02.839Z",
+    "ts": "2026-10-14T08:47:13.066Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "translate-panel",
-    "ts": "2026-10-14T08:24:06.749Z",
-    "counts": {
-      "serious": 1
-    },
-    "violations": [
-      {
-        "id": "color-contrast",
-        "impact": "serious",
-        "tags": [
-          "cat.color",
-          "wcag2aa",
-          "wcag143",
-          "TTv5",
-          "TT13.c",
-          "EN-301-549",
-          "EN-9.1.4.3",
-          "ACT",
-          "RGAAv4",
-          "RGAA-3.2.1"
-        ],
-        "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
-        "help": "Elements must meet minimum color contrast ratio thresholds",
-        "helpUrl": "https://dequeuniversity.com/rules/axe/4.13/color-contrast?application=playwright",
-        "nodes": [
-          {
-            "any": [
-              {
-                "id": "color-contrast",
-                "data": {
-                  "fgColor": "#5f6b83",
-                  "bgColor": "#202c44",
-                  "contrastRatio": 2.6,
-                  "fontSize": "9.8pt (13px)",
-                  "fontWeight": "normal",
-                  "messageKey": null,
-                  "expectedContrastRatio": "4.5:1"
-                },
-                "relatedNodes": [
-                  {
-                    "html": "<div data-v-ef8bfab7=\"\" class=\"tr-output\"><div data-v-ef8bfab7=\"\" class=\"tr-empty\">译文会显示在这里</div></div>",
-                    "target": [
-                      ".tr-output"
-                    ]
-                  }
-                ],
-                "impact": "serious",
-                "message": "Element has insufficient color contrast of 2.6 (foreground color: #5f6b83, background color: #202c44, font size: 9.8pt (13px), font weight: normal). Expected contrast ratio of 4.5:1"
-              }
-            ],
-            "all": [],
-            "none": [],
-            "impact": "serious",
-            "html": "<div data-v-ef8bfab7=\"\" class=\"tr-empty\">译文会显示在这里</div>",
-            "target": [
-              ".tr-empty"
-            ],
-            "failureSummary": "Fix any of the following:\n  Element has insufficient color contrast of 2.6 (foreground color: #5f6b83, background color: #202c44, font size: 9.8pt (13px), font weight: normal). Expected contrast ratio of 4.5:1"
-          }
-        ]
-      }
-    ]
+    "ts": "2026-10-14T08:47:16.956Z",
+    "counts": {},
+    "violations": []
   },
   {
     "scenario": "bookmarks-dialog",
-    "ts": "2026-10-14T08:24:10.531Z",
-    "counts": {
-      "serious": 1
-    },
-    "violations": [
-      {
-        "id": "color-contrast",
-        "impact": "serious",
-        "tags": [
-          "cat.color",
-          "wcag2aa",
-          "wcag143",
-          "TTv5",
-          "TT13.c",
-          "EN-301-549",
-          "EN-9.1.4.3",
-          "ACT",
-          "RGAAv4",
-          "RGAA-3.2.1"
-        ],
-        "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
-        "help": "Elements must meet minimum color contrast ratio thresholds",
-        "helpUrl": "https://dequeuniversity.com/rules/axe/4.13/color-contrast?application=playwright",
-        "nodes": [
-          {
-            "any": [
-              {
-                "id": "color-contrast",
-                "data": {
-                  "fgColor": "#ffffff",
-                  "bgColor": "#5b8cff",
-                  "contrastRatio": 3.16,
-                  "fontSize": "9.0pt (12px)",
-                  "fontWeight": "normal",
-                  "messageKey": null,
-                  "expectedContrastRatio": "4.5:1"
-                },
-                "relatedNodes": [
-                  {
-                    "html": "<button data-v-68f20112=\"\" class=\"h-btn accent\">＋ 添加书签</button>",
-                    "target": [
-                      ".accent"
-                    ]
-                  }
-                ],
-                "impact": "serious",
-                "message": "Element has insufficient color contrast of 3.16 (foreground color: #ffffff, background color: #5b8cff, font size: 9.0pt (12px), font weight: normal). Expected contrast ratio of 4.5:1"
-              }
-            ],
-            "all": [],
-            "none": [],
-            "impact": "serious",
-            "html": "<button data-v-68f20112=\"\" class=\"h-btn accent\">＋ 添加书签</button>",
-            "target": [
-              ".accent"
-            ],
-            "failureSummary": "Fix any of the following:\n  Element has insufficient color contrast of 3.16 (foreground color: #ffffff, background color: #5b8cff, font size: 9.0pt (12px), font weight: normal). Expected contrast ratio of 4.5:1"
-          }
-        ]
-      }
-    ]
+    "ts": "2026-10-14T08:47:20.658Z",
+    "counts": {},
+    "violations": []
   },
   {
     "scenario": "passwords-dialog",
-    "ts": "2026-10-14T08:24:14.154Z",
+    "ts": "2026-10-14T08:47:24.368Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "sessions-dialog",
-    "ts": "2026-10-14T08:24:17.764Z",
-    "counts": {
-      "serious": 1
-    },
-    "violations": [
-      {
-        "id": "color-contrast",
-        "impact": "serious",
-        "tags": [
-          "cat.color",
-          "wcag2aa",
-          "wcag143",
-          "TTv5",
-          "TT13.c",
-          "EN-301-549",
-          "EN-9.1.4.3",
-          "ACT",
-          "RGAAv4",
-          "RGAA-3.2.1"
-        ],
-        "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
-        "help": "Elements must meet minimum color contrast ratio thresholds",
-        "helpUrl": "https://dequeuniversity.com/rules/axe/4.13/color-contrast?application=playwright",
-        "nodes": [
-          {
-            "any": [
-              {
-                "id": "color-contrast",
-                "data": {
-                  "fgColor": "#ffffff",
-                  "bgColor": "#5b8cff",
-                  "contrastRatio": 3.16,
-                  "fontSize": "9.0pt (12px)",
-                  "fontWeight": "normal",
-                  "messageKey": null,
-                  "expectedContrastRatio": "4.5:1"
-                },
-                "relatedNodes": [
-                  {
-                    "html": "<button data-v-76baca95=\"\" class=\"ss-btn accent\">保存当前</button>",
-                    "target": [
-                      ".ss-btn"
-                    ]
-                  }
-                ],
-                "impact": "serious",
-                "message": "Element has insufficient color contrast of 3.16 (foreground color: #ffffff, background color: #5b8cff, font size: 9.0pt (12px), font weight: normal). Expected contrast ratio of 4.5:1"
-              }
-            ],
-            "all": [],
-            "none": [],
-            "impact": "serious",
-            "html": "<button data-v-76baca95=\"\" class=\"ss-btn accent\">保存当前</button>",
-            "target": [
-              ".ss-btn"
-            ],
-            "failureSummary": "Fix any of the following:\n  Element has insufficient color contrast of 3.16 (foreground color: #ffffff, background color: #5b8cff, font size: 9.0pt (12px), font weight: normal). Expected contrast ratio of 4.5:1"
-          }
-        ]
-      }
-    ]
+    "ts": "2026-10-14T08:47:28.042Z",
+    "counts": {},
+    "violations": []
   },
   {
     "scenario": "downloads-dialog",
-    "ts": "2026-10-14T08:24:21.388Z",
+    "ts": "2026-10-14T08:47:31.703Z",
     "counts": {},
     "violations": []
   }

@@ -351,7 +351,7 @@ const charCount = (s: string) => s.length
   white-space: pre-wrap;
   word-break: break-word;
 }
-.tr-empty { color: var(--text-faint); font-style: italic; }
+.tr-empty { color: var(--text-muted); font-style: italic; }
 .tr-error {
   color: var(--danger);
   background: var(--danger-soft);

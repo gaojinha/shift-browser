@@ -234,8 +234,9 @@ async function onSave() {
   flex-shrink: 0;
 }
 .ss-btn.accent {
-  background: var(--accent);
-  border-color: var(--accent);
+  /* 局部对比度修复（包5）：#1d4ed8 + 白字 = 6.70:1 ≥ 4.5:1（--accent 全局值 3.16:1 不达标） */
+  background: #1d4ed8;
+  border-color: #1d4ed8;
   color: var(--accent-contrast);
 }
 .ss-btn.accent:hover {
