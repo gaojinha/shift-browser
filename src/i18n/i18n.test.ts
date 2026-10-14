@@ -55,6 +55,73 @@ describe('i18n 语言包键集一致', () => {
   })
 })
 
+// ─── 多文件/多节校验（R4-5 拆包 · 022 扩展）──────────────────────────────
+// 兼容 D-5 任意拆法：
+//   - 单文件模式（现状）：locales/zh-CN.ts + locales/en.ts
+//   - 多文件平铺：locales/zh-CN.navigation.ts + locales/en.navigation.ts
+//   - 子目录模式：locales/zh-CN/navigation.ts + locales/en/navigation.ts
+// 规则：同名节文件（去 locale 前缀后）在 zh-CN 和 en 两侧必须同时存在，
+//       且键路径完全一致。
+//
+// 当前 locales/ 只有 zh-CN.ts / en.ts，此测试块自动发现 0 个节文件，
+// 不报错；拆包后新增文件自动纳入校验。
+
+describe('i18n 多文件节键集一致（多节扩展）', () => {
+  // import.meta.glob 在 vitest 中静态分析，编译期发现所有 .ts 文件
+  const sectionFiles = import.meta.glob<{ default: Node }>(
+    './locales/!(zh-CN|en).ts',
+    { eager: true },
+  )
+
+  it('节文件数量为零时跳过（单文件模式）', () => {
+    const count = Object.keys(sectionFiles).length
+    if (count === 0) return // 单文件模式，无节文件，通过
+  })
+
+  it('每对 zh-CN/en 节文件键路径一致', () => {
+    // 按节名分组：zh-CN.navigation.ts → navigation, en.navigation.ts → navigation
+    const bySection: Record<string, { zh?: Node; en?: Node; zhName?: string; enName?: string }> = {}
+
+    for (const [path, mod] of Object.entries(sectionFiles)) {
+      // path 形如 './locales/zh-CN.navigation.ts' 或 './locales/zh-CN/navigation.ts'
+      const fileName = path.split('/').pop()!.replace(/\.ts$/, '')
+      const [locale, section] = fileName.split('.', 2)
+      if (!locale || !section) continue
+      const loc = locale === 'zh-CN' ? 'zh' : locale === 'en' ? 'en' : null
+      if (!loc) continue
+      if (!bySection[section]) bySection[section] = {}
+      bySection[section][loc] = (mod as { default: Node }).default
+      bySection[section][`${loc}Name`] = fileName
+    }
+
+    for (const [section, pair] of Object.entries(bySection)) {
+      if (pair.zh && pair.en) {
+        const zhKeys = leafPaths(pair.zh).sort()
+        const enKeys = leafPaths(pair.en).sort()
+        expect(enKeys, `节 ${section}（${pair.zhName} vs ${pair.enName}）`).toEqual(zhKeys)
+      } else {
+        // 一侧有、另一侧没有 → 不匹配
+        expect(
+          pair.zh || pair.en,
+          `节 ${section}：${pair.zhName ? 'zh-CN 存在' : ''} ${pair.enName ? 'en 存在' : ''}（必须成对出现）`,
+        ).toBeUndefined()
+      }
+    }
+  })
+
+  it('节文件叶子值均为非空字符串', () => {
+    for (const [path, mod] of Object.entries(sectionFiles)) {
+      const pack = (mod as { default: Node }).default
+      const label = path.split('/').pop()
+      for (const p of leafPaths(pack)) {
+        const v = p.split('.').reduce<unknown>((o, k) => (o as Node)[k], pack)
+        expect(typeof v, `${label}:${p}`).toBe('string')
+        expect(v as string, `${label}:${p}`).not.toBe('')
+      }
+    }
+  })
+})
+
 describe('i18n 样板：翻译进度条文案', () => {
   it('默认 zh-CN：插值渲染与原文案逐字一致', () => {
     expect(i18n.global.t('progress.preparing')).toBe('准备中…')
