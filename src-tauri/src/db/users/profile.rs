@@ -121,11 +121,19 @@ pub async fn user_change_password(
     let Some((stored_hash, salt, algo)) = row else {
         return Ok(UserResult::err("账号不存在"));
     };
-    if hash_password_with_iter(&old_password, &salt, iterations_for_algo(&algo)) != stored_hash {
+    if hash_password_blocking(
+        old_password.clone(),
+        salt.clone(),
+        iterations_for_algo(&algo),
+    )
+    .await
+        != stored_hash
+    {
         return Ok(UserResult::err("旧密码错误"));
     }
     let new_salt = generate_salt();
-    let new_hash = hash_password(&new_password, &new_salt);
+    let new_hash =
+        hash_password_blocking(new_password.clone(), new_salt.clone(), PBKDF2_ITER).await;
     db_try!(sqlx::query(
         "UPDATE users SET password_hash = ?, salt = ?, hash_algo = ? WHERE id = ?"
     )
@@ -158,7 +166,9 @@ pub async fn user_delete(
     let Some((uid, stored_hash, salt, algo)) = row else {
         return Ok(UserResult::err("账号不存在"));
     };
-    if hash_password_with_iter(&password, &salt, iterations_for_algo(&algo)) != stored_hash {
+    if hash_password_blocking(password.clone(), salt, iterations_for_algo(&algo)).await
+        != stored_hash
+    {
         return Ok(UserResult::err("密码错误，无法删除"));
     }
     let was_current = current_user_id(&db).await == Some(uid);

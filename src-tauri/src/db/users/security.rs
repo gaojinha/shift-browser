@@ -31,9 +31,24 @@ pub(crate) fn hash_password_with_iter(password: &str, salt: &str, iter: u32) -> 
     hex::encode(out)
 }
 
-/// 按当前参数计算哈希（新注册/改密码用）
-pub(crate) fn hash_password(password: &str, salt: &str) -> String {
-    hash_password_with_iter(password, salt, PBKDF2_ITER)
+/// KDF 移出 async worker（R4-3 / 方案 Q-12，2026-10-14）：
+/// PBKDF2 是 CPU 密集纯计算（21 万次 SHA512 ≈ 0.2-0.4s），直接在 async fn
+/// 里同步跑会占住 tokio worker 线程，阻塞并发的 E_DB 查询等其他任务。
+/// 统一经 `spawn_blocking` 进阻塞池，与 vault 侧 `unwrap_key_blocking`/
+/// `wrap_key_blocking`（vault.rs）同款先例。语义与同步版完全一致。
+pub(crate) async fn hash_password_blocking(password: String, salt: String, iter: u32) -> String {
+    let task = (password.clone(), salt.clone(), iter);
+    match tokio::task::spawn_blocking(move || hash_password_with_iter(&task.0, &task.1, task.2))
+        .await
+    {
+        Ok(hash) => hash,
+        // 毒化恢复（AGENTS.md：panic 不许裸穿透）：闭包是纯计算无 panic 点，
+        // 此分支理论不可达；一旦发生降级为主线程同步重算，保证结果正确性
+        Err(e) => {
+            log::error!("[users] KDF blocking 任务异常（{e}），降级同步重算");
+            hash_password_with_iter(&password, &salt, iter)
+        }
+    }
 }
 
 /// 从 hash_algo 解析校验所需迭代次数（未知值按历史参数兜底）

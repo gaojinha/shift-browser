@@ -156,7 +156,7 @@ pub async fn user_register(
         return Ok(UserResult::err("用户名已存在，请换一个"));
     }
     let salt = generate_salt();
-    let hash = hash_password(&password, &salt);
+    let hash = hash_password_blocking(password.clone(), salt.clone(), PBKDF2_ITER).await;
     let res = db_try!(sqlx::query(
         "INSERT INTO users (username, password_hash, salt, hash_algo, nickname, avatar, signature)
        VALUES (?, ?, ?, ?, ?, '🦊', '这个人很懒，什么都没写')",
@@ -219,12 +219,12 @@ pub async fn verify_password(db: &Db, username: &str, password: &str) -> Command
         return Ok(false);
     };
     let iter = iterations_for_algo(&algo);
-    if hash_password_with_iter(password, &salt, iter) != stored_hash {
+    if hash_password_blocking(password.to_string(), salt.clone(), iter).await != stored_hash {
         return Ok(false);
     }
     // 透明升级：旧参数（如 'pbkdf2' 10 万次）→ 当前参数（60 万次）
     if algo != HASH_ALGO_CURRENT {
-        let new_hash = hash_password(password, &salt);
+        let new_hash = hash_password_blocking(password.to_string(), salt, PBKDF2_ITER).await;
         let _ = sqlx::query("UPDATE users SET password_hash = ?, hash_algo = ? WHERE username = ?")
             .bind(&new_hash)
             .bind(HASH_ALGO_CURRENT)
@@ -266,7 +266,9 @@ pub async fn user_login(
     let Some((uid, stored_hash, salt, algo)) = row else {
         return Ok(UserResult::err("账号不存在，请先注册"));
     };
-    if hash_password_with_iter(&password, &salt, iterations_for_algo(&algo)) != stored_hash {
+    if hash_password_blocking(password.clone(), salt.clone(), iterations_for_algo(&algo)).await
+        != stored_hash
+    {
         guard_record_failure(&name);
         let (f, _) = guard_get(&name);
         if f == 0 {
@@ -279,7 +281,7 @@ pub async fn user_login(
     }
     // 透明升级旧迭代参数
     if algo != HASH_ALGO_CURRENT {
-        let new_hash = hash_password(&password, &salt);
+        let new_hash = hash_password_blocking(password.clone(), salt, PBKDF2_ITER).await;
         let _ = sqlx::query("UPDATE users SET password_hash = ?, hash_algo = ? WHERE id = ?")
             .bind(&new_hash)
             .bind(HASH_ALGO_CURRENT)
