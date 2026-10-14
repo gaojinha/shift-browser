@@ -171,6 +171,15 @@ onMounted(loadDefaultBrowser)
         />
       </div>
       <div class="field">
+        <label for="update-check">启动查版本</label>
+        <span class="field-desc">启动时检查新版本并提示（只提示，不自动安装）</span>
+        <SettingSwitch
+          label="启动查版本"
+          :checked="settingsStore.get('update_check_enabled') === 'true'"
+          @change="onSet('update_check_enabled', $event ? 'true' : 'false')"
+        />
+      </div>
+      <div class="field">
         <label>翻译源</label>
         <SegControl
           v-model="translateEngine"

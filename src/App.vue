@@ -666,6 +666,21 @@ onMounted(async () => {
   onEvent(EVENTS.VAULT_AUTO_LOCKED, () => {
     useToastStore().show('密码库已因空闲自动锁定', 'info', 5000)
   })
+
+  // 启动查版本提示（R4-4 先行版）：只提示不安装；后端 fail-silent，
+  // null = 无新版/查询失败/WAF 拦截，一律静默不打扰
+  invoke<{ currentVersion: string; latestVersion: string; releaseUrl: string } | null>(
+    'check_for_update',
+  )
+    .then((u) => {
+      if (!u) return
+      useToastStore().show(
+        `发现新版本 v${u.latestVersion}（当前 v${u.currentVersion}），到「关于」页或 Release 页获取`,
+        'info',
+        8000,
+      )
+    })
+    .catch(() => {})
 })
 
 onUnmounted(() => {

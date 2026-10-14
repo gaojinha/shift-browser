@@ -44,6 +44,7 @@ mod tabs;
 mod tls;
 mod translate;
 mod tray;
+mod update_check;
 mod useragent;
 // P2（2026-09-26）：网页随手问 —— Rust 代理连本机 opencode，浏览器只做手/入口。
 // pub：tests/webqa_live.rs 真机验收直接调 SseAccumulator/fold_event/build_prompt
@@ -324,6 +325,8 @@ pub fn run() {
             misc_cmds::selfcheck_cmd,
             // 关于页信息（只读，打开即显示）
             misc_cmds::app_about_cmd,
+            // 启动查版本提示（R4-4 先行版：只提示不安装，fail-silent）
+            update_check::check_for_update,
             // AI 侧边栏
             ai::ai_chat,
             ai::ai_chat_stream,

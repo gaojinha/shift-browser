@@ -99,6 +99,8 @@ pub mod settings {
         SettingDef { key: "auto_refresh_feeds_minutes", default: "0", kind: Kind::Int, sensitive: false, desc: "自动刷新资讯（分钟，0=关）" },
         SettingDef { key: "auto_agent_minutes", default: "0", kind: Kind::Int, sensitive: false, desc: "定时 Agent（分钟，0=关）" },
         SettingDef { key: "auto_agent_prompt", default: "", kind: Kind::Str, sensitive: false, desc: "定时 Agent 提示词" },
+        // ---- 更新 ----
+        SettingDef { key: "update_check_enabled", default: "true", kind: Kind::Bool, sensitive: false, desc: "启动查版本提示（只提示不安装）" },
         // ---- 开放 API ----
         SettingDef { key: "api_allow_eval", default: "false", kind: Kind::Bool, sensitive: false, desc: "允许执行 JS（危险，默认关）" },
         SettingDef { key: "api_http_port", default: "19701", kind: Kind::Int, sensitive: false, desc: "开放 API HTTP 端口" },
@@ -290,6 +292,8 @@ pub mod timeout {
     pub const EXTERNAL_URL_READY_MS: u64 = 5000;
     /// 标签同步兜底轮询（毫秒，前端用；版本差分无变更即跳过）
     pub const TAB_POLL_MS: u64 = 15000;
+    /// 启动查版本（GitCode Release API；本机实测可能被 WAF 拦，超时即静默放弃）
+    pub const UPDATE_CHECK_SECS: u64 = 5;
 
     /// (前端常量名, 值) —— 供 build.rs 生成前端 `TIMEOUT`
     pub const ALL: &[(&str, u64)] = &[
@@ -304,6 +308,7 @@ pub mod timeout {
         ("SYNC_REQUEST_SECS", SYNC_REQUEST_SECS),
         ("TRANSLATE_SECS", TRANSLATE_SECS),
         ("DB_BUSY_SECS", DB_BUSY_SECS),
+        ("UPDATE_CHECK_SECS", UPDATE_CHECK_SECS),
         ("SINGLE_INSTANCE_WAIT_MS", SINGLE_INSTANCE_WAIT_MS),
         ("DEFAULT_BROWSER_WAIT_MS", DEFAULT_BROWSER_WAIT_MS),
         ("EXTERNAL_URL_READY_MS", EXTERNAL_URL_READY_MS),
