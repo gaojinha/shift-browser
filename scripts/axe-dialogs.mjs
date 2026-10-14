@@ -41,8 +41,7 @@ const scenarios = [
     await p.waitForTimeout(800)
   }, wait: 0 },
   { name: 'downloads-dialog', trigger: async (p) => {
-    // ipc-bridge 浮层拦截 pointer events，force 穿透；dl-btn 在 StatusBar
-    await p.locator('button.dl-btn').click({ force: true })
+    await p.locator('button.dl-btn').click()
     await p.waitForTimeout(800)
   }, wait: 0 },
 ]
