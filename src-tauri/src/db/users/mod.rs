@@ -312,7 +312,7 @@ mod tests {
     /// 若 KDF 在 async worker 同步执行，event loop 被冻结，tick 无法
     /// 推进；spawn_blocking 后 KDF 去阻塞线程池，主 task 仍能每 5ms
     /// 响应 sleep 唤醒 → tick 持续增长。
-    /// 断言：KDF 完成前 tick ≥ 5（blocking 版 ≈ 数百；同步版 ≈ 0）。
+    /// 断言：KDF 完成前 tick ≥ 30（blocking 版打满上限 1000+；同步版实测仅 4）。
     #[tokio::test(flavor = "current_thread")]
     async fn test_kdf_does_not_block_other_async_work() {
         use std::sync::{
@@ -350,9 +350,11 @@ mod tests {
 
         // 定性：KDF 完成前 tick ≥ 5 → event loop 未被冻结 → spawn_blocking 生效
         // blocking 版实测 ~100；同步版（未 spawn_blocking）≈ 0（event loop 冻死）
+        // 阈值 30：验收对照实验实测——blocking 版 tick 打满上限（1000+），
+        // 同步版仅 4；取 30 留数量级安全边际（6 << 30 << 1000），防边界漏判。
         assert!(
-            tick_count >= 5,
-            "KDF 冻结事件循环（KDF 完成前仅 {tick_count} 次 tick，应 ≥5）"
+            tick_count >= 30,
+            "KDF 冻结事件循环（KDF 完成前仅 {tick_count} 次 tick，应 ≥30）"
         );
     }
 }
