@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 网页随手问 AI 单体（opencode 代理/选区/朗读同域），拆分排期 R3/R4（2026-10-14 红线卡标注）
 //! P2：本机 opencode 代理（Rust → opencode HTTP server）
 //!
 //! 定位：浏览器只做"手/入口"，大脑是本机 opencode。侧边栏把「问题 + 选区上下文」

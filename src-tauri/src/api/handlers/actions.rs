@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 9 个交互动作 handler 同域（selector/等待工具共用），拆分排期 R4（2026-10-14 红线卡标注）
 //! 交互 handler（P2）：wait_for / scroll / click / fill / back
 //!
 //! 方案：docs/开放API-页面读取能力完善方案_2026-09-25.md（§4.4）

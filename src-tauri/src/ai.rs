@@ -1,3 +1,4 @@
+// LINES-EXEMPT: AI 网关（provider 配置/模型分发/SSRF 守卫），拆分排期 R4（2026-10-14 红线卡标注）
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
 
 // AI 侧边栏：对接 AGNES AI（OpenAI 兼容 API）

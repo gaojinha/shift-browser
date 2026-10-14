@@ -1,3 +1,4 @@
+// LINES-EXEMPT: crate 根（模块声明+全局 setup+命令注册），不宜拆（2026-10-14 红线卡标注）
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
 
 mod about;

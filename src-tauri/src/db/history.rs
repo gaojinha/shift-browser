@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 历史数据层，拆分排期 R4（2026-10-14 红线卡标注）
 // 历史记录管理
 use crate::db::{Db, DbResult};
 use serde::{Deserialize, Serialize};

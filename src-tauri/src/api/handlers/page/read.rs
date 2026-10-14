@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 页面读取 handler（read_page/read_status/open_and_read 共用守卫工具），拆分排期 R4（2026-10-14 红线卡标注）
 //! 页面内容/状态读取 handler（R1 三次拆分 · 2026-09-25）：
 //! read_page（固定采集脚本的多模式读取）与 read_status（只读就绪态元信息）。
 

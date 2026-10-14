@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 扩展管理（UserScript/样式注入），拆分排期 R4（2026-10-14 红线卡标注）
 // 扩展管理（WebKitGTK UserContentManager 用户脚本/样式注入）
 // WebKitGTK 不支持真正的 Chrome 扩展 API，MVP 方案：
 // 扩展 = 目录（含 manifest.json + content.js/content.css），

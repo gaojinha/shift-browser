@@ -1,3 +1,4 @@
+// LINES-EXEMPT: R2 渲染层去风险目标（2026-10-15 高哥拍板前不动），豁免至 R2 spike 落地
 //! child webview 的 Linux/GTK reparent、事件挂接与下载信号（R1 拆分 · 2026-09-25）
 //!
 //! 从 tabs/backend/layout.rs 原样外移；impl 块分散在子模块不影响方法归属。
