@@ -10,7 +10,7 @@ jobs:
     name: 前端 lint + 构建
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -37,7 +37,7 @@ jobs:
     name: 后端 fmt + check + clippy + test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # 仓库根 rust-toolchain.toml 固定 1.97.1（含 clippy/rustfmt 组件），rustup 自动读文件
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -70,7 +70,7 @@ jobs:
     name: 供应链审计（cargo-audit）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # P2-4：RustSec 公告扫描。忽略清单与评审理由在 src-tauri/audit.toml，
       # 新公告默认使本步失败；升级 tauri/gtk-rs 后须复核忽略项
       - name: 安装 cargo-audit
@@ -85,7 +85,7 @@ jobs:
     name: 静态一致性（文档/脚本防漂移）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # 防 README 工具数/并发数手抄漂移：真值以 registry_tests.rs（48）与 feed.rs 信号量（6）为准
       - name: 脚本语法检查
         run: |
