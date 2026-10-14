@@ -6,7 +6,7 @@
 // Reka 接管的部分：上下键高亮、回车选中、悬停高亮、高亮项自动滚入视野、无障碍 listbox 语义。
 // 自己保留的部分：多源候选计算（query 驱动，ignoreFilter）、选中派发 execute()、
 //   webview 显隐、输入框聚焦、中文输入法组字保护（isComposing 时按键不下沉到 Reka）。
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, defineComponent, nextTick, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import {
   ComboboxContent,
@@ -15,6 +15,8 @@ import {
   ComboboxItem,
   ComboboxRoot,
   ComboboxViewport,
+  FocusScope,
+  injectComboboxRootContext,
 } from 'reka-ui'
 import { setWebviewVisible } from '../utils/webview'
 import { useTabsStore } from '../stores/tabs'
@@ -160,6 +162,29 @@ async function loadHistory() {
   }
 }
 
+// 修 critical（aria-controls 空串）：
+// Reka 2.10.5 ComboboxRoot 的 context 是裸对象（createContext 无 reactive 包装），
+// contentId 初始为 ''；ComboboxContent 的 contentId ||= useId() 只在 Portal 分支
+// 赋值（非 Portal 内联场景不生效），ComboboxInput 写死 :aria-controls="rootContext.contentId"
+// → 永远渲染空串（axe critical）。
+//
+// 修法：在 ComboboxRoot 的槽内用包装组件 CpComboboxIdFix，通过 Reka 主包公开的
+// injectComboboxRootContext 拿到同一 context 对象，源头改写 contentId 为静态值。
+// 因 context 是裸对象（赋值不触发响应式反 patch），Reka 自身渲染的 input aria-controls
+// 与 content 元素 id 天然同步为该静态值，无需 DOM 补丁 / MutationObserver。
+const COMMAND_LISTBOX_ID = 'cp-command-listbox'
+
+/** 包裹在 ComboboxRoot 槽内：inject 同一 context，源头改写 contentId 为静态值 */
+const CpComboboxIdFix = defineComponent({
+  name: 'CpComboboxIdFix',
+  setup(_, { slots }) {
+    const rootContext = injectComboboxRootContext()
+    if (rootContext && !rootContext.contentId)
+      rootContext.contentId = COMMAND_LISTBOX_ID
+    return () => slots.default?.()
+  },
+})
+
 // 打开：隐藏 webview（否则被页面盖住）+ 载入历史 + 聚焦输入框；关闭：恢复 webview
 watch(
   () => props.show,
@@ -180,42 +205,55 @@ watch(
 </script>
 
 <template>
-  <div v-if="show" class="cp-overlay" @mousedown.self="emit('close')">
+  <!-- 焦点陷阱：FocusScope(trapped+loop) 圈定 overlay 内 Tab；Reka 在 unmount 时自动把焦点还给打开前的元素 -->
+  <FocusScope v-if="show" class="cp-overlay" :trapped="true" :loop="true" as="div" @mousedown.self="emit('close')">
     <!-- 命令菜单官方形态：常开 + 自过滤关闭 + 选中默认行为拦截走 execute() -->
-    <ComboboxRoot :open="true" :ignore-filter="true" model-value="" class="cp-panel">
-      <div class="cp-input-row" @keydown.capture="guardComposing">
-        <span class="cp-search">⌕</span>
-        <ComboboxInput
-          ref="inputRef"
-          v-model="query"
-          class="cp-input"
-          placeholder="输入命令、网址，或问 AI…"
-          aria-label="命令面板搜索"
-          spellcheck="false"
-          @keydown.enter="onEnterKey"
-        />
-        <span class="cp-esc">Esc</span>
-      </div>
-      <ComboboxContent class="cp-list-wrap" @escape-key-down="emit('close')">
-        <ComboboxViewport class="cp-list">
-          <ComboboxEmpty class="cp-empty">没有匹配项</ComboboxEmpty>
-          <ComboboxItem
-            v-for="it in items"
-            :key="it.key"
-            :value="it.key"
-            class="cp-item"
-            @select.prevent="execute(it)"
-          >
-            <span class="cp-icon">{{ it.icon }}</span>
-            <span class="cp-text">
-              <span class="cp-title">{{ it.title }}</span>
-              <span v-if="it.subtitle" class="cp-sub">{{ it.subtitle }}</span>
-            </span>
-          </ComboboxItem>
-        </ComboboxViewport>
-      </ComboboxContent>
+    <ComboboxRoot
+      :open="true"
+      :ignore-filter="true"
+      model-value=""
+      class="cp-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-label="命令面板"
+    >
+      <!-- 源头修：inject ComboboxRoot context 并改写 contentId 为静态值，
+           Reka 自身渲染的 input aria-controls 与 content id 天然同步，无 DOM 补丁 -->
+      <CpComboboxIdFix>
+        <div class="cp-input-row" @keydown.capture="guardComposing">
+          <span class="cp-search">⌕</span>
+          <ComboboxInput
+            ref="inputRef"
+            v-model="query"
+            class="cp-input"
+            placeholder="输入命令、网址，或问 AI…"
+            aria-label="命令面板搜索"
+            spellcheck="false"
+            @keydown.enter="onEnterKey"
+          />
+          <span class="cp-esc">Esc</span>
+        </div>
+        <ComboboxContent class="cp-list-wrap" aria-label="命令候选" @escape-key-down="emit('close')">
+          <ComboboxViewport class="cp-list">
+            <ComboboxEmpty class="cp-empty">没有匹配项</ComboboxEmpty>
+            <ComboboxItem
+              v-for="it in items"
+              :key="it.key"
+              :value="it.key"
+              class="cp-item"
+              @select.prevent="execute(it)"
+            >
+              <span class="cp-icon">{{ it.icon }}</span>
+              <span class="cp-text">
+                <span class="cp-title">{{ it.title }}</span>
+                <span v-if="it.subtitle" class="cp-sub">{{ it.subtitle }}</span>
+              </span>
+            </ComboboxItem>
+          </ComboboxViewport>
+        </ComboboxContent>
+      </CpComboboxIdFix>
     </ComboboxRoot>
-  </div>
+  </FocusScope>
 </template>
 
 <style scoped>

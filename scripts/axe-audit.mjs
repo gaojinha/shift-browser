@@ -2,7 +2,6 @@
 // 用法：npm run axe:audit （先起 vite）
 import { chromium } from 'playwright'
 import { AxeBuilder } from '@axe-core/playwright'
-import { readFileSync } from 'node:fs'
 
 const base = process.env.AXU_BASE || 'http://localhost:5199'
 const pages = process.argv[2]
