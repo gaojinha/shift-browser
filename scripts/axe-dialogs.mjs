@@ -14,6 +14,37 @@ const scenarios = [
     await input.fill('test')
     await p.waitForTimeout(600)
   }, wait: 0 },
+  // 补扫包：§ 六 列出的 6 个对话框（2026-10-14 T-017 补扫）
+  { name: 'ai-sidebar', trigger: async (p) => {
+    await p.locator('button[aria-label="AI 助手"]').click()
+    await p.waitForTimeout(800)
+  }, wait: 0 },
+  { name: 'history-dialog', trigger: async (p) => {
+    await p.locator('button[aria-label="历史记录"]').click()
+    await p.waitForTimeout(800)
+  }, wait: 0 },
+  { name: 'translate-panel', trigger: async (p) => {
+    await p.locator('button[aria-label="翻译"]').click()
+    await p.waitForTimeout(800)
+  }, wait: 0 },
+  { name: 'bookmarks-dialog', trigger: async (p) => {
+    // 书签管理器按钮在 BookmarksBar 里，需先让书签栏显示
+    await p.locator('button.manage-btn').click()
+    await p.waitForTimeout(800)
+  }, wait: 0 },
+  { name: 'passwords-dialog', trigger: async (p) => {
+    await p.locator('button[aria-label="密码管理"]').click()
+    await p.waitForTimeout(800)
+  }, wait: 0 },
+  { name: 'sessions-dialog', trigger: async (p) => {
+    await p.keyboard.press('Control+Shift+S')
+    await p.waitForTimeout(800)
+  }, wait: 0 },
+  { name: 'downloads-dialog', trigger: async (p) => {
+    // ipc-bridge 浮层拦截 pointer events，force 穿透；dl-btn 在 StatusBar
+    await p.locator('button.dl-btn').click({ force: true })
+    await p.waitForTimeout(800)
+  }, wait: 0 },
 ]
 
 const browser = await chromium.launch({
