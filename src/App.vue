@@ -742,6 +742,7 @@ watch(
           @open-userscripts="openPanel('userscripts')"
           @open-history="openPanel('history')"
           @open-certs="showCerts = true"
+          @open-privacy="openSettings('privacy#shield')"
         />
         <BookmarksBar v-if="settingsStore.showBookmarksBar" @open-manager="showBookmarks = true" />
         <!-- 内容区：webview 由 Rust 按内容区几何盖住此区域（top 随书签栏/垂直标签变化） -->

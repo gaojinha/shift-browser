@@ -1,14 +1,17 @@
 <script setup lang="ts">
 // 地址栏（对应 Electron 版 .address-bar 设计）
-import { computed, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useTabsStore } from '../stores/tabs'
 import { useSettingsStore } from '../stores/settings'
+import { useShieldStore } from '../stores/shield'
 import type { Bookmark } from '../types/bookmark'
 import type { HistoryEntry } from '../types/history'
 import TranslateProgress from './TranslateProgress.vue'
 import SpaceSwitcher from './SpaceSwitcher.vue'
 import AppIcon from './AppIcon.vue'
+// 护盾面板（B-04）：弹层懒加载（对齐 R1 首屏分包）
+const ShieldPanel = defineAsyncComponent(() => import('./ShieldPanel.vue'))
 // 认址纯函数（URL 识别 / 默认协议 / 搜索分流，单测见 utils/address.test.ts）
 import { resolveInputTarget } from '../utils/address'
 import { errText } from '../utils/invoke'
@@ -16,6 +19,7 @@ import { setWebviewVisible } from '../utils/webview'
 
 const tabsStore = useTabsStore()
 const settingsStore = useSettingsStore()
+const shieldStore = useShieldStore()
 const addressInput = ref('')
 const inputEl = ref<HTMLInputElement | null>(null)
 /** 聚焦地址栏并全选（Ctrl+L 快捷键用） */
@@ -44,7 +48,15 @@ const emit = defineEmits<{
   (e: 'openDownloads'): void
   (e: 'openSettings'): void
   (e: 'openCerts'): void
+  (e: 'openPrivacy'): void
 }>()
+
+// 护盾按钮与面板（B-04，2026-10-15）：http/https 页面显示；外点关闭由面板自理
+const showShieldPanel = ref(false)
+const showShieldEntry = computed(() => /^https?:\/\//i.test(tabsStore.activeTab?.url ?? ''))
+function toggleShieldPanel() {
+  showShieldPanel.value = !showShieldPanel.value
+}
 
 // 搜索引擎 URL 模板已收敛到 constants.ts（唯一来源）
 
@@ -53,6 +65,8 @@ watch(
   () => tabsStore.activeTab?.url,
   (url) => {
     addressInput.value = url ?? ''
+    // 护盾本页计数：导航时重建统计基线（B-04）
+    void shieldStore.noteNavigation(url ?? '')
   },
   { immediate: true },
 )
@@ -291,6 +305,27 @@ async function onReader() {
       >
         <AppIcon name="lock" :size="12" />
       </span>
+      <span v-if="showShieldEntry" class="shield-anchor">
+        <span
+          class="shield-btn"
+          role="button"
+          tabindex="0"
+          title="护盾面板"
+          aria-label="护盾面板"
+          aria-haspopup="dialog"
+          :aria-expanded="showShieldPanel"
+          @click.stop="toggleShieldPanel"
+          @keydown.enter.prevent="toggleShieldPanel"
+          @keydown.space.prevent="toggleShieldPanel"
+        >
+          <AppIcon name="shield" :size="12" />
+        </span>
+        <ShieldPanel
+          v-if="showShieldPanel"
+          @close="showShieldPanel = false"
+          @open-privacy="emit('openPrivacy')"
+        />
+      </span>
       <input
         ref="inputEl"
         v-model="addressInput"
@@ -469,6 +504,32 @@ async function onReader() {
 }
 .lock-icon:hover {
   opacity: 1;
+}
+.shield-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.shield-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 6px;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.shield-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.shield-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .load-bar {
   position: absolute;
