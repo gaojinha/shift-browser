@@ -6,7 +6,9 @@
 # - 豁免清单 scripts/size-exemptions.json（仿 LINES-EXEMPT）：
 #     { "exemptions": [ { "file": "index", "limit": 200, "until": "R4-5-full", "reason": "…" } ] }
 #   file 匹配 chunk 名首个 '-' 前的 token（index-CE3fpNlY.js → "index"）
-# - 本地自测失败路径：SIZE_LIMIT_KB=1 bash scripts/check-bundle-size.sh
+# - 失败路径自测（两步）：
+#     SIZE_EXEMPT_BYPASS=1 SIZE_LIMIT_KB=1 bash scripts/check-bundle-size.sh   # → exit=1
+#   （SIZE_LIMIT_KB=1 单独改不触发拦截：豁免条目 limit 优先生效，属预期行为）
 #
 # 用法：npm run build && bash scripts/check-bundle-size.sh（CI frontend job 挂载）
 set -euo pipefail
@@ -15,6 +17,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="$ROOT/dist"
 WHITELIST="$ROOT/scripts/size-exemptions.json"
 DEFAULT_LIMIT_KB="${SIZE_LIMIT_KB:-90}"
+# 置 1 时忽略豁免清单（CI/本地验证失败路径用，日常跑不要开）
+BYPASS="${SIZE_EXEMPT_BYPASS:-0}"
 
 if [ ! -d "$DIST" ]; then
   echo "❌ 未找到 $DIST —— 先跑 npm run build 再执行本检查" >&2
@@ -36,7 +40,9 @@ while IFS= read -r f; do
 
   limit=$DEFAULT_LIMIT_KB
   note=""
-  if [ -f "$WHITELIST" ]; then
+  if [ "$BYPASS" = "1" ]; then
+    note="豁免已绕过（SIZE_EXEMPT_BYPASS=1）"
+  elif [ -f "$WHITELIST" ]; then
     # 豁免查询交给 node（frontend job 必有 node；本地亦然）
     limit_and_reason=$(node -e '
       const fs = require("fs");
