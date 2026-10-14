@@ -230,3 +230,25 @@ pub async fn feed_recommend_prompt(
         &title, &source, &summary,
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 防漂移（R4-1）：content_qa_prompt 空参数必须归 E_VALIDATION
+    /// （前端据此提示"请输入问题"，而不是当成系统故障）
+    #[tokio::test]
+    async fn content_qa_prompt_empty_question_is_validation() {
+        let err = content_qa_prompt(
+            "title".into(),
+            "url".into(),
+            "source".into(),
+            "coverage".into(),
+            "content".into(),
+            "".into(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, crate::error::E_VALIDATION);
+    }
+}
