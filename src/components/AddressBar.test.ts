@@ -8,7 +8,7 @@
 // 跑法：npx vitest run src/components/AddressBar.test.ts
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { nextTick } from 'vue'
 import type { Tab } from '../types/tab'
@@ -143,6 +143,24 @@ describe('AddressBar：导航按钮', () => {
     await wrapper.find('[data-nav="home"]').trigger('click')
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy).toHaveBeenCalledWith()
+  })
+})
+
+describe('AddressBar：阅读模式错误提示（R4-1 成对）', () => {
+  it('enter_reader_mode 失败：显示 CommandError.message，不出现 [object Object]', async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === 'enter_reader_mode'
+        ? Promise.reject({ code: 'E_VALIDATION', message: '内容太短，可能不是文章页' })
+        : undefined,
+    )
+    const { wrapper } = mountWith([makeTab('a', { url: 'https://example.com/article' })], 'a')
+    const btn = wrapper.find('[aria-label="阅读模式"]')
+    expect(btn.exists()).toBe(true)
+    await btn.trigger('click')
+    await flushPromises()
+    const title = btn.attributes('title') ?? ''
+    expect(title).toBe('内容太短，可能不是文章页')
+    expect(title).not.toContain('[object Object]')
   })
 })
 

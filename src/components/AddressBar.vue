@@ -11,6 +11,7 @@ import SpaceSwitcher from './SpaceSwitcher.vue'
 import AppIcon from './AppIcon.vue'
 // 认址纯函数（URL 识别 / 默认协议 / 搜索分流，单测见 utils/address.test.ts）
 import { resolveInputTarget } from '../utils/address'
+import { errText } from '../utils/invoke'
 import { setWebviewVisible } from '../utils/webview'
 
 const tabsStore = useTabsStore()
@@ -244,7 +245,9 @@ async function onReader() {
     const url = await invoke<string>('enter_reader_mode', { url: active.url })
     await tabsStore.createTab(url)
   } catch (e) {
-    readerTip.value = String(e).replace(/^[^:]*:\s*/, '') || '提取失败'
+    // R4-1 成对：enter_reader_mode 迁 CommandError 后 reject 值为对象，
+    // 经 errText 归一取 message（原 String(e) 会得 "[object Object]"）
+    readerTip.value = errText(e).replace(/^[^:]*:\s*/, '') || '提取失败'
     setTimeout(() => (readerTip.value = ''), 4000)
   } finally {
     readerLoading.value = false
