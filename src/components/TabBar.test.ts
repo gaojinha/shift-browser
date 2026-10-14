@@ -9,8 +9,8 @@
 //
 // 跑法：npx vitest run src/components/TabBar.test.ts
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { nextTick } from 'vue'
 import type { Tab } from '../types/tab'
@@ -56,6 +56,10 @@ beforeEach(() => {
   setActivePinia(pinia)
   invokeMock.mockReset()
 })
+// 键盘用例需要真实文档树（jsdom 对游离 DOM 的 focus() 无效）；逐测试清理
+afterEach(() => {
+  document.body.innerHTML = ''
+})
 
 /** 种子：标签 + 分组都挂载前种好；返回挂载好的组件与 stores */
 function mountWith(tabs: Tab[], activeTabId: string | null, groups: TabGroup[] = []) {
@@ -63,7 +67,7 @@ function mountWith(tabs: Tab[], activeTabId: string | null, groups: TabGroup[] =
   tabsStore.$patch({ tabs, activeTabId })
   const groupsStore = useGroupsStore()
   groupsStore.$patch({ groups })
-  const wrapper = mount(TabBar, { global: { plugins: [pinia] } })
+  const wrapper = mount(TabBar, { attachTo: document.body, global: { plugins: [pinia] } })
   return { wrapper, tabsStore, groupsStore }
 }
 
@@ -186,5 +190,90 @@ describe('TabBar：新标签按钮', () => {
     await wrapper.find('.new-tab-btn').trigger('click')
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy).toHaveBeenCalledWith()
+  })
+})
+
+describe('TabBar：键盘可达（R4-6 包 2）', () => {
+  /** 派发键盘事件（带冒泡，模拟真实按键冒泡到 .tab-scroll 的委托监听） */
+  const press = (el: Element, key: string, opts: KeyboardEventInit = {}) => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...opts }))
+  }
+
+  it('tablist/tab 语义：role、aria-selected、roving tabindex', () => {
+    const { wrapper } = mountWith([makeTab('a'), makeTab('b')], 'a')
+    expect(wrapper.find('.tab-scroll').attributes('role')).toBe('tablist')
+    const tabs = wrapper.findAll('.tab')
+    expect(tabs[0].attributes('role')).toBe('tab')
+    expect(tabs[0].attributes('aria-selected')).toBe('true')
+    expect(tabs[0].attributes('tabindex')).toBe('0')
+    expect(tabs[1].attributes('aria-selected')).toBe('false')
+    expect(tabs[1].attributes('tabindex')).toBe('-1')
+  })
+
+  it('←/→ 在标签间移动焦点（循环）', async () => {
+    const { wrapper } = mountWith([makeTab('a'), makeTab('b'), makeTab('c')], 'a')
+    const tabs = wrapper.findAll('.tab').map((t) => t.element as HTMLElement)
+    tabs[0].focus()
+    press(tabs[0], 'ArrowRight')
+    await nextTick()
+    expect(document.activeElement).toBe(tabs[1])
+    press(tabs[1], 'ArrowRight')
+    await nextTick()
+    expect(document.activeElement).toBe(tabs[2])
+    press(tabs[2], 'ArrowRight') // 末尾 → 循环回首
+    await nextTick()
+    expect(document.activeElement).toBe(tabs[0])
+    press(tabs[0], 'ArrowLeft') // 开头 → 循环回尾
+    await nextTick()
+    expect(document.activeElement).toBe(tabs[2])
+  })
+
+  it('Enter 激活聚焦的标签（switchTab）', async () => {
+    const { wrapper, tabsStore } = mountWith([makeTab('a'), makeTab('b')], 'a')
+    const spy = vi.spyOn(tabsStore, 'switchTab').mockResolvedValue(undefined)
+    const tabs = wrapper.findAll('.tab').map((t) => t.element as HTMLElement)
+    tabs[1].focus()
+    press(tabs[1], 'Enter')
+    await nextTick()
+    expect(spy).toHaveBeenCalledWith('b')
+  })
+
+  it('菜单键打开右键菜单：焦点入首项 → ↑/↓ 移动 → Esc 关闭并归还焦点', async () => {
+    const { wrapper } = mountWith([makeTab('a'), makeTab('b')], 'a')
+    const tabEl = wrapper.findAll('.tab')[1].element as HTMLElement
+    tabEl.focus()
+    press(tabEl, 'ContextMenu')
+    await nextTick()
+    await flushPromises()
+    const menu = wrapper.find('.context-menu')
+    expect(menu.exists()).toBe(true)
+    const items = menu.findAll('.menu-item')
+    expect(items.length).toBeGreaterThan(2)
+    expect(document.activeElement).toBe(items[0].element)
+    press(items[0].element, 'ArrowDown')
+    await nextTick()
+    expect(document.activeElement).toBe(items[1].element)
+    press(items[1].element, 'ArrowUp')
+    await nextTick()
+    expect(document.activeElement).toBe(items[0].element)
+    press(items[0].element, 'Escape')
+    await nextTick()
+    expect(wrapper.find('.context-menu').exists()).toBe(false)
+    expect(document.activeElement).toBe(tabEl)
+  })
+
+  it('菜单内 Enter 激活菜单项（以「固定/取消固定」为样本）并关闭菜单', async () => {
+    const { wrapper, tabsStore } = mountWith([makeTab('a'), makeTab('b')], 'a')
+    const tabEl = wrapper.findAll('.tab')[1].element as HTMLElement
+    tabEl.focus()
+    press(tabEl, 'ContextMenu')
+    await nextTick()
+    await flushPromises()
+    const first = wrapper.find('.context-menu .menu-item')
+    const spy = vi.spyOn(tabsStore, 'pinTab').mockResolvedValue(undefined)
+    press(first.element, 'Enter')
+    await nextTick()
+    expect(spy).toHaveBeenCalledWith('b')
+    expect(wrapper.find('.context-menu').exists()).toBe(false)
   })
 })

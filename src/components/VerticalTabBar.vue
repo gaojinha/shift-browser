@@ -50,6 +50,29 @@ function closeWin() {
   // 有意静默：窗口关闭失败仅表现为窗口还在，用户可再点一次
   invokeOk('close_window').catch(() => {})
 }
+
+// ---- 列表键盘导航（R4-6 包 2：↑/↓ 移动焦点、Enter 激活；事件委托到 .vtab-list）----
+function onListKeydown(e: KeyboardEvent) {
+  const target = e.target as HTMLElement
+  // 关闭按钮自行处理键盘（button 默认 Enter/Space 触发 click）
+  if (target.closest('.vtab-close')) return
+  const itemEl = target.closest('.vtab-item') as HTMLElement | null
+  if (!itemEl) return
+  const list = (e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('.vtab-item')
+  const idx = Array.from(list).indexOf(itemEl)
+  if (idx === -1) return
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    e.preventDefault()
+    const step = e.key === 'ArrowDown' ? 1 : -1
+    list[(idx + step + list.length) % list.length]?.focus()
+    return
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    const id = itemEl.dataset.tabId
+    if (id) onSelect(id)
+  }
+}
 </script>
 
 <template>
@@ -74,13 +97,17 @@ function closeWin() {
         <AppIcon name="x" :size="12" />
       </button>
     </div>
-    <div class="vtab-list">
+    <div class="vtab-list" role="tablist" aria-label="打开的标签" @keydown="onListKeydown">
       <div
         v-for="t in ordered"
         :key="t.id"
         class="vtab-item"
         :class="{ active: t.id === tabsStore.activeTabId }"
         :title="t.title || t.url"
+        :data-tab-id="t.id"
+        role="tab"
+        :tabindex="t.id === tabsStore.activeTabId ? 0 : -1"
+        :aria-selected="t.id === tabsStore.activeTabId"
         @click="onSelect(t.id)"
         @auxclick="onAux($event, t.id)"
       >
@@ -234,11 +261,21 @@ function closeWin() {
     background var(--dur-fast) var(--ease),
     color var(--dur-fast) var(--ease);
 }
-.vtab-item:hover .vtab-close {
+.vtab-item:hover .vtab-close,
+.vtab-item:focus-within .vtab-close {
   opacity: 1;
 }
 .vtab-close:hover {
   background: var(--danger);
   color: var(--accent-contrast);
+}
+
+/* 焦点环（R4-6 包 2）：键盘可见焦点，口径与全项目一致（3px accent-ring） */
+.vtab-item:focus-visible,
+.vtab-btn:focus-visible,
+.vtab-win:focus-visible,
+.vtab-close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 </style>

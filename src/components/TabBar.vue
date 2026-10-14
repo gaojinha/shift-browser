@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 标签栏（分组版）：未分组标签 + 各分组（颜色条 + 折叠）+ 右键分配分组
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useTabsStore } from '../stores/tabs'
 import { useGroupsStore } from '../stores/groups'
 import { useToastStore } from '../stores/toast'
@@ -33,6 +33,10 @@ const groupedTabs = computed(() => {
 
 // ---- 右键菜单 ----
 const menu = ref<{ x: number; y: number; tabId: string } | null>(null)
+/** 菜单 DOM 引用（键盘导航与焦点管理用，R4-6 包 2） */
+const menuEl = ref<HTMLElement | null>(null)
+/** 菜单打开时的触发元素（键盘路径关闭时归还焦点用） */
+let menuAnchorEl: HTMLElement | null = null
 
 // 菜单打开时隐藏 GTK 层 webview（否则 HTML 菜单被 webview 盖住），关闭时恢复
 watch(menu, (v) => {
@@ -44,8 +48,20 @@ watch(menu, (v) => {
   }
 })
 
-function onTabContextMenu(e: MouseEvent, tab: Tab) {
-  e.preventDefault()
+// 菜单打开后：菜单项设为可编程聚焦（tabindex=-1，不占 Tab 序），焦点移入首项
+// （R4-6 包 2：菜单键盘可用——打开即可 ↑/↓ 选择、Enter 激活、Esc 关闭）
+watch(menuEl, async (el) => {
+  if (!el) return
+  await nextTick()
+  const items = el.querySelectorAll<HTMLElement>('.menu-item')
+  items.forEach((it) => {
+    it.tabIndex = -1
+  })
+  items[0]?.focus()
+})
+
+/** 打开标签右键菜单（鼠标右键与键盘菜单键共用；anchor = 焦点归还目标） */
+function openTabMenu(x: number, y: number, tabId: string, anchor: HTMLElement | null = null) {
   // 兜底：菜单打开前确保分组已加载（App 启动时 loadGroups 可能还没完成）
   if (groupsStore.groups.length === 0) {
     groupsStore.loadGroups().catch((e) => {
@@ -55,13 +71,85 @@ function onTabContextMenu(e: MouseEvent, tab: Tab) {
   // 贴边检测：菜单估算宽 200px，高按分组项数估算，超右/下边界时翻转
   const menuW = 200
   const menuH = 230 + groupsStore.groups.length * 30
-  const x = Math.min(e.clientX, window.innerWidth - menuW - 8)
-  const y = Math.min(e.clientY, window.innerHeight - menuH - 8)
-  menu.value = { x: Math.max(8, x), y: Math.max(8, y), tabId: tab.id }
+  const px = Math.min(x, window.innerWidth - menuW - 8)
+  const py = Math.min(y, window.innerHeight - menuH - 8)
+  menuAnchorEl = anchor
+  menu.value = { x: Math.max(8, px), y: Math.max(8, py), tabId }
+}
+
+function onTabContextMenu(e: MouseEvent, tab: Tab) {
+  e.preventDefault()
+  openTabMenu(e.clientX, e.clientY, tab.id)
 }
 
 function closeMenu() {
+  const focusInside = !!menuEl.value && menuEl.value.contains(document.activeElement)
   menu.value = null
+  // 键盘路径（焦点在菜单内）关闭时归还焦点到触发标签；鼠标路径不转移焦点
+  if (focusInside && menuAnchorEl) menuAnchorEl.focus()
+  menuAnchorEl = null
+}
+
+// ---- 标签栏键盘导航（R4-6 包 2：←/→ 移动焦点、Enter 激活、菜单键打开菜单；事件委托到 .tab-scroll）----
+function onTabListKeydown(e: KeyboardEvent) {
+  const target = e.target as HTMLElement
+  // 关闭按钮等内部控件自行处理键盘（button 默认 Enter/Space 触发 click）
+  if (target.closest('.close-btn')) return
+  const tabEl = target.closest('.tab') as HTMLElement | null
+  if (!tabEl) return
+  const list = (e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('.tab')
+  const idx = Array.from(list).indexOf(tabEl)
+  if (idx === -1) return
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault()
+    const step = e.key === 'ArrowRight' ? 1 : -1
+    list[(idx + step + list.length) % list.length]?.focus()
+    return
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    const id = tabEl.dataset.tabId
+    if (id) onTabClick(id)
+    return
+  }
+  if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+    e.preventDefault()
+    const id = tabEl.dataset.tabId
+    if (!id) return
+    const rect = tabEl.getBoundingClientRect()
+    openTabMenu(rect.left, rect.bottom + 4, id, tabEl)
+  }
+}
+
+// ---- 右键菜单键盘导航（↑/↓/Home/End 移动、Enter/Space 激活、Esc 关闭）----
+function onMenuKeydown(e: KeyboardEvent) {
+  const el = menuEl.value
+  if (!el) return
+  const items = Array.from(el.querySelectorAll<HTMLElement>('.menu-item'))
+  if (items.length === 0) return
+  const cur = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  const idx = cur ? items.indexOf(cur) : -1
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault()
+    const step = e.key === 'ArrowDown' ? 1 : -1
+    items[(idx + step + items.length) % items.length]?.focus()
+    return
+  }
+  if (e.key === 'Home' || e.key === 'End') {
+    e.preventDefault()
+    items[e.key === 'Home' ? 0 : items.length - 1]?.focus()
+    return
+  }
+  if (e.key === 'Enter' || e.key === ' ') {
+    if (idx === -1) return
+    e.preventDefault()
+    cur?.click()
+    return
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    closeMenu()
+  }
 }
 
 // ---- 右键菜单拖拽移动（按住菜单任意处拖动，超阈值才移动，避免误触菜单项）----
@@ -457,7 +545,14 @@ function onFaviconError(e: Event) {
 
 <template>
   <div class="tab-bar" @click="closeMenu" @mousedown="onTabBarMouseDown">
-    <div class="tab-scroll" @contextmenu.prevent @dblclick="onTabScrollDblClick">
+    <div
+      class="tab-scroll"
+      role="tablist"
+      aria-label="打开的标签"
+      @contextmenu.prevent
+      @dblclick="onTabScrollDblClick"
+      @keydown="onTabListKeydown"
+    >
       <!-- 未分组标签 -->
       <div
         v-for="tab in groupedTabs.ungrouped"
@@ -465,6 +560,9 @@ function onFaviconError(e: Event) {
         class="tab"
         :class="{ active: tab.id === tabsStore.activeTabId, pinned: tab.is_pinned, dragging: dragTabId === tab.id }"
         :data-tab-id="tab.id"
+        role="tab"
+        :tabindex="tab.id === tabsStore.activeTabId ? 0 : -1"
+        :aria-selected="tab.id === tabsStore.activeTabId"
         @click="onTabClick(tab.id)"
         @dblclick="onTabDblClick(tab.id)"
         @auxclick="onTabAuxClick($event, tab.id)"
@@ -511,6 +609,9 @@ function onFaviconError(e: Event) {
             class="tab"
             :class="{ active: tab.id === tabsStore.activeTabId, pinned: tab.is_pinned, dragging: dragTabId === tab.id }"
             :data-tab-id="tab.id"
+            role="tab"
+            :tabindex="tab.id === tabsStore.activeTabId ? 0 : -1"
+            :aria-selected="tab.id === tabsStore.activeTabId"
             @click="onTabClick(tab.id)"
             @dblclick="onTabDblClick(tab.id)"
             @auxclick="onTabAuxClick($event, tab.id)"
@@ -552,6 +653,7 @@ function onFaviconError(e: Event) {
     <!-- 右键菜单（原版标准菜单：固定/静音/关闭/复制网址 + 移动到分组；按住可拖动位置） -->
     <div
       v-if="menu"
+      ref="menuEl"
       class="context-menu"
       role="menu"
       :class="{ 'menu-dragging': menuDragging }"
@@ -559,23 +661,24 @@ function onFaviconError(e: Event) {
       @click.stop
       @contextmenu.prevent
       @mousedown="onMenuMouseDown"
+      @keydown="onMenuKeydown"
     >
       <div class="menu-item" role="menuitem" @click="onMenuPin">📌 固定/取消固定</div>
       <div class="menu-item" role="menuitem" @click="onMenuMute">🔇 静音/取消静音</div>
       <div class="menu-item" role="menuitem" @click="onMenuSplit">
         {{ tabsStore.splitTabId === menu?.tabId ? '◫ 关闭分屏' : '◫ 在右侧分屏' }}
       </div>
-      <div class="menu-divider"></div>
+      <div class="menu-divider" role="separator"></div>
       <div class="menu-item" role="menuitem" @click="onMenuCloseTab">✕ 关闭标签</div>
       <div class="menu-item" role="menuitem" @click="onMenuCloseOthers">关闭其他标签</div>
       <div class="menu-item" role="menuitem" @click="onMenuCloseRight">关闭右侧标签</div>
       <div class="menu-item" role="menuitem" @click="onMenuCloseSameDomain">关闭同域名标签</div>
       <div class="menu-item" role="menuitem" @click="onMenuCloseDuplicates">关闭重复标签</div>
       <div class="menu-item" role="menuitem" @click="onMenuMuteAll">🔇 全部静音/取消</div>
-      <div class="menu-divider"></div>
+      <div class="menu-divider" role="separator"></div>
       <div class="menu-item" role="menuitem" @click="onMenuCopyUrl">🔗 复制网址</div>
-      <div class="menu-divider"></div>
-      <div class="menu-title">移动到分组</div>
+      <div class="menu-divider" role="separator"></div>
+      <div class="menu-title" role="presentation">移动到分组</div>
       <div
         v-for="g in groupsStore.groups"
         :key="g.id"
@@ -585,7 +688,7 @@ function onFaviconError(e: Event) {
         <span class="menu-dot" :style="{ background: g.color }"></span>{{ g.name }}
       </div>
       <div class="menu-item" role="menuitem" @click="onMoveToGroup(null)">取消分组</div>
-      <div class="menu-divider"></div>
+      <div class="menu-divider" role="separator"></div>
       <div class="menu-item accent" role="menuitem" @click="onNewGroupFromMenu">＋ 新建分组并移动</div>
     </div>
   </div>
@@ -711,12 +814,30 @@ function onFaviconError(e: Event) {
     color var(--dur-fast) var(--ease);
 }
 .tab:hover .close-btn,
-.tab.active .close-btn {
+.tab.active .close-btn,
+.tab:focus-within .close-btn {
   display: block;
 }
 .tab .close-btn:hover {
   background: var(--danger);
   color: var(--accent-contrast);
+}
+
+/* 焦点环（R4-6 包 2）：键盘可见焦点，口径与全项目一致（3px accent-ring） */
+.tab:focus-visible,
+.new-tab-btn:focus-visible,
+.wc-btn:focus-visible,
+.group-toggle:focus-visible,
+.tab .close-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+/* 活动标签带既有双层阴影：焦点环叠加、保留 active 视觉 */
+.tab.active:focus-visible {
+  box-shadow:
+    inset 0 2.5px 0 var(--accent),
+    0 -3px 10px rgba(0, 0, 0, 0.22),
+    0 0 0 3px var(--accent-ring);
 }
 .tab.pinned {
   min-width: 34px;
@@ -891,6 +1012,10 @@ function onFaviconError(e: Event) {
 }
 .menu-item:hover {
   background: var(--bg-hover);
+}
+.menu-item:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
 }
 .menu-item.accent {
   color: var(--accent);
