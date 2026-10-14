@@ -476,6 +476,28 @@ pub mod shortcuts {
             desc: "会话管理",
         },
         Shortcut {
+            id: "downloads",
+            key: "j",
+            ctrl: true,
+            shift: false,
+            gdk_keyval: 0x6A,
+            gdk_keyval_shift: 0x4A,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "下载面板",
+        },
+        Shortcut {
+            id: "bookmarks",
+            key: "o",
+            ctrl: true,
+            shift: true,
+            gdk_keyval: 0x6F,
+            gdk_keyval_shift: 0x4F,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "书签管理",
+        },
+        Shortcut {
             id: "lock-vault",
             key: "l",
             ctrl: true,
@@ -507,6 +529,8 @@ pub mod shortcuts {
         ("HISTORY", "ctrl+h"),
         ("COMMAND_PALETTE", "ctrl+k"),
         ("SESSIONS", "ctrl+shift+s"),
+        ("DOWNLOADS", "ctrl+j"),
+        ("BOOKMARKS", "ctrl+shift+o"),
         ("LOCK_VAULT", "ctrl+shift+l"),
     ];
 }

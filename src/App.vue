@@ -238,6 +238,12 @@ function handleGlobalAction(action: string) {
     case 'sessions':
       openPanel('sessions')
       break
+    case 'downloads':
+      openPanel('downloads')
+      break
+    case 'bookmarks':
+      openPanel('bookmarks')
+      break
     case 'next-tab':
     case 'prev-tab': {
       const tabs = tabsStore.tabs
@@ -393,6 +399,16 @@ function onGlobalKeydown(e: KeyboardEvent) {
     if (matchShortcut(e, SHORTCUTS.SESSIONS)) {
       e.preventDefault()
       handleGlobalAction('sessions')
+      return
+    }
+    if (matchShortcut(e, SHORTCUTS.DOWNLOADS)) {
+      e.preventDefault()
+      handleGlobalAction('downloads')
+      return
+    }
+    if (matchShortcut(e, SHORTCUTS.BOOKMARKS)) {
+      e.preventDefault()
+      handleGlobalAction('bookmarks')
       return
     }
     if (matchShortcut(e, SHORTCUTS.NEW_TAB)) {

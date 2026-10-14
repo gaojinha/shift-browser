@@ -155,6 +155,8 @@ export const SHORTCUTS = {
   HISTORY: 'ctrl+h',
   COMMAND_PALETTE: 'ctrl+k',
   SESSIONS: 'ctrl+shift+s',
+  DOWNLOADS: 'ctrl+j',
+  BOOKMARKS: 'ctrl+shift+o',
   LOCK_VAULT: 'ctrl+shift+l',
 } as const
 

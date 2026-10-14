@@ -11,6 +11,8 @@ export const DIALOG_GUARDED_ACTIONS: ReadonlySet<string> = new Set([
   'close-tab',
   'reload',
   'history',
+  'downloads',
+  'bookmarks',
 ])
 
 /** 该动作是否受弹窗守卫约束（弹窗打开时拒绝执行） */
