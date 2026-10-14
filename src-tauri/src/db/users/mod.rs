@@ -308,45 +308,51 @@ mod tests {
     }
 
     /// R4-3 / Q-12 并发集成测试（定性断言，与机器速度/构建模式无关）：
-    /// 若 KDF 跑在 async worker 上，它占住该 worker 导致整个 runtime 不能
-    /// 调度其他任务（event loop 冻结）；spawn_blocking 后 KDF 去阻塞池，
-    /// 主 task 仍能自由 yield → tick 连续增长。
-    /// 策略：启动 KDF 到后台 task（用 Arc 共享 db），主 task 每 5ms tick
-    /// 计一次；断言 tick ≥ 5（≥50ms 内事件循环未冻结）。
-    #[tokio::test]
+    /// `current_thread` flavor 下单个 worker 既跑 KDF 又跑 tick——
+    /// 若 KDF 在 async worker 同步执行，event loop 被冻结，tick 无法
+    /// 推进；spawn_blocking 后 KDF 去阻塞线程池，主 task 仍能每 5ms
+    /// 响应 sleep 唤醒 → tick 持续增长。
+    /// 断言：KDF 完成前 tick ≥ 5（blocking 版 ≈ 数百；同步版 ≈ 0）。
+    #[tokio::test(flavor = "current_thread")]
     async fn test_kdf_does_not_block_other_async_work() {
-        use std::sync::Arc;
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
 
         let (_dir, db) = temp_db().await;
         insert_user(&db, "concurrent_test", "abc12345", HASH_ALGO_CURRENT).await;
 
         let db_arc = Arc::new(db);
+        let kdf_done = Arc::new(AtomicBool::new(false));
         let db_for_kdf = db_arc.clone();
+        let done_for_kdf = kdf_done.clone();
 
-        // KDF 在后台 task 持续跑（多次 verify_password）
-        let kdf_task = tokio::spawn(async move {
-            // 跑 4 次 KDF 以拉长占用时间，确保覆盖整个 tick 窗口
+        // KDF 在独立 thread 启动（不抢占主 async task）
+        let kdf_handle = tokio::task::spawn(async move {
             for _ in 0..4 {
                 verify_password(&db_for_kdf, "concurrent_test", "abc12345")
                     .await
                     .ok();
             }
+            done_for_kdf.store(true, Ordering::SeqCst);
         });
 
-        // 每 5ms tick 一次——若 KDF 冻结 event loop，tick 会停滞
-        let tick_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        for _ in 0..50 {
-            tick_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // 等 KDF 完成前持续 tick：若 KDF 冻结 event loop，此循环停滞
+        let mut tick_count: usize = 0;
+        while !kdf_done.load(Ordering::SeqCst) && tick_count < 1000 {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            tick_count += 1;
         }
 
-        let count = tick_count.load(std::sync::atomic::Ordering::Relaxed);
-        kdf_task.await.unwrap();
+        // 等待 KDF 收尾
+        kdf_handle.await.unwrap();
 
-        // 定性：tick 至少 5 次 → 事件循环未被冻结 → spawn_blocking 生效
+        // 定性：KDF 完成前 tick ≥ 5 → event loop 未被冻结 → spawn_blocking 生效
+        // blocking 版实测 ~100；同步版（未 spawn_blocking）≈ 0（event loop 冻死）
         assert!(
-            count >= 5,
-            "KDF 冻结事件循环（500ms 内仅 {count} 次 tick，应 ≥5）"
+            tick_count >= 5,
+            "KDF 冻结事件循环（KDF 完成前仅 {tick_count} 次 tick，应 ≥5）"
         );
     }
 }
