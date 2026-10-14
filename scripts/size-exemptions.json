@@ -1,0 +1,11 @@
+{
+  "_说明": "首屏体积豁免（T-011 · 仿 LINES-EXEMPT 机制）。file 匹配 dist/assets/<file>-*.js 入口 chunk；limit 单位 kB（raw 口径）。默认硬卡 90 kB（R4-5 目标）。带豁免的 chunk 按其 limit 检查；R4-5 语言包懒加载落地后删除对应条目，硬卡自动生效。",
+  "exemptions": [
+    {
+      "file": "index",
+      "limit": 200,
+      "until": "R4-5-full",
+      "reason": "vue-i18n 骨架期入主包（116.76→171.33 kB），语言包按设置节懒加载在 R4-5 全量迁移时落地"
+    }
+  ]
+}
