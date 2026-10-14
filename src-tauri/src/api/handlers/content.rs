@@ -211,7 +211,8 @@ pub(super) async fn reader_extract(_app: &AppHandle, req: &Value) -> Value {
     }
     match crate::reader::fetch_article(url).await {
         Ok(v) => json!({"ok": true, "data": v}),
-        Err(e) => AppError::validation(e).error_json(),
+        // R4-1 长尾：透传命令侧错误码（此前一律软化 E_VALIDATION，分类信息丢失）
+        Err(e) => AppError::from(e).error_json(),
     }
 }
 
