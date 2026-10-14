@@ -192,6 +192,37 @@ pub async fn read_llmstxt(url: &str) -> Result<crate::engine::llmstxt::LlmsSumma
     Ok(summary)
 }
 
+/// R4-9 llms.txt 出网闸门（内网收窄 · 2026-10-14）。
+///
+/// 复用 `ai::ssrf` 同一判定（铁律：同一类判定只许一份实现，不新造口径）：
+/// - `is_private_host`：静态私网（IP 字面量/IPv4 混淆写法/内网域名后缀）
+/// - `check_resolved_ips`：解析结果任一落内网或空解析都拒（fail-closed）
+///
+/// 返回 `None` = 静默跳过（模块语义：Fail→None 不拖快照）；`Some(addrs)` = 放行，
+/// 域名时 addrs 非空调用方须 `resolve_to_addrs` 钉定（防 DNS 重绑定绕过判定），
+/// IP 字面量 addrs 为空直连。
+async fn llms_outbound_addrs(host: &str, port: u16) -> Option<Vec<std::net::SocketAddr>> {
+    // 1. 静态私网：直接拒（不出网、不解析）
+    if crate::ai::is_private_host(host) {
+        return None;
+    }
+    // 2. 公网 IP 字面量：过静态判定即可直连（无 DNS 环节可绕）
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return Some(Vec::new());
+    }
+    // 3. 域名：解析（DNS_LOOKUP_SECS 超时，fail-closed 先例 feed.rs/reader-fetch.rs）
+    let sock: Vec<std::net::SocketAddr> = tokio::time::timeout(
+        std::time::Duration::from_secs(crate::contracts::timeout::DNS_LOOKUP_SECS),
+        tokio::net::lookup_host((host, port)),
+    )
+    .await
+    .ok()? // 超时 → 静默跳过
+    .ok()? // 解析失败 → 静默跳过
+    .collect();
+    // 4. 解析结果判定（任一内网/空解析拒）→ llms.txt 侧转静默
+    crate::ai::check_resolved_ips(host, sock.iter().map(|s| s.ip()), port).ok()
+}
+
 /// read_llmstxt 的实际实现（被上面 pub async 裹，方便下发/单测）
 pub async fn read_llmstxt_impl(url: &str) -> Option<crate::engine::llmstxt::LlmsSummary> {
     // 用静态会话级缓存实例（进程内单例，跨命令共享）
@@ -214,6 +245,10 @@ pub async fn read_llmstxt_impl(url: &str) -> Option<crate::engine::llmstxt::Llms
     if let Some(sum) = hit {
         return Some(sum);
     }
+    // R4-9 出网闸门：内网/解析失败一律静默 None（私网 host 不产生任何出站请求，
+    // 也不消耗下面的限次额度）；公网域名过闸后钉定地址。
+    let port: u16 = if url.starts_with("https://") { 443 } else { 80 };
+    let vetted = llms_outbound_addrs(&host, port).await?;
     // 限次检查（每域每会话最多 2 次真出网）
     {
         let mut guard = cache.counts.lock().ok()?;
@@ -226,14 +261,17 @@ pub async fn read_llmstxt_impl(url: &str) -> Option<crate::engine::llmstxt::Llms
     // 3) 真出网读 /llms.txt（短超时）
     let summary = {
         // 3s 短超时静默出网（铁律：llms.txt 是轻量线索，Fail→None 不拖快照）
-        let cli = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .timeout(FETCH_TIMEOUT)
             // 建连上限（单边地址族卡住时快速让路给另一族，见 contracts::timeout::CONNECT_TIMEOUT_SECS）
             .connect_timeout(std::time::Duration::from_secs(
                 crate::contracts::timeout::CONNECT_TIMEOUT_SECS,
-            ))
-            .build()
-            .ok()?;
+            ));
+        // 域名 host：钉定过判定的地址（防 DNS 重绑定绕过 SSRF 判定，feed.rs 同款）
+        if !vetted.is_empty() {
+            builder = builder.resolve_to_addrs(&host, &vetted);
+        }
+        let cli = builder.build().ok()?;
         let resp = cli.get(url).send().await.ok()?;
         if !resp.status().is_success() {
             return None;
@@ -255,4 +293,32 @@ pub async fn read_llmstxt_impl(url: &str) -> Option<crate::engine::llmstxt::Llms
         );
     }
     Some(summary)
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    /// R4-9 防漂移：私网 host（IP 字面量/内网后缀/IPv4 混淆写法）静默 None，
+    /// 不出网不解析——复用 ai::ssrf 同一判定，此处锁 llms.txt 侧的接线。
+    #[tokio::test]
+    async fn gate_blocks_private_hosts_silently() {
+        for host in ["127.0.0.1", "192.168.1.10", "10.0.0.1", "169.254.1.1",
+                     "0x7f000001", "localhost", "box.internal", "::ffff:192.168.1.1"] {
+            assert!(
+                llms_outbound_addrs(host, 80).await.is_none(),
+                "私网 host 应静默跳过: {host}"
+            );
+        }
+    }
+
+    /// R4-9 防漂移：公网 IP 字面量放行（Some 空列表=直连，无 DNS 可绕）；
+    /// DNS 解析失败/超时的域名同样静默 None（fail-closed 不出网）。
+    #[tokio::test]
+    async fn gate_passes_public_ip_and_fails_closed_on_dns() {
+        let addrs = llms_outbound_addrs("93.184.216.34", 80).await.unwrap();
+        assert!(addrs.is_empty(), "公网 IP 字面量应直连（空 addrs）");
+        // 保留域 .invalid 永不解析 → 静默 None（网络无关，CI 稳定）
+        assert!(llms_outbound_addrs("no-such-host.invalid", 80).await.is_none());
+    }
 }
