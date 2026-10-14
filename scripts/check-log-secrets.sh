@@ -9,7 +9,8 @@
 # 目的：防止密钥/token 意外泄漏到日志，被日志聚合系统采集后失守。
 #
 # 用法：bash scripts/check-log-secrets.sh   （CI static-checks job 挂载）
-# 本地自测失败路径：FORCE_OFFENDER=1 bash scripts/check-log-secrets.sh
+# 本地自测失败路径：临时在任一 .rs 中插入一条含敏感词的 log:: 调用（如
+# log::warn!("password ...")）后运行本脚本，应 exit 1（验证完记得还原）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
