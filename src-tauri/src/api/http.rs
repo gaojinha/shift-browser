@@ -32,11 +32,6 @@ pub(crate) use req::{find_header_end, HTTP_MAX_BODY};
 
 const HTTP_PORT: u16 = 19701;
 
-/// 开放接口侧只读判断：唯一来源见 `super::auth::is_readonly`（三处同口径，防裸 SQL 散落）。
-async fn is_readonly(app: &AppHandle) -> bool {
-    auth::is_readonly(app).await
-}
-
 /// dashboard 页面安全响应头：禁被嵌入任意框架（点击劫持），CSP 收紧到无脚本/无外联
 const DASHBOARD_HEADERS: &str = "X-Frame-Options: DENY\r\n\
 Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'\r\n\
@@ -110,6 +105,8 @@ pub(crate) fn spawn_http(app: AppHandle, tokens: auth::ApiTokenShared) {
             let tokens = tokens.clone();
             let guard = guard.clone();
             let sem = sem.clone();
+            // R4-3 包 A：主体打标（loopback → 本机，否则局域网）；判定暂不按主体分支
+            let principal = super::matrix::Principal::for_http(peer_ip.is_loopback());
             tauri::async_runtime::spawn(async move {
                 // 并发闸门（DoS 防护）：满员立即断开，不排队不占资源；permit 随 task 结束释放
                 let _permit = match sem.try_acquire_owned() {
@@ -193,9 +190,13 @@ pub(crate) fn spawn_http(app: AppHandle, tokens: auth::ApiTokenShared) {
                 // 模型网关（阶段4）：POST /v1/chat/completions → 转发到配置的 provider
                 if path.starts_with("/v1/chat/completions") {
                     let (status, reason, extra, payload) = if bearer_ok {
-                        // 只读模式同样约束网关：网关携带 key 调上游（花钱+外联），属写/外联原语，
-                        // 不能因为不在 HANDLERS 表里就漏网（与 api.rs 主闸门同口径）
-                        if is_readonly(&app).await {
+                        // 网关 readonly 闸（R4-3 包 A）：判定收口到 matrix::can_gateway
+                        // （口径与命令闸同源：网关携带 key 调上游，属写/外联原语，
+                        // 不能因为不在 HANDLERS 表里就漏网）
+                        if let super::matrix::Decision::Deny(_) = super::matrix::can_gateway(
+                            principal,
+                            &super::matrix::Policy::load(&app).await,
+                        ) {
                             guard.record_failure(&peer_ip, Instant::now());
                             log::warn!("[api] 模型网关只读模式拒绝 peer={peer_ip}");
                             (
@@ -331,7 +332,7 @@ pub(crate) fn spawn_http(app: AppHandle, tokens: auth::ApiTokenShared) {
                         200,
                         "OK",
                         String::new(),
-                        serde_json::to_string(&super::handle(&app, body.trim()).await)
+                        serde_json::to_string(&super::handle(&app, principal, body.trim()).await)
                             .unwrap_or_else(|_| "{}".into()),
                     )
                 };

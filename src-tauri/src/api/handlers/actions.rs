@@ -11,17 +11,9 @@ use tauri::{AppHandle, Manager};
 use super::page::bool_arg;
 use crate::error::AppError;
 
-/// 交互总开关（默认关）：settings.api_agent_actions == "true"
-async fn agent_actions_enabled(app: &AppHandle) -> bool {
-    let db = app.state::<crate::db::Db>();
-    sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = 'api_agent_actions'")
-        .fetch_optional(&db.pool)
-        .await
-        .ok()
-        .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false)
-}
+// 交互闸（agent_actions）已收口至 `api::matrix::can()`（R4-3 包 A，2026-10-14）：
+// 8 个交互 handler 的开关判定统一在入口闸执行，本文件不再持第二份判定。
+// 现状例外保持：action/find（Risk=Read）与 action/dismiss（page.rs，历史不挂闸）不受此闸约束。
 
 /// 注入 page_action.js 执行一次（解析后的 JSON；网络/超时为 Err 响应）
 #[allow(clippy::too_many_arguments)]
@@ -131,17 +123,8 @@ fn wrap(v: Value) -> Value {
     }
 }
 
-/// 开关未开时的统一拒绝
-fn gated() -> Value {
-    AppError::permission("交互能力未开启：需在设置里开启「允许 API 页面交互」(api_agent_actions)")
-        .error_json()
-}
-
 /// `action/wait_for`：等待元素出现/消失或页面加载完成（超时返回 met:false）。
 pub(super) async fn wait_for(app: &AppHandle, req: &Value) -> Value {
-    if !agent_actions_enabled(app).await {
-        return gated();
-    }
     let selector = req
         .get("selector")
         .and_then(|v| v.as_str())
@@ -238,9 +221,6 @@ async fn idle_cleanup(app: &AppHandle, req: &Value, condition: &str) {
 
 /// `action/scroll`：滚动（up/down/top/bottom）。
 pub(super) async fn scroll(app: &AppHandle, req: &Value) -> Value {
-    if !agent_actions_enabled(app).await {
-        return gated();
-    }
     let direction = req
         .get("direction")
         .and_then(|v| v.as_str())
@@ -261,9 +241,6 @@ pub(super) async fn scroll(app: &AppHandle, req: &Value) -> Value {
 
 /// `action/click`：预检 → 点第 index 个匹配元素 → 返回是否发生导航。
 pub(super) async fn click(app: &AppHandle, req: &Value) -> Value {
-    if !agent_actions_enabled(app).await {
-        return gated();
-    }
     let selector = match required_selector(req) {
         Ok(s) => s,
         Err(resp) => return resp,
@@ -281,9 +258,6 @@ pub(super) async fn click(app: &AppHandle, req: &Value) -> Value {
 
 /// `action/fill`：预检 → 设值 + 触发 input/change（值只落字符串，不执行）。
 pub(super) async fn fill(app: &AppHandle, req: &Value) -> Value {
-    if !agent_actions_enabled(app).await {
-        return gated();
-    }
     let selector = match required_selector(req) {
         Ok(s) => s,
         Err(resp) => return resp,
@@ -302,9 +276,6 @@ pub(super) async fn fill(app: &AppHandle, req: &Value) -> Value {
 
 /// `action/back`：history.back()（交互撤销）。
 pub(super) async fn back(app: &AppHandle, req: &Value) -> Value {
-    if !agent_actions_enabled(app).await {
-        return gated();
-    }
     match eval_action(app, req, "back", "", 0, "", "down", 0, "", "", 5).await {
         Ok(v) => wrap(v),
         Err(resp) => resp,
@@ -313,9 +284,6 @@ pub(super) async fn back(app: &AppHandle, req: &Value) -> Value {
 
 /// `action/hover`：悬停（派发 mouseover/mouseenter/mousemove）——用于 hover 展开的菜单。
 pub(super) async fn hover(app: &AppHandle, req: &Value) -> Value {
-    if !agent_actions_enabled(app).await {
-        return gated();
-    }
     let selector = match required_selector(req) {
         Ok(s) => s,
         Err(resp) => return resp,
@@ -333,9 +301,6 @@ pub(super) async fn hover(app: &AppHandle, req: &Value) -> Value {
 
 /// `action/key`：键盘事件（Enter/Escape/Tab/ArrowDown 等）。可选先聚焦 selector 命中元素。
 pub(super) async fn key(app: &AppHandle, req: &Value) -> Value {
-    if !agent_actions_enabled(app).await {
-        return gated();
-    }
     let k = req
         .get("key")
         .and_then(|v| v.as_str())
@@ -366,9 +331,6 @@ pub(super) async fn key(app: &AppHandle, req: &Value) -> Value {
 /// 不传 selector 时作用于当前焦点。input/textarea 走 native setter + InputEvent；
 /// contenteditable 走 Selection/Range。密码框拒绝（password_refused）。Risk=Write，受双闸门。
 pub(super) async fn type_text(app: &AppHandle, req: &Value) -> Value {
-    if !agent_actions_enabled(app).await {
-        return gated();
-    }
     let text = req.get("text").and_then(|v| v.as_str()).unwrap_or("");
     if text.is_empty() && !bool_arg(req, "clear") {
         return AppError::validation("缺少 text（或显式 clear:true）").error_json();

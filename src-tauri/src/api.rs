@@ -26,6 +26,8 @@ pub(crate) mod dashboard;
 pub(crate) mod auth;
 // R2-1c 拆分（2026-09-24）：HTTP 服务器（状态面板/模型网关/命令端点）独立成子模块
 pub(crate) mod http;
+// R4-3 包 A（2026-10-14）：鉴权矩阵判定单源（Principal × 命令 × 开关 → Decision）
+pub(crate) mod matrix;
 
 use serde_json::Value;
 use std::path::PathBuf;
@@ -142,7 +144,7 @@ pub fn spawn(app: AppHandle) {
                             if line.trim().is_empty() {
                                 continue;
                             }
-                            let resp = handle(&app, &line).await;
+                            let resp = handle(&app, matrix::Principal::Sock, &line).await;
                             let mut s = serde_json::to_string(&resp)
                                 .unwrap_or_else(|_| "{\"ok\":false}".to_string());
                             s.push('\n');
@@ -159,7 +161,7 @@ pub fn spawn(app: AppHandle) {
 }
 
 /// 处理一条请求
-async fn handle(app: &AppHandle, line: &str) -> Value {
+async fn handle(app: &AppHandle, principal: matrix::Principal, line: &str) -> Value {
     let req: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => {
@@ -168,15 +170,13 @@ async fn handle(app: &AppHandle, line: &str) -> Value {
         }
     };
     let cmd = req.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
-    // 只读模式（api_readonly=true）：拒绝一切写命令。
-    // 写命令身份唯一来源：capabilities 注册表的 Risk 分类（P0-2，2026-09-24），
-    // 不再在本文件维护手写第二份名单。
-    if crate::capabilities::is_write(cmd) && auth::is_readonly(app).await {
-        return crate::error::AppError::permission(format!(
-            "只读模式已开启，写命令 {} 被拒绝",
-            cmd
-        ))
-        .error_json();
+    // 鉴权矩阵单源闸门（R4-3 包 A，2026-10-14）：readonly 写闸 + agent_actions 交互闸
+    // + eval 闸统一走 matrix::can()（原入口仅 readonly 写闸；交互/eval 闸自 handler
+    // 内上移，拒绝语义与文案逐字节不变，见 matrix.rs 模块注释）。
+    // 写命令身份唯一来源：capabilities 注册表的 Risk 分类（P0-2，2026-09-24）。
+    let policy = matrix::Policy::load(app).await;
+    if let matrix::Decision::Deny(reason) = matrix::can(principal, cmd, &policy) {
+        return crate::error::AppError::permission(reason.message(cmd)).error_json();
     }
     // R2-1c（2026-09-24）：命令分发已拆到 api/handlers.rs
     handlers::dispatch(app, &req, cmd).await

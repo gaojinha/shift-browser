@@ -127,19 +127,23 @@ pub(crate) fn create_dashboard_ticket(
 /// 模型网关：把 OpenAI 兼容的 chat/completions 请求转发到设置里的 provider。
 /// 默认关（设置 `api_model_gateway` 需为 'true'）；复用设置里的 base_url / key / model。
 pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Value {
+    // 开关判定（api_model_gateway，默认关）已收口至 `api::matrix::gateway_switch`
+    // （R4-3 包 A）；此处仅取网关转发所需的 provider 三键。
+    if let super::matrix::Decision::Deny(_) =
+        super::matrix::gateway_switch(&super::matrix::Policy::load(app).await)
+    {
+        return AppError::permission("模型网关已禁用：需在设置里显式开启「允许模型网关」")
+            .gateway_error_json();
+    }
     let db = app.state::<crate::db::Db>();
     let rows = sqlx::query_as::<_, (String, String)>(
         "SELECT key, value FROM settings WHERE key IN \
-         ('api_model_gateway','ai_base_url','ai_api_key','ai_model')",
+         ('ai_base_url','ai_api_key','ai_model')",
     )
     .fetch_all(&db.pool)
     .await
     .unwrap_or_default();
     let m: std::collections::HashMap<String, String> = rows.into_iter().collect();
-    if m.get("api_model_gateway").map(|v| v.as_str()) != Some("true") {
-        return AppError::permission("模型网关已禁用：需在设置里显式开启「允许模型网关」")
-            .gateway_error_json();
-    }
     let base = m
         .get("ai_base_url")
         .cloned()

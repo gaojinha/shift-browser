@@ -30,20 +30,8 @@ use tauri::{AppHandle, Manager};
 use crate::error::AppError;
 
 pub(super) async fn eval(app: &AppHandle, req: &Value) -> Value {
-    // 执行 JS（安全闸门：设置 api_allow_eval 必须为 'true'，默认关）
-    let db = app.state::<crate::db::Db>();
-    let allowed: String =
-        sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'api_allow_eval'")
-            .fetch_optional(&db.pool)
-            .await
-            .ok()
-            .flatten()
-            .map(|(v,)| v)
-            .unwrap_or_default();
-    if allowed != "true" {
-        return AppError::permission("执行 JS 已禁用：需在设置里显式开启「允许 API 执行 JS」")
-            .error_json();
-    }
+    // 安全闸门（api_allow_eval，默认关）已收口至 `api::matrix::can()`（R4-3 包 A），
+    // 入口闸统一判定后才会到达本 handler，此处不再持第二份判定。
     let code = req
         .get("code")
         .and_then(|v| v.as_str())
