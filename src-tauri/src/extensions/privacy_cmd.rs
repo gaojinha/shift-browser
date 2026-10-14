@@ -45,7 +45,13 @@ pub async fn set_privacy_whitelist(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
+    inject_extensions(
+        &app,
+        items,
+        webmcp_on,
+        super::compat_enabled(&db).await,
+        None,
+    );
     Ok(())
 }
 
@@ -77,7 +83,13 @@ pub async fn set_webmcp_polyfill(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
+    inject_extensions(
+        &app,
+        items,
+        webmcp_on,
+        super::compat_enabled(&db).await,
+        None,
+    );
     Ok(())
 }
 
@@ -151,7 +163,13 @@ pub async fn set_privacy_shield_level(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
+    inject_extensions(
+        &app,
+        items,
+        webmcp_on,
+        super::compat_enabled(&db).await,
+        None,
+    );
     Ok(())
 }
 
@@ -206,7 +224,13 @@ pub async fn set_privacy_fp_mode(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
+    inject_extensions(
+        &app,
+        items,
+        webmcp_on,
+        super::compat_enabled(&db).await,
+        None,
+    );
     Ok(())
 }
 
@@ -238,7 +262,13 @@ pub async fn set_privacy_shield_enabled(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
+    inject_extensions(
+        &app,
+        items,
+        webmcp_on,
+        super::compat_enabled(&db).await,
+        None,
+    );
     Ok(())
 }
 
@@ -270,7 +300,13 @@ pub async fn set_adblock_enabled(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
+    inject_extensions(
+        &app,
+        items,
+        webmcp_on,
+        super::compat_enabled(&db).await,
+        None,
+    );
     Ok(())
 }
 
@@ -317,7 +353,13 @@ pub async fn set_adblock_keywords(
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     let (items, webmcp_on) = adblock::collect_enabled_items(&db).await?;
-    inject_extensions(&app, items, webmcp_on, super::compat_enabled(&db).await, None);
+    inject_extensions(
+        &app,
+        items,
+        webmcp_on,
+        super::compat_enabled(&db).await,
+        None,
+    );
     Ok(())
 }
 

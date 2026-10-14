@@ -209,7 +209,12 @@ pub(crate) async fn resolve_pin_for_https(
         tokio::net::lookup_host((host.as_str(), port)),
     )
     .await
-    .map_err(|_| format!("域名解析超时（{}s）: {host}", crate::contracts::timeout::DNS_LOOKUP_SECS))?
+    .map_err(|_| {
+        format!(
+            "域名解析超时（{}s）: {host}",
+            crate::contracts::timeout::DNS_LOOKUP_SECS
+        )
+    })?
     .map_err(|e| format!("域名解析失败: {host} ({e})"))?
     .collect();
     let addrs = check_resolved_ips(&host, sock.iter().map(|s| s.ip()), port)?;

@@ -76,7 +76,10 @@ pub async fn warmup(pool: &SqlitePool) {
         // 预热失败打 warn（2026-09-29）：此前 unwrap_or_default 静默吞错，缓存空跑，
         // 调用方全走回源且无感知。降级行为不变（空缓存），但让问题可观测。
         Err(e) => {
-            log::warn!("[settings-cache] 白名单预热失败（缓存空跑，调用方回源）: {}", e);
+            log::warn!(
+                "[settings-cache] 白名单预热失败（缓存空跑，调用方回源）: {}",
+                e
+            );
             Vec::new()
         }
     };
@@ -106,7 +109,11 @@ pub async fn get(pool: &SqlitePool, key: &str) -> Option<String> {
             .fetch_optional(pool)
             .await
             .map_err(|e| {
-                log::warn!("[settings-cache] 回源失败 key={}（调用方用默认）: {}", key, e);
+                log::warn!(
+                    "[settings-cache] 回源失败 key={}（调用方用默认）: {}",
+                    key,
+                    e
+                );
             })
             .ok()
             .flatten();
@@ -123,7 +130,11 @@ pub async fn get(pool: &SqlitePool, key: &str) -> Option<String> {
         .fetch_optional(pool)
         .await
         .map_err(|e| {
-            log::warn!("[settings-cache] 回源失败 key={}（调用方用默认）: {}", key, e);
+            log::warn!(
+                "[settings-cache] 回源失败 key={}（调用方用默认）: {}",
+                key,
+                e
+            );
         })
         .ok()
         .flatten();

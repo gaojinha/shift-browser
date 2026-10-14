@@ -233,19 +233,9 @@ pub fn build_privacy_selftest(
             "引擎不支持 WebGPU（无此接口，无指纹泄露面）",
         ));
     } else if has("webgpu") {
-        checks.push(mk_check(
-            "webgpu",
-            "WebGPU 指纹防护",
-            "pass",
-            "已启用",
-        ));
+        checks.push(mk_check("webgpu", "WebGPU 指纹防护", "pass", "已启用"));
     } else {
-        checks.push(mk_check(
-            "webgpu",
-            "WebGPU 指纹防护",
-            "fail",
-            "未生效",
-        ));
+        checks.push(mk_check("webgpu", "WebGPU 指纹防护", "fail", "未生效"));
     }
 
     let total = checks.len();

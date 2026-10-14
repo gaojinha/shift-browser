@@ -459,9 +459,21 @@ mod tests {
         insert(&pool_a, "homepage", "https://example.com").await;
         sqlx::raw_sql(sql).execute(&pool_a).await.unwrap();
         sqlx::raw_sql(sql).execute(&pool_a).await.unwrap(); // 幂等：重复执行
-        assert_eq!(get_value(&pool_a, "tab_hibernate_minutes").await, "10", "旧默认值 30 应迁移为 10");
-        assert_eq!(get_value(&pool_a, "tab_hibernate_count").await, "8", "旧默认值 0 应迁移为 8");
-        assert_eq!(get_value(&pool_a, "homepage").await, "https://example.com", "无关键不得被改动");
+        assert_eq!(
+            get_value(&pool_a, "tab_hibernate_minutes").await,
+            "10",
+            "旧默认值 30 应迁移为 10"
+        );
+        assert_eq!(
+            get_value(&pool_a, "tab_hibernate_count").await,
+            "8",
+            "旧默认值 0 应迁移为 8"
+        );
+        assert_eq!(
+            get_value(&pool_a, "homepage").await,
+            "https://example.com",
+            "无关键不得被改动"
+        );
 
         // 场景 B（手工改过的不碰）：值非旧默认值，迁移后必须原样保留
         let pool_b = new_pool(&dir, "b.db").await;
@@ -474,8 +486,16 @@ mod tests {
         insert(&pool_b, "tab_hibernate_minutes", "5").await;
         insert(&pool_b, "tab_hibernate_count", "12").await;
         sqlx::raw_sql(sql).execute(&pool_b).await.unwrap();
-        assert_eq!(get_value(&pool_b, "tab_hibernate_minutes").await, "5", "手工改过的 5 不得被覆盖");
-        assert_eq!(get_value(&pool_b, "tab_hibernate_count").await, "12", "手工改过的 12 不得被覆盖");
+        assert_eq!(
+            get_value(&pool_b, "tab_hibernate_minutes").await,
+            "5",
+            "手工改过的 5 不得被覆盖"
+        );
+        assert_eq!(
+            get_value(&pool_b, "tab_hibernate_count").await,
+            "12",
+            "手工改过的 12 不得被覆盖"
+        );
     }
 
     /// 批量入口 internal 键防护（2026-09-29）：与 set_setting 单项入口同口径，

@@ -373,7 +373,10 @@ mod tests {
         // 最小 PNG（1x1，8 字节签名 + IHDR，随手造的合法头即可，只验编解码）
         let png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02];
         let url = png_data_url(&png);
-        assert!(url.starts_with("data:image/png;base64,"), "缺 data URL 前缀");
+        assert!(
+            url.starts_with("data:image/png;base64,"),
+            "缺 data URL 前缀"
+        );
         use base64::Engine as _;
         let back = base64::engine::general_purpose::STANDARD
             .decode(url.trim_start_matches("data:image/png;base64,"))

@@ -115,7 +115,11 @@ pub(crate) fn spawn_http(app: AppHandle, tokens: auth::ApiTokenShared) {
                 let _permit = match sem.try_acquire_owned() {
                     Ok(p) => p,
                     Err(_) => {
-                        log::warn!("[api] 并发连接已满（{}），断开 peer={}", crate::contracts::limits::HTTP_MAX_CONCURRENT, peer_ip);
+                        log::warn!(
+                            "[api] 并发连接已满（{}），断开 peer={}",
+                            crate::contracts::limits::HTTP_MAX_CONCURRENT,
+                            peer_ip
+                        );
                         return;
                     }
                 };
@@ -123,37 +127,40 @@ pub(crate) fn spawn_http(app: AppHandle, tokens: auth::ApiTokenShared) {
                 // 旧实现只读一次 64KB，长对话经模型网关转发必然 JSON 截断）。
                 // 读超时（DoS 防护）：防白名单 IP 发半个请求挂连，长期占用 task/缓冲区。
                 let read_fut = read_http_request(&mut stream);
-                let (head, body) =
-                    match tokio::time::timeout(
-                        std::time::Duration::from_secs(
+                let (head, body) = match tokio::time::timeout(
+                    std::time::Duration::from_secs(
+                        crate::contracts::timeout::HTTP_READ_TIMEOUT_SECS,
+                    ),
+                    read_fut,
+                )
+                .await
+                {
+                    Ok(HttpReq::Complete(h, b)) => (h, b),
+                    Ok(HttpReq::TooLarge) => {
+                        write_http(
+                            &mut stream,
+                            413,
+                            "Payload Too Large",
+                            "application/json",
+                            "",
+                            AppError::validation("请求体过大（上限 8MB）")
+                                .gateway_error_json()
+                                .to_string()
+                                .as_bytes(),
+                        )
+                        .await;
+                        return;
+                    }
+                    Ok(HttpReq::Bad) => return,
+                    Err(_) => {
+                        log::warn!(
+                            "[api] 读取请求超时（{}s）断开 peer={}",
                             crate::contracts::timeout::HTTP_READ_TIMEOUT_SECS,
-                        ),
-                        read_fut,
-                    )
-                    .await
-                    {
-                        Ok(HttpReq::Complete(h, b)) => (h, b),
-                        Ok(HttpReq::TooLarge) => {
-                            write_http(
-                                &mut stream,
-                                413,
-                                "Payload Too Large",
-                                "application/json",
-                                "",
-                                AppError::validation("请求体过大（上限 8MB）")
-                                    .gateway_error_json()
-                                    .to_string()
-                                    .as_bytes(),
-                            )
-                            .await;
-                            return;
-                        }
-                        Ok(HttpReq::Bad) => return,
-                        Err(_) => {
-                            log::warn!("[api] 读取请求超时（{}s）断开 peer={}", crate::contracts::timeout::HTTP_READ_TIMEOUT_SECS, peer_ip);
-                            return;
-                        }
-                    };
+                            peer_ip
+                        );
+                        return;
+                    }
+                };
                 // 请求行：method 与 target（target 可能带 query；path 取问号前）
                 let request_line = head.lines().next().unwrap_or("");
                 let mut rl = request_line.split_whitespace();

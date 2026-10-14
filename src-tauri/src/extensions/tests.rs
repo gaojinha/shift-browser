@@ -32,9 +32,17 @@ fn privacy_selftest_webgpu_engine_unsupported_is_skip_not_fail() {
     let r = build_privacy_selftest("standard", "example.com", false, page);
     assert_eq!(r.total, 9);
     assert_eq!(r.passed, 8);
-    let w = r.checks.iter().find(|c| c.id == "webgpu").expect("应有 webgpu 项");
+    let w = r
+        .checks
+        .iter()
+        .find(|c| c.id == "webgpu")
+        .expect("应有 webgpu 项");
     assert_eq!(w.status, "skip");
-    assert!(w.detail.contains("引擎不支持"), "应说明引擎不支持：{}", w.detail);
+    assert!(
+        w.detail.contains("引擎不支持"),
+        "应说明引擎不支持：{}",
+        w.detail
+    );
     assert!(
         r.checks.iter().all(|c| c.status != "fail"),
         "引擎不支持时不得有 fail 项：{:?}",

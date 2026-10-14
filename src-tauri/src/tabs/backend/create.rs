@@ -93,7 +93,10 @@ impl TabManager {
                         // 强制打开本地文件标签（create_webview 对非 newtab 的 file:// 保持 External 渲染）。
                         // 内部页面（shift://newtab 等）由可信前端 create_tab 命令打开，不走此入口。
                         if url.scheme() != "http" && url.scheme() != "https" {
-                            log::warn!("[tabs] on_new_window: 拒绝非 http/https scheme: {}", crate::redact_url(url.as_str()));
+                            log::warn!(
+                                "[tabs] on_new_window: 拒绝非 http/https scheme: {}",
+                                crate::redact_url(url.as_str())
+                            );
                             return tauri::webview::NewWindowResponse::Deny;
                         }
                         let url_str = url.to_string();

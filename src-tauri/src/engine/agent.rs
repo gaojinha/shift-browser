@@ -130,11 +130,7 @@ pub fn build_action_js(params: &AgentActionParams) -> CommandResult<Option<Strin
     let action = params.action.as_str();
     if !AGENT_ACTIONS.contains(&action) {
         // 白名单是安全策略：不在名单即拒绝（E_PERM，重试无意义）
-        return Err(AppError::permission(format!(
-            "动作 '{}' 不在白名单内",
-            action
-        ))
-        .into());
+        return Err(AppError::permission(format!("动作 '{}' 不在白名单内", action)).into());
     }
     match action {
         "click" => {

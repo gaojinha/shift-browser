@@ -68,9 +68,7 @@ async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
             ))
             .error_json()
         })?
-        .map_err(|_| {
-            AppError::permission(format!("域名解析失败，已拒绝：{host}")).error_json()
-        })?
+        .map_err(|_| AppError::permission(format!("域名解析失败，已拒绝：{host}")).error_json())?
         .collect();
         if let Err(e) = crate::ai::check_resolved_ips(&host, addrs.iter().map(|s| s.ip()), port) {
             log::warn!("[open_and_read] SSRF 拦截域名解析: {}", e);
@@ -87,9 +85,9 @@ async fn guard_url(app: &AppHandle, url: &str) -> Result<(), Value> {
 /// 只有建连/解析/超时失败才拦（正常公网站点无误报）。
 /// IP 字面量无 rebinding 面（pin 返回 None），直接放行（私有的入口 guard 已拦）。
 async fn verify_reachable(url: &str) -> Result<(), Value> {
-    let (resolve_key, pinned) = crate::ai::resolve_pin_for_https(url).await.map_err(|e| {
-        AppError::permission(format!("可达验证解析失败，已拒绝：{e}")).error_json()
-    })?;
+    let (resolve_key, pinned) = crate::ai::resolve_pin_for_https(url)
+        .await
+        .map_err(|e| AppError::permission(format!("可达验证解析失败，已拒绝：{e}")).error_json())?;
     let Some(addrs) = pinned else {
         return Ok(());
     };

@@ -115,7 +115,7 @@ pub fn run() {
                 .cloned()
                 .collect();
             // argv 可能含带 token/query 的完整 URL：http/https 参数只记 scheme://host，
-// 非 URL 参数原样（redact_url 对非 URL 返回"<非URL>"会丢信息，故只脱敏 URL）
+            // 非 URL 参数原样（redact_url 对非 URL 返回"<非URL>"会丢信息，故只脱敏 URL）
             let safe_argv: Vec<String> = argv
                 .iter()
                 .map(|a| {

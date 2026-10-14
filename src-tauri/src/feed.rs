@@ -76,7 +76,12 @@ async fn pinned_client_for(url: &str) -> Result<reqwest::Client, String> {
             tokio::net::lookup_host((host.as_str(), port)),
         )
         .await
-        .map_err(|_| format!("DNS 解析超时（{}s）: {host}", crate::contracts::timeout::DNS_LOOKUP_SECS))?
+        .map_err(|_| {
+            format!(
+                "DNS 解析超时（{}s）: {host}",
+                crate::contracts::timeout::DNS_LOOKUP_SECS
+            )
+        })?
         .map_err(|e| format!("DNS 解析失败: {} ({})", host, e))?
         .collect();
         let addrs = crate::ai::check_resolved_ips(&host, sock.iter().map(|s| s.ip()), port)?;

@@ -175,7 +175,11 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
     // 网关变成携带密钥打内网的跳板。
     let base = base.trim();
     if let Err(e) = crate::ai::validate_base_url(base) {
-        log::warn!("[api] 模型网关上游地址被安全策略拒绝: {} ({})", e, crate::redact_url(base));
+        log::warn!(
+            "[api] 模型网关上游地址被安全策略拒绝: {} ({})",
+            e,
+            crate::redact_url(base)
+        );
         return AppError::permission(format!("上游地址未通过安全校验: {e}")).gateway_error_json();
     }
     // P0-6：域名解析后 pin 死公网地址，消除"校验时解析一次、发送时再解析一次"
@@ -183,7 +187,11 @@ pub(crate) async fn model_gateway(app: &AppHandle, body: &str) -> serde_json::Va
     let (resolve_key, pinned) = match crate::ai::resolve_pin_for_https(base).await {
         Ok(v) => v,
         Err(e) => {
-            log::warn!("[api] 模型网关注解/pin 上游地址失败: {} ({})", e, crate::redact_url(base));
+            log::warn!(
+                "[api] 模型网关注解/pin 上游地址失败: {} ({})",
+                e,
+                crate::redact_url(base)
+            );
             return AppError::permission(format!("上游地址未通过安全校验: {e}"))
                 .gateway_error_json();
         }

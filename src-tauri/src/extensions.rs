@@ -173,21 +173,21 @@ fn inject_extensions(
                 // label 会复用）返回 true，必须重新连接——此前按 label 常驻去重，
                 // 重建的 webview 永远没桥，整页翻译静默死亡（2026-09-29 高哥实锤）。
                 if manager.register_script_message_handler("shiftTranslate") {
-                        let app_msg = app_for_bridge.clone();
-                        let label_msg = label_for_bridge.clone();
-                        manager.connect_script_message_received(
-                            Some("shiftTranslate"),
-                            move |_mgr, res| {
-                                if let Some(v) = res.js_value() {
-                                    let raw = v.to_string();
-                                    crate::proto_shift::native_translate_handle(
-                                        &app_msg, &label_msg, &raw,
-                                    );
-                                }
-                            },
-                        );
-                        log::info!("[translate-native] 原生桥已注册: {}", label_for_bridge);
-                    }
+                    let app_msg = app_for_bridge.clone();
+                    let label_msg = label_for_bridge.clone();
+                    manager.connect_script_message_received(
+                        Some("shiftTranslate"),
+                        move |_mgr, res| {
+                            if let Some(v) = res.js_value() {
+                                let raw = v.to_string();
+                                crate::proto_shift::native_translate_handle(
+                                    &app_msg, &label_msg, &raw,
+                                );
+                            }
+                        },
+                    );
+                    log::info!("[translate-native] 原生桥已注册: {}", label_for_bridge);
+                }
                 manager.remove_all_scripts();
                 manager.remove_all_style_sheets();
                 // 选区缓存监听：**常驻** document_start UserScript（所有 frame、
