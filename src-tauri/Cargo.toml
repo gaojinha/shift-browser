@@ -102,8 +102,40 @@ tempfile = "3"
 
 [profile.release]
 codegen-units = 1
-lto = true
-opt-level = "s"
+lto = "thin"
+opt-level = 3
 # 注意：不能 strip = true！Tauri 2 的 web extension（cdylib）需要保留符号，
 # 否则 WebKit 找不到入口函数，tauri://localhost 协议失效，前端加载失败
+strip = "debuginfo"
+# R4-8 决策（2026-10-14）：从 opt-level="s"+fat-LTO 切到 3+thin-LTO。
+# 依据：bench_3_thin 基准跑分与 bench_s_lto 性能基本持平，构建时间显著更短；
+# Tauri 2 cdylib 保留符号（strip="debuginfo"）要求不变。
+
+# === R4-8 基准 profile（仅用于基准跑分，不改现行 release）===
+[profile.bench_s_lto]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.bench_z_lto]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.bench_3_lto]
+inherits = "release"
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.bench_3_thin]
+inherits = "release"
+opt-level = 3
+lto = "thin"
+codegen-units = 1
 strip = "debuginfo"
