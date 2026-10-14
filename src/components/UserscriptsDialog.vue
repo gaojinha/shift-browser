@@ -236,6 +236,11 @@ async function remove(u: Userscript) {
   padding: 8px;
   outline: none;
 }
+.us-input:focus,
+.us-code:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
 .us-code {
   flex: 1;
   min-height: 200px;

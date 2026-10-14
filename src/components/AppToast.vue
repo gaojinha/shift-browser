@@ -6,7 +6,8 @@ const toastStore = useToastStore()
 </script>
 
 <template>
-  <div class="toast-container">
+  <!-- 读屏播报（R4-6 §3.3）：error 用 assertive，其余 polite -->
+  <div class="toast-container" role="status" :aria-live="toastStore.items.some((t) => t.type === 'error') ? 'assertive' : 'polite'">
     <TransitionGroup name="toast">
       <div v-for="t in toastStore.items" :key="t.id" class="toast-item" :class="t.type">
         <span class="toast-icon">{{

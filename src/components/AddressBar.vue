@@ -278,7 +278,7 @@ async function onReader() {
     <button class="nav-btn" data-nav="home" title="主页" aria-label="主页" @click="onHome">
       <AppIcon name="house" :size="15" />
     </button>
-    <div class="address-container">
+    <div class="address-container" role="toolbar" aria-label="地址栏">
       <span
         v-if="isHttps"
         class="lock-icon"
@@ -331,7 +331,7 @@ async function onReader() {
     >
       <AppIcon name="bookOpen" :size="15" :class="{ 'icon-spin': readerLoading }" />
     </button>
-    <span v-if="readerTip" class="reader-tip" :title="readerTip">{{ readerTip }}</span>
+    <span v-if="readerTip" class="reader-tip" role="status" :title="readerTip">{{ readerTip }}</span>
     <TranslateProgress />
     <button class="action-btn translate-btn" title="翻译" aria-label="翻译" @click="emit('openTranslate')">
       <AppIcon name="globe" :size="15" />
@@ -594,5 +594,14 @@ async function onReader() {
     min-width: 0;
     padding: 0 11px;
   }
+}
+
+/* 键盘焦点环（R4-6 §2.7 包 4）：与既有 --accent-ring 风格一致 */
+.nav-btn:focus-visible,
+.action-btn:focus-visible,
+.suggest-item:focus-visible,
+.lock-icon:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 </style>

@@ -140,8 +140,9 @@ watch(
       <div class="card" data-anchor="model">
         <div class="card-title"><AppIcon name="sparkles" :size="14" /> 模型服务</div>
         <div class="field">
-          <label>推理服务（Provider）</label>
+          <label for="ai-provider">推理服务（Provider）</label>
           <select
+            id="ai-provider"
             :value="settingsStore.get('ai_provider') || 'agnes'"
             @change="onSet('ai_provider', ($event.target as HTMLSelectElement).value)"
           >
@@ -162,8 +163,9 @@ watch(
         <!-- AGNES 云端专属配置 -->
         <template v-if="!isOc && !isLocal">
           <div class="field">
-            <label>模型</label>
+            <label for="ai-model-agnes">模型</label>
             <select
+              id="ai-model-agnes"
               :value="settingsStore.get('ai_model')"
               @change="onSet('ai_model', ($event.target as HTMLSelectElement).value)"
             >
@@ -173,8 +175,9 @@ watch(
             </select>
           </div>
           <div class="field">
-            <label>API 地址</label>
+            <label for="ai-base-url">API 地址</label>
             <input
+              id="ai-base-url"
               type="text"
               :value="settingsStore.get('ai_base_url')"
               placeholder="https://apihub.agnes-ai.com/v1"
@@ -183,8 +186,9 @@ watch(
             />
           </div>
           <div class="field">
-            <label>API Key</label>
+            <label for="ai-key">API Key</label>
             <input
+              id="ai-key"
               type="password"
               v-model="aiKeyInput"
               :placeholder="hasAiKey() ? '已配置（不回显），留空保持不变' : '留空使用环境变量 AGNES_API_KEY'"
@@ -194,8 +198,9 @@ watch(
           </div>
           <div class="field-row">
             <div class="field">
-              <label>请求超时（秒）</label>
+              <label for="ai-timeout">请求超时（秒）</label>
               <input
+                id="ai-timeout"
                 type="number"
                 min="10"
                 max="300"
@@ -204,8 +209,9 @@ watch(
               />
             </div>
             <div class="field">
-              <label>流式超时（秒）</label>
+              <label for="ai-stream-timeout">流式超时（秒）</label>
               <input
+                id="ai-stream-timeout"
                 type="number"
                 min="10"
                 max="300"
@@ -220,8 +226,9 @@ watch(
         <!-- 本机 Ollama 专属配置（复用 ai_model 键，无新增契约） -->
         <template v-else-if="isLocal">
           <div class="field">
-            <label>模型</label>
+            <label for="ai-model-local">模型</label>
             <input
+              id="ai-model-local"
               type="text"
               :value="settingsStore.get('ai_model')"
               placeholder="llama3.1（填 Ollama 本机已拉取的模型名）"
@@ -261,8 +268,8 @@ watch(
           </div>
 
           <div class="field">
-            <label>opencode 模型</label>
-            <select v-model="ocModel" :disabled="ocLoading || !!ocError">
+            <label for="oc-model">opencode 模型</label>
+            <select id="oc-model" v-model="ocModel" :disabled="ocLoading || !!ocError">
               <option value="">
                 跟随 opencode 默认{{ ocProbe?.model ? `（${ocProbe.model}）` : '' }}
               </option>

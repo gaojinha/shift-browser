@@ -105,8 +105,9 @@ async function copyRotatedToken() {
                 />
               </div>
               <div class="field">
-                <label>开放 API 端口</label>
+                <label for="api-http-port">开放 API 端口</label>
                 <input
+                  id="api-http-port"
                   class="task-num"
                   type="number"
                   min="1024"
@@ -128,8 +129,9 @@ async function copyRotatedToken() {
                 />
               </div>
               <div class="field">
-                <label>API IP 白名单</label>
+                <label for="api-allowed-ips">API IP 白名单</label>
                 <input
+                  id="api-allowed-ips"
                   class="task-num api-allowlist-input"
                   type="text"
                   placeholder="192.168.1.0/24, 10.0.0.5"

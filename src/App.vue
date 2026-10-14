@@ -711,7 +711,9 @@ watch(
     <!-- 主体：垂直标签时「左侧栏 + 主列」，横向时只有主列 -->
     <div class="app-body">
       <VerticalTabBar v-if="verticalTabs" @toggle="onToggleVerticalTabs" />
-      <div class="app-main">
+      <div class="app-main" role="main">
+        <!-- 视觉隐藏的文档级 h1（axe page-has-heading-one / landmark-one-main） -->
+        <h1 class="sr-only">ShiftBrowser</h1>
         <TabBar v-if="!verticalTabs" />
         <AddressBar
           ref="addressBarRef"
@@ -993,5 +995,18 @@ button:active:not(:disabled) {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* 视觉隐藏但读屏可见（文档级 h1 等 landmark 用） */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 </style>

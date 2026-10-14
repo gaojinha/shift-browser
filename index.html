@@ -15,8 +15,9 @@
   function showDiag(msg) {
     try {
       var d = document.createElement('div');
-      d.style.cssText = 'position:fixed;bottom:10px;right:10px;z-index:99999;background:#c00;color:#fff;padding:8px 12px;font-size:12px;border-radius:6px;max-width:70%;';
+      d.style.cssText = 'position:fixed;bottom:10px;right:10px;z-index:99999;background:#c00;color:#fff;padding:8px 12px;font-size:12px;border-radius:6px;max-width:70%;pointer-events:none;';
       d.textContent = '[ipc-bridge] ' + msg;
+      d.setAttribute('aria-hidden', 'true'); // 调试诊断条：读屏不播报，axe region 违规忽略
       document.body.appendChild(d);
     } catch (_) {}
   }

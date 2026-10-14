@@ -369,4 +369,11 @@ watch(
   align-items: center;
   gap: 7px;
 }
+
+/* 键盘焦点环（R4-6 §2.7 包 4）；settings-search input 已有 :focus 焦点环 */
+.nav-item:focus-visible,
+.search-item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
 </style>

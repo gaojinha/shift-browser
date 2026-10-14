@@ -201,6 +201,7 @@ function hostOf(url: string): string {
 }
 .history-search:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .clear-btn {
   height: 30px;

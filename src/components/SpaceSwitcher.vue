@@ -223,6 +223,10 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
   padding: 0 7px;
   outline: none;
 }
+.space-edit:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
 .space-mini {
   flex-shrink: 0;
   width: 22px;

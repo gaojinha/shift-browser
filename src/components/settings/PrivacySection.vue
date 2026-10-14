@@ -155,8 +155,8 @@ onMounted(() => {
     <div class="card" data-anchor="shield">
       <div class="card-title"><AppIcon name="shield" :size="14" /> 浏览防护</div>
       <div class="field">
-        <label>隐私防护</label>
-        <select class="privacy-select" :value="privacyLevel" @change="onChangePrivacyLevel">
+        <label for="privacy-level">隐私防护</label>
+        <select id="privacy-level" class="privacy-select" :value="privacyLevel" @change="onChangePrivacyLevel">
           <option value="standard">标准（推荐）</option>
           <option value="strict">严格</option>
           <option value="off">关闭</option>
@@ -170,8 +170,8 @@ onMounted(() => {
         切换后刷新页面即对已开标签生效。
       </div>
       <div class="field">
-        <label>反指纹模式</label>
-        <select class="privacy-select" :value="fpMode" @change="onChangeFpMode">
+        <label for="fp-mode">反指纹模式</label>
+        <select id="fp-mode" class="privacy-select" :value="fpMode" @change="onChangeFpMode">
           <option value="noise">加噪（默认）</option>
           <option value="uniform">统一化（Tor/Mullvad 派）</option>
         </select>

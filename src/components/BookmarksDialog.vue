@@ -246,7 +246,7 @@ async function onExport() {
               placeholder="搜索书签..."
               spellcheck="false"
             />
-            <select v-model="filterFolder" class="bm-filter">
+            <select v-model="filterFolder" class="bm-filter" aria-label="筛选文件夹">
               <option value="all">全部文件夹</option>
               <option value="none">未分类</option>
               <option v-for="f in folders" :key="f.id" :value="String(f.id)">{{ f.name }}</option>
@@ -406,6 +406,7 @@ async function onExport() {
 }
 .bm-search:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .bm-filter {
   height: 32px;
@@ -573,6 +574,7 @@ async function onExport() {
 .bm-field input:focus,
 .bm-field select:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 /* 通用 .bm-actions/.bm-cancel/.bm-save 已收口至 styles/components.css */
 </style>

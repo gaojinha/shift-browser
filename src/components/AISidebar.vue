@@ -225,6 +225,8 @@ function onOverlaySelf() {
   <div v-if="props.show" class="ai-overlay" @click.self="onOverlaySelf">
     <div
       class="ai-sidebar"
+      role="complementary"
+      aria-label="AI 助手"
       :style="{ top: topOffset + 'px', height: `calc(100vh - ${topOffset}px - ${LAYOUT.statusBar}px)` }"
     >
       <!-- 头部 -->
@@ -291,7 +293,7 @@ function onOverlaySelf() {
             <div v-else class="md-body" v-html="renderMarkdown(m.content)"></div>
           </div>
         </div>
-        <div v-if="aiStore.loading && !aiStore.streamingId" class="ai-msg assistant">
+        <div v-if="aiStore.loading && !aiStore.streamingId" class="ai-msg assistant" role="status" aria-live="polite">
           <div class="ai-bubble ai-thinking"><span class="spinner"></span> 思考中…</div>
         </div>
         <div v-if="aiStore.error" class="ai-error">{{ aiStore.error }}</div>
@@ -585,6 +587,7 @@ function onOverlaySelf() {
 }
 .ai-input:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .ai-send {
   height: 32px;

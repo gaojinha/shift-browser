@@ -22,8 +22,9 @@ function fillTpl(k: string) {
   <div class="card" data-anchor="automation">
     <div class="card-title"><AppIcon name="clock" :size="14" /> 定时任务</div>
     <div class="field">
-      <label>定时清理历史</label>
+      <label for="auto-clear-history-days">定时清理历史</label>
       <input
+        id="auto-clear-history-days"
         class="task-num"
         type="number"
         min="0"
@@ -33,8 +34,9 @@ function fillTpl(k: string) {
       <span class="field-desc">天（0=关闭；每天自动删更早的历史）</span>
     </div>
     <div class="field">
-      <label>定时刷新订阅</label>
+      <label for="auto-refresh-feeds">定时刷新订阅</label>
       <input
+        id="auto-refresh-feeds"
         class="task-num"
         type="number"
         min="0"
@@ -44,8 +46,9 @@ function fillTpl(k: string) {
       <span class="field-desc">分钟（0=关闭）</span>
     </div>
     <div class="field">
-      <label>定时跑 Agent</label>
+      <label for="auto-agent-minutes">定时跑 Agent</label>
       <input
+        id="auto-agent-minutes"
         class="task-num"
         type="number"
         min="0"

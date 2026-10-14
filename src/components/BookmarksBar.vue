@@ -522,6 +522,7 @@ async function onSaveEdit() {
 }
 .bm-field input:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 /* 通用 .bm-actions/.bm-cancel/.bm-save 已收口至 styles/components.css */
 </style>

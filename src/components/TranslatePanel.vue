@@ -153,7 +153,7 @@ const charCount = (s: string) => s.length
 <template>
   <Transition name="slide">
     <div v-if="props.show" class="tr-overlay" @click.self="emit('close')" @keydown="onKeydown">
-      <div class="tr-panel">
+      <div class="tr-panel" role="region" aria-label="翻译面板">
         <!-- 头部 -->
         <div class="tr-header">
           <span class="tr-title">🌐 翻译</span>
@@ -307,6 +307,7 @@ const charCount = (s: string) => s.length
 .tr-textarea:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
 .tr-actions {

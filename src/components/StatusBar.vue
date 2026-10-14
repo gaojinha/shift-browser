@@ -214,8 +214,8 @@ async function diagnoseNet() {
 
 <template>
   <div class="status-bar">
-    <span class="status-left">
-      <span v-if="loadFailed" class="status-load-failed">⚠️ 页面加载失败</span>
+    <span class="status-left" role="status">
+      <span v-if="loadFailed" class="status-load-failed" role="alert">⚠️ 页面加载失败</span>
       <span class="status-icon">{{ statusIcon }}</span>
       <span class="status-text">{{ statusText }}</span>
       <img v-if="siteIcon" class="status-favicon" :src="siteIcon" alt="" @error="(e) => ((e.target as HTMLImageElement).style.display = 'none')" />
@@ -410,5 +410,13 @@ async function diagnoseNet() {
   .privacy-badge {
     display: none;
   }
+}
+
+/* 键盘焦点环（R4-6 §2.7 包 4）：与既有 --accent-ring 风格一致 */
+.privacy-badge:focus-visible,
+.status-btn:focus-visible,
+.net-status:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 </style>
