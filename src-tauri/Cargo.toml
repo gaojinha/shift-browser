@@ -58,7 +58,7 @@ base64 = "0.22"
 # 用户账号密码哈希（PBKDF2，与原版 Electron 一致：10 万次迭代 SHA-512）
 pbkdf2 = "0.12"
 hmac = "0.12"
-sha2 = "0.10"
+sha2 = "0.11"
 # 主密码 NFKC 归一化（全角/兼容字符在设置与解锁两侧得到同一密码）
 unicode-normalization = "0.1"
 hex = "0.4"
