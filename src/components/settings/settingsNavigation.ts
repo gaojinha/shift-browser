@@ -111,6 +111,7 @@ export interface SearchEntry {
 export const SETTING_SEARCH_INDEX: SearchEntry[] = [
   // —— 基础 · 常规 ——
   { label: '默认浏览器', keywords: ['默认浏览器', 'default browser', '设为默认'], section: 'general' },
+  { label: '下载保存目录', keywords: ['下载目录', '下载路径', 'download dir', 'download path', 'download_dir'], section: 'general' },
   { label: '主页 URL', keywords: ['主页', '首页', 'homepage'], section: 'general' },
   { label: '搜索引擎', keywords: ['搜索引擎', '搜索', 'search', 'bing', 'google'], section: 'general' },
   { label: '标签休眠时长', keywords: ['标签休眠', '休眠时长', '闲置', 'hibernate', '内存'], section: 'general' },

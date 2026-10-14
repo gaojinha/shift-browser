@@ -121,6 +121,18 @@ onMounted(loadDefaultBrowser)
         系统级 desktop 文件若缺浏览器声明，会自动写入用户级声明（无需 root）。
       </HintBlock>
       <div class="field">
+        <label for="download-dir-input">下载保存目录</label>
+        <input
+          id="download-dir-input"
+          type="text"
+          :value="settingsStore.get('download_dir')"
+          placeholder="留空使用系统默认下载目录"
+          spellcheck="false"
+          @change="onSet('download_dir', ($event.target as HTMLInputElement).value.trim())"
+        />
+        <span class="field-desc">自定义下载文件的保存位置（留空 = 系统默认下载目录）</span>
+      </div>
+      <div class="field">
         <label for="homepage-input">主页 URL</label>
         <input
           id="homepage-input"

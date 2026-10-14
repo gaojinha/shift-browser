@@ -49,4 +49,9 @@ export default {
     siteResumed: 'Protection resumed for this site',
     setFailed: 'Setting failed, please retry',
   },
+  settings: {
+    downloadDir: 'Download directory',
+    downloadDirDesc: 'Custom location for downloaded files (empty = system default)',
+    downloadDirPlaceholder: 'Empty for system default download directory',
+  },
 }

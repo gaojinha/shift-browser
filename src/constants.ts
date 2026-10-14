@@ -49,6 +49,7 @@ export const SETTINGS_SCHEMA = {
   show_weather: { default: 'true', kind: 'bool', sensitive: false, desc: '启动页显示天气' },
   weather_city: { default: '', kind: 'str', sensitive: false, desc: '天气城市（空=自动定位）' },
   lock_enabled: { default: 'true', kind: 'bool', sensitive: false, desc: '启动锁屏' },
+  download_dir: { default: '', kind: 'str', sensitive: false, desc: '下载保存目录（空=系统默认下载目录）' },
   ai_provider: { default: 'agnes', kind: 'str', sensitive: false, desc: '推理服务（agnes/opencode）' },
   ai_model: { default: 'agnes-2.0-flash', kind: 'str', sensitive: false, desc: 'AI 模型' },
   ai_base_url: { default: 'https://apihub.agnes-ai.com/v1', kind: 'str', sensitive: false, desc: 'AI API 地址' },

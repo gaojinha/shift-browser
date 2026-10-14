@@ -36,6 +36,17 @@ pub(super) async fn warmup_caches(app: &tauri::AppHandle) {
                         .store(v == "true", std::sync::atomic::Ordering::Relaxed);
                 }
             },
+            // 下载目录覆盖值载入（空串/无记录 = 用系统默认）
+            async {
+                if let Ok(Some((v,))) = sqlx::query_as::<_, (String,)>(
+                    "SELECT value FROM settings WHERE key = 'download_dir'",
+                )
+                .fetch_optional(&pool)
+                .await
+                {
+                    crate::engine::platform::set_download_dir_override(&v);
+                }
+            },
         );
     };
     if tokio::time::timeout(std::time::Duration::from_millis(800), work)

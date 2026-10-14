@@ -49,4 +49,9 @@ export default {
     siteResumed: '本页防护已恢复',
     setFailed: '设置失败，请重试',
   },
+  settings: {
+    downloadDir: '下载保存目录',
+    downloadDirDesc: '自定义下载文件的保存位置（留空 = 系统默认下载目录）',
+    downloadDirPlaceholder: '留空使用系统默认下载目录',
+  },
 }

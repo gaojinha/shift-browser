@@ -68,6 +68,7 @@ pub mod settings {
         SettingDef { key: "show_weather", default: "true", kind: Kind::Bool, sensitive: false, desc: "启动页显示天气" },
         SettingDef { key: "weather_city", default: "", kind: Kind::Str, sensitive: false, desc: "天气城市（空=自动定位）" },
         SettingDef { key: "lock_enabled", default: "true", kind: Kind::Bool, sensitive: false, desc: "启动锁屏" },
+        SettingDef { key: "download_dir", default: "", kind: Kind::Str, sensitive: false, desc: "下载保存目录（空=系统默认下载目录）" },
         // ---- AI ----
         SettingDef { key: "ai_provider", default: "agnes", kind: Kind::Str, sensitive: false, desc: "推理服务（agnes/opencode）" },
         SettingDef { key: "ai_model", default: "agnes-2.0-flash", kind: Kind::Str, sensitive: false, desc: "AI 模型" },

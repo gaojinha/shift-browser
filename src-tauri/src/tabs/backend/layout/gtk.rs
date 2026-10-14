@@ -234,11 +234,10 @@ impl TabManager {
                     sanitize_filename(&name)
                   })
                   .unwrap_or_else(|| "download".to_string());
-                // 用系统 XDG 下载目录（~/.config/user-dirs.dirs；中文系统常是 ~/下载），
-                // 避免硬编码 ~/Downloads 与实际落盘位置不一致（用户"找不到下载的文件"）。
+                // 下载目录优先级：用户设置覆盖 > 系统 XDG 目录 > ~/Downloads 兜底。
                 // P0-2：平台目录解析下沉到 engine::platform
-                let dest_dir = crate::engine::platform::download_dir()
-                  .map(|p| p.to_string_lossy().to_string())
+                let dest_dir = crate::engine::platform::get_download_dir_override()
+                  .or_else(|| crate::engine::platform::download_dir().map(|p| p.to_string_lossy().to_string()))
                   .unwrap_or_else(|| {
                     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
                     format!("{}/Downloads", home)

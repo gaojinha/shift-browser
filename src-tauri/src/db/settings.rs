@@ -146,6 +146,8 @@ pub async fn set_setting(db: tauri::State<'_, Db>, key: String, value: String) -
     crate::db::settings_cache::update(&key, &value);
     // 开发者工具开关即时生效（免重启）：新开 webview 创建时读静态值，已开标签关掉重开即可
     sync_devtools_static(&key, &value);
+    // 下载目录覆盖值即时同步（GTK 下载回调同步读，不能查库）
+    sync_download_dir_static(&key, &value);
     Ok(())
 }
 
@@ -155,6 +157,14 @@ fn sync_devtools_static(key: &str, value: &str) {
     if key == "enable_devtools" {
         crate::engine::webview::DEVTOOLS_ENABLED
             .store(value == "true", std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// 下载目录覆盖值同步：落库成功后更新 RwLock，GTK 下载回调同步读。
+/// 空串 = 清除覆盖（回退系统 XDG 目录）。
+fn sync_download_dir_static(key: &str, value: &str) {
+    if key == "download_dir" {
+        crate::engine::platform::set_download_dir_override(value);
     }
 }
 
@@ -185,6 +195,10 @@ pub async fn delete_setting(db: tauri::State<'_, Db>, key: String) -> DbResult<(
         .await?;
     // 性能 P0：同步移除缓存
     crate::db::settings_cache::remove(&key);
+    // 删除下载目录设置时清除覆盖（回退系统默认）
+    if key == "download_dir" {
+        crate::engine::platform::set_download_dir_override("");
+    }
     Ok(())
 }
 
