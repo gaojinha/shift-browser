@@ -60,6 +60,10 @@ describe('i18n 样板：翻译进度条文案', () => {
     expect(i18n.global.t('progress.preparing')).toBe('准备中…')
     expect(i18n.global.t('progress.done', { s: 12 })).toBe('完成 · 12s')
     expect(i18n.global.t('progress.runningEta', { s: 5, eta: 20 })).toBe('5s · 剩20s')
+    // update 节（T-009 toast 文案并入 i18n · 收尾批）
+    expect(
+      i18n.global.t('update.available', { latest: '5.9.0', current: '5.8.3' }),
+    ).toBe('发现新版本 v5.9.0（当前 v5.8.3），到「关于」页或 Release 页获取')
   })
 
   it('切 en 后插值文案跟着变；回切 zh-CN 无残留', async () => {

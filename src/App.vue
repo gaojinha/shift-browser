@@ -3,6 +3,7 @@
 // 结构：TabBar(38) + AddressBar(36) + BookmarksBar(26) + 内容区(webview) + StatusBar(22)
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { useI18n } from 'vue-i18n'
 import { invokeOk } from './utils/invoke'
 import { isDialogGuardedAction } from './utils/shortcut-guard'
 import { useManagedListeners } from './composables/useManagedListeners'
@@ -44,6 +45,7 @@ const groupsStore = useGroupsStore()
 const settingsStore = useSettingsStore()
 const workspacesStore = useWorkspacesStore()
 const aiStore = useAIStore()
+const { t } = useI18n()
 
 // 垂直标签模式（阶段 3.1）：标签栏在左（true）vs 在上（false）
 const verticalTabs = computed(() => settingsStore.get('vertical_tabs') === 'true')
@@ -674,11 +676,7 @@ onMounted(async () => {
   )
     .then((u) => {
       if (!u) return
-      useToastStore().show(
-        `发现新版本 v${u.latestVersion}（当前 v${u.currentVersion}），到「关于」页或 Release 页获取`,
-        'info',
-        8000,
-      )
+      useToastStore().show(t('update.available', { latest: u.latestVersion, current: u.currentVersion }), 'info', 8000)
     })
     .catch(() => {})
 })

@@ -9,4 +9,7 @@ export default {
     title: '翻译中 {info}{failsText}　点击收起',
     fails: '（{n} 段未译）',
   },
+  update: {
+    available: '发现新版本 v{latest}（当前 v{current}），到「关于」页或 Release 页获取',
+  },
 }

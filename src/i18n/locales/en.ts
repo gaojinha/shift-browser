@@ -9,4 +9,7 @@ export default {
     title: 'Translating {info}{failsText} — click to collapse',
     fails: ' ({n} segments untranslated)',
   },
+  update: {
+    available: 'New version v{latest} available (current v{current}) — see the About page or the Releases page',
+  },
 }
