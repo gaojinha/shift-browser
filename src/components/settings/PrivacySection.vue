@@ -19,7 +19,9 @@ const { onSet } = useSettingsSet()
 const privacyLevel = computed(() => {
   const l = settingsStore.get('privacy_shield_level')
   if (l === 'off' || l === 'standard' || l === 'strict') return l
-  // 兼容旧布尔开关
+  // 老值迁移兼容：privacy_shield_level 缺值/异常值时，回退读旧布尔键 privacy_shield
+  // （契约 L84 标记"旧布尔开关，兼容"；与 Rust adblock.rs / privacy.rs 回退同口径：
+  //  'false' → off，其余 → standard）
   return settingsStore.get('privacy_shield') === 'false' ? 'off' : 'standard'
 })
 
