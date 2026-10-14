@@ -110,6 +110,7 @@ pub(crate) async fn rotate_api_token(
     let new = generate_token();
     atomic_write_token(&path, &new).map_err(|e| format!("写入 api-token 失败: {e}"))?;
     *tokens.0.write().await = new.clone();
+    // LOG-SECRET-EXEMPT: 消息文案提及 "token"（轮换状态说明），实际日志值不含密钥
     log::info!("[api] API token 已轮换（旧 token 即时失效）");
     Ok(new)
 }

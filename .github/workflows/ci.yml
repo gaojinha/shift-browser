@@ -94,10 +94,15 @@ jobs:
           bash -n scripts/package-deb.sh
           bash -n scripts/check-rs-file-size.sh
           bash -n scripts/check-bundle-size.sh
+          bash -n scripts/check-log-secrets.sh
       # 大文件红线卡：任意 .rs >400 行必须在文件头带 LINES-EXEMPT 豁免标记
       # （防 page.rs 式治理后反弹，2026-10-14 落地）
       - name: 大文件行数红线检查
         run: bash scripts/check-rs-file-size.sh
+      # R4-10（2026-10-14）：日志密钥扫描——log:: 调用行含 token/password/secret 等
+      # 敏感词时必须带 LOG-SECRET-EXEMPT 豁免注释，防止密钥意外泄漏到日志
+      - name: 日志密钥扫描
+        run: bash scripts/check-log-secrets.sh
       - name: 文档数字防漂移
         run: |
           test "$(grep -c '48 个工具' README.md)" -ge 1

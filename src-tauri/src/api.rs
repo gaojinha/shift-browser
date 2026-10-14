@@ -83,6 +83,7 @@ pub fn spawn(app: AppHandle) {
         app.manage(auth::DashboardTickets::new());
         http::spawn_http(app.clone(), token_shared);
     } else {
+        // LOG-SECRET-EXEMPT: 消息文案提及 "api-token"（初始化失败状态），实际日志值不含密钥
         log::warn!("[api] api-token 初始化失败，HTTP API 未启动");
     }
     tauri::async_runtime::spawn(async move {
