@@ -124,7 +124,7 @@ watch(
         <!-- 左侧导航 -->
         <div class="settings-nav" role="tablist">
           <div class="settings-search">
-            <input v-model="searchQuery" type="text" placeholder="搜索设置…" spellcheck="false" />
+            <input v-model="searchQuery" type="text" placeholder="搜索设置…" aria-label="搜索设置项" spellcheck="false" />
           </div>
           <!-- 搜索结果（有查询时替换分组导航） -->
           <div v-if="searchQuery.trim()" class="search-results">

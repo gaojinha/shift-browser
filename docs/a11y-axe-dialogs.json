@@ -1,61 +1,61 @@
 [
   {
     "scenario": "settings-dialog",
-    "ts": "2026-10-14T08:46:57.779Z",
+    "ts": "2026-10-14T12:53:44.676Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "command-palette",
-    "ts": "2026-10-14T08:47:01.877Z",
+    "ts": "2026-10-14T12:53:48.858Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "address-suggest",
-    "ts": "2026-10-14T08:47:05.493Z",
+    "ts": "2026-10-14T12:53:52.632Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "ai-sidebar",
-    "ts": "2026-10-14T08:47:09.390Z",
+    "ts": "2026-10-14T12:53:56.578Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "history-dialog",
-    "ts": "2026-10-14T08:47:13.066Z",
+    "ts": "2026-10-14T12:54:00.387Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "translate-panel",
-    "ts": "2026-10-14T08:47:16.956Z",
+    "ts": "2026-10-14T12:54:04.729Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "bookmarks-dialog",
-    "ts": "2026-10-14T08:47:20.658Z",
+    "ts": "2026-10-14T12:54:08.731Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "passwords-dialog",
-    "ts": "2026-10-14T08:47:24.368Z",
+    "ts": "2026-10-14T12:54:12.666Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "sessions-dialog",
-    "ts": "2026-10-14T08:47:28.042Z",
+    "ts": "2026-10-14T12:54:16.642Z",
     "counts": {},
     "violations": []
   },
   {
     "scenario": "downloads-dialog",
-    "ts": "2026-10-14T08:47:31.703Z",
+    "ts": "2026-10-14T12:54:20.578Z",
     "counts": {},
     "violations": []
   }
