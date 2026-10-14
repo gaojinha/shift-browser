@@ -121,11 +121,13 @@ watch(
 
 <template>
   <div class="ai-pane">
-    <div class="ai-tabs">
+    <div class="ai-tabs" role="tablist">
       <button
         v-for="t in AI_TABS"
         :key="t.id"
         class="ai-tab"
+        role="tab"
+        :aria-selected="activeTab === t.id"
         :class="{ active: activeTab === t.id }"
         @click="switchTab(t.id)"
       >

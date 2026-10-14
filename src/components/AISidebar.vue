@@ -276,7 +276,7 @@ function onOverlaySelf() {
       </div>
 
       <!-- 对话区 -->
-      <div ref="listRef" class="ai-list" @click="onListClick">
+      <div ref="listRef" class="ai-list" role="log" aria-live="polite" @click="onListClick">
         <div v-if="aiStore.messages.length === 0" class="ai-empty">
           我是 ShiftBrowser 内置 AI 助手，可以聊天、总结当前页面、翻译、解释网页内容。
         </div>

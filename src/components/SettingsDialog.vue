@@ -122,7 +122,7 @@ watch(
     <div class="settings-wrap">
       <div class="settings-body">
         <!-- 左侧导航 -->
-        <div class="settings-nav">
+        <div class="settings-nav" role="tablist">
           <div class="settings-search">
             <input v-model="searchQuery" type="text" placeholder="搜索设置…" spellcheck="false" />
           </div>
@@ -146,6 +146,8 @@ watch(
                 v-for="s in g.items"
                 :key="s.id"
                 class="nav-item"
+                role="tab"
+                :aria-selected="activeSection === s.id"
                 :class="{ active: activeSection === s.id }"
                 @click="activeSection = s.id"
               >

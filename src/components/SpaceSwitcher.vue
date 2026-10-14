@@ -66,7 +66,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
 
 <template>
   <div ref="rootRef" class="space-switcher">
-    <button class="space-btn" :title="'当前空间：' + ws.currentName" @click="toggle">
+    <button class="space-btn" :title="'当前空间：' + ws.currentName" :aria-label="'空间切换：' + ws.currentName" @click="toggle">
       <span class="space-dot" :style="{ background: ws.currentColor || 'var(--accent)' }"></span>
       <span class="space-name">{{ ws.currentName }}</span>
       <span class="space-caret">▾</span>
@@ -93,16 +93,17 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
           @click.stop
         />
         <span v-else class="space-item-name" @click="pick(w.id)">{{ w.name }}</span>
-        <button class="space-mini" title="重命名" @click.stop="startRename(w.id, w.name)">✎</button>
+        <button class="space-mini" title="重命名" aria-label="重命名空间" @click.stop="startRename(w.id, w.name)">✎</button>
         <button
           v-if="confirmDeleteId !== w.id"
           class="space-mini danger"
           title="删除空间"
+          aria-label="删除空间"
           @click.stop="askDelete(w.id)"
         >
           ✕
         </button>
-        <button v-else class="space-mini danger" title="确认删除" @click.stop="doDelete(w.id)">
+        <button v-else class="space-mini danger" title="确认删除" aria-label="确认删除" @click.stop="doDelete(w.id)">
           确认
         </button>
       </div>

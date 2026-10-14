@@ -497,6 +497,8 @@ function onFaviconError(e: Event) {
           <button
             class="group-toggle"
             :title="g.group.collapsed ? '展开' : '折叠'"
+            :aria-label="g.group.collapsed ? '展开分组' : '折叠分组'"
+            :aria-expanded="!g.group.collapsed"
             @click="onToggleCollapse(g.group.id)"
           >
             {{ g.group.collapsed ? '▶' : '▼' }}
@@ -537,53 +539,54 @@ function onFaviconError(e: Event) {
         </template>
       </template>
     </div>
-    <button class="new-tab-btn" title="新建标签" @click="onNewTab">+</button>
-    <button class="new-tab-btn priv-tab-btn" title="新建无痕标签（不计历史、Cookie 不落盘）" @click="onNewPrivateTab">🕶</button>
+    <button class="new-tab-btn" title="新建标签" aria-label="新建标签" @click="onNewTab">+</button>
+    <button class="new-tab-btn priv-tab-btn" title="新建无痕标签" aria-label="新建无痕标签" @click="onNewPrivateTab">🕶</button>
 
     <!-- 窗口控制（标签栏 = 标题栏，无边框窗口） -->
     <div class="window-controls">
-      <button class="wc-btn" title="最小化" @click="onMinimize">─</button>
-      <button class="wc-btn" title="最大化/还原" @click="onToggleMax">□</button>
-      <button class="wc-btn wc-close" title="关闭" @click="onClose">✕</button>
+      <button class="wc-btn" title="最小化" aria-label="最小化" @click="onMinimize">─</button>
+      <button class="wc-btn" title="最大化/还原" aria-label="最大化或还原" @click="onToggleMax">□</button>
+      <button class="wc-btn wc-close" title="关闭" aria-label="关闭" @click="onClose">✕</button>
     </div>
 
     <!-- 右键菜单（原版标准菜单：固定/静音/关闭/复制网址 + 移动到分组；按住可拖动位置） -->
     <div
       v-if="menu"
       class="context-menu"
+      role="menu"
       :class="{ 'menu-dragging': menuDragging }"
       :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
       @click.stop
       @contextmenu.prevent
       @mousedown="onMenuMouseDown"
     >
-      <div class="menu-item" @click="onMenuPin">📌 固定/取消固定</div>
-      <div class="menu-item" @click="onMenuMute">🔇 静音/取消静音</div>
-      <div class="menu-item" @click="onMenuSplit">
+      <div class="menu-item" role="menuitem" @click="onMenuPin">📌 固定/取消固定</div>
+      <div class="menu-item" role="menuitem" @click="onMenuMute">🔇 静音/取消静音</div>
+      <div class="menu-item" role="menuitem" @click="onMenuSplit">
         {{ tabsStore.splitTabId === menu?.tabId ? '◫ 关闭分屏' : '◫ 在右侧分屏' }}
       </div>
       <div class="menu-divider"></div>
-      <div class="menu-item" @click="onMenuCloseTab">✕ 关闭标签</div>
-      <div class="menu-item" @click="onMenuCloseOthers">关闭其他标签</div>
-      <div class="menu-item" @click="onMenuCloseRight">关闭右侧标签</div>
-      <div class="menu-item" @click="onMenuCloseSameDomain">关闭同域名标签</div>
-      <div class="menu-item" @click="onMenuCloseDuplicates">关闭重复标签</div>
-      <div class="menu-item" @click="onMenuMuteAll">🔇 全部静音/取消</div>
+      <div class="menu-item" role="menuitem" @click="onMenuCloseTab">✕ 关闭标签</div>
+      <div class="menu-item" role="menuitem" @click="onMenuCloseOthers">关闭其他标签</div>
+      <div class="menu-item" role="menuitem" @click="onMenuCloseRight">关闭右侧标签</div>
+      <div class="menu-item" role="menuitem" @click="onMenuCloseSameDomain">关闭同域名标签</div>
+      <div class="menu-item" role="menuitem" @click="onMenuCloseDuplicates">关闭重复标签</div>
+      <div class="menu-item" role="menuitem" @click="onMenuMuteAll">🔇 全部静音/取消</div>
       <div class="menu-divider"></div>
-      <div class="menu-item" @click="onMenuCopyUrl">🔗 复制网址</div>
+      <div class="menu-item" role="menuitem" @click="onMenuCopyUrl">🔗 复制网址</div>
       <div class="menu-divider"></div>
       <div class="menu-title">移动到分组</div>
       <div
         v-for="g in groupsStore.groups"
         :key="g.id"
-        class="menu-item"
+        class="menu-item" role="menuitem"
         @click="onMoveToGroup(g.id)"
       >
         <span class="menu-dot" :style="{ background: g.color }"></span>{{ g.name }}
       </div>
-      <div class="menu-item" @click="onMoveToGroup(null)">取消分组</div>
+      <div class="menu-item" role="menuitem" @click="onMoveToGroup(null)">取消分组</div>
       <div class="menu-divider"></div>
-      <div class="menu-item accent" @click="onNewGroupFromMenu">＋ 新建分组并移动</div>
+      <div class="menu-item accent" role="menuitem" @click="onNewGroupFromMenu">＋ 新建分组并移动</div>
     </div>
   </div>
 </template>

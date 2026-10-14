@@ -222,17 +222,17 @@ async function diagnoseNet() {
       <span v-if="domainText" class="status-domain">{{ domainText }}</span>
     </span>
 
-    <button class="privacy-badge" :class="privacyClass" :title="privacyTitle" @click="emit('openPrivacy')">
+    <button class="privacy-badge" :class="privacyClass" :title="privacyTitle" :aria-label="privacyTitle" @click="emit('openPrivacy')">
       {{ privacyText }}
     </button>
 
     <span class="status-right">
-      <span class="net-status" :class="netClass" :title="netTitle + '（点击诊断断在哪一层）'" @click="diagnoseNet">{{ netIcon }} {{ netPing }} {{ netSpeed }}</span>
-      <button class="status-btn dl-btn" title="下载管理" @click="emit('openDownloads')">
+      <span class="net-status" :class="netClass" :title="netTitle + '（点击诊断断在哪一层）'" :aria-label="netTitle + '（点击诊断断在哪一层）'" @click="diagnoseNet">{{ netIcon }} {{ netPing }} {{ netSpeed }}</span>
+      <button class="status-btn dl-btn" :title="activeDownloads > 0 ? `下载管理（${activeDownloads} 进行中）` : '下载管理'" :aria-label="activeDownloads > 0 ? `下载管理（${activeDownloads} 进行中）` : '下载管理'" @click="emit('openDownloads')">
         📥<span v-if="activeDownloads > 0" class="dl-badge">{{ activeDownloads }}</span>
       </button>
-      <button class="status-btn" title="设置" @click="emit('openSettings')">⚙️</button>
-      <button class="status-btn" title="帮助" @click="openHelp">❓</button>
+      <button class="status-btn" title="设置" aria-label="设置" @click="emit('openSettings')">⚙️</button>
+      <button class="status-btn" title="帮助" aria-label="帮助" @click="openHelp">❓</button>
     </span>
   </div>
 </template>

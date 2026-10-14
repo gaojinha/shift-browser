@@ -255,10 +255,10 @@ async function onReader() {
 <template>
   <div class="address-bar">
     <SpaceSwitcher />
-    <button class="nav-btn" data-nav="back" title="后退" :disabled="!tabsStore.canGoBack" @click="onBack">
+    <button class="nav-btn" data-nav="back" title="后退" aria-label="后退" :disabled="!tabsStore.canGoBack" @click="onBack">
       <AppIcon name="arrowLeft" :size="15" />
     </button>
-    <button class="nav-btn" data-nav="forward" title="前进" :disabled="!tabsStore.canGoForward" @click="onForward">
+    <button class="nav-btn" data-nav="forward" title="前进" aria-label="前进" :disabled="!tabsStore.canGoForward" @click="onForward">
       <AppIcon name="arrowRight" :size="15" />
     </button>
     <button
@@ -266,16 +266,26 @@ async function onReader() {
       data-nav="reload"
       :class="{ spinning: isLoading }"
       title="刷新"
+      aria-label="刷新"
       :disabled="isLoading"
       @click="onRefresh"
     >
       <AppIcon name="rotateCw" :size="15" />
     </button>
-    <button class="nav-btn" data-nav="home" title="主页" @click="onHome">
+    <button class="nav-btn" data-nav="home" title="主页" aria-label="主页" @click="onHome">
       <AppIcon name="house" :size="15" />
     </button>
     <div class="address-container">
-      <span v-if="isHttps" class="lock-icon" title="查看证书（点击打开证书中心）" @click="emit('openCerts')">
+      <span
+        v-if="isHttps"
+        class="lock-icon"
+        role="button"
+        tabindex="0"
+        title="查看证书（点击打开证书中心）"
+        aria-label="查看证书"
+        @click="emit('openCerts')"
+        @keydown.enter.prevent="emit('openCerts')"
+      >
         <AppIcon name="lock" :size="12" />
       </span>
       <input
@@ -291,11 +301,13 @@ async function onReader() {
         @blur="onBlur"
       />
       <div v-if="isLoading" class="load-bar"></div>
-      <div v-if="showSuggestions" class="suggest-dropdown">
+      <div v-if="showSuggestions" class="suggest-dropdown" role="listbox">
         <div
           v-for="(s, i) in suggestions"
           :key="s.type + s.id"
           class="suggest-item"
+          role="option"
+          :aria-selected="i === selectedIndex"
           :class="{ selected: i === selectedIndex }"
           @mousedown.prevent="openSuggestion(s)"
         >
@@ -311,34 +323,35 @@ async function onReader() {
       class="action-btn"
       :disabled="readerLoading"
       :title="readerTip || '阅读模式（提取正文大字看）'"
+      aria-label="阅读模式"
       @click="onReader"
     >
       <AppIcon name="bookOpen" :size="15" :class="{ 'icon-spin': readerLoading }" />
     </button>
     <span v-if="readerTip" class="reader-tip" :title="readerTip">{{ readerTip }}</span>
     <TranslateProgress />
-    <button class="action-btn translate-btn" title="翻译（粘贴文本→中文）" @click="emit('openTranslate')">
+    <button class="action-btn translate-btn" title="翻译" aria-label="翻译" @click="emit('openTranslate')">
       <AppIcon name="globe" :size="15" />
     </button>
-    <button class="action-btn ai-btn" title="AI 助手" @click="emit('openAi')">
+    <button class="action-btn ai-btn" title="AI 助手" aria-label="AI 助手" @click="emit('openAi')">
       <AppIcon name="sparkles" :size="15" />
     </button>
-    <button class="action-btn hide-narrow" title="密码管理" @click="emit('openPasswords')">
+    <button class="action-btn hide-narrow" title="密码管理" aria-label="密码管理" @click="emit('openPasswords')">
       <AppIcon name="key" :size="15" />
     </button>
-    <button class="action-btn hide-narrow" title="标签分组" @click="emit('openGroups')">
+    <button class="action-btn hide-narrow" title="标签分组" aria-label="标签分组" @click="emit('openGroups')">
       <AppIcon name="folder" :size="15" />
     </button>
-    <button class="action-btn hide-narrow" title="用户脚本" @click="emit('openUserscripts')">
+    <button class="action-btn hide-narrow" title="用户脚本" aria-label="用户脚本" @click="emit('openUserscripts')">
       <AppIcon name="scroll" :size="15" />
     </button>
-    <button class="action-btn hide-narrow" title="历史记录（Ctrl+H）" @click="emit('openHistory')">
+    <button class="action-btn hide-narrow" title="历史记录" aria-label="历史记录" @click="emit('openHistory')">
       <AppIcon name="clock" :size="15" />
     </button>
-    <button class="action-btn" title="下载管理" @click="emit('openDownloads')">
+    <button class="action-btn" title="下载管理" aria-label="下载管理" @click="emit('openDownloads')">
       <AppIcon name="download" :size="15" />
     </button>
-    <button class="action-btn" title="设置" @click="emit('openSettings')">
+    <button class="action-btn" title="设置" aria-label="设置" @click="emit('openSettings')">
       <AppIcon name="gear" :size="15" />
     </button>
   </div>
