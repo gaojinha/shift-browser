@@ -13,6 +13,7 @@ use std::collections::VecDeque;
 use std::sync::{Mutex, OnceLock};
 
 use super::{AgentActionParams, AgentStep, MultiStepPlan};
+use crate::error::{AppError, CommandResult};
 
 /// 单条动作历史记录
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -91,12 +92,12 @@ pub fn action_history_list(limit: Option<usize>) -> Vec<ActionHistoryItem> {
 }
 
 /// 按步号取回参数（回放/重试用；找不到返回 Err）
-pub fn rebuild_params(step: u64) -> Result<AgentActionParams, String> {
+pub fn rebuild_params(step: u64) -> CommandResult<AgentActionParams> {
     let h = action_history();
     let item = h
         .iter()
         .find(|i| i.step == step)
-        .ok_or_else(|| format!("没有第 {} 步的历史", step))?;
+        .ok_or_else(|| AppError::validation(format!("没有第 {} 步的历史", step)))?;
     Ok(AgentActionParams {
         action: item.action.clone(),
         selector: item.selector.clone(),
@@ -108,24 +109,25 @@ pub fn rebuild_params(step: u64) -> Result<AgentActionParams, String> {
 }
 
 /// 最近一次失败动作的步号（重试用；无则 Err）
-pub fn last_failed_step() -> Result<u64, String> {
+pub fn last_failed_step() -> CommandResult<u64> {
     let h = action_history();
     h.iter()
         .rev()
         .find(|i| !i.ok)
         .map(|i| i.step)
-        .ok_or_else(|| "没有失败过的动作".to_string())
+        .ok_or_else(|| AppError::validation("没有失败过的动作"))
+        .map_err(Into::into)
 }
 
 /// 从历史里挑出**所有失败步**并重建参数（整批重试地基）。
 /// 先收集步号再重建，避免与 `rebuild_params` 重复加锁（std Mutex 不可重入）。
-pub fn failed_action_params() -> Result<Vec<(u64, AgentActionParams)>, String> {
+pub fn failed_action_params() -> CommandResult<Vec<(u64, AgentActionParams)>> {
     let steps: Vec<u64> = {
         let h = action_history();
         h.iter().filter(|i| !i.ok).map(|i| i.step).collect()
     };
     if steps.is_empty() {
-        return Err("历史里没有失败过的动作".to_string());
+        return Err(AppError::validation("历史里没有失败过的动作").into());
     }
     steps
         .into_iter()

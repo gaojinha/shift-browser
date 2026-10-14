@@ -12,6 +12,8 @@
 
 use serde_json::{json, Value};
 
+use crate::error::{AppError, CommandResult};
+
 /// 动作白名单（AI 只能请求这些动作）——单一来源见 `capabilities::agent_actions`
 pub use crate::capabilities::agent_actions::IDS as AGENT_ACTIONS;
 
@@ -124,10 +126,15 @@ pub struct AgentActionParams {
 
 /// 生成动作的 JS（参数 JSON 序列化嵌入，防注入）。
 /// 返回 Ok(Some(js)) = 需在页面执行；Ok(None) = 后端动作（wait/navigate/back/snapshot）。
-pub fn build_action_js(params: &AgentActionParams) -> Result<Option<String>, String> {
+pub fn build_action_js(params: &AgentActionParams) -> CommandResult<Option<String>> {
     let action = params.action.as_str();
     if !AGENT_ACTIONS.contains(&action) {
-        return Err(format!("动作 '{}' 不在白名单内", action));
+        // 白名单是安全策略：不在名单即拒绝（E_PERM，重试无意义）
+        return Err(AppError::permission(format!(
+            "动作 '{}' 不在白名单内",
+            action
+        ))
+        .into());
     }
     match action {
         "click" => {
@@ -172,24 +179,34 @@ pub fn build_action_js(params: &AgentActionParams) -> Result<Option<String>, Str
         }
         // 以下为后端动作（不生成 JS）
         "wait" | "navigate" | "back" | "snapshot" => Ok(None),
-        _ => Err(format!("动作 '{}' 未实现", action)),
+        // 在白名单内却没有模板＝代码不一致（缺陷）
+        _ => Err(AppError::internal(format!("动作 '{}' 未实现", action)).into()),
     }
 }
 
 /// 解析页面 JS 返回的 JSON 结果（{ok, text?, error?}）
-pub fn parse_js_result(raw: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(raw).map_err(|_| format!("页面脚本返回异常: {}", raw))?;
+pub fn parse_js_result(raw: &str) -> CommandResult<String> {
+    // 固定脚本永不抛异常且必返回 JSON——解析失败＝内部异常
+    let v: Value = serde_json::from_str(raw)
+        .map_err(|_| AppError::internal(format!("页面脚本返回异常: {}", raw)))?;
     if v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false) {
         Ok(v.get("text")
             .and_then(|t| t.as_str())
             .unwrap_or("")
             .to_string())
     } else {
-        Err(v
+        let msg = v
             .get("error")
             .and_then(|e| e.as_str())
             .unwrap_or("动作执行失败")
-            .to_string())
+            .to_string();
+        // 错误消息全部来自 build_action_js 的固定模板：密码框拒绝是策略（E_PERM），
+        // 其余（元素未找到/找不到表单等）是页面状态与参数不匹配（E_VALIDATION）
+        if msg.contains("拒绝") {
+            Err(AppError::permission(msg).into())
+        } else {
+            Err(AppError::validation(msg).into())
+        }
     }
 }
 

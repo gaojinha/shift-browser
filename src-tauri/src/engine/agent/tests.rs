@@ -69,6 +69,35 @@ fn parse_js_result_ok_and_err() {
     assert!(parse_js_result(r#"{"ok":false,"error":"元素未找到"}"#).is_err());
 }
 
+/// 防漂移：parse_js_result 的错误码分类（R1 第二批 · 2026-10-14）
+/// - 密码框拒绝（固定模板"拒绝…"）→ E_PERM（策略，重试无意义）
+/// - 其余页面态（元素未找到/找不到表单）→ E_VALIDATION（可改参重试）
+/// - 非法 JSON（脚本契约被破坏）→ E_INTERNAL（缺陷）
+#[test]
+fn parse_js_result_error_codes() {
+    let err = parse_js_result(r#"{"ok":false,"error":"拒绝操作密码框"}"#).unwrap_err();
+    assert_eq!(err.code, crate::error::E_PERM);
+    let err = parse_js_result(r#"{"ok":false,"error":"元素未找到"}"#).unwrap_err();
+    assert_eq!(err.code, crate::error::E_VALIDATION);
+    let err = parse_js_result("not-json").unwrap_err();
+    assert_eq!(err.code, crate::error::E_INTERNAL);
+}
+
+/// 防漂移：白名单外动作必须 E_PERM（R1 第二批 · 2026-10-14）
+#[test]
+fn build_action_js_whitelist_is_perm() {
+    let p = AgentActionParams {
+        action: "rm_rf".to_string(),
+        selector: None,
+        value: None,
+        direction: None,
+        url: None,
+        ms: None,
+    };
+    let err = build_action_js(&p).unwrap_err();
+    assert_eq!(err.code, crate::error::E_PERM);
+}
+
 #[test]
 fn describe_action_human_readable() {
     let p = AgentActionParams {

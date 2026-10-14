@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::error::{AppError, CommandResult};
+use crate::error::{AppError, CommandError, CommandResult};
 
 /// 待确认的动作：request_id -> oneshot 应答通道（用户允许/拒绝）
 static PENDING: OnceLock<Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>> =
@@ -29,7 +29,7 @@ fn pending() -> &'static Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool
 pub async fn request_agent_action(
     app: &AppHandle,
     params: &crate::engine::agent::AgentActionParams,
-) -> Result<bool, String> {
+) -> CommandResult<bool> {
     let request_id = uuid::Uuid::new_v4().to_string();
     let description = crate::engine::agent::describe_action(params);
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -52,10 +52,10 @@ pub async fn request_agent_action(
             log::info!("[agent] 动作确认结果: approved={}", approved);
             Ok(approved)
         }
-        Ok(Err(_)) => Err("动作确认通道已关闭".to_string()),
+        Ok(Err(_)) => Err(AppError::internal("动作确认通道已关闭").into()),
         Err(_) => {
             pending().lock().unwrap().remove(&request_id);
-            Err("动作确认超时（60 秒未响应）".to_string())
+            Err(AppError::timeout("动作确认超时（60 秒未响应）").into())
         }
     }
 }
@@ -82,7 +82,7 @@ pub fn agent_confirm_action(request_id: String, approved: bool) -> CommandResult
 pub async fn request_multi_step_action(
     app: &AppHandle,
     plan: &crate::engine::agent::MultiStepPlan,
-) -> Result<bool, String> {
+) -> CommandResult<bool> {
     let request_id = uuid::Uuid::new_v4().to_string();
     let description = crate::engine::agent::describe_multi_step(plan);
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -114,10 +114,10 @@ pub async fn request_multi_step_action(
             log::info!("[agent] 多步动作确认结果: approved={}", approved);
             Ok(approved)
         }
-        Ok(Err(_)) => Err("多步确认通道已关闭".to_string()),
+        Ok(Err(_)) => Err(AppError::internal("多步确认通道已关闭").into()),
         Err(_) => {
             pending().lock().unwrap().remove(&request_id);
-            Err("多步确认超时（120 秒未响应）".to_string())
+            Err(AppError::timeout("多步确认超时（120 秒未响应）").into())
         }
     }
 }
@@ -146,7 +146,7 @@ pub async fn execute_multi_step_action(
     window: &tauri::WebviewWindow,
     state: &crate::tabs::TabManager,
     plan: &crate::engine::agent::MultiStepPlan,
-) -> Result<String, String> {
+) -> CommandResult<String> {
     let mut results = Vec::new();
     for step in &plan.steps {
         let params = crate::engine::agent::AgentActionParams {
@@ -233,11 +233,11 @@ pub async fn agent_action_replay_or_retry(
     };
     match r {
         Ok(txt) => Ok(format!("{}第 {} 步（{}）→ {}", verb, step_no, action, txt)),
-        Err(e) => Err(AppError::internal(format!(
-            "{}第 {} 步（{}）失败: {}",
-            verb, step_no, action, e
-        ))
-        .into()),
+        // 保留原始错误码（超时/白名单等分类不因回放包装丢失），仅附加上下文
+        Err(e) => Err(CommandError {
+            code: e.code,
+            message: format!("{}第 {} 步（{}）失败: {}", verb, step_no, action, e.message),
+        }),
     }
 }
 
@@ -256,7 +256,7 @@ pub async fn agent_actions_batch_retry(
     if !approved {
         return Ok("整批重试已被用户拒绝".to_string());
     }
-    Ok(execute_multi_step_action(&app, &window, &state, &plan).await?)
+    execute_multi_step_action(&app, &window, &state, &plan).await
 }
 
 pub async fn execute_agent_action(
@@ -264,7 +264,7 @@ pub async fn execute_agent_action(
     window: &tauri::WebviewWindow,
     state: &crate::tabs::TabManager,
     params: &crate::engine::agent::AgentActionParams,
-) -> Result<String, String> {
+) -> CommandResult<String> {
     let action = params.action.as_str();
 
     // 后端动作（不依赖页面 JS）
@@ -277,38 +277,52 @@ pub async fn execute_agent_action(
             return Ok(format!("已等待 {} 毫秒", params.ms.unwrap_or(500)));
         }
         "navigate" => {
-            let url = params.url.clone().ok_or_else(|| "缺少 url".to_string())?;
+            let url = params
+                .url
+                .clone()
+                .ok_or_else(|| AppError::validation("缺少 url"))?;
             let id = state
                 .runtime_snapshot()
                 .1
-                .ok_or_else(|| "没有活动标签".to_string())?;
+                .ok_or_else(|| AppError::validation("没有活动标签"))?;
             let label = format!("tab-{}", id);
             let wv = window
                 .get_webview(&label)
-                .ok_or_else(|| "活动标签的 webview 不存在".to_string())?;
+                .ok_or_else(|| AppError::internal("活动标签的 webview 不存在"))?;
             // Agent 导航守卫（非用户直驱，必须设防）：scheme 白名单 + 内网拒绝。
             // 用户标签页自己逛内网不管（路由器后台要能开），但 AI 驱使的跳转走三件套，
             // 与 open_and_read 的 guard_url 同口径，防“导航+读取”内网链。
-            let parsed = url::Url::parse(&url).map_err(|e| format!("网址不合法: {}", e))?;
+            let parsed = url::Url::parse(&url)
+                .map_err(|e| AppError::validation(format!("网址不合法: {e}")))?;
             match parsed.scheme() {
                 "http" | "https" | "shift" => {}
-                _ => return Err(format!("Agent 不允许导航到该地址类型: {}", parsed.scheme())),
+                _ => {
+                    return Err(AppError::permission(format!(
+                        "Agent 不允许导航到该地址类型: {}",
+                        parsed.scheme()
+                    ))
+                    .into())
+                }
             }
             let host = parsed.host_str().unwrap_or("").to_string();
             if !host.is_empty() && !crate::net_guard::host_permitted(&host) {
-                return Err(format!("Agent 不允许导航到内网地址：{host}"));
+                return Err(
+                    AppError::permission(format!("Agent 不允许导航到内网地址：{host}")).into(),
+                );
             }
             if host.parse::<std::net::IpAddr>().is_err() && !host.is_empty() {
                 let port = parsed.port_or_known_default().unwrap_or(80);
                 let sock: Vec<std::net::SocketAddr> =
                     tokio::net::lookup_host((host.as_str(), port))
                         .await
-                        .map_err(|_| format!("域名解析失败，已拒绝：{host}"))?
+                        .map_err(|_| AppError::net(format!("域名解析失败，已拒绝：{host}")))?
                         .collect();
-                crate::ai::check_resolved_ips(&host, sock.iter().map(|s| s.ip()), port)?;
+                // SSRF 双答防护：拒绝类错误统一 E_PERM（同 error.rs 表：SSRF→E_PERM）
+                crate::ai::check_resolved_ips(&host, sock.iter().map(|s| s.ip()), port)
+                    .map_err(AppError::permission)?;
             }
             wv.navigate(parsed)
-                .map_err(|e| format!("导航失败: {}", e))?;
+                .map_err(|e| AppError::net(format!("导航失败: {e}")))?;
             // 存量同步（与 navigate_tab/切标签兑现同口径）：AI 驱使跳转后存的 url
             // 若还是旧的，标签栏与地址栏就两岔；加载完成信号会再对一次，这里先对齐。
             state.mutate(|s| {
@@ -324,17 +338,20 @@ pub async fn execute_agent_action(
             let id = state
                 .runtime_snapshot()
                 .1
-                .ok_or_else(|| "没有活动标签".to_string())?;
+                .ok_or_else(|| AppError::validation("没有活动标签"))?;
             let label = format!("tab-{}", id);
             let wv = window
                 .get_webview(&label)
-                .ok_or_else(|| "活动标签的 webview 不存在".to_string())?;
+                .ok_or_else(|| AppError::internal("活动标签的 webview 不存在"))?;
             wv.eval("history.back()")
-                .map_err(|e| format!("后退失败: {}", e))?;
+                .map_err(|e| AppError::internal(format!("后退失败: {e}")))?;
             return Ok("已后退一页".to_string());
         }
         "snapshot" => {
-            let snap = crate::content_cmd::content_snapshot(app.clone()).await?;
+            // content_snapshot 的三处 Err 均为服务端状态异常（未初始化/webview 缺失）
+            let snap = crate::content_cmd::content_snapshot(app.clone())
+                .await
+                .map_err(AppError::internal)?;
             // 用 serde_json 序列化快照给 AI（限制长度）
             let text = serde_json::to_string(&snap).unwrap_or_default();
             return Ok(text.chars().take(3000).collect());
@@ -344,15 +361,15 @@ pub async fn execute_agent_action(
 
     // 页面 JS 动作（click/fill/scroll/read/submit）
     let js = crate::engine::agent::build_action_js(params)?
-        .ok_or_else(|| "动作未生成脚本".to_string())?;
+        .ok_or_else(|| AppError::internal("动作未生成脚本"))?;
     let id = state
         .runtime_snapshot()
         .1
-        .ok_or_else(|| "没有活动标签".to_string())?;
+        .ok_or_else(|| AppError::validation("没有活动标签"))?;
     let label = format!("tab-{}", id);
     let wv = window
         .get_webview(&label)
-        .ok_or_else(|| "活动标签的 webview 不存在".to_string())?;
+        .ok_or_else(|| AppError::internal("活动标签的 webview 不存在"))?;
 
     // 只发起 JS 执行（with_webview 闭包内不阻塞），结果异步回来
     let (tx, rx) = std::sync::mpsc::channel();
@@ -361,14 +378,14 @@ pub async fn execute_agent_action(
             let _ = tx.send(res);
         });
     })
-    .map_err(|e| format!("动作执行失败: {}", e))?;
+    .map_err(|e| AppError::internal(format!("动作执行失败: {e}")))?;
 
     let raw = rx
         .recv_timeout(std::time::Duration::from_secs(
             crate::contracts::timeout::WEBVIEW_IPC_SECS,
         ))
-        .map_err(|e| format!("动作执行超时: {}", e))?
-        .map_err(|e| format!("页面脚本执行失败: {}", e))?;
+        .map_err(|e| AppError::timeout(format!("动作执行超时: {e}")))?
+        .map_err(|e| AppError::internal(format!("页面脚本执行失败: {e}")))?;
     crate::engine::agent::parse_js_result(&raw)
 }
 
@@ -397,7 +414,7 @@ pub async fn agent_debug_execute(
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| AppError::internal("主窗口不存在"))?;
-    Ok(execute_agent_action(&app, &window, &state, &params).await?)
+    execute_agent_action(&app, &window, &state, &params).await
 }
 
 #[cfg(test)]
