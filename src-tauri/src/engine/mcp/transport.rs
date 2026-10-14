@@ -190,10 +190,12 @@ pub(super) fn connections() -> &'static Mutex<HashMap<i64, Arc<tokio::sync::Mute
 static CONNECT_LOCKS: OnceLock<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
 
 pub(super) fn connect_lock(server_id: i64) -> Arc<tokio::sync::Mutex<()>> {
+    // 锁中毒毒化恢复（model.rs 先例）：锁无状态，毒化后数据仍可用，
+    // 直接取内层数据继续，不 panic（AGENTS.md 铁律：锁一律毒化恢复或降级）
     let mut map = CONNECT_LOCKS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
-        .unwrap();
+        .unwrap_or_else(|p| p.into_inner());
     map.entry(server_id)
         .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
         .clone()
