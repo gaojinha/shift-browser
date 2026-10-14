@@ -351,7 +351,7 @@ pub async fn execute_agent_action(
             // content_snapshot 的三处 Err 均为服务端状态异常（未初始化/webview 缺失）
             let snap = crate::content_cmd::content_snapshot(app.clone())
                 .await
-                .map_err(AppError::internal)?;
+                .map_err(AppError::from)?;
             // 用 serde_json 序列化快照给 AI（限制长度）
             let text = serde_json::to_string(&snap).unwrap_or_default();
             return Ok(text.chars().take(3000).collect());

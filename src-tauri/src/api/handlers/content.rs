@@ -243,7 +243,9 @@ pub(super) async fn translate(app: &AppHandle, req: &Value) -> Value {
 pub(super) async fn snapshot(app: &AppHandle, _req: &Value) -> Value {
     match crate::content_cmd::content_snapshot(app.clone()).await {
         Ok(s) => json!({"ok": true, "data": s}),
-        Err(e) => AppError::internal(e).error_json(),
+        // R4-1 成对改：透传命令侧错误码（不再硬编码 E_INTERNAL），
+        // AppError::from(CommandError) 已在 error.rs 实现精确映射
+        Err(e) => AppError::from(e).error_json(),
     }
 }
 
