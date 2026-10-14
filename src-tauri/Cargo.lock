@@ -4238,7 +4238,7 @@ dependencies = [
  "aes-gcm",
  "ammonia",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "cairo-rs",
  "encoding_rs",
  "futures-util",

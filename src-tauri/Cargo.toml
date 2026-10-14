@@ -54,7 +54,7 @@ tauri-plugin-single-instance = "2"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
 aes-gcm = "0.10"
 rand = "0.8"
-base64 = "0.22"
+base64 = "0.23"
 # 用户账号密码哈希（PBKDF2，与原版 Electron 一致：10 万次迭代 SHA-512）
 pbkdf2 = "0.12"
 hmac = "0.12"
