@@ -255,14 +255,15 @@ async function onReader() {
 <template>
   <div class="address-bar">
     <SpaceSwitcher />
-    <button class="nav-btn" title="后退" :disabled="!tabsStore.canGoBack" @click="onBack">
+    <button class="nav-btn" data-nav="back" title="后退" :disabled="!tabsStore.canGoBack" @click="onBack">
       <AppIcon name="arrowLeft" :size="15" />
     </button>
-    <button class="nav-btn" title="前进" :disabled="!tabsStore.canGoForward" @click="onForward">
+    <button class="nav-btn" data-nav="forward" title="前进" :disabled="!tabsStore.canGoForward" @click="onForward">
       <AppIcon name="arrowRight" :size="15" />
     </button>
     <button
       class="nav-btn"
+      data-nav="reload"
       :class="{ spinning: isLoading }"
       title="刷新"
       :disabled="isLoading"
@@ -270,7 +271,7 @@ async function onReader() {
     >
       <AppIcon name="rotateCw" :size="15" />
     </button>
-    <button class="nav-btn" title="主页" @click="onHome">
+    <button class="nav-btn" data-nav="home" title="主页" @click="onHome">
       <AppIcon name="house" :size="15" />
     </button>
     <div class="address-container">

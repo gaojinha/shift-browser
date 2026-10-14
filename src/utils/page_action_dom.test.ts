@@ -314,12 +314,30 @@ describe('key / hover / scroll', () => {
     expect(win.eval('String(window.__ov)')).toBe('1')
   })
 
-  it('scroll top → ok_action（jsdom 无滚动引擎，只验动作成功）', () => {
-    const { result } = runAction('<body><p>x</p></body>', {
+  it('scroll down → scrollTo(0, 600)（stub 验证坐标，消 jsdom not-implemented 噪声）', () => {
+    const { result, win } = runAction('<body><p>x</p></body>', {
       action: 'scroll',
-      direction: 'top',
+      direction: 'down',
+      pre: "window.scrollTo = function (x, y) { window.__scroll = [x, y]; };",
     })
     expect(result.ok_action).toBe('scroll')
+    expect(win.eval('JSON.stringify(window.__scroll)')).toBe('[0,600]')
+  })
+
+  it('scroll top → scrollTo(0, 0)；up 越顶钳到 0', () => {
+    const { win } = runAction('<body><p>x</p></body>', {
+      action: 'scroll',
+      direction: 'top',
+      pre: "window.scrollTo = function (x, y) { window.__scroll = [x, y]; };",
+    })
+    expect(win.eval('JSON.stringify(window.__scroll)')).toBe('[0,0]')
+    const { win: win2 } = runAction('<body><p>x</p></body>', {
+      action: 'scroll',
+      direction: 'up',
+      pre: "window.scrollTo = function (x, y) { window.__scroll = [x, y]; };",
+    })
+    // scrollY=0 时 up 的负值被 Math.max(0,·) 钳到 0
+    expect(win2.eval('JSON.stringify(window.__scroll)')).toBe('[0,0]')
   })
 })
 

@@ -24,7 +24,8 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
 }))
 vi.mock('../utils/webview', () => ({
-  setWebviewVisible: vi.fn(),
+  // 统一口径：一律返回 promise（AddressBar 侧对它 .catch()；能 .catch() 的 mock 两处通用）
+  setWebviewVisible: vi.fn(() => Promise.resolve()),
 }))
 
 import { useTabsStore } from '../stores/tabs'

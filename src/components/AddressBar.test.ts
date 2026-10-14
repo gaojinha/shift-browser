@@ -120,26 +120,27 @@ describe('AddressBar：回车导航分流', () => {
 })
 
 describe('AddressBar：导航按钮', () => {
+  // 稳定钩子 data-nav（收尾批③）：i18n 全量迁移改 title 文案后测试不崩
   it('刷新按钮 → reloadTab(active.id)', async () => {
     const { wrapper, tabsStore } = mountWith([makeTab('a')], 'a')
     const spy = vi.spyOn(tabsStore, 'reloadTab').mockResolvedValue(undefined)
-    await wrapper.find('.nav-btn[title="刷新"]').trigger('click')
+    await wrapper.find('[data-nav="reload"]').trigger('click')
     expect(spy).toHaveBeenCalledWith('a')
   })
 
   it('后退按钮：canGoBack=false 禁用；true 时点击 → goBack', async () => {
     const w1 = mountWith([makeTab('a')], 'a').wrapper
-    expect(w1.find('.nav-btn[title="后退"]').attributes('disabled')).toBeDefined()
+    expect(w1.find('[data-nav="back"]').attributes('disabled')).toBeDefined()
     const { wrapper, tabsStore } = mountWith([makeTab('a')], 'a', { canGoBack: true })
     const spy = vi.spyOn(tabsStore, 'goBack').mockResolvedValue(undefined)
-    await wrapper.find('.nav-btn[title="后退"]').trigger('click')
+    await wrapper.find('[data-nav="back"]').trigger('click')
     expect(spy).toHaveBeenCalledTimes(1)
   })
 
   it('主页按钮：默认 homepage=newtab → createTab()（无标签也不哑火）', async () => {
     const { wrapper, tabsStore } = mountWith([makeTab('a')], 'a')
     const spy = vi.spyOn(tabsStore, 'createTab').mockResolvedValue(null)
-    await wrapper.find('.nav-btn[title="主页"]').trigger('click')
+    await wrapper.find('[data-nav="home"]').trigger('click')
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy).toHaveBeenCalledWith()
   })
