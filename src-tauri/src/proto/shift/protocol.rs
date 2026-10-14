@@ -172,7 +172,8 @@ pub(crate) fn handle(
                             .await
                         {
                             Ok(t) => serde_json::json!({ "text": t }),
-                            Err(e) => serde_json::json!({ "error": e }),
+                            // e.to_string()：保住注入 JS 的字符串线格式（R4-1 成对改）
+                            Err(e) => serde_json::json!({ "error": e.to_string() }),
                         };
                     write_translate_result(&app_clone, &webview_label, &callback, &payload);
                 });

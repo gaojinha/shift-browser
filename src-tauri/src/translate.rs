@@ -8,6 +8,7 @@
 //!   不能直接 block——用 tauri::async_runtime::block_on 把 async 拉成同步
 //! - 整页翻译分两步：先 eval JS 收集文本节点 JSON，再 spawn 异步翻译后 eval 写回
 
+use crate::error::CommandError;
 use reqwest::Client;
 use serde::Serialize;
 use std::sync::OnceLock;
@@ -45,6 +46,32 @@ fn client() -> &'static Client {
     })
 }
 
+/// 发送失败分类（纯函数，可单测）：reqwest 超时 → E_TIMEOUT，其余 → E_NET
+/// （调用方据此分流"可重试"；超时不得降级成通用网络错误）
+fn classify_send(is_timeout: bool, message: String) -> CommandError {
+    CommandError {
+        code: if is_timeout {
+            crate::error::E_TIMEOUT
+        } else {
+            crate::error::E_NET
+        },
+        message,
+    }
+}
+
+/// 请求发送失败（带 reqwest 错误）：按是否超时分流入码
+fn send_failure(op: &str, e: &reqwest::Error) -> CommandError {
+    classify_send(e.is_timeout(), format!("{}: {}", op, e))
+}
+
+/// 上游返回异常（非 2xx / 结构解析失败 / 页面参数抓取失败）→ E_NET
+fn upstream_failure(message: impl Into<String>) -> CommandError {
+    CommandError {
+        code: crate::error::E_NET,
+        message: message.into(),
+    }
+}
+
 /// 当前翻译超时（秒）：settings.translate_timeout，默认 15，合法范围 5-120
 pub async fn current_timeout(db: &crate::db::Db) -> u64 {
     let row: Option<(String,)> = crate::db::settings_cache::get(&db.pool, "translate_timeout")
@@ -58,7 +85,11 @@ pub async fn current_timeout(db: &crate::db::Db) -> u64 {
 /// Google 翻译（Chrome dict-chrome-ex 公共端点，无需 API key）
 ///
 /// `target` 默认 zh-CN；源语言自动检测（sl=auto）；`timeout` 秒（设置里可调）
-pub async fn translate_google(text: &str, target: &str, timeout: u64) -> Result<String, String> {
+pub async fn translate_google(
+    text: &str,
+    target: &str,
+    timeout: u64,
+) -> Result<String, CommandError> {
     if text.trim().is_empty() {
         return Ok(String::new());
     }
@@ -75,24 +106,24 @@ pub async fn translate_google(text: &str, target: &str, timeout: u64) -> Result<
         .timeout(std::time::Duration::from_secs(timeout))
         .send()
         .await
-        .map_err(|e| format!("翻译请求失败: {}", e))?;
+        .map_err(|e| send_failure("翻译请求失败", &e))?;
 
     let status = resp.status();
     // 先判状态码再解析：上游限流/故障返回 HTML 错误页时，直接报 HTTP 状态，
     // 而不是"解析失败"掩盖真实原因（与 Bing 侧一致）
     if !status.is_success() {
-        return Err(format!("翻译服务返回 HTTP {}", status));
+        return Err(upstream_failure(format!("翻译服务返回 HTTP {}", status)));
     }
     let body: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("翻译响应解析失败: {}", e))?;
+        .map_err(|e| upstream_failure(format!("翻译响应解析失败: {}", e)))?;
 
     // 返回格式：[[["译文","原文",null,null,1],...],null,null,null,...]
     let segs = body
         .get(0)
         .and_then(|v| v.as_array())
-        .ok_or_else(|| "翻译响应格式异常".to_string())?;
+        .ok_or_else(|| upstream_failure("翻译响应格式异常"))?;
     let result: String = segs
         .iter()
         .filter_map(|seg| seg.get(0).and_then(|s| s.as_str()))
@@ -131,7 +162,7 @@ fn bing_cache_fresh(at: std::time::Instant) -> bool {
 /// 锁拆分（第六件）：拿会话与发请求分两段——先短持锁看缓存（命中直接克隆返回），
 /// 未命中则放锁后发网络请求，拿到再短持锁回填。旧实现整段持锁（含最长 timeout 秒
 /// 的网络等待），并行双发后多路翻译排队堵在同一把锁上；拆开后锁内只剩内存操作。
-async fn bing_session(timeout: u64) -> Result<BingSession, String> {
+async fn bing_session(timeout: u64) -> Result<BingSession, CommandError> {
     let cell = BING_SESSION.get_or_init(|| tokio::sync::Mutex::new(None));
     // 第一段：短持锁，只读缓存
     {
@@ -165,32 +196,35 @@ async fn bing_session(timeout: u64) -> Result<BingSession, String> {
 }
 
 /// 纯网络抓取 Bing 会话参数（不碰锁，由 bing_session 分段调用）
-async fn fetch_bing_session(timeout: u64) -> Result<(String, String, String, String), String> {
+async fn fetch_bing_session(
+    timeout: u64,
+) -> Result<(String, String, String, String), CommandError> {
     let html = client()
         .get("https://cn.bing.com/translator")
         .timeout(std::time::Duration::from_secs(timeout))
         .send()
         .await
-        .map_err(|e| format!("Bing 页面加载失败: {}", e))?
+        .map_err(|e| send_failure("Bing 页面加载失败", &e))?
         .text()
         .await
-        .map_err(|e| format!("Bing 页面读取失败: {}", e))?;
-    let ig = extract_between(&html, "IG:\"", "\"").ok_or_else(|| "Bing IG 抓取失败".to_string())?;
+        .map_err(|e| upstream_failure(format!("Bing 页面读取失败: {}", e)))?;
+    let ig = extract_between(&html, "IG:\"", "\"")
+        .ok_or_else(|| upstream_failure("Bing IG 抓取失败"))?;
     let iid = extract_between(&html, "data-iid=\"", "\"")
-        .ok_or_else(|| "Bing IID 抓取失败".to_string())?;
+        .ok_or_else(|| upstream_failure("Bing IID 抓取失败"))?;
     // 页面内嵌：params_AbusePreventionHelper = [key,"token",interval]
     let helper = extract_between(&html, "params_AbusePreventionHelper = [", "]")
-        .ok_or_else(|| "Bing 防滥用参数抓取失败".to_string())?;
+        .ok_or_else(|| upstream_failure("Bing 防滥用参数抓取失败"))?;
     let (key, token) = {
         let (k, rest) = helper
             .split_once(',')
-            .ok_or_else(|| "Bing 防滥用参数格式异常".to_string())?;
+            .ok_or_else(|| upstream_failure("Bing 防滥用参数格式异常"))?;
         let t = rest.trim().trim_start_matches('"');
         let t = t.split('"').next().unwrap_or("");
         (k.trim().to_string(), t.to_string())
     };
     if key.is_empty() || token.is_empty() {
-        return Err("Bing 会话参数为空".to_string());
+        return Err(upstream_failure("Bing 会话参数为空"));
     }
     Ok((ig, iid, key, token))
 }
@@ -198,7 +232,11 @@ async fn fetch_bing_session(timeout: u64) -> Result<(String, String, String, Str
 /// Bing 翻译（cn.bing.com 网页端同款接口，无需 API key）
 ///
 /// 语言码差异：Google 用 zh-CN，Bing 用 zh-Hans；`timeout` 秒（设置里可调）
-pub async fn translate_bing(text: &str, target: &str, timeout: u64) -> Result<String, String> {
+pub async fn translate_bing(
+    text: &str,
+    target: &str,
+    timeout: u64,
+) -> Result<String, CommandError> {
     if text.trim().is_empty() {
         return Ok(String::new());
     }
@@ -225,14 +263,14 @@ pub async fn translate_bing(text: &str, target: &str, timeout: u64) -> Result<St
         .timeout(std::time::Duration::from_secs(timeout))
         .send()
         .await
-        .map_err(|e| format!("Bing 翻译请求失败: {}", e))?;
+        .map_err(|e| send_failure("Bing 翻译请求失败", &e))?;
     let status = resp.status();
     let v: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("Bing 响应解析失败: {}", e))?;
+        .map_err(|e| upstream_failure(format!("Bing 响应解析失败: {}", e)))?;
     if !status.is_success() {
-        return Err(format!("Bing 翻译返回 HTTP {}", status));
+        return Err(upstream_failure(format!("Bing 翻译返回 HTTP {}", status)));
     }
     // 失败形态：{"statusCode":205,"errorMessage":""}（key/token 失效或参数被拒）
     // —— 清掉缓存的会话，下次调用重新抓取（自愈）
@@ -241,7 +279,12 @@ pub async fn translate_bing(text: &str, target: &str, timeout: u64) -> Result<St
             let mut g = cell.lock().await;
             *g = None;
         }
-        return Err(format!("Bing 翻译被拒（statusCode={}）", code));
+        // 凭证失效（key/token 被拒）→ E_AUTH：调用方语义是"重新取凭证"，
+        // 与网络故障（可重试）区分；会话缓存已在上面清掉，下次自愈
+        return Err(CommandError {
+            code: crate::error::E_AUTH,
+            message: format!("Bing 翻译被拒（statusCode={}）", code),
+        });
     }
     // 成功格式：[{"translations":[{"text":"译文","to":"zh-Hans"}],"detectedLanguage":{...}}]
     let result = v
@@ -266,7 +309,7 @@ async fn translate_one(
     text: String,
     target: String,
     timeout: u64,
-) -> Result<String, String> {
+) -> Result<String, CommandError> {
     if engine == "bing" {
         translate_bing(&text, &target, timeout).await
     } else {
@@ -283,7 +326,7 @@ pub async fn translate_with(
     target: &str,
     engine: &str,
     timeout: u64,
-) -> Result<String, String> {
+) -> Result<String, CommandError> {
     // 非 bing 即 google：未知引擎名回落 google（与旧分支一致）
     let (first, second) = if engine == "bing" {
         ("bing", "google")
@@ -305,6 +348,7 @@ pub async fn translate_with(
     ));
     // 先完成的失败不致命：记下等另一个；首个成功直接返回，析构取消在途者
     let mut errs: Vec<String> = Vec::new();
+    let mut codes: Vec<&'static str> = Vec::new();
     while let Some(r) = set.join_next().await {
         match r {
             Ok(Ok(t)) => {
@@ -313,7 +357,8 @@ pub async fn translate_with(
             }
             Ok(Err(e)) => {
                 log::warn!("[translate] 一路失败，等另一路: {}", e);
-                errs.push(e);
+                codes.push(e.code);
+                errs.push(e.message);
             }
             Err(e) => {
                 log::warn!("[translate] 引擎任务异常: {}", e);
@@ -321,7 +366,20 @@ pub async fn translate_with(
             }
         }
     }
-    Err(format!("双引擎均失败（{}）", errs.join("；")))
+    Err(CommandError {
+        code: aggregate_dual_fail(&codes),
+        message: format!("双引擎均失败（{}）", errs.join("；")),
+    })
+}
+
+/// 双引擎均失败时归码（纯函数，可单测）：两路全是超时 → E_TIMEOUT（可重试）；
+/// 混入其他失败或任务异常 → E_NET
+fn aggregate_dual_fail(codes: &[&'static str]) -> &'static str {
+    if !codes.is_empty() && codes.iter().all(|c| *c == crate::error::E_TIMEOUT) {
+        crate::error::E_TIMEOUT
+    } else {
+        crate::error::E_NET
+    }
 }
 
 /// 读取当前翻译源（settings.translate_engine，默认 google）
@@ -360,7 +418,8 @@ pub async fn translate_text(
         }),
         Err(e) => Ok(TranslateResult {
             ok: false,
-            msg: Some(e),
+            // 信封出口不变：msg 仍为人读字符串（TranslatePanel 直接展示 r.msg）
+            msg: Some(e.to_string()),
             data: None,
         }),
     }
@@ -391,5 +450,40 @@ mod tests {
         assert!(!bing_cache_fresh(
             now - std::time::Duration::from_secs(3600)
         ));
+    }
+
+    /// 防漂移（R4-1）：发送失败分类——reqwest 超时必须归 E_TIMEOUT（可重试），
+    /// 其余网络失败归 E_NET；超时不得降级成通用网络错误
+    #[test]
+    fn classify_send_maps_timeout_and_net() {
+        assert_eq!(
+            classify_send(true, "超时".into()).code,
+            crate::error::E_TIMEOUT
+        );
+        assert_eq!(
+            classify_send(false, "断连".into()).code,
+            crate::error::E_NET
+        );
+    }
+
+    /// 防漂移（R4-1）：双引擎聚合归码——两路全超时才归 E_TIMEOUT；
+    /// 混入其他失败归 E_NET；两路都是任务异常（无码）也归 E_NET
+    #[test]
+    fn aggregate_dual_fail_only_all_timeout_is_timeout() {
+        use crate::error::{E_NET, E_TIMEOUT};
+        assert_eq!(aggregate_dual_fail(&[E_TIMEOUT, E_TIMEOUT]), E_TIMEOUT);
+        assert_eq!(aggregate_dual_fail(&[E_TIMEOUT, E_NET]), E_NET);
+        assert_eq!(aggregate_dual_fail(&[]), E_NET);
+    }
+
+    /// 防漂移（R4-1）：translate_text 信封出口不变——msg 仍是人读字符串
+    /// （TranslatePanel 直接展示 r.msg；信封 {ok,msg,data} 形态不因类型化漂移）
+    #[test]
+    fn dual_fail_message_keeps_legacy_envelope_shape() {
+        let e = CommandError {
+            code: aggregate_dual_fail(&[crate::error::E_TIMEOUT]),
+            message: format!("双引擎均失败（{}）", ["超时"].join("；")),
+        };
+        assert_eq!(e.message, "双引擎均失败（超时）");
     }
 }

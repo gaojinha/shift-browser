@@ -188,7 +188,9 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                 .await
                 {
                     Ok(t) => serde_json::json!({ "text": t }),
-                    Err(e) => serde_json::json!({ "error": e }),
+                    // e.to_string()：CommandError 序列化是 {code,message} 对象，
+                    // 注入 JS 只认字符串线格式（R4-1 类型化成对改）
+                    Err(e) => serde_json::json!({ "error": e.to_string() }),
                 };
                 write_translate_result(&app_clone, &label, &callback, &payload);
             });
