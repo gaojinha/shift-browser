@@ -12,4 +12,11 @@ export default {
   update: {
     available: 'New version v{latest} available (current v{current}) — see the About page or the Releases page',
   },
+  commandPalette: {
+    title: 'Command Palette',
+    placeholder: 'Type a command, URL, or ask AI…',
+    searchLabel: 'Command Palette Search',
+    listLabel: 'Command Suggestions',
+    empty: 'No matching items',
+  },
 }

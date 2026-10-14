@@ -1,0 +1,3431 @@
+{
+  "total": 380,
+  "bySection": {
+    "components": 216,
+    "settings": 162,
+    "ui": 1,
+    "utils": 1
+  },
+  "entries": [
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 229,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "attr",
+      "value": "AI 助手",
+      "suggestedKey": "components.aisidebar.aria_label"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 234,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "text",
+      "value": "🤖 AI 助手",
+      "suggestedKey": "components.aisidebar.text"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 235,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "attr",
+      "value": "关闭",
+      "suggestedKey": "components.aisidebar.title"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 260,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "text",
+      "value": "停止",
+      "suggestedKey": "components.aisidebar.text"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 273,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "text",
+      "value": "本页已汉化，原文已备份在页面里",
+      "suggestedKey": "components.aisidebar.text"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 304,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "text",
+      "value": "🤖 AI 想执行操作",
+      "suggestedKey": "components.aisidebar.text"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 307,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "text",
+      "value": "允许",
+      "suggestedKey": "components.aisidebar.text"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 308,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "text",
+      "value": "拒绝",
+      "suggestedKey": "components.aisidebar.text"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 314,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "text",
+      "value": "🤖 AI 想执行多步任务",
+      "suggestedKey": "components.aisidebar.text"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 322,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "text",
+      "value": "允许全部",
+      "suggestedKey": "components.aisidebar.text"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 333,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "attr",
+      "value": "AI 提问输入框",
+      "suggestedKey": "components.aisidebar.aria_label"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 334,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "attr",
+      "value": "aiStore.webqaMode ? '问本机 opencode：Enter 发送，Shift+Enter 换行' : '输入问题，Enter 发送，Shift+Enter 换行'",
+      "suggestedKey": "components.aisidebar.placeholder"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 339,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "text",
+      "value": "发送",
+      "suggestedKey": "components.aisidebar.text"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 342,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "text",
+      "value": "清空对话",
+      "suggestedKey": "components.aisidebar.text"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 346,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "attr",
+      "value": "用本机 opencode 回答，只带上你选中的内容（不出本机）",
+      "suggestedKey": "components.aisidebar.title"
+    },
+    {
+      "file": "src/components/AISidebar.vue",
+      "line": 365,
+      "section": "components",
+      "component": "aisidebar",
+      "type": "text",
+      "value": "🏠 本机 opencode 未连通",
+      "suggestedKey": "components.aisidebar.text"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 261,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "后退",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 264,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "前进",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 271,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "刷新",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 278,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "主页",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 281,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "地址栏",
+      "suggestedKey": "components.address-bar.aria_label"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 287,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "查看证书（点击打开证书中心）",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 288,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "查看证书",
+      "suggestedKey": "components.address-bar.aria_label"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 298,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "输入网址或搜索...",
+      "suggestedKey": "components.address-bar.placeholder"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 328,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "readerTip || '阅读模式（提取正文大字看）'",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 329,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "阅读模式",
+      "suggestedKey": "components.address-bar.aria_label"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 336,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "翻译",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 339,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "AI 助手",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 342,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "密码管理",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 345,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "标签分组",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 348,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "用户脚本",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 351,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "历史记录",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 354,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "下载管理",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/AddressBar.vue",
+      "line": 357,
+      "section": "components",
+      "component": "address-bar",
+      "type": "attr",
+      "value": "设置",
+      "suggestedKey": "components.address-bar.title"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 238,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "attr",
+      "value": "`${f.name}（${folderBookmarks(f.id).length} 个书签）`",
+      "suggestedKey": "components.bookmarks-bar.title"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 255,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "attr",
+      "value": "confirmDelete.isPending(b.id) ? '再点一次确认删除' : '删除书签'",
+      "suggestedKey": "components.bookmarks-bar.title"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 261,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "attr",
+      "value": "收藏当前页",
+      "suggestedKey": "components.bookmarks-bar.title"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 262,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "attr",
+      "value": "书签管理器（导入/导出/管理）",
+      "suggestedKey": "components.bookmarks-bar.title"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 296,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "text",
+      "value": "＋ 新标签打开",
+      "suggestedKey": "components.bookmarks-bar.text"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 297,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "text",
+      "value": "🔗 复制链接",
+      "suggestedKey": "components.bookmarks-bar.text"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 298,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "text",
+      "value": "✏ 编辑",
+      "suggestedKey": "components.bookmarks-bar.text"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 299,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "text",
+      "value": "✕ 删除",
+      "suggestedKey": "components.bookmarks-bar.text"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 302,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "text",
+      "value": "☆ 收藏当前页",
+      "suggestedKey": "components.bookmarks-bar.text"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 303,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "text",
+      "value": "📁 新建文件夹",
+      "suggestedKey": "components.bookmarks-bar.text"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 308,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "attr",
+      "value": "编辑书签",
+      "suggestedKey": "components.bookmarks-bar.title"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 310,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "text",
+      "value": "标题",
+      "suggestedKey": "components.bookmarks-bar.text"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 314,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "text",
+      "value": "网址",
+      "suggestedKey": "components.bookmarks-bar.text"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 318,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "text",
+      "value": "取消",
+      "suggestedKey": "components.bookmarks-bar.text"
+    },
+    {
+      "file": "src/components/BookmarksBar.vue",
+      "line": 319,
+      "section": "components",
+      "component": "bookmarks-bar",
+      "type": "text",
+      "value": "保存",
+      "suggestedKey": "components.bookmarks-bar.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 231,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "attr",
+      "value": "书签管理器",
+      "suggestedKey": "components.bookmarks-dialog.title"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 234,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "attr",
+      "value": "导入书签（Chrome/Firefox 导出的 HTML）",
+      "suggestedKey": "components.bookmarks-dialog.title"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 234,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "📥 导入",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 235,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "attr",
+      "value": "导出为 Netscape HTML 到下载目录",
+      "suggestedKey": "components.bookmarks-dialog.title"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 235,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "📤 导出",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 236,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "＋ 添加书签",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 237,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "📁 新建文件夹",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 246,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "attr",
+      "value": "搜索书签...",
+      "suggestedKey": "components.bookmarks-dialog.placeholder"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 249,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "attr",
+      "value": "筛选文件夹",
+      "suggestedKey": "components.bookmarks-dialog.aria_label"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 250,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "全部文件夹",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 251,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "未分类",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 262,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "attr",
+      "value": "删除文件夹（含其中的书签）",
+      "suggestedKey": "components.bookmarks-dialog.title"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 267,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "暂无书签，点「＋ 添加书签」或「📥 导入」",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 275,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "attr",
+      "value": "打开",
+      "suggestedKey": "components.bookmarks-dialog.title"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 276,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "attr",
+      "value": "编辑",
+      "suggestedKey": "components.bookmarks-dialog.title"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 280,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "attr",
+      "value": "confirmDelete.isPending(b.id) ? '再点一次确认删除' : '删除'",
+      "suggestedKey": "components.bookmarks-dialog.title"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 292,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "attr",
+      "value": "编辑书签",
+      "suggestedKey": "components.bookmarks-dialog.title"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 294,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "标题",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 298,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "网址",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 302,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "文件夹",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 309,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "取消",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 310,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "保存",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 315,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "attr",
+      "value": "添加书签",
+      "suggestedKey": "components.bookmarks-dialog.title"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 318,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "attr",
+      "value": "书签标题",
+      "suggestedKey": "components.bookmarks-dialog.placeholder"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 333,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "添加",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 340,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "attr",
+      "value": "删除文件夹",
+      "suggestedKey": "components.bookmarks-dialog.title"
+    },
+    {
+      "file": "src/components/BookmarksDialog.vue",
+      "line": 349,
+      "section": "components",
+      "component": "bookmarks-dialog",
+      "type": "text",
+      "value": "删除",
+      "suggestedKey": "components.bookmarks-dialog.text"
+    },
+    {
+      "file": "src/components/CertWarning.vue",
+      "line": 85,
+      "section": "components",
+      "component": "cert-warning",
+      "type": "text",
+      "value": "您的连接不是私密连接",
+      "suggestedKey": "components.cert-warning.text"
+    },
+    {
+      "file": "src/components/CertWarning.vue",
+      "line": 98,
+      "section": "components",
+      "component": "cert-warning",
+      "type": "text",
+      "value": "继续前往后，中间人能看到你的明文；放行记录进证书中心，可随时撤销。",
+      "suggestedKey": "components.cert-warning.text"
+    },
+    {
+      "file": "src/components/CertWarning.vue",
+      "line": 102,
+      "section": "components",
+      "component": "cert-warning",
+      "type": "text",
+      "value": "返回（推荐）",
+      "suggestedKey": "components.cert-warning.text"
+    },
+    {
+      "file": "src/components/CertWarning.vue",
+      "line": 108,
+      "section": "components",
+      "component": "cert-warning",
+      "type": "text",
+      "value": "查看证书详情 ▾",
+      "suggestedKey": "components.cert-warning.text"
+    },
+    {
+      "file": "src/components/CertWarning.vue",
+      "line": 116,
+      "section": "components",
+      "component": "cert-warning",
+      "type": "text",
+      "value": "若这是您自己的内网/自签服务，可\"继续前往\"；放行记录会存入证书中心，可随时撤销。",
+      "suggestedKey": "components.cert-warning.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 178,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "attr",
+      "value": "🔐 证书中心",
+      "suggestedKey": "components.certificates-dialog.title"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 181,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "当前网页",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 194,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "当前标签没有 TLS 证书信息（非 HTTPS 页或尚未加载）",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 197,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "连接",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 201,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "已放行",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 210,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "有效期",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 214,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "指纹",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 218,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "域名",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 226,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "证书链",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 235,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "扫描临期",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 236,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "刷新",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 238,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "加载中…",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 239,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "还没有监测记录，浏览 HTTPS 网站后自动记录",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 267,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "没有放行的证书例外",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CertificatesDialog.vue",
+      "line": 286,
+      "section": "components",
+      "component": "certificates-dialog",
+      "type": "text",
+      "value": "暂无证书事件",
+      "suggestedKey": "components.certificates-dialog.text"
+    },
+    {
+      "file": "src/components/CommandPalette.vue",
+      "line": 218,
+      "section": "components",
+      "component": "command-palette",
+      "type": "attr",
+      "value": "命令面板",
+      "suggestedKey": "components.command-palette.aria_label"
+    },
+    {
+      "file": "src/components/CommandPalette.vue",
+      "line": 229,
+      "section": "components",
+      "component": "command-palette",
+      "type": "attr",
+      "value": "输入命令、网址，或问 AI…",
+      "suggestedKey": "components.command-palette.placeholder"
+    },
+    {
+      "file": "src/components/CommandPalette.vue",
+      "line": 230,
+      "section": "components",
+      "component": "command-palette",
+      "type": "attr",
+      "value": "命令面板搜索",
+      "suggestedKey": "components.command-palette.aria_label"
+    },
+    {
+      "file": "src/components/CommandPalette.vue",
+      "line": 236,
+      "section": "components",
+      "component": "command-palette",
+      "type": "attr",
+      "value": "命令候选",
+      "suggestedKey": "components.command-palette.aria_label"
+    },
+    {
+      "file": "src/components/CommandPalette.vue",
+      "line": 238,
+      "section": "components",
+      "component": "command-palette",
+      "type": "text",
+      "value": "没有匹配项",
+      "suggestedKey": "components.command-palette.text"
+    },
+    {
+      "file": "src/components/DownloadsDialog.vue",
+      "line": 138,
+      "section": "components",
+      "component": "downloads-dialog",
+      "type": "attr",
+      "value": "下载管理",
+      "suggestedKey": "components.downloads-dialog.title"
+    },
+    {
+      "file": "src/components/DownloadsDialog.vue",
+      "line": 160,
+      "section": "components",
+      "component": "downloads-dialog",
+      "type": "text",
+      "value": "打开",
+      "suggestedKey": "components.downloads-dialog.text"
+    },
+    {
+      "file": "src/components/DownloadsDialog.vue",
+      "line": 161,
+      "section": "components",
+      "component": "downloads-dialog",
+      "type": "text",
+      "value": "文件夹",
+      "suggestedKey": "components.downloads-dialog.text"
+    },
+    {
+      "file": "src/components/DownloadsDialog.vue",
+      "line": 164,
+      "section": "components",
+      "component": "downloads-dialog",
+      "type": "text",
+      "value": "重新下载",
+      "suggestedKey": "components.downloads-dialog.text"
+    },
+    {
+      "file": "src/components/DownloadsDialog.vue",
+      "line": 176,
+      "section": "components",
+      "component": "downloads-dialog",
+      "type": "text",
+      "value": "加载中…",
+      "suggestedKey": "components.downloads-dialog.text"
+    },
+    {
+      "file": "src/components/DownloadsDialog.vue",
+      "line": 177,
+      "section": "components",
+      "component": "downloads-dialog",
+      "type": "text",
+      "value": "还没有下载记录",
+      "suggestedKey": "components.downloads-dialog.text"
+    },
+    {
+      "file": "src/components/GroupsDialog.vue",
+      "line": 144,
+      "section": "components",
+      "component": "groups-dialog",
+      "type": "attr",
+      "value": "标签分组",
+      "suggestedKey": "components.groups-dialog.title"
+    },
+    {
+      "file": "src/components/GroupsDialog.vue",
+      "line": 152,
+      "section": "components",
+      "component": "groups-dialog",
+      "type": "attr",
+      "value": "分组名称（如 工作、娱乐）",
+      "suggestedKey": "components.groups-dialog.placeholder"
+    },
+    {
+      "file": "src/components/GroupsDialog.vue",
+      "line": 154,
+      "section": "components",
+      "component": "groups-dialog",
+      "type": "text",
+      "value": "颜色",
+      "suggestedKey": "components.groups-dialog.text"
+    },
+    {
+      "file": "src/components/GroupsDialog.vue",
+      "line": 166,
+      "section": "components",
+      "component": "groups-dialog",
+      "type": "text",
+      "value": "创建",
+      "suggestedKey": "components.groups-dialog.text"
+    },
+    {
+      "file": "src/components/GroupsDialog.vue",
+      "line": 175,
+      "section": "components",
+      "component": "groups-dialog",
+      "type": "text",
+      "value": "保存",
+      "suggestedKey": "components.groups-dialog.text"
+    },
+    {
+      "file": "src/components/GroupsDialog.vue",
+      "line": 186,
+      "section": "components",
+      "component": "groups-dialog",
+      "type": "attr",
+      "value": "g.collapsed ? '已折叠' : '未折叠'",
+      "suggestedKey": "components.groups-dialog.title"
+    },
+    {
+      "file": "src/components/GroupsDialog.vue",
+      "line": 204,
+      "section": "components",
+      "component": "groups-dialog",
+      "type": "text",
+      "value": "删除",
+      "suggestedKey": "components.groups-dialog.text"
+    },
+    {
+      "file": "src/components/GroupsDialog.vue",
+      "line": 208,
+      "section": "components",
+      "component": "groups-dialog",
+      "type": "text",
+      "value": "加载中…",
+      "suggestedKey": "components.groups-dialog.text"
+    },
+    {
+      "file": "src/components/GroupsDialog.vue",
+      "line": 209,
+      "section": "components",
+      "component": "groups-dialog",
+      "type": "text",
+      "value": "还没有分组。右键标签 → 新建分组并移动，或点\"+ 新建分组\"",
+      "suggestedKey": "components.groups-dialog.text"
+    },
+    {
+      "file": "src/components/GroupsDialog.vue",
+      "line": 214,
+      "section": "components",
+      "component": "groups-dialog",
+      "type": "attr",
+      "value": "删除分组",
+      "suggestedKey": "components.groups-dialog.title"
+    },
+    {
+      "file": "src/components/GroupsDialog.vue",
+      "line": 218,
+      "section": "components",
+      "component": "groups-dialog",
+      "type": "text",
+      "value": "取消",
+      "suggestedKey": "components.groups-dialog.text"
+    },
+    {
+      "file": "src/components/HistoryDialog.vue",
+      "line": 132,
+      "section": "components",
+      "component": "history-dialog",
+      "type": "attr",
+      "value": "浏览历史",
+      "suggestedKey": "components.history-dialog.title"
+    },
+    {
+      "file": "src/components/HistoryDialog.vue",
+      "line": 139,
+      "section": "components",
+      "component": "history-dialog",
+      "type": "attr",
+      "value": "搜索历史记录...",
+      "suggestedKey": "components.history-dialog.placeholder"
+    },
+    {
+      "file": "src/components/HistoryDialog.vue",
+      "line": 147,
+      "section": "components",
+      "component": "history-dialog",
+      "type": "text",
+      "value": "加载中…",
+      "suggestedKey": "components.history-dialog.text"
+    },
+    {
+      "file": "src/components/HistoryDialog.vue",
+      "line": 161,
+      "section": "components",
+      "component": "history-dialog",
+      "type": "attr",
+      "value": "删除",
+      "suggestedKey": "components.history-dialog.aria_label"
+    },
+    {
+      "file": "src/components/HistoryDialog.vue",
+      "line": 168,
+      "section": "components",
+      "component": "history-dialog",
+      "type": "attr",
+      "value": "清空历史",
+      "suggestedKey": "components.history-dialog.title"
+    },
+    {
+      "file": "src/components/HistoryDialog.vue",
+      "line": 172,
+      "section": "components",
+      "component": "history-dialog",
+      "type": "text",
+      "value": "取消",
+      "suggestedKey": "components.history-dialog.text"
+    },
+    {
+      "file": "src/components/HistoryDialog.vue",
+      "line": 173,
+      "section": "components",
+      "component": "history-dialog",
+      "type": "text",
+      "value": "清空",
+      "suggestedKey": "components.history-dialog.text"
+    },
+    {
+      "file": "src/components/PasswordsDialog.vue",
+      "line": 112,
+      "section": "components",
+      "component": "passwords-dialog",
+      "type": "attr",
+      "value": "密码管理",
+      "suggestedKey": "components.passwords-dialog.title"
+    },
+    {
+      "file": "src/components/PasswordsDialog.vue",
+      "line": 120,
+      "section": "components",
+      "component": "passwords-dialog",
+      "type": "attr",
+      "value": "域名（如 example.com）",
+      "suggestedKey": "components.passwords-dialog.placeholder"
+    },
+    {
+      "file": "src/components/PasswordsDialog.vue",
+      "line": 121,
+      "section": "components",
+      "component": "passwords-dialog",
+      "type": "attr",
+      "value": "用户名（可选）",
+      "suggestedKey": "components.passwords-dialog.placeholder"
+    },
+    {
+      "file": "src/components/PasswordsDialog.vue",
+      "line": 122,
+      "section": "components",
+      "component": "passwords-dialog",
+      "type": "attr",
+      "value": "密码",
+      "suggestedKey": "components.passwords-dialog.placeholder"
+    },
+    {
+      "file": "src/components/PasswordsDialog.vue",
+      "line": 123,
+      "section": "components",
+      "component": "passwords-dialog",
+      "type": "attr",
+      "value": "备注（可选）",
+      "suggestedKey": "components.passwords-dialog.placeholder"
+    },
+    {
+      "file": "src/components/PasswordsDialog.vue",
+      "line": 125,
+      "section": "components",
+      "component": "passwords-dialog",
+      "type": "text",
+      "value": "保存",
+      "suggestedKey": "components.passwords-dialog.text"
+    },
+    {
+      "file": "src/components/PasswordsDialog.vue",
+      "line": 149,
+      "section": "components",
+      "component": "passwords-dialog",
+      "type": "text",
+      "value": "加载中…",
+      "suggestedKey": "components.passwords-dialog.text"
+    },
+    {
+      "file": "src/components/PasswordsDialog.vue",
+      "line": 150,
+      "section": "components",
+      "component": "passwords-dialog",
+      "type": "text",
+      "value": "还没有保存的密码",
+      "suggestedKey": "components.passwords-dialog.text"
+    },
+    {
+      "file": "src/components/PermissionPrompt.vue",
+      "line": 69,
+      "section": "components",
+      "component": "permission-prompt",
+      "type": "text",
+      "value": "网站请求权限",
+      "suggestedKey": "components.permission-prompt.text"
+    },
+    {
+      "file": "src/components/PermissionPrompt.vue",
+      "line": 83,
+      "section": "components",
+      "component": "permission-prompt",
+      "type": "text",
+      "value": "拒绝",
+      "suggestedKey": "components.permission-prompt.text"
+    },
+    {
+      "file": "src/components/PermissionPrompt.vue",
+      "line": 84,
+      "section": "components",
+      "component": "permission-prompt",
+      "type": "text",
+      "value": "允许",
+      "suggestedKey": "components.permission-prompt.text"
+    },
+    {
+      "file": "src/components/SessionDialog.vue",
+      "line": 151,
+      "section": "components",
+      "component": "session-dialog",
+      "type": "attr",
+      "value": "会话管理",
+      "suggestedKey": "components.session-dialog.title"
+    },
+    {
+      "file": "src/components/SessionDialog.vue",
+      "line": 158,
+      "section": "components",
+      "component": "session-dialog",
+      "type": "attr",
+      "value": "会话名称（保存当前标签页）",
+      "suggestedKey": "components.session-dialog.placeholder"
+    },
+    {
+      "file": "src/components/SessionDialog.vue",
+      "line": 162,
+      "section": "components",
+      "component": "session-dialog",
+      "type": "text",
+      "value": "保存当前",
+      "suggestedKey": "components.session-dialog.text"
+    },
+    {
+      "file": "src/components/SessionDialog.vue",
+      "line": 165,
+      "section": "components",
+      "component": "session-dialog",
+      "type": "text",
+      "value": "加载中…",
+      "suggestedKey": "components.session-dialog.text"
+    },
+    {
+      "file": "src/components/SessionDialog.vue",
+      "line": 166,
+      "section": "components",
+      "component": "session-dialog",
+      "type": "text",
+      "value": "还没有保存的会话",
+      "suggestedKey": "components.session-dialog.text"
+    },
+    {
+      "file": "src/components/SessionDialog.vue",
+      "line": 176,
+      "section": "components",
+      "component": "session-dialog",
+      "type": "attr",
+      "value": "恢复此会话",
+      "suggestedKey": "components.session-dialog.title"
+    },
+    {
+      "file": "src/components/SessionDialog.vue",
+      "line": 176,
+      "section": "components",
+      "component": "session-dialog",
+      "type": "text",
+      "value": "↩ 恢复",
+      "suggestedKey": "components.session-dialog.text"
+    },
+    {
+      "file": "src/components/SessionDialog.vue",
+      "line": 177,
+      "section": "components",
+      "component": "session-dialog",
+      "type": "attr",
+      "value": "删除会话",
+      "suggestedKey": "components.session-dialog.title"
+    },
+    {
+      "file": "src/components/SessionDialog.vue",
+      "line": 190,
+      "section": "components",
+      "component": "session-dialog",
+      "type": "text",
+      "value": "取消",
+      "suggestedKey": "components.session-dialog.text"
+    },
+    {
+      "file": "src/components/SessionDialog.vue",
+      "line": 191,
+      "section": "components",
+      "component": "session-dialog",
+      "type": "text",
+      "value": "删除",
+      "suggestedKey": "components.session-dialog.text"
+    },
+    {
+      "file": "src/components/SettingsDialog.vue",
+      "line": 139,
+      "section": "components",
+      "component": "settings-dialog",
+      "type": "attr",
+      "value": "设置",
+      "suggestedKey": "components.settings-dialog.title"
+    },
+    {
+      "file": "src/components/SettingsDialog.vue",
+      "line": 145,
+      "section": "components",
+      "component": "settings-dialog",
+      "type": "attr",
+      "value": "搜索设置项",
+      "suggestedKey": "components.settings-dialog.aria_label"
+    },
+    {
+      "file": "src/components/SettingsDialog.vue",
+      "line": 145,
+      "section": "components",
+      "component": "settings-dialog",
+      "type": "attr",
+      "value": "搜索设置…",
+      "suggestedKey": "components.settings-dialog.placeholder"
+    },
+    {
+      "file": "src/components/SettingsDialog.vue",
+      "line": 158,
+      "section": "components",
+      "component": "settings-dialog",
+      "type": "text",
+      "value": "无匹配设置",
+      "suggestedKey": "components.settings-dialog.text"
+    },
+    {
+      "file": "src/components/SpaceSwitcher.vue",
+      "line": 69,
+      "section": "components",
+      "component": "space-switcher",
+      "type": "attr",
+      "value": "'当前空间：' + ws.currentName",
+      "suggestedKey": "components.space-switcher.title"
+    },
+    {
+      "file": "src/components/SpaceSwitcher.vue",
+      "line": 69,
+      "section": "components",
+      "component": "space-switcher",
+      "type": "attr",
+      "value": "'空间切换：' + ws.currentName",
+      "suggestedKey": "components.space-switcher.aria_label"
+    },
+    {
+      "file": "src/components/SpaceSwitcher.vue",
+      "line": 77,
+      "section": "components",
+      "component": "space-switcher",
+      "type": "text",
+      "value": "默认",
+      "suggestedKey": "components.space-switcher.text"
+    },
+    {
+      "file": "src/components/SpaceSwitcher.vue",
+      "line": 96,
+      "section": "components",
+      "component": "space-switcher",
+      "type": "attr",
+      "value": "重命名",
+      "suggestedKey": "components.space-switcher.title"
+    },
+    {
+      "file": "src/components/SpaceSwitcher.vue",
+      "line": 96,
+      "section": "components",
+      "component": "space-switcher",
+      "type": "attr",
+      "value": "重命名空间",
+      "suggestedKey": "components.space-switcher.aria_label"
+    },
+    {
+      "file": "src/components/SpaceSwitcher.vue",
+      "line": 100,
+      "section": "components",
+      "component": "space-switcher",
+      "type": "attr",
+      "value": "删除空间",
+      "suggestedKey": "components.space-switcher.title"
+    },
+    {
+      "file": "src/components/SpaceSwitcher.vue",
+      "line": 106,
+      "section": "components",
+      "component": "space-switcher",
+      "type": "attr",
+      "value": "确认删除",
+      "suggestedKey": "components.space-switcher.title"
+    },
+    {
+      "file": "src/components/SpaceSwitcher.vue",
+      "line": 111,
+      "section": "components",
+      "component": "space-switcher",
+      "type": "text",
+      "value": "＋ 新建空间",
+      "suggestedKey": "components.space-switcher.text"
+    },
+    {
+      "file": "src/components/StatusBar.vue",
+      "line": 218,
+      "section": "components",
+      "component": "status-bar",
+      "type": "text",
+      "value": "⚠️ 页面加载失败",
+      "suggestedKey": "components.status-bar.text"
+    },
+    {
+      "file": "src/components/StatusBar.vue",
+      "line": 230,
+      "section": "components",
+      "component": "status-bar",
+      "type": "attr",
+      "value": "netTitle + '（点击诊断断在哪一层）'",
+      "suggestedKey": "components.status-bar.title"
+    },
+    {
+      "file": "src/components/StatusBar.vue",
+      "line": 231,
+      "section": "components",
+      "component": "status-bar",
+      "type": "attr",
+      "value": "activeDownloads > 0 ? `下载管理（${activeDownloads} 进行中）` : '下载管理'",
+      "suggestedKey": "components.status-bar.title"
+    },
+    {
+      "file": "src/components/StatusBar.vue",
+      "line": 234,
+      "section": "components",
+      "component": "status-bar",
+      "type": "attr",
+      "value": "设置",
+      "suggestedKey": "components.status-bar.title"
+    },
+    {
+      "file": "src/components/StatusBar.vue",
+      "line": 235,
+      "section": "components",
+      "component": "status-bar",
+      "type": "attr",
+      "value": "帮助",
+      "suggestedKey": "components.status-bar.title"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 549,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "attr",
+      "value": "打开的标签",
+      "suggestedKey": "components.tab-bar.aria_label"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 577,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "attr",
+      "value": "已固定",
+      "suggestedKey": "components.tab-bar.title"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 578,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "attr",
+      "value": "无痕标签",
+      "suggestedKey": "components.tab-bar.title"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 580,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "attr",
+      "value": "关闭标签",
+      "suggestedKey": "components.tab-bar.title"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 595,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "attr",
+      "value": "g.group.collapsed ? '展开' : '折叠'",
+      "suggestedKey": "components.tab-bar.title"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 596,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "attr",
+      "value": "g.group.collapsed ? '展开分组' : '折叠分组'",
+      "suggestedKey": "components.tab-bar.aria_label"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 641,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "attr",
+      "value": "新建标签",
+      "suggestedKey": "components.tab-bar.title"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 642,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "attr",
+      "value": "新建无痕标签",
+      "suggestedKey": "components.tab-bar.title"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 646,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "attr",
+      "value": "最小化",
+      "suggestedKey": "components.tab-bar.title"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 647,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "attr",
+      "value": "最大化/还原",
+      "suggestedKey": "components.tab-bar.title"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 647,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "attr",
+      "value": "最大化或还原",
+      "suggestedKey": "components.tab-bar.aria_label"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 648,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "attr",
+      "value": "关闭",
+      "suggestedKey": "components.tab-bar.title"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 664,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "text",
+      "value": "📌 固定/取消固定",
+      "suggestedKey": "components.tab-bar.text"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 665,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "text",
+      "value": "🔇 静音/取消静音",
+      "suggestedKey": "components.tab-bar.text"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 670,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "text",
+      "value": "✕ 关闭标签",
+      "suggestedKey": "components.tab-bar.text"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 671,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "text",
+      "value": "关闭其他标签",
+      "suggestedKey": "components.tab-bar.text"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 672,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "text",
+      "value": "关闭右侧标签",
+      "suggestedKey": "components.tab-bar.text"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 673,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "text",
+      "value": "关闭同域名标签",
+      "suggestedKey": "components.tab-bar.text"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 674,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "text",
+      "value": "关闭重复标签",
+      "suggestedKey": "components.tab-bar.text"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 675,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "text",
+      "value": "🔇 全部静音/取消",
+      "suggestedKey": "components.tab-bar.text"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 677,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "text",
+      "value": "🔗 复制网址",
+      "suggestedKey": "components.tab-bar.text"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 679,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "text",
+      "value": "移动到分组",
+      "suggestedKey": "components.tab-bar.text"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 688,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "text",
+      "value": "取消分组",
+      "suggestedKey": "components.tab-bar.text"
+    },
+    {
+      "file": "src/components/TabBar.vue",
+      "line": 690,
+      "section": "components",
+      "component": "tab-bar",
+      "type": "text",
+      "value": "＋ 新建分组并移动",
+      "suggestedKey": "components.tab-bar.text"
+    },
+    {
+      "file": "src/components/TranslatePanel.vue",
+      "line": 156,
+      "section": "components",
+      "component": "translate-panel",
+      "type": "attr",
+      "value": "翻译面板",
+      "suggestedKey": "components.translate-panel.aria_label"
+    },
+    {
+      "file": "src/components/TranslatePanel.vue",
+      "line": 159,
+      "section": "components",
+      "component": "translate-panel",
+      "type": "text",
+      "value": "🌐 翻译",
+      "suggestedKey": "components.translate-panel.text"
+    },
+    {
+      "file": "src/components/TranslatePanel.vue",
+      "line": 161,
+      "section": "components",
+      "component": "translate-panel",
+      "type": "attr",
+      "value": "关闭 (Esc)",
+      "suggestedKey": "components.translate-panel.title"
+    },
+    {
+      "file": "src/components/TranslatePanel.vue",
+      "line": 161,
+      "section": "components",
+      "component": "translate-panel",
+      "type": "attr",
+      "value": "关闭",
+      "suggestedKey": "components.translate-panel.aria_label"
+    },
+    {
+      "file": "src/components/TranslatePanel.vue",
+      "line": 167,
+      "section": "components",
+      "component": "translate-panel",
+      "type": "text",
+      "value": "原文",
+      "suggestedKey": "components.translate-panel.text"
+    },
+    {
+      "file": "src/components/TranslatePanel.vue",
+      "line": 173,
+      "section": "components",
+      "component": "translate-panel",
+      "type": "attr",
+      "value": "粘贴或输入要翻译的文本（Ctrl+Enter 翻译）",
+      "suggestedKey": "components.translate-panel.placeholder"
+    },
+    {
+      "file": "src/components/TranslatePanel.vue",
+      "line": 187,
+      "section": "components",
+      "component": "translate-panel",
+      "type": "text",
+      "value": "清空",
+      "suggestedKey": "components.translate-panel.text"
+    },
+    {
+      "file": "src/components/TranslatePanel.vue",
+      "line": 191,
+      "section": "components",
+      "component": "translate-panel",
+      "type": "attr",
+      "value": "翻译当前标签的整个页面（把网页文字换成中文）",
+      "suggestedKey": "components.translate-panel.title"
+    },
+    {
+      "file": "src/components/TranslatePanel.vue",
+      "line": 202,
+      "section": "components",
+      "component": "translate-panel",
+      "type": "text",
+      "value": "译文",
+      "suggestedKey": "components.translate-panel.text"
+    },
+    {
+      "file": "src/components/TranslatePanel.vue",
+      "line": 215,
+      "section": "components",
+      "component": "translate-panel",
+      "type": "text",
+      "value": "译文会显示在这里",
+      "suggestedKey": "components.translate-panel.text"
+    },
+    {
+      "file": "src/components/UserscriptsDialog.vue",
+      "line": 121,
+      "section": "components",
+      "component": "userscripts-dialog",
+      "type": "attr",
+      "value": "用户脚本",
+      "suggestedKey": "components.userscripts-dialog.title"
+    },
+    {
+      "file": "src/components/UserscriptsDialog.vue",
+      "line": 127,
+      "section": "components",
+      "component": "userscripts-dialog",
+      "type": "text",
+      "value": "＋ 新建脚本",
+      "suggestedKey": "components.userscripts-dialog.text"
+    },
+    {
+      "file": "src/components/UserscriptsDialog.vue",
+      "line": 128,
+      "section": "components",
+      "component": "userscripts-dialog",
+      "type": "text",
+      "value": "还没有用户脚本",
+      "suggestedKey": "components.userscripts-dialog.text"
+    },
+    {
+      "file": "src/components/UserscriptsDialog.vue",
+      "line": 135,
+      "section": "components",
+      "component": "userscripts-dialog",
+      "type": "attr",
+      "value": "启用/停用",
+      "suggestedKey": "components.userscripts-dialog.title"
+    },
+    {
+      "file": "src/components/UserscriptsDialog.vue",
+      "line": 140,
+      "section": "components",
+      "component": "userscripts-dialog",
+      "type": "attr",
+      "value": "删除",
+      "suggestedKey": "components.userscripts-dialog.title"
+    },
+    {
+      "file": "src/components/UserscriptsDialog.vue",
+      "line": 144,
+      "section": "components",
+      "component": "userscripts-dialog",
+      "type": "attr",
+      "value": "名称",
+      "suggestedKey": "components.userscripts-dialog.placeholder"
+    },
+    {
+      "file": "src/components/UserscriptsDialog.vue",
+      "line": 148,
+      "section": "components",
+      "component": "userscripts-dialog",
+      "type": "attr",
+      "value": "匹配模式（每行一条，如 *://*.example.com/*）",
+      "suggestedKey": "components.userscripts-dialog.placeholder"
+    },
+    {
+      "file": "src/components/UserscriptsDialog.vue",
+      "line": 154,
+      "section": "components",
+      "component": "userscripts-dialog",
+      "type": "attr",
+      "value": "// 用户脚本 JS 代码（document_end 注入）",
+      "suggestedKey": "components.userscripts-dialog.placeholder"
+    },
+    {
+      "file": "src/components/UserscriptsDialog.vue",
+      "line": 161,
+      "section": "components",
+      "component": "userscripts-dialog",
+      "type": "text",
+      "value": "取消编辑",
+      "suggestedKey": "components.userscripts-dialog.text"
+    },
+    {
+      "file": "src/components/VerticalTabBar.vue",
+      "line": 81,
+      "section": "components",
+      "component": "vertical-tab-bar",
+      "type": "attr",
+      "value": "新建标签页",
+      "suggestedKey": "components.vertical-tab-bar.title"
+    },
+    {
+      "file": "src/components/VerticalTabBar.vue",
+      "line": 84,
+      "section": "components",
+      "component": "vertical-tab-bar",
+      "type": "attr",
+      "value": "切换回横向标签栏",
+      "suggestedKey": "components.vertical-tab-bar.title"
+    },
+    {
+      "file": "src/components/VerticalTabBar.vue",
+      "line": 86,
+      "section": "components",
+      "component": "vertical-tab-bar",
+      "type": "text",
+      "value": "横向",
+      "suggestedKey": "components.vertical-tab-bar.text"
+    },
+    {
+      "file": "src/components/VerticalTabBar.vue",
+      "line": 90,
+      "section": "components",
+      "component": "vertical-tab-bar",
+      "type": "attr",
+      "value": "最小化",
+      "suggestedKey": "components.vertical-tab-bar.title"
+    },
+    {
+      "file": "src/components/VerticalTabBar.vue",
+      "line": 93,
+      "section": "components",
+      "component": "vertical-tab-bar",
+      "type": "attr",
+      "value": "最大化/还原",
+      "suggestedKey": "components.vertical-tab-bar.title"
+    },
+    {
+      "file": "src/components/VerticalTabBar.vue",
+      "line": 93,
+      "section": "components",
+      "component": "vertical-tab-bar",
+      "type": "attr",
+      "value": "最大化或还原",
+      "suggestedKey": "components.vertical-tab-bar.aria_label"
+    },
+    {
+      "file": "src/components/VerticalTabBar.vue",
+      "line": 96,
+      "section": "components",
+      "component": "vertical-tab-bar",
+      "type": "attr",
+      "value": "关闭窗口",
+      "suggestedKey": "components.vertical-tab-bar.title"
+    },
+    {
+      "file": "src/components/VerticalTabBar.vue",
+      "line": 100,
+      "section": "components",
+      "component": "vertical-tab-bar",
+      "type": "attr",
+      "value": "打开的标签",
+      "suggestedKey": "components.vertical-tab-bar.aria_label"
+    },
+    {
+      "file": "src/components/VerticalTabBar.vue",
+      "line": 121,
+      "section": "components",
+      "component": "vertical-tab-bar",
+      "type": "attr",
+      "value": "关闭",
+      "suggestedKey": "components.vertical-tab-bar.title"
+    },
+    {
+      "file": "src/components/VerticalTabBar.vue",
+      "line": 121,
+      "section": "components",
+      "component": "vertical-tab-bar",
+      "type": "attr",
+      "value": "关闭标签",
+      "suggestedKey": "components.vertical-tab-bar.aria_label"
+    },
+    {
+      "file": "src/components/settings/AboutSection.vue",
+      "line": 73,
+      "section": "settings",
+      "component": "about-section",
+      "type": "text",
+      "value": "本地优先的隐私浏览器，数据主权在你手里。",
+      "suggestedKey": "settings.about-section.text"
+    },
+    {
+      "file": "src/components/settings/AboutSection.vue",
+      "line": 98,
+      "section": "settings",
+      "component": "about-section",
+      "type": "text",
+      "value": "项目主页",
+      "suggestedKey": "settings.about-section.text"
+    },
+    {
+      "file": "src/components/settings/AboutSection.vue",
+      "line": 99,
+      "section": "settings",
+      "component": "about-section",
+      "type": "text",
+      "value": "打开仓库",
+      "suggestedKey": "settings.about-section.text"
+    },
+    {
+      "file": "src/components/settings/AboutSection.vue",
+      "line": 102,
+      "section": "settings",
+      "component": "about-section",
+      "type": "text",
+      "value": "数据目录",
+      "suggestedKey": "settings.about-section.text"
+    },
+    {
+      "file": "src/components/settings/AboutSection.vue",
+      "line": 103,
+      "section": "settings",
+      "component": "about-section",
+      "type": "text",
+      "value": "打开文件夹",
+      "suggestedKey": "settings.about-section.text"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 143,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "text",
+      "value": "推理服务（Provider）",
+      "suggestedKey": "settings.ai-section.text"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 156,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "text",
+      "value": "AGNES 云端",
+      "suggestedKey": "settings.ai-section.text"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 166,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "text",
+      "value": "模型",
+      "suggestedKey": "settings.ai-section.text"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 172,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "text",
+      "value": "agnes-2.0-flash（推荐）",
+      "suggestedKey": "settings.ai-section.text"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 174,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "text",
+      "value": "agnes-2.5-flash（可能超时）",
+      "suggestedKey": "settings.ai-section.text"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 178,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "text",
+      "value": "API 地址",
+      "suggestedKey": "settings.ai-section.text"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 194,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "attr",
+      "value": "hasAiKey() ? '已配置（不回显），留空保持不变' : '留空使用环境变量 AGNES_API_KEY'",
+      "suggestedKey": "settings.ai-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 201,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "text",
+      "value": "请求超时（秒）",
+      "suggestedKey": "settings.ai-section.text"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 212,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "text",
+      "value": "流式超时（秒）",
+      "suggestedKey": "settings.ai-section.text"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 223,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "text",
+      "value": "范围 10-300 秒，慢网可调大；超范围回落默认值（90/120）。",
+      "suggestedKey": "settings.ai-section.text"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 234,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "attr",
+      "value": "llama3.1（填 Ollama 本机已拉取的模型名）",
+      "suggestedKey": "settings.ai-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 253,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "text",
+      "value": "连接状态",
+      "suggestedKey": "settings.ai-section.text"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 255,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "text",
+      "value": "正在连接本机 opencode…",
+      "suggestedKey": "settings.ai-section.text"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 258,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "text",
+      "value": "重试",
+      "suggestedKey": "settings.ai-section.text"
+    },
+    {
+      "file": "src/components/settings/AiSection.vue",
+      "line": 271,
+      "section": "settings",
+      "component": "ai-section",
+      "type": "text",
+      "value": "opencode 模型",
+      "suggestedKey": "settings.ai-section.text"
+    },
+    {
+      "file": "src/components/settings/ApiSection.vue",
+      "line": 75,
+      "section": "settings",
+      "component": "api-section",
+      "type": "text",
+      "value": "允许 API 执行 JS（危险）",
+      "suggestedKey": "settings.api-section.text"
+    },
+    {
+      "file": "src/components/settings/ApiSection.vue",
+      "line": 86,
+      "section": "settings",
+      "component": "api-section",
+      "type": "text",
+      "value": "API 只读模式",
+      "suggestedKey": "settings.api-section.text"
+    },
+    {
+      "file": "src/components/settings/ApiSection.vue",
+      "line": 97,
+      "section": "settings",
+      "component": "api-section",
+      "type": "text",
+      "value": "允许 API 页面交互（危险）",
+      "suggestedKey": "settings.api-section.text"
+    },
+    {
+      "file": "src/components/settings/ApiSection.vue",
+      "line": 108,
+      "section": "settings",
+      "component": "api-section",
+      "type": "text",
+      "value": "开放 API 端口",
+      "suggestedKey": "settings.api-section.text"
+    },
+    {
+      "file": "src/components/settings/ApiSection.vue",
+      "line": 118,
+      "section": "settings",
+      "component": "api-section",
+      "type": "text",
+      "value": "默认 19701；改完重启生效",
+      "suggestedKey": "settings.api-section.text"
+    },
+    {
+      "file": "src/components/settings/ApiSection.vue",
+      "line": 121,
+      "section": "settings",
+      "component": "api-section",
+      "type": "text",
+      "value": "开放 API 绑局域网（危险）",
+      "suggestedKey": "settings.api-section.text"
+    },
+    {
+      "file": "src/components/settings/ApiSection.vue",
+      "line": 132,
+      "section": "settings",
+      "component": "api-section",
+      "type": "text",
+      "value": "API IP 白名单",
+      "suggestedKey": "settings.api-section.text"
+    },
+    {
+      "file": "src/components/settings/ApiSection.vue",
+      "line": 146,
+      "section": "settings",
+      "component": "api-section",
+      "type": "text",
+      "value": "允许模型网关（消耗额度）",
+      "suggestedKey": "settings.api-section.text"
+    },
+    {
+      "file": "src/components/settings/ApiSection.vue",
+      "line": 157,
+      "section": "settings",
+      "component": "api-section",
+      "type": "text",
+      "value": "状态面板与 token",
+      "suggestedKey": "settings.api-section.text"
+    },
+    {
+      "file": "src/components/settings/ApiSection.vue",
+      "line": 180,
+      "section": "settings",
+      "component": "api-section",
+      "type": "text",
+      "value": "复制新 token",
+      "suggestedKey": "settings.api-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 15,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "attr",
+      "value": "外观",
+      "suggestedKey": "settings.appearance-section.title"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 17,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "主题",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 28,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "深色",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 39,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "浅色",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 44,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "显示书签栏",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 53,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "attr",
+      "value": "启动页",
+      "suggestedKey": "settings.appearance-section.title"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 55,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "动态背景",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 56,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "Bing 每日高清壁纸 + 缓慢缩放动画",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 64,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "字体大小",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 70,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "12px（小）",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 72,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "14px（默认）",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 74,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "16px（大）",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 76,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "20px（特大）",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 80,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "主题色",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 90,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "恢复默认",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 93,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "启动页强调色；留空使用默认蓝。",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 95,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "自定义壁纸 URL",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 100,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "attr",
+      "value": "留空 = Bing 每日高清图",
+      "suggestedKey": "settings.appearance-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 106,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "显示农历",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 107,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "启动页时钟下方显示农历日期",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 115,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "显示每日一句",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 116,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "启动页展示一句英文金句",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 124,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "显示天气",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 125,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "启动页展示天气卡片",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 133,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "天气城市",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 138,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "attr",
+      "value": "留空 = 自动定位",
+      "suggestedKey": "settings.appearance-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/AppearanceSection.vue",
+      "line": 144,
+      "section": "settings",
+      "component": "appearance-section",
+      "type": "text",
+      "value": "重新打开启动页生效",
+      "suggestedKey": "settings.appearance-section.text"
+    },
+    {
+      "file": "src/components/settings/AutomationCard.vue",
+      "line": 25,
+      "section": "settings",
+      "component": "automation-card",
+      "type": "text",
+      "value": "定时清理历史",
+      "suggestedKey": "settings.automation-card.text"
+    },
+    {
+      "file": "src/components/settings/AutomationCard.vue",
+      "line": 34,
+      "section": "settings",
+      "component": "automation-card",
+      "type": "text",
+      "value": "天（0=关闭；每天自动删更早的历史）",
+      "suggestedKey": "settings.automation-card.text"
+    },
+    {
+      "file": "src/components/settings/AutomationCard.vue",
+      "line": 37,
+      "section": "settings",
+      "component": "automation-card",
+      "type": "text",
+      "value": "定时刷新订阅",
+      "suggestedKey": "settings.automation-card.text"
+    },
+    {
+      "file": "src/components/settings/AutomationCard.vue",
+      "line": 46,
+      "section": "settings",
+      "component": "automation-card",
+      "type": "text",
+      "value": "分钟（0=关闭）",
+      "suggestedKey": "settings.automation-card.text"
+    },
+    {
+      "file": "src/components/settings/AutomationCard.vue",
+      "line": 49,
+      "section": "settings",
+      "component": "automation-card",
+      "type": "text",
+      "value": "定时跑 Agent",
+      "suggestedKey": "settings.automation-card.text"
+    },
+    {
+      "file": "src/components/settings/AutomationCard.vue",
+      "line": 58,
+      "section": "settings",
+      "component": "automation-card",
+      "type": "text",
+      "value": "分钟（0=关闭；到点打开 AI 侧栏并发送下面的提示词）",
+      "suggestedKey": "settings.automation-card.text"
+    },
+    {
+      "file": "src/components/settings/AutomationCard.vue",
+      "line": 62,
+      "section": "settings",
+      "component": "automation-card",
+      "type": "text",
+      "value": "Agent 定时提示词",
+      "suggestedKey": "settings.automation-card.text"
+    },
+    {
+      "file": "src/components/settings/AutomationCard.vue",
+      "line": 66,
+      "section": "settings",
+      "component": "automation-card",
+      "type": "text",
+      "value": "资讯早报模板",
+      "suggestedKey": "settings.automation-card.text"
+    },
+    {
+      "file": "src/components/settings/AutomationCard.vue",
+      "line": 67,
+      "section": "settings",
+      "component": "automation-card",
+      "type": "text",
+      "value": "页面总结模板",
+      "suggestedKey": "settings.automation-card.text"
+    },
+    {
+      "file": "src/components/settings/AutomationCard.vue",
+      "line": 68,
+      "section": "settings",
+      "component": "automation-card",
+      "type": "text",
+      "value": "到点提醒模板",
+      "suggestedKey": "settings.automation-card.text"
+    },
+    {
+      "file": "src/components/settings/AutomationCard.vue",
+      "line": 73,
+      "section": "settings",
+      "component": "automation-card",
+      "type": "attr",
+      "value": "例如：看看当前页面讲了啥，总结三条要点",
+      "suggestedKey": "settings.automation-card.placeholder"
+    },
+    {
+      "file": "src/components/settings/CompatCard.vue",
+      "line": 16,
+      "section": "settings",
+      "component": "compat-card",
+      "type": "text",
+      "value": "开发者工具（F12）",
+      "suggestedKey": "settings.compat-card.text"
+    },
+    {
+      "file": "src/components/settings/CompatCard.vue",
+      "line": 18,
+      "section": "settings",
+      "component": "compat-card",
+      "type": "text",
+      "value": "新开标签直接生效",
+      "suggestedKey": "settings.compat-card.text"
+    },
+    {
+      "file": "src/components/settings/CompatCard.vue",
+      "line": 27,
+      "section": "settings",
+      "component": "compat-card",
+      "type": "text",
+      "value": "Chrome 指纹补齐",
+      "suggestedKey": "settings.compat-card.text"
+    },
+    {
+      "file": "src/components/settings/CompatCard.vue",
+      "line": 38,
+      "section": "settings",
+      "component": "compat-card",
+      "type": "text",
+      "value": "禁用 DMA-BUF 渲染",
+      "suggestedKey": "settings.compat-card.text"
+    },
+    {
+      "file": "src/components/settings/CompatCard.vue",
+      "line": 40,
+      "section": "settings",
+      "component": "compat-card",
+      "type": "text",
+      "value": "但禁用后打开微博等重合成页面会导致浏览器崩溃",
+      "suggestedKey": "settings.compat-card.text"
+    },
+    {
+      "file": "src/components/settings/DataSection.vue",
+      "line": 31,
+      "section": "settings",
+      "component": "data-section",
+      "type": "text",
+      "value": "密码库主密码",
+      "suggestedKey": "settings.data-section.text"
+    },
+    {
+      "file": "src/components/settings/DataSection.vue",
+      "line": 69,
+      "section": "settings",
+      "component": "data-section",
+      "type": "text",
+      "value": "锁定",
+      "suggestedKey": "settings.data-section.text"
+    },
+    {
+      "file": "src/components/settings/DataSection.vue",
+      "line": 90,
+      "section": "settings",
+      "component": "data-section",
+      "type": "text",
+      "value": "分钟",
+      "suggestedKey": "settings.data-section.text"
+    },
+    {
+      "file": "src/components/settings/DataSection.vue",
+      "line": 91,
+      "section": "settings",
+      "component": "data-section",
+      "type": "text",
+      "value": "保存",
+      "suggestedKey": "settings.data-section.text"
+    },
+    {
+      "file": "src/components/settings/DataSection.vue",
+      "line": 96,
+      "section": "settings",
+      "component": "data-section",
+      "type": "text",
+      "value": "上云 E2E 加密同步（服务器零知识）",
+      "suggestedKey": "settings.data-section.text"
+    },
+    {
+      "file": "src/components/settings/DataSection.vue",
+      "line": 97,
+      "section": "settings",
+      "component": "data-section",
+      "type": "text",
+      "value": "主密码",
+      "suggestedKey": "settings.data-section.text"
+    },
+    {
+      "file": "src/components/settings/DataSection.vue",
+      "line": 114,
+      "section": "settings",
+      "component": "data-section",
+      "type": "attr",
+      "value": "WebDAV 地址，如 https://host/remote.php/dav/files/user",
+      "suggestedKey": "settings.data-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/DataSection.vue",
+      "line": 119,
+      "section": "settings",
+      "component": "data-section",
+      "type": "attr",
+      "value": "用户名",
+      "suggestedKey": "settings.data-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/DataSection.vue",
+      "line": 125,
+      "section": "settings",
+      "component": "data-section",
+      "type": "attr",
+      "value": "密码",
+      "suggestedKey": "settings.data-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/DataSection.vue",
+      "line": 171,
+      "section": "settings",
+      "component": "data-section",
+      "type": "text",
+      "value": "启动锁屏（每次启动输入账号密码解锁，数据不受影响）",
+      "suggestedKey": "settings.data-section.text"
+    },
+    {
+      "file": "src/components/settings/ExtensionsSection.vue",
+      "line": 70,
+      "section": "settings",
+      "component": "extensions-section",
+      "type": "attr",
+      "value": "扩展目录或 manifest.json 路径",
+      "suggestedKey": "settings.extensions-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/ExtensionsSection.vue",
+      "line": 96,
+      "section": "settings",
+      "component": "extensions-section",
+      "type": "text",
+      "value": "删除",
+      "suggestedKey": "settings.extensions-section.text"
+    },
+    {
+      "file": "src/components/settings/ExtensionsSection.vue",
+      "line": 100,
+      "section": "settings",
+      "component": "extensions-section",
+      "type": "text",
+      "value": "还没有扩展，输入路径加载一个试试",
+      "suggestedKey": "settings.extensions-section.text"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 99,
+      "section": "settings",
+      "component": "general-section",
+      "type": "attr",
+      "value": "通用",
+      "suggestedKey": "settings.general-section.title"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 101,
+      "section": "settings",
+      "component": "general-section",
+      "type": "text",
+      "value": "默认浏览器",
+      "suggestedKey": "settings.general-section.text"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 124,
+      "section": "settings",
+      "component": "general-section",
+      "type": "text",
+      "value": "主页 URL",
+      "suggestedKey": "settings.general-section.text"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 129,
+      "section": "settings",
+      "component": "general-section",
+      "type": "attr",
+      "value": "newtab 或 https://...",
+      "suggestedKey": "settings.general-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 135,
+      "section": "settings",
+      "component": "general-section",
+      "type": "text",
+      "value": "搜索引擎",
+      "suggestedKey": "settings.general-section.text"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 139,
+      "section": "settings",
+      "component": "general-section",
+      "type": "text",
+      "value": "标签休眠",
+      "suggestedKey": "settings.general-section.text"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 147,
+      "section": "settings",
+      "component": "general-section",
+      "type": "text",
+      "value": "销毁它的渲染进程、立刻释放内存",
+      "suggestedKey": "settings.general-section.text"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 151,
+      "section": "settings",
+      "component": "general-section",
+      "type": "text",
+      "value": "休眠标签数阈值",
+      "suggestedKey": "settings.general-section.text"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 165,
+      "section": "settings",
+      "component": "general-section",
+      "type": "text",
+      "value": "垂直标签栏",
+      "suggestedKey": "settings.general-section.text"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 166,
+      "section": "settings",
+      "component": "general-section",
+      "type": "text",
+      "value": "标签栏移到左侧竖排，适合多标签",
+      "suggestedKey": "settings.general-section.text"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 174,
+      "section": "settings",
+      "component": "general-section",
+      "type": "text",
+      "value": "启动查版本",
+      "suggestedKey": "settings.general-section.text"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 175,
+      "section": "settings",
+      "component": "general-section",
+      "type": "text",
+      "value": "启动时检查新版本并提示（只提示，不自动安装）",
+      "suggestedKey": "settings.general-section.text"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 183,
+      "section": "settings",
+      "component": "general-section",
+      "type": "text",
+      "value": "翻译源",
+      "suggestedKey": "settings.general-section.text"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 196,
+      "section": "settings",
+      "component": "general-section",
+      "type": "text",
+      "value": "翻译目标语言",
+      "suggestedKey": "settings.general-section.text"
+    },
+    {
+      "file": "src/components/settings/GeneralSection.vue",
+      "line": 211,
+      "section": "settings",
+      "component": "general-section",
+      "type": "text",
+      "value": "翻译超时（秒）",
+      "suggestedKey": "settings.general-section.text"
+    },
+    {
+      "file": "src/components/settings/McpSection.vue",
+      "line": 147,
+      "section": "settings",
+      "component": "mcp-section",
+      "type": "attr",
+      "value": "名称（如 filesystem）",
+      "suggestedKey": "settings.mcp-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/McpSection.vue",
+      "line": 148,
+      "section": "settings",
+      "component": "mcp-section",
+      "type": "attr",
+      "value": "命令（如 npx）",
+      "suggestedKey": "settings.mcp-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/McpSection.vue",
+      "line": 151,
+      "section": "settings",
+      "component": "mcp-section",
+      "type": "text",
+      "value": "添加",
+      "suggestedKey": "settings.mcp-section.text"
+    },
+    {
+      "file": "src/components/settings/McpSection.vue",
+      "line": 163,
+      "section": "settings",
+      "component": "mcp-section",
+      "type": "attr",
+      "value": "s.enabled ? '点击停用' : '点击启用'",
+      "suggestedKey": "settings.mcp-section.title"
+    },
+    {
+      "file": "src/components/settings/McpSection.vue",
+      "line": 170,
+      "section": "settings",
+      "component": "mcp-section",
+      "type": "text",
+      "value": "删除",
+      "suggestedKey": "settings.mcp-section.text"
+    },
+    {
+      "file": "src/components/settings/McpSection.vue",
+      "line": 176,
+      "section": "settings",
+      "component": "mcp-section",
+      "type": "text",
+      "value": "暂无可用工具（需启用且能连通的 server）",
+      "suggestedKey": "settings.mcp-section.text"
+    },
+    {
+      "file": "src/components/settings/McpSection.vue",
+      "line": 187,
+      "section": "settings",
+      "component": "mcp-section",
+      "type": "text",
+      "value": "选择工具…",
+      "suggestedKey": "settings.mcp-section.text"
+    },
+    {
+      "file": "src/components/settings/McpSection.vue",
+      "line": 200,
+      "section": "settings",
+      "component": "mcp-section",
+      "type": "text",
+      "value": "暂无工具调用记录",
+      "suggestedKey": "settings.mcp-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 117,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "证书管理",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 119,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "打开证书中心",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 120,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "查看/管理证书、例外与监测事件",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 130,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "默认",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 131,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "Windows 版",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 132,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "移动版",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 133,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "不会手写就点预设，再按保存（清空即回默认）",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 135,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "attr",
+      "value": "留空 = 使用默认 UA",
+      "suggestedKey": "settings.privacy-data-card.placeholder"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 137,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "保存",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 138,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "恢复默认",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 141,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "站点级覆盖（某些站需特定 UA）",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 143,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "attr",
+      "value": "域名，如 example.com",
+      "suggestedKey": "settings.privacy-data-card.placeholder"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 144,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "attr",
+      "value": "该站 UA",
+      "suggestedKey": "settings.privacy-data-card.placeholder"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 145,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "添加",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 150,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "删除",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 161,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "记录浏览历史",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 169,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "历史记录",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 171,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "清除历史数据",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 176,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "清除浏览数据",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacyDataCard.vue",
+      "line": 186,
+      "section": "settings",
+      "component": "privacy-data-card",
+      "type": "text",
+      "value": "立即清除",
+      "suggestedKey": "settings.privacy-data-card.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 158,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "隐私防护",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 160,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "标准（推荐）",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 161,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "严格",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 162,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "关闭",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 166,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "标准",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 173,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "反指纹模式",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 175,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "加噪（默认）",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 176,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "统一化（Tor/Mullvad 派）",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 180,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "加噪",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 182,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "统一化",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 188,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "兼容白名单",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 199,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "保存白名单",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 203,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "防护统计",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 207,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "重置",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 211,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "防护自测",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 228,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "（白名单站点，兼容模式：防护整体跳过）",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 251,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "GPC 请求头（Sec-GPC: 1）",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 252,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "W3C Global Privacy Control：网络层告诉站点「别卖我的数据」",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 260,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "广告拦截",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 274,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "attr",
+      "value": "删除",
+      "suggestedKey": "settings.privacy-section.title"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 281,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "attr",
+      "value": "输入关键词，回车添加",
+      "suggestedKey": "settings.privacy-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 285,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "添加",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 291,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "网络层拦截规则",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 292,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "2 秒自动生效",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 297,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "attr",
+      "value": "每行一个 URL 子串，例如：doubleclick.net",
+      "suggestedKey": "settings.privacy-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 305,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "自定义请求头",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 307,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "注：",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 312,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "attr",
+      "value": "每行 Name: Value，例如：DNT: 1",
+      "suggestedKey": "settings.privacy-section.placeholder"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 320,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "站点 GPC 声明",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/PrivacySection.vue",
+      "line": 339,
+      "section": "settings",
+      "component": "privacy-section",
+      "type": "text",
+      "value": "外联审计",
+      "suggestedKey": "settings.privacy-section.text"
+    },
+    {
+      "file": "src/components/settings/SelfCheckSection.vue",
+      "line": 69,
+      "section": "settings",
+      "component": "self-check-section",
+      "type": "text",
+      "value": "点击「重新检查」开始体检",
+      "suggestedKey": "settings.self-check-section.text"
+    },
+    {
+      "file": "src/components/settings/UserscriptsEntryCard.vue",
+      "line": 14,
+      "section": "settings",
+      "component": "userscripts-entry-card",
+      "type": "text",
+      "value": "打开用户脚本管理",
+      "suggestedKey": "settings.userscripts-entry-card.text"
+    },
+    {
+      "file": "src/components/settings/WebmcpCard.vue",
+      "line": 40,
+      "section": "settings",
+      "component": "webmcp-card",
+      "type": "text",
+      "value": "试验中",
+      "suggestedKey": "settings.webmcp-card.text"
+    },
+    {
+      "file": "src/components/ui/UiDialog.vue",
+      "line": 55,
+      "section": "ui",
+      "component": "ui-dialog",
+      "type": "attr",
+      "value": "关闭",
+      "suggestedKey": "ui.ui-dialog.aria_label"
+    },
+    {
+      "file": "src/utils/markdown.ts",
+      "line": 47,
+      "section": "utils",
+      "component": "markdown",
+      "type": "attr",
+      "value": "复制代码",
+      "suggestedKey": "utils.markdown.title"
+    }
+  ]
+}

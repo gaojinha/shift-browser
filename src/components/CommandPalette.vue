@@ -7,6 +7,7 @@
 // 自己保留的部分：多源候选计算（query 驱动，ignoreFilter）、选中派发 execute()、
 //   webview 显隐、输入框聚焦、中文输入法组字保护（isComposing 时按键不下沉到 Reka）。
 import { computed, defineComponent, nextTick, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import {
   ComboboxContent,
@@ -23,6 +24,7 @@ import { useTabsStore } from '../stores/tabs'
 import type { HistoryEntry } from '../types/history'
 
 const props = defineProps<{ show: boolean }>()
+const { t } = useI18n()
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'command', action: string): void
@@ -215,7 +217,7 @@ watch(
       class="cp-panel"
       role="dialog"
       aria-modal="true"
-      aria-label="命令面板"
+      :aria-label="t('commandPalette.title')"
     >
       <!-- 源头修：inject ComboboxRoot context 并改写 contentId 为静态值，
            Reka 自身渲染的 input aria-controls 与 content id 天然同步，无 DOM 补丁 -->
@@ -226,16 +228,16 @@ watch(
             ref="inputRef"
             v-model="query"
             class="cp-input"
-            placeholder="输入命令、网址，或问 AI…"
-            aria-label="命令面板搜索"
+            :placeholder="t('commandPalette.placeholder')"
+            :aria-label="t('commandPalette.searchLabel')"
             spellcheck="false"
             @keydown.enter="onEnterKey"
           />
           <span class="cp-esc">Esc</span>
         </div>
-        <ComboboxContent class="cp-list-wrap" aria-label="命令候选" @escape-key-down="emit('close')">
+        <ComboboxContent class="cp-list-wrap" :aria-label="t('commandPalette.listLabel')" @escape-key-down="emit('close')">
           <ComboboxViewport class="cp-list">
-            <ComboboxEmpty class="cp-empty">没有匹配项</ComboboxEmpty>
+            <ComboboxEmpty class="cp-empty">{{ t('commandPalette.empty') }}</ComboboxEmpty>
             <ComboboxItem
               v-for="it in items"
               :key="it.key"

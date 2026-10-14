@@ -12,4 +12,11 @@ export default {
   update: {
     available: '发现新版本 v{latest}（当前 v{current}），到「关于」页或 Release 页获取',
   },
+  commandPalette: {
+    title: '命令面板',
+    placeholder: '输入命令、网址，或问 AI…',
+    searchLabel: '命令面板搜索',
+    listLabel: '命令候选',
+    empty: '没有匹配项',
+  },
 }
