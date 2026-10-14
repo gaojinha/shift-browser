@@ -114,6 +114,24 @@ watch(
     }
   },
 )
+
+// 焦点归位：Reka triggerElement 由 <DialogTrigger> 注册，但触发按钮在 StatusBar
+// （与 DialogRoot 不在同一组件树），triggerElement 始终为 null，Reka 的
+// triggerElement?.focus() 静默无效。在此手动补焦点链：打开时捕获 activeElement，
+// 关闭时 nextTick 恢复（nextTick 确保 Reka unmount 逻辑先完成）。
+const _focusReturnEl = ref<HTMLElement | null>(null)
+watch(
+  () => props.show,
+  (v) => {
+    if (v) {
+      _focusReturnEl.value = document.activeElement as HTMLElement | null
+    } else if (_focusReturnEl.value) {
+      const el = _focusReturnEl.value
+      _focusReturnEl.value = null
+      nextTick(() => el.focus())
+    }
+  },
+)
 </script>
 
 <template>
