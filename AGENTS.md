@@ -38,3 +38,13 @@
 
 - 跟高哥汇报：结论先行，一项一议，干了啥、咋验的、有啥没把握，三段讲清
 - 禁用语：永远不说"中不中"
+
+## 六、多 AI 协作（2026-10-14 加）
+
+三方协作：**王二狗**（协调器）· **atomcode**（执行者）· **copilot**（审查/执行）。
+
+- **每轮任务开始前**：检查 `.ai/inbox/atomcode/` 是否有新消息（协调器派发的任务/询问）
+- **处理完**：回复写到 `.ai/outbox/atomcode/`（格式见 `.ai/README.md`），已处理的移到 `.ai/processed/`
+- **进度与状态**：每轮收尾把状态写进 `.ai/STATUS_REPORT.md` 的 atomcode 段
+- **任务队列**：`.ai/TASK_QUEUE.md`（协调器维护，只读）
+- **有阻塞/疑问**：立即写 `.ai/outbox/atomcode/`，标记 `priority: high`

@@ -303,8 +303,16 @@ mod gate_tests {
     /// 不出网不解析——复用 ai::ssrf 同一判定，此处锁 llms.txt 侧的接线。
     #[tokio::test]
     async fn gate_blocks_private_hosts_silently() {
-        for host in ["127.0.0.1", "192.168.1.10", "10.0.0.1", "169.254.1.1",
-                     "0x7f000001", "localhost", "box.internal", "::ffff:192.168.1.1"] {
+        for host in [
+            "127.0.0.1",
+            "192.168.1.10",
+            "10.0.0.1",
+            "169.254.1.1",
+            "0x7f000001",
+            "localhost",
+            "box.internal",
+            "::ffff:192.168.1.1",
+        ] {
             assert!(
                 llms_outbound_addrs(host, 80).await.is_none(),
                 "私网 host 应静默跳过: {host}"
@@ -319,6 +327,8 @@ mod gate_tests {
         let addrs = llms_outbound_addrs("93.184.216.34", 80).await.unwrap();
         assert!(addrs.is_empty(), "公网 IP 字面量应直连（空 addrs）");
         // 保留域 .invalid 永不解析 → 静默 None（网络无关，CI 稳定）
-        assert!(llms_outbound_addrs("no-such-host.invalid", 80).await.is_none());
+        assert!(llms_outbound_addrs("no-such-host.invalid", 80)
+            .await
+            .is_none());
     }
 }

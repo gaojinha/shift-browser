@@ -1,0 +1,28 @@
+{
+  "mcp": {
+    "servers": {
+      "shift-browser": {
+        "type": "local",
+        "command": [
+          "/usr/bin/shift-browser-mcp"
+        ]
+      },
+      "context7": {
+        "type": "local",
+        "command": [
+          "npx",
+          "--yes",
+          "@upstash/context7-mcp@latest"
+        ]
+      },
+      "playwright": {
+        "type": "local",
+        "command": [
+          "npx",
+          "--yes",
+          "@playwright/mcp@latest"
+        ]
+      }
+    }
+  }
+}
