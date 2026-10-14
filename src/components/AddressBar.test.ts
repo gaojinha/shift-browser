@@ -26,6 +26,7 @@ vi.mock('../utils/webview', () => ({
 }))
 
 import { useTabsStore } from '../stores/tabs'
+import { i18n } from '../i18n'
 import AddressBar from './AddressBar.vue'
 
 function makeTab(id: string, over: Partial<Tab> = {}): Tab {
@@ -56,7 +57,8 @@ afterEach(() => vi.useRealTimers())
 function mountWith(tabs: Tab[], activeTabId: string | null, patch: Record<string, unknown> = {}) {
   const tabsStore = useTabsStore()
   tabsStore.$patch({ tabs, activeTabId, ...patch })
-  const wrapper = mount(AddressBar, { global: { plugins: [pinia] } })
+  // 子组件 TranslateProgress 用 useI18n()，必须装 i18n 插件
+  const wrapper = mount(AddressBar, { global: { plugins: [pinia, i18n] } })
   return { wrapper, tabsStore }
 }
 

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 // 翻译进度条（挂在地址栏）：参照原版 Electron 的 #translateProgress 蓝色胶囊
 // 数据来源：整页翻译脚本 → shift://__translate__/progress → Rust emit "translate-progress"
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { listen } from '@tauri-apps/api/event'
+import { useI18n } from 'vue-i18n'
 import { EVENTS } from '../constants'
+
+const { t } = useI18n()
 
 interface ProgressPayload {
   state: 'start' | 'update' | 'done' | 'hide'
@@ -52,17 +55,20 @@ onMounted(async () => {
       info.value = p.info || ''
       fails.value = p.fails || 0
       if (p.state === 'start') {
-        timeText.value = '准备中…'
+        timeText.value = t('progress.preparing')
       } else if (p.state === 'done') {
         pct.value = 100
-        timeText.value = '完成 · ' + p.elapsed + 's'
+        timeText.value = t('progress.done', { s: p.elapsed })
         // 完成态停留 5 秒后自动收起
         hideTimer = window.setTimeout(() => {
           visible.value = false
           hideTimer = null
         }, 5000)
       } else {
-        timeText.value = p.elapsed + 's' + (p.eta > 0 ? ' · 剩' + p.eta + 's' : '')
+        timeText.value =
+          p.eta > 0
+            ? t('progress.runningEta', { s: p.elapsed, eta: p.eta })
+            : t('progress.running', { s: p.elapsed })
       }
     })
   } catch (e) {
@@ -74,15 +80,17 @@ onUnmounted(() => {
   if (unlisten) unlisten()
   clearHideTimer()
 })
+
+const titleText = computed(() =>
+  t('progress.title', {
+    info: info.value,
+    failsText: fails.value ? t('progress.fails', { n: fails.value }) : '',
+  }),
+)
 </script>
 
 <template>
-  <div
-    v-if="visible"
-    class="tp"
-    :title="`翻译中 ${info}${fails ? '（' + fails + ' 段未译）' : ''}　点击收起`"
-    @click="dismiss"
-  >
+  <div v-if="visible" class="tp" :title="titleText" @click="dismiss">
     <span class="tp-engine">{{ engine }}</span>
     <div class="tp-track"><div class="tp-fill" :style="{ width: pct + '%' }"></div></div>
     <span class="tp-pct">{{ pct }}%</span>
