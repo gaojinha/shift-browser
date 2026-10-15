@@ -5,6 +5,26 @@ use super::super::*;
 use crate::error::CommandResult;
 use tauri::Manager;
 
+/// 拖拽排序合并（纯函数，便于测试）：前端新顺序只保留现存标签，
+/// 现存但前端未报的标签兜底追加到末尾（前端漏报不丢标签）。
+pub(crate) fn merged_tab_order(
+    ids: &[String],
+    existing: &std::collections::HashSet<String>,
+    current_order: &[String],
+) -> Vec<String> {
+    let mut new_order: Vec<String> = ids
+        .iter()
+        .filter(|id| existing.contains(*id))
+        .cloned()
+        .collect();
+    for id in current_order {
+        if !new_order.contains(id) {
+            new_order.push(id.clone());
+        }
+    }
+    new_order
+}
+
 /// 更新标签顺序（拖拽排序）；前端传新顺序，缺失的现存标签兜底追加到末尾
 #[tauri::command]
 pub async fn reorder_tabs(
@@ -13,18 +33,10 @@ pub async fn reorder_tabs(
 ) -> CommandResult<()> {
     // 读锁内一次取全（状态收敛实施）
     let new_order: Vec<String> = state.mutate(|s| {
-        let mut new_order: Vec<String> = ids
-            .iter()
-            .filter(|id| s.tabs.contains_key(*id))
-            .cloned()
-            .collect();
-        for id in s.order.iter() {
-            if !new_order.contains(id) {
-                new_order.push(id.clone());
-            }
-        }
-        s.order = new_order.clone();
-        new_order
+        let existing: std::collections::HashSet<_> = s.tabs.keys().cloned().collect();
+        let merged = merged_tab_order(&ids, &existing, &s.order);
+        s.order = merged.clone();
+        merged
     });
     log::info!("[tabs] reorder_tabs: 新顺序 {:?}", new_order);
     Ok(())
@@ -122,24 +134,11 @@ pub async fn clear_browsing_data(
     db: tauri::State<'_, crate::db::Db>,
     scopes: Vec<String>,
 ) -> CommandResult<Vec<String>> {
-    let has = |k: &str| scopes.iter().any(|s| s == k || s == "all");
-    let mut done: Vec<String> = Vec::new();
-
-    // ---- 数据库侧 ----
-    if has("history") {
-        let _ = sqlx::query("DELETE FROM history").execute(&db.pool).await;
-        done.push("history".into());
-    }
-    if has("downloads") {
-        let _ = sqlx::query("DELETE FROM downloads").execute(&db.pool).await;
-        done.push("downloads".into());
-    }
-    if has("sessions") {
-        let _ = sqlx::query("DELETE FROM sessions").execute(&db.pool).await;
-        done.push("sessions".into());
-    }
+    // ---- 数据库侧（吃池，可测；scope 匹配口径见 clear_browsing_data_db）----
+    let done = clear_browsing_data_db(&db.pool, &scopes).await;
 
     // ---- WebKit 侧（GTK 对象只能在主线程操作）----
+    let has = |k: &str| scopes.iter().any(|s| s == k || s == "all");
     let need_cookies = has("cookies");
     let need_cache = has("cache");
     let need_storage = has("storage");
@@ -155,6 +154,7 @@ pub async fn clear_browsing_data(
             );
         })
         .map_err(|e| e.to_string())?;
+        let mut done = done;
         if need_cookies {
             done.push("cookies".into());
         }
@@ -164,8 +164,120 @@ pub async fn clear_browsing_data(
         if need_storage {
             done.push("storage".into());
         }
+        log::info!("[privacy] 清除浏览数据完成: {:?}", done);
+        return Ok(done);
     }
 
     log::info!("[privacy] 清除浏览数据完成: {:?}", done);
     Ok(done)
+}
+
+/// 清除浏览数据的 DB 侧（吃连接池，便于测试）：history/downloads/sessions 三表
+/// 按 scopes 清空（"all" 等价全部 scope），返回实际执行过的 scope 清单。
+async fn clear_browsing_data_db(
+    pool: &sqlx::SqlitePool,
+    scopes: &[String],
+) -> Vec<String> {
+    let has = |k: &str| scopes.iter().any(|s| s == k || s == "all");
+    let mut done: Vec<String> = Vec::new();
+
+    if has("history") {
+        let _ = sqlx::query("DELETE FROM history").execute(pool).await;
+        done.push("history".into());
+    }
+    if has("downloads") {
+        let _ = sqlx::query("DELETE FROM downloads").execute(pool).await;
+        done.push("downloads".into());
+    }
+    if has("sessions") {
+        let _ = sqlx::query("DELETE FROM sessions").execute(pool).await;
+        done.push("sessions".into());
+    }
+    done
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 建一个跑完整迁移的真实库（history/downloads/sessions 表齐全）
+    async fn temp_db() -> (tempfile::TempDir, crate::db::Db) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::Db::init(dir.path().to_path_buf()).await.unwrap();
+        (dir, db)
+    }
+
+    /// 三表各造一行数据
+    async fn seed_all(pool: &sqlx::SqlitePool) {
+        sqlx::query("INSERT INTO history (url, title, visit_count, last_visit_at) VALUES ('https://a.com', 'A', 1, datetime('now'))")
+            .execute(pool).await.unwrap();
+        sqlx::query("INSERT INTO downloads (filename, url, path, total_bytes, received_bytes) VALUES ('f.zip', 'https://a.com/f.zip', '/tmp/f.zip', 1, 1)")
+            .execute(pool).await.unwrap();
+        sqlx::query("INSERT INTO sessions (name, data) VALUES ('会话', '{}')")
+            .execute(pool).await.unwrap();
+    }
+
+    async fn count(pool: &sqlx::SqlitePool, table: &str) -> i64 {
+        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[test]
+    fn merged_order_filters_missing_and_appends_unreported() {
+        // existing = 现存标签（ghost 不在其中）；current = 当前顺序
+        let existing: std::collections::HashSet<_> =
+            ["a", "b", "c"].into_iter().map(String::from).collect();
+        let current = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+
+        // 前端报的顺序里 ghost 不存在 → 过滤；c 前端漏报 → 兜底追加末尾（不丢标签）
+        let ids = vec!["b".to_string(), "ghost".to_string(), "a".to_string()];
+        assert_eq!(
+            merged_tab_order(&ids, &existing, &current),
+            vec!["b".to_string(), "a".to_string(), "c".to_string()]
+        );
+        // 前端报空 → 原顺序原样保留
+        assert_eq!(
+            merged_tab_order(&[], &existing, &current),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+        // 顺序完全一致 + 无漏报 → 原样
+        let ids: Vec<String> = current.clone();
+        assert_eq!(merged_tab_order(&ids, &existing, &current), current);
+    }
+
+    #[tokio::test]
+    async fn clear_db_side_by_scopes() {
+        let (_dir, db) = temp_db().await;
+        seed_all(&db.pool).await;
+
+        // 单 scope：只清 history，其余两表不动
+        let done = clear_browsing_data_db(&db.pool, &["history".to_string()]).await;
+        assert_eq!(done, vec!["history".to_string()]);
+        assert_eq!(count(&db.pool, "history").await, 0);
+        assert_eq!(count(&db.pool, "downloads").await, 1);
+        assert_eq!(count(&db.pool, "sessions").await, 1);
+
+        // "all" 等价全部 DB scope：downloads/sessions 一并清空
+        let done = clear_browsing_data_db(&db.pool, &["all".to_string()]).await;
+        assert_eq!(
+            done,
+            vec!["history".to_string(), "downloads".to_string(), "sessions".to_string()]
+        );
+        assert_eq!(count(&db.pool, "downloads").await, 0);
+        assert_eq!(count(&db.pool, "sessions").await, 0);
+    }
+
+    #[tokio::test]
+    async fn clear_db_side_noop_on_unrelated_scope() {
+        let (_dir, db) = temp_db().await;
+        seed_all(&db.pool).await;
+        // 只要求 WebKit 侧 scope：DB 侧零动作，三表数据原样
+        let done = clear_browsing_data_db(&db.pool, &["cookies".to_string(), "cache".to_string()]).await;
+        assert!(done.is_empty());
+        assert_eq!(count(&db.pool, "history").await, 1);
+        assert_eq!(count(&db.pool, "downloads").await, 1);
+        assert_eq!(count(&db.pool, "sessions").await, 1);
+    }
 }
