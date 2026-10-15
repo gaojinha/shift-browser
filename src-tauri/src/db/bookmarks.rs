@@ -21,11 +21,15 @@ pub struct Bookmark {
     pub created_at: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../src/types/generated/")]
 pub struct BookmarkFolder {
+    #[ts(type = "number")]
     pub id: i64,
     pub name: String,
+    #[ts(type = "number | null")]
     pub parent_id: Option<i64>,
+    #[ts(type = "number")]
     pub sort_order: i64,
     pub created_at: String,
 }

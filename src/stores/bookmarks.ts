@@ -2,7 +2,7 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { useToastStore } from './toast'
-import type { Bookmark } from '../types/bookmark'
+import type { Bookmark, BookmarkFolder } from '../types/bookmark'
 
 interface BookmarksState {
   bookmarks: Bookmark[]
@@ -71,11 +71,11 @@ export const useBookmarksStore = defineStore('bookmarks', {
       }
     },
 
-    /** 新建文件夹 */
-    async createFolder(name: string): Promise<number | null> {
+    /** 新建文件夹（parentId 可选：传入则建为子文件夹，否则顶层） */
+    async createFolder(name: string, parentId: number | null = null): Promise<number | null> {
       try {
         const id = await invoke<number>('create_bookmark_folder', {
-          input: { name, parent_id: null },
+          input: { name, parent_id: parentId },
         })
         return id
       } catch (e) {
@@ -85,10 +85,10 @@ export const useBookmarksStore = defineStore('bookmarks', {
       }
     },
 
-    /** 文件夹列表（管理弹窗用） */
-    async loadFolders(): Promise<{ id: number; name: string }[]> {
+    /** 文件夹列表（含 parent_id，供前端构树） */
+    async loadFolders(): Promise<BookmarkFolder[]> {
       try {
-        return await invoke<{ id: number; name: string }[]>('get_bookmark_folders')
+        return await invoke<BookmarkFolder[]>('get_bookmark_folders')
       } catch (e) {
         console.error('[bookmarks] 加载文件夹失败:', e)
         return []

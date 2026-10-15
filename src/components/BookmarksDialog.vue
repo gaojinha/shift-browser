@@ -10,7 +10,9 @@ import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
 import { useConfirmDelete } from '../composables/useConfirmDelete'
 import UiDialog from './ui/UiDialog.vue'
-import type { Bookmark } from '../types/bookmark'
+import type { Bookmark, BookmarkFolder } from '../types/bookmark'
+import { buildFolderTree, folderPathName, countBookmarksInSubtree } from '../utils/bookmarks'
+import BookmarkFolderTree from './BookmarkFolderTree.vue'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -29,8 +31,19 @@ const toastStore = useToastStore()
 const confirmDelete = useConfirmDelete()
 
 const query = ref('')
-const folders = ref<{ id: number; name: string }[]>([])
+const folders = ref<BookmarkFolder[]>([])
 const filterFolder = ref<number | 'all' | 'none'>('all')
+
+/** 文件夹树（扁平 folders 构树，供树形 UI 展开/折叠） */
+const folderTree = computed(() => buildFolderTree(folders.value))
+/** 折叠中的文件夹 id（默认全展开；单一来源，传给树组件） */
+const collapsed = ref<Set<number>>(new Set())
+function toggleFolder(id: number) {
+  const next = new Set(collapsed.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  collapsed.value = next
+}
 
 // 弹窗显示时隐藏所有标签 webview，关闭时恢复
 let seq = 0
@@ -77,7 +90,7 @@ const filtered = computed(() => {
 
 function folderName(id: number | null): string {
   if (id == null) return '未分类'
-  return folders.value.find((f) => f.id === id)?.name ?? '未分类'
+  return folderPathName(id, folders.value) || '未分类'
 }
 
 // ---- 操作 ----
@@ -168,13 +181,22 @@ async function onNewFolder() {
   }
 }
 
+// 新建子文件夹（树节点 ＋ 触发，parentId 指定父）
+async function onNewSubFolder(parentId: number) {
+  const id = await bookmarksStore.createFolder('新文件夹', parentId)
+  if (id !== null) {
+    folders.value = await bookmarksStore.loadFolders()
+    toastStore.success('子文件夹已创建')
+  }
+}
+
 // ---- 文件夹管理（删除，级联删子文件夹+书签，需自定义确认）----
 const folderDeleteTarget = ref<{ id: number; name: string } | null>(null)
 const showFolderConfirm = ref(false)
 
-/** 文件夹内书签数（含未分类统计用） */
+/** 文件夹子树书签总数（含子文件夹，删除确认文案用） */
 function folderCount(id: number): number {
-  return bookmarksStore.bookmarks.filter((b) => b.folder_id === id).length
+  return countBookmarksInSubtree(id, folders.value, bookmarksStore.bookmarks)
 }
 
 function onDeleteFolder(f: { id: number; name: string }) {
@@ -249,18 +271,24 @@ async function onExport() {
             <select v-model="filterFolder" class="bm-filter" aria-label="筛选文件夹">
               <option value="all">全部文件夹</option>
               <option value="none">未分类</option>
-              <option v-for="f in folders" :key="f.id" :value="String(f.id)">{{ f.name }}</option>
+              <option v-for="f in folders" :key="f.id" :value="String(f.id)">{{ folderPathName(f.id, folders) }}</option>
             </select>
           </div>
 
-          <!-- 文件夹管理区 -->
+          <!-- 文件夹管理区（树形：嵌套展开/折叠 + 删除 + 新建子文件夹） -->
           <div v-if="folders.length > 0" class="bm-folders">
             <div class="bm-folders-head">文件夹（{{ folders.length }}）</div>
-            <div class="bm-folder-row" v-for="f in folders" :key="f.id">
-              <span class="bm-folder-name" @click="filterFolder = f.id">📁 {{ f.name }}</span>
-              <span class="bm-folder-count">{{ folderCount(f.id) }} 个书签</span>
-              <button class="op-btn danger" title="删除文件夹（含其中的书签）" @click="onDeleteFolder(f)">✕</button>
-            </div>
+            <BookmarkFolderTree
+              :nodes="folderTree"
+              :bookmarks="bookmarksStore.bookmarks"
+              :collapsed="collapsed"
+              @toggle="toggleFolder"
+              @delete-folder="(id) => {
+                const t = folders.find((x) => x.id === id);
+                if (t) onDeleteFolder(t);
+              }"
+              @new-subfolder="onNewSubFolder"
+            />
           </div>
 
           <div class="bm-list">
@@ -302,7 +330,7 @@ async function onExport() {
               <span>文件夹</span>
               <select v-model="editForm.folderId">
                 <option value="none">未分类</option>
-                <option v-for="f in folders" :key="f.id" :value="String(f.id)">{{ f.name }}</option>
+                <option v-for="f in folders" :key="f.id" :value="String(f.id)">{{ folderPathName(f.id, folders) }}</option>
               </select>
             </label>
             <div class="bm-actions">
@@ -325,7 +353,7 @@ async function onExport() {
               <span>文件夹</span>
               <select v-model="addForm.folderId">
                 <option value="none">未分类</option>
-                <option v-for="f in folders" :key="f.id" :value="String(f.id)">{{ f.name }}</option>
+                <option v-for="f in folders" :key="f.id" :value="String(f.id)">{{ folderPathName(f.id, folders) }}</option>
               </select>
             </label>
             <div class="bm-actions">
@@ -449,34 +477,6 @@ async function onExport() {
   color: var(--text-muted);
   margin-bottom: 6px;
   padding-left: 2px;
-}
-.bm-folder-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 6px;
-  border-radius: var(--radius-xs);
-}
-.bm-folder-row:hover {
-  background: var(--bg-active);
-}
-.bm-folder-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--text-primary);
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.bm-folder-name:hover {
-  color: var(--accent);
-}
-.bm-folder-count {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--text-muted);
 }
 .bm-confirm-text {
   font-size: 13px;

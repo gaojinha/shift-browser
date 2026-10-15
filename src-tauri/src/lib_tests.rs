@@ -368,6 +368,7 @@ mod ts_export_tests {
     fn export_bindings() {
         crate::tabs::Tab::export().expect("导出 Tab 失败");
         crate::db::bookmarks::Bookmark::export().expect("导出 Bookmark 失败");
+        crate::db::bookmarks::BookmarkFolder::export().expect("导出 BookmarkFolder 失败");
         crate::db::history::HistoryEntry::export().expect("导出 HistoryEntry 失败");
         crate::db::downloads::Download::export().expect("导出 Download 失败");
         crate::db::passwords::PasswordMeta::export().expect("导出 PasswordMeta 失败");

@@ -7,7 +7,8 @@ import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
 import { useConfirmDelete } from '../composables/useConfirmDelete'
 import UiDialog from './ui/UiDialog.vue'
-import type { Bookmark } from '../types/bookmark'
+import type { Bookmark, BookmarkFolder } from '../types/bookmark'
+import { flattenSubtree, countBookmarksInSubtree, type SubtreeRow } from '../utils/bookmarks'
 
 const bookmarksStore = useBookmarksStore()
 const tabsStore = useTabsStore()
@@ -29,7 +30,7 @@ function onWheel(e: WheelEvent) {
 }
 
 // ===== 文件夹分组（书签栏像原版一样显示 📁 文件夹，点击展开书签）=====
-const folders = ref<{ id: number; name: string }[]>([])
+const folders = ref<BookmarkFolder[]>([])
 const folderMenu = ref<{ folderId: number; x: number; y: number } | null>(null)
 
 onMounted(async () => {
@@ -45,19 +46,33 @@ onUnmounted(() => {
   listRef.value?.removeEventListener('wheel', onWheel)
 })
 
-/** 有书签的文件夹才显示在书签栏 */
+/** 顶层文件夹（parent_id 为空）且子树非空（有书签或有子文件夹）才显示在书签栏 */
 const foldersWithBookmarks = computed(() =>
-  folders.value.filter((f) => folderBookmarks(f.id).length > 0)
+  folders.value
+    .filter((f) => f.parent_id == null)
+    .filter(
+      (f) =>
+        countBookmarksInSubtree(f.id, folders.value, bookmarksStore.bookmarks) > 0 ||
+        hasChildFolders(f.id),
+    )
+)
+
+/** 该文件夹是否有直接子文件夹 */
+function hasChildFolders(id: number) {
+  return folders.value.some((f) => f.parent_id === id)
+}
+
+/** 当前打开文件夹的子树行（展平：文件夹标题 + 书签，depth 缩进） */
+const folderMenuRows = computed(() =>
+  folderMenu.value
+    ? flattenSubtree(folderMenu.value.folderId, folders.value, bookmarksStore.bookmarks)
+    : [],
 )
 
 /** 未分类书签（folder_id 为空）平铺显示 */
 const unfiledBookmarks = computed(() =>
   bookmarksStore.bookmarks.filter((b) => b.folder_id == null)
 )
-
-function folderBookmarks(folderId: number) {
-  return bookmarksStore.bookmarks.filter((b) => b.folder_id === folderId)
-}
 
 /** 点击文件夹 → 打开/切换下拉菜单 */
 function onFolderClick(e: MouseEvent, folder: { id: number; name: string }) {
@@ -84,6 +99,16 @@ function onFolderBookmarkClick(url: string) {
   const active = tabsStore.activeTab
   if (active) tabsStore.navigateTab(active.id, url)
   closeFolderMenu()
+}
+
+/** 下拉菜单行点击（书签行导航；文件夹行不响应，仅作分组标题） */
+function onMenuRowClick(row: SubtreeRow) {
+  if (row.bookmark) onFolderBookmarkClick(row.bookmark.url)
+}
+
+/** 下拉菜单书签行右键 → 复用管理菜单 */
+function onMenuRowContext(e: MouseEvent, row: SubtreeRow) {
+  if (row.bookmark) onFolderBookmarkContext(e, row.bookmark)
 }
 
 /** 文件夹内书签右键 → 复用管理菜单 */
@@ -235,7 +260,7 @@ async function onSaveEdit() {
         :key="f.id"
         class="folder-item"
         :class="{ active: folderMenu?.folderId === f.id }"
-        :title="`${f.name}（${folderBookmarks(f.id).length} 个书签）`"
+        :title="`${f.name}（${countBookmarksInSubtree(f.id, folders, bookmarksStore.bookmarks)} 个书签）`"
         @click="onFolderClick($event, f)"
       >
         📁 {{ f.name }}
@@ -269,17 +294,29 @@ async function onSaveEdit() {
       @click.stop
       @contextmenu.prevent
     >
-      <div
-        v-for="b in folderBookmarks(folderMenu.folderId)"
-        :key="b.id"
-        class="folder-menu-item"
-        :title="`${b.title}\n${b.url}`"
-        @click="onFolderBookmarkClick(b.url)"
-        @contextmenu.stop="onFolderBookmarkContext($event, b)"
+      <template
+        v-for="(row, i) in folderMenuRows"
+        :key="row.folder ? `f-${row.folder?.id}` : `b-${row.bookmark?.id}-${i}`"
       >
-        {{ b.title }}
-      </div>
-      <div v-if="folderBookmarks(folderMenu.folderId).length === 0" class="folder-menu-empty">
+        <div
+          v-if="row.folder"
+          class="folder-menu-item folder-menu-folder"
+          :style="{ paddingLeft: 10 + row.depth * 14 + 'px' }"
+        >
+          📁 {{ row.folder.name }}
+        </div>
+        <div
+          v-else
+          class="folder-menu-item"
+          :style="{ paddingLeft: 10 + row.depth * 14 + 'px' }"
+          :title="`${row.bookmark?.title}\n${row.bookmark?.url}`"
+          @click="onMenuRowClick(row)"
+          @contextmenu.stop="onMenuRowContext($event, row)"
+        >
+          {{ row.bookmark?.title }}
+        </div>
+      </template>
+      <div v-if="folderMenuRows.length === 0" class="folder-menu-empty">
         （空文件夹）
       </div>
     </div>
