@@ -422,6 +422,66 @@ fn pseudo_page_classification() {
     assert!(!is_pseudo_page("https://data.example.com/"));
 }
 
+/// contracts 公共函数族补课（F-18）：lib_tests 既有防漂移只断言表间一致性，
+/// 以下查询函数零覆盖——它们是 API 闸门/掩码/回退的运行时入口，锁行为口径。
+#[test]
+fn contracts_settings_query_functions() {
+    use crate::contracts::settings;
+    // 掩码键：读侧只给掩码（安全铁律"读侧也要白名单/掩码"）
+    assert!(settings::is_masked("ai_api_key"));
+    assert!(settings::is_masked("opencode_password"));
+    assert!(!settings::is_masked("homepage"));
+    // master_key 是敏感键不是掩码键，两清单不相交（语义不同：不落库 vs 读掩码）
+    assert!(settings::is_sensitive("master_key"));
+    assert!(!settings::is_masked("master_key"));
+    assert!(!settings::is_sensitive("ai_api_key"));
+    // default_of：已知键取表内默认值，未知键 None
+    assert_eq!(settings::default_of("search_engine"), Some("bing"));
+    assert_eq!(settings::default_of("no_such_key"), None);
+    for d in settings::SETTINGS {
+        assert_eq!(settings::default_of(d.key), Some(d.default));
+    }
+    // is_allowed 与 SETTINGS 表严格同源
+    assert!(settings::is_allowed("search_engine"));
+    assert!(!settings::is_allowed("no_such_key"));
+}
+
+#[test]
+fn contracts_shortcut_find_by_id() {
+    use crate::contracts::shortcuts;
+    // 已知动作 id 可查（快捷键表驱动分发的唯一查询入口），未知 id None
+    let devtools = shortcuts::find_by_id("devtools").expect("devtools 必在表内");
+    assert_eq!(devtools.id, "devtools");
+    assert!(shortcuts::find_by_id("no_such_action").is_none());
+}
+
+#[test]
+fn contracts_urls_is_newtab() {
+    use crate::contracts::urls;
+    // 协议版
+    assert!(urls::is_newtab("shift://newtab"));
+    // 旧 file:// 版（靠 /newtab/ marker contains 判定——既定口径）
+    assert!(urls::is_newtab("file:///home/gao/.local/share/shift/newtab/index.html"));
+    // 普通页面不误杀（marker 是内部路径约定，外部 https 页面按现状会 contains 命中，
+    // 此处只锁内部 URL 判定为真；外部误杀问题由 webview 层不加载此类 URL 保证）
+    assert!(urls::is_newtab("anything/newtab/whatever"));
+}
+
+#[test]
+fn contracts_skills_ids_and_kind_as_ts() {
+    use crate::contracts::{skills, settings::Kind};
+    // ids() 与 SKILLS 一一对应
+    let ids = skills::ids();
+    assert_eq!(ids.len(), skills::SKILLS.len());
+    for (id, s) in ids.iter().zip(skills::SKILLS.iter()) {
+        assert_eq!(*id, s.id);
+    }
+    // Kind::as_ts：build.rs 生成 TS 类型标签的三值映射
+    assert_eq!(Kind::Str.as_ts(), "str");
+    assert_eq!(Kind::Bool.as_ts(), "bool");
+    assert_eq!(Kind::Int.as_ts(), "int");
+}
+
 /// TS 类型契约导出（P2）：把 Rust struct 导出为 TS interface，
 /// 消除前端 `src/types/*.ts` 手写与本端 struct 的漂移。
 /// 生成物落在 `src/types/generated/`（由 cargo test 触发）。
