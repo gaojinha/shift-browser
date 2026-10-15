@@ -482,6 +482,27 @@ fn contracts_skills_ids_and_kind_as_ts() {
     assert_eq!(Kind::Int.as_ts(), "int");
 }
 
+/// 日志隐私脱敏（F-19）：redact_url 只留 scheme://host，路径/查询/片段
+/// （常含搜索词、文档名、token）不进日志；17 个调用点共用此口径。
+#[test]
+fn redact_url_keeps_only_scheme_and_host() {
+    use crate::redact_url;
+    // 路径/查询/片段（含 token）全剥
+    assert_eq!(
+        redact_url("https://example.com/a/b?token=abc&x=1#frag"),
+        "https://example.com"
+    );
+    // 端口不保留（口径：只 scheme://host）
+    assert_eq!(redact_url("http://example.com:8443/p"), "http://example.com");
+    // 无 host（file:// 内部路径）→ 占位，路径不落日志
+    assert_eq!(redact_url("file:///home/gao/secret.txt"), "file://[内部]");
+    // 非 URL / 空串 → 占位符
+    assert_eq!(redact_url("not a url"), "<非URL>");
+    assert_eq!(redact_url(""), "<非URL>");
+    // IPv6 host
+    assert_eq!(redact_url("http://[::1]:8080/x"), "http://[::1]");
+}
+
 /// TS 类型契约导出（P2）：把 Rust struct 导出为 TS interface，
 /// 消除前端 `src/types/*.ts` 手写与本端 struct 的漂移。
 /// 生成物落在 `src/types/generated/`（由 cargo test 触发）。
