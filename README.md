@@ -756,7 +756,8 @@ AI 对话默认使用 AGNES AI（OpenAI 兼容协议）。API Key 两种配置�
 
 | 文档 | 说明 |
 |---|---|
-| [docs/archive/HANDOFF.md](docs/archive/HANDOFF.md) | 历史工程交接归档：逐轮交付记录、踩坑与根因分析、验证方法 |
+| [CHANGELOG.md](CHANGELOG.md) | 更新日志（Keep a Changelog 格式，自 v5.8.3 起启用） |
+| [docs/archive/HANDOFF-2026-09-24.md](docs/archive/HANDOFF-2026-09-24.md) | 历史工程交接归档：逐轮交付记录、踩坑与根因分析、验证方法 |
 | [docs/strategy-2026.md](docs/strategy-2026.md) | 战略规划：定位 / 五大支柱 / 分阶段路线图 / 风险治理 |
 | [docs/standard-tracking-2026-09-20.md](docs/standard-tracking-2026-09-20.md) | WebMCP / Agentic Browsing 标准跟踪 |
 | [docs/browser-privacy-fingerprint-research-2026.md](docs/browser-privacy-fingerprint-research-2026.md) | 浏览器指纹识别调研 |
