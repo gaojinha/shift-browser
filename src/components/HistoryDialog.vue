@@ -9,6 +9,7 @@ import { useTabsStore } from '../stores/tabs'
 import { useToastStore } from '../stores/toast'
 import UiDialog from './ui/UiDialog.vue'
 import type { HistoryEntry } from '../types/history'
+import { groupHistoryByDate } from '../utils/history'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -25,6 +26,10 @@ const tabsStore = useTabsStore()
 const toastStore = useToastStore()
 
 const list = ref<HistoryEntry[]>([])
+/** 日期分组（C-4）：今天/昨天/更早，纯前端从 list 派生，不新增后端调用 */
+const groups = computed(() => groupHistoryByDate(list.value))
+/** 分组折叠状态（默认全展开，点组头折叠/展开） */
+const collapsed = ref<Record<string, boolean>>({})
 const query = ref('')
 const loading = ref(false)
 // 自定义确认弹窗（WebKitGTK 下 window.confirm 不弹，必须用组件内弹窗）
@@ -109,6 +114,15 @@ async function doClearAll() {
   }
 }
 
+/** 分组是否折叠（C-4） */
+function isCollapsed(key: string): boolean {
+  return collapsed.value[key] === true
+}
+/** 折叠/展开分组（C-4） */
+function toggleGroup(key: string) {
+  collapsed.value[key] = !isCollapsed(key)
+}
+
 /** 格式化时间（YYYY-MM-DD HH:mm） */
 function formatTime(iso: string): string {
   const d = new Date(iso)
@@ -149,16 +163,34 @@ function hostOf(url: string): string {
             {{ query ? '没有匹配的历史记录' : '还没有浏览历史' }}
           </div>
           <div v-else class="history-list">
-            <div v-for="entry in list" :key="entry.id" class="history-item" @click="onOpen(entry)">
-              <div class="history-main">
-                <div class="history-title">{{ entry.title || hostOf(entry.url) }}</div>
-                <div class="history-url">{{ entry.url }}</div>
+            <div v-for="group in groups" :key="group.key" class="history-group">
+              <button
+                class="history-group-header"
+                :aria-expanded="!isCollapsed(group.key)"
+                @click="toggleGroup(group.key)"
+              >
+                <span class="history-group-caret" :class="{ collapsed: isCollapsed(group.key) }">▾</span>
+                <span class="history-group-label">{{ group.label }}</span>
+                <span class="history-group-count">{{ group.entries.length }}</span>
+              </button>
+              <div v-show="!isCollapsed(group.key)" class="history-group-body">
+                <div
+                  v-for="entry in group.entries"
+                  :key="entry.id"
+                  class="history-item"
+                  @click="onOpen(entry)"
+                >
+                  <div class="history-main">
+                    <div class="history-title">{{ entry.title || hostOf(entry.url) }}</div>
+                    <div class="history-url">{{ entry.url }}</div>
+                  </div>
+                  <div class="history-meta">
+                    <span class="history-count">{{ entry.visit_count }} 次</span>
+                    <span class="history-time">{{ formatTime(entry.last_visit_at) }}</span>
+                  </div>
+                  <button class="history-del" aria-label="删除" @click="onDelete($event, entry)">×</button>
+                </div>
               </div>
-              <div class="history-meta">
-                <span class="history-count">{{ entry.visit_count }} 次</span>
-                <span class="history-time">{{ formatTime(entry.last_visit_at) }}</span>
-              </div>
-              <button class="history-del" aria-label="删除" @click="onDelete($event, entry)">×</button>
             </div>
           </div>
         </div>
@@ -228,6 +260,48 @@ function hostOf(url: string): string {
   gap: 4px;
   overflow-y: auto;
   max-height: 50vh;
+}
+.history-group {
+  display: flex;
+  flex-direction: column;
+}
+.history-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border: none;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.history-group-header:hover {
+  background: var(--bg-active);
+}
+.history-group-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.history-group-caret {
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+.history-group-caret.collapsed {
+  transform: rotate(-90deg);
+}
+.history-group-label {
+  flex: 1;
+}
+.history-group-count {
+  font-weight: 400;
+  color: var(--text-muted);
 }
 .history-item {
   display: flex;
