@@ -32,6 +32,10 @@ src-tauri/resources/libshift_web_extension.so
 # 三方 AI 协作目录（含会话配置/状态/日志，不进版本库）
 .ai/
 
+# GitHub Copilot CLI 本地设置（机器特定，不入库）
+.github/copilot/settings.local.json
+.github/copilot/settings.local.json.lock
+
 # 备份与缓存（不入库）
 .mcp.json.bak-*
 .playwright-mcp/
