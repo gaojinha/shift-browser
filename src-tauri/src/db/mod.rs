@@ -34,9 +34,13 @@ pub struct Db {
     pub key_path: PathBuf,
     /// 密码库主密码包裹文件路径（vault.key，权限 600；文件存在 = 已设主密码）
     pub vault_path: PathBuf,
+    /// 翻译记忆 HMAC 密钥文件路径（translate.key，权限 600；C-11 原文不落明文）
+    pub translate_key_path: PathBuf,
     /// 密码主密钥内存缓存：进程内串行化首次生成（并发首用不会双写覆盖），
     /// 命中后不再重复读文件。tokio Mutex 保证跨 await 持有。
     pub master_key: tokio::sync::Mutex<Option<[u8; 32]>>,
+    /// 翻译记忆 HMAC 密钥内存缓存（同 master_key 的串行化口径）
+    pub translate_key: tokio::sync::Mutex<Option<[u8; 32]>>,
 }
 
 impl Db {
@@ -128,7 +132,9 @@ impl Db {
             feed_pool,
             key_path: app_data_dir.join("master.key"),
             vault_path: app_data_dir.join("vault.key"),
+            translate_key_path: app_data_dir.join("translate.key"),
             master_key: tokio::sync::Mutex::new(None),
+            translate_key: tokio::sync::Mutex::new(None),
         })
     }
 
@@ -246,6 +252,11 @@ impl Db {
                 20,
                 "search_indexes",
                 include_str!("../../migrations/20260928000002_search_indexes.sql"),
+            ),
+            (
+                21,
+                "translate_memory_hmac",
+                include_str!("../../migrations/20261015000000_translate_memory_hmac.sql"),
             ),
         ];
 

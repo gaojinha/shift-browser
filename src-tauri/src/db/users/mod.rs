@@ -135,6 +135,7 @@ mod tests {
             .unwrap();
         let key_path = dir.path().join("master.key");
         let vault_path = dir.path().join("vault.key");
+        let translate_key_path = dir.path().join("translate.key");
         (
             dir,
             Db {
@@ -142,7 +143,9 @@ mod tests {
                 feed_pool: pool,
                 key_path,
                 vault_path,
+                translate_key_path,
                 master_key: tokio::sync::Mutex::new(None),
+                translate_key: tokio::sync::Mutex::new(None),
             },
         )
     }

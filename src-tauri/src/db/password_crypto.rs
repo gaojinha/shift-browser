@@ -51,11 +51,13 @@ pub(super) fn write_key_file(path: &Path, encoded: &str) -> DbResult<()> {
     Ok(())
 }
 
-/// 读取主密钥文件并校验（文件存在但非法 → 报错停用，绝不静默覆盖/重生）
-pub(super) fn read_key_file(path: &Path) -> DbResult<[u8; 32]> {
+/// 读取密钥文件并校验（文件存在但非法 → 报错，绝不静默覆盖/重生）
+///
+/// `what`：密钥用途名（如「主」「翻译记忆」），用于错误文案。
+pub(super) fn read_key_file(path: &Path, what: &str) -> DbResult<[u8; 32]> {
     let encoded = std::fs::read_to_string(path).map_err(|e| {
         DbError::Other(format!(
-            "主密钥文件读取失败（{}），密码功能已停用。请检查 {} 权限或从备份恢复",
+            "{what}密钥文件读取失败（{}），相关功能已停用。请检查 {} 权限或从备份恢复",
             e,
             path.display()
         ))
@@ -63,13 +65,13 @@ pub(super) fn read_key_file(path: &Path) -> DbResult<[u8; 32]> {
     let encoded = encoded.trim();
     let bytes = BASE64.decode(encoded).map_err(|_| {
         DbError::Other(format!(
-            "主密钥文件格式损坏，密码功能已停用。请从备份恢复 {}",
+            "{what}密钥文件格式损坏，相关功能已停用。请从备份恢复 {}",
             path.display()
         ))
     })?;
     if bytes.len() != 32 {
         return Err(DbError::Other(format!(
-            "主密钥文件内容非法（长度 {}），密码功能已停用。请从备份恢复 {}",
+            "{what}密钥文件内容非法（长度 {}），相关功能已停用。请从备份恢复 {}",
             bytes.len(),
             path.display()
         )));
@@ -79,11 +81,11 @@ pub(super) fn read_key_file(path: &Path) -> DbResult<[u8; 32]> {
     Ok(key)
 }
 
-/// 原子创建主密钥文件（create_new：并发首用时只有一个成功，其余读回已有文件）。
+/// 原子创建密钥文件（create_new：并发首用时只有一个成功，其余读回已有文件）。
 /// 权限 600，创建即收紧（OpenOptions.mode 无 644 窗口期）。
-fn write_key_file_create_new(path: &Path, encoded: &str) -> DbResult<()> {
-    let create_err = |e: std::io::Error| DbError::Other(format!("创建主密钥文件失败: {}", e));
-    let write_err = |e: std::io::Error| DbError::Other(format!("写入主密钥文件失败: {}", e));
+pub(super) fn write_key_file_create_new(path: &Path, encoded: &str) -> DbResult<()> {
+    let create_err = |e: std::io::Error| DbError::Other(format!("创建密钥文件失败: {}", e));
+    let write_err = |e: std::io::Error| DbError::Other(format!("写入密钥文件失败: {}", e));
 
     #[cfg(unix)]
     {
@@ -138,7 +140,7 @@ pub(super) async fn get_master_key(db: &Db) -> DbResult<[u8; 32]> {
 
     // 1. 优先从密钥文件读取；文件存在但非法 → 报错停用，不重新生成
     if db.key_path.exists() {
-        let key = read_key_file(&db.key_path)?;
+        let key = read_key_file(&db.key_path, "主")?;
         *cache = Some(key);
         return Ok(key);
     }
@@ -157,7 +159,7 @@ pub(super) async fn get_master_key(db: &Db) -> DbResult<[u8; 32]> {
                     Ok(()) => {}
                     Err(_) if db.key_path.exists() => {
                         // 并发窗口：另一调用者已写入，读回其密钥（绝不覆盖）
-                        let existing = read_key_file(&db.key_path)?;
+                        let existing = read_key_file(&db.key_path, "主")?;
                         *cache = Some(existing);
                         return Ok(existing);
                     }
@@ -194,7 +196,7 @@ pub(super) async fn get_master_key(db: &Db) -> DbResult<[u8; 32]> {
         }
         Err(_) if db.key_path.exists() => {
             // 并发窗口：另一调用者已写入，读回其密钥（绝不覆盖）
-            let existing = read_key_file(&db.key_path)?;
+            let existing = read_key_file(&db.key_path, "主")?;
             *cache = Some(existing);
             Ok(existing)
         }

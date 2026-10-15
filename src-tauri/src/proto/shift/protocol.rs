@@ -172,8 +172,10 @@ pub(crate) fn handle(
                     // C-9：引擎译文落翻译记忆，命中则不发第三方
                     let r = match db.as_ref() {
                         Some(db) => {
+                            let mem_key = crate::db::translate_memory::hmac_key(db.inner()).await;
                             crate::translate::translate_text_cached(
                                 &db.pool, &text, "zh-CN", &engine, &dual_mode, timeout,
+                                mem_key.as_ref(),
                             )
                             .await
                         }
@@ -296,8 +298,10 @@ pub(crate) fn handle(
                     // C-9：命中记忆的段落不发第三方，仅翻未命中（每批 5 段并发的口径不变）
                     let out = match db.as_ref() {
                         Some(db) => {
+                            let mem_key = crate::db::translate_memory::hmac_key(db.inner()).await;
                             crate::translate::translate_batch_cached(
                                 &db.pool, &texts, &target, &engine, &dual_mode, timeout,
+                                mem_key.as_ref(),
                             )
                             .await
                         }

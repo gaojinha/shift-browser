@@ -390,6 +390,9 @@ pub async fn translate_with(
 /// 既省时（秒回）又减少外发（隐私）。缓存是「尽力而为」：记忆读写失败绝不影响
 /// 翻译本身（db 层已吞异常）。键把「引擎 + 目标语言」编成命名空间
 /// （见 `db::translate_memory::engine_scope`）。
+///
+/// C-11：`mem_key` 是翻译记忆 HMAC 密钥（`db::translate_memory::hmac_key` 的结果）；
+/// None = 密钥不可用（translate.key 损坏/不可写），记忆停用但翻译照常。
 pub async fn translate_text_cached(
     pool: &sqlx::SqlitePool,
     text: &str,
@@ -397,21 +400,36 @@ pub async fn translate_text_cached(
     engine: &str,
     dual_mode: &str,
     timeout: u64,
+    mem_key: Option<&[u8; 32]>,
 ) -> Result<String, CommandError> {
     let scope = crate::db::translate_memory::engine_scope(engine, target);
     let key = crate::db::translate_memory::normalize_source(text);
     if !key.is_empty() {
-        let hits =
-            crate::db::translate_memory::lookup(pool, &scope, std::slice::from_ref(&key)).await;
-        if let Some(t) = hits.get(&key) {
-            log::debug!("[translate] 记忆命中，跳过第三方请求");
-            return Ok(t.clone());
+        if let Some(mem_key) = mem_key {
+            let hits = crate::db::translate_memory::lookup(
+                pool,
+                &scope,
+                std::slice::from_ref(&key),
+                mem_key,
+            )
+            .await;
+            if let Some(t) = hits.get(&key) {
+                log::debug!("[translate] 记忆命中，跳过第三方请求");
+                return Ok(t.clone());
+            }
         }
     }
     let out = translate_with(text, target, engine, dual_mode, timeout).await?;
     if !key.is_empty() {
-        crate::db::translate_memory::remember(pool, &scope, &[(text.to_string(), out.clone())])
+        if let Some(mem_key) = mem_key {
+            crate::db::translate_memory::remember(
+                pool,
+                &scope,
+                &[(text.to_string(), out.clone())],
+                mem_key,
+            )
             .await;
+        }
     }
     Ok(out)
 }
@@ -419,6 +437,7 @@ pub async fn translate_text_cached(
 /// 批量引擎翻译 + 翻译记忆（C-9）：只对未命中的段落发第三方，命中直接回填。
 ///
 /// 并发度 5（复用 [`translate_batch_plain`]）；失败段落保持空串，与既有批量口径一致。
+/// C-11：`mem_key` = None 时记忆停用，全部段落走第三方（语义同 [`translate_text_cached`]）。
 pub async fn translate_batch_cached(
     pool: &sqlx::SqlitePool,
     texts: &[String],
@@ -426,9 +445,13 @@ pub async fn translate_batch_cached(
     engine: &str,
     dual_mode: &str,
     timeout: u64,
+    mem_key: Option<&[u8; 32]>,
 ) -> Vec<String> {
     let scope = crate::db::translate_memory::engine_scope(engine, target);
-    let hits = crate::db::translate_memory::lookup(pool, &scope, texts).await;
+    let hits = match mem_key {
+        Some(mem_key) => crate::db::translate_memory::lookup(pool, &scope, texts, mem_key).await,
+        None => Default::default(),
+    };
     let mut out: Vec<String> = vec![String::new(); texts.len()];
     let mut miss: Vec<usize> = Vec::new();
     for (i, t) in texts.iter().enumerate() {
@@ -452,7 +475,9 @@ pub async fn translate_batch_cached(
         }
     }
     if !to_remember.is_empty() {
-        crate::db::translate_memory::remember(pool, &scope, &to_remember).await;
+        if let Some(mem_key) = mem_key {
+            crate::db::translate_memory::remember(pool, &scope, &to_remember, mem_key).await;
+        }
     }
     out
 }
@@ -535,7 +560,18 @@ pub async fn translate_text(
     let engine = current_engine(db.inner()).await;
     let dual_mode = current_dual_mode(db.inner()).await;
     let timeout = current_timeout(db.inner()).await;
-    match translate_text_cached(&db.pool, &text, &target, &engine, &dual_mode, timeout).await {
+    let mem_key = crate::db::translate_memory::hmac_key(db.inner()).await;
+    match translate_text_cached(
+        &db.pool,
+        &text,
+        &target,
+        &engine,
+        &dual_mode,
+        timeout,
+        mem_key.as_ref(),
+    )
+    .await
+    {
         Ok(data) => Ok(TranslateResult {
             ok: true,
             msg: None,
@@ -638,22 +674,32 @@ mod tests {
             .await
             .unwrap();
         sqlx::raw_sql(include_str!(
-            "../migrations/20260927000000_translate_memory.sql"
+            "../migrations/20261015000000_translate_memory_hmac.sql"
         ))
         .execute(&pool)
         .await
         .unwrap();
         let scope = crate::db::translate_memory::engine_scope("google", "zh-CN");
+        let mem_key = [7u8; 32];
         crate::db::translate_memory::remember(
             &pool,
             &scope,
             &[("Sign in".to_string(), "登录".to_string())],
+            &mem_key,
         )
         .await;
         // 原文带多余空白：归一化后仍应命中
-        let got = translate_text_cached(&pool, "Sign   in", "zh-CN", "google", "single", 1)
-            .await
-            .unwrap();
+        let got = translate_text_cached(
+            &pool,
+            "Sign   in",
+            "zh-CN",
+            "google",
+            "single",
+            1,
+            Some(&mem_key),
+        )
+        .await
+        .unwrap();
         assert_eq!(got, "登录");
     }
 }

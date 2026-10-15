@@ -319,7 +319,9 @@ mod tests {
             feed_pool: pool,
             key_path: dir.path().join("master.key"),
             vault_path: dir.path().join("vault.key"),
+            translate_key_path: dir.path().join("translate.key"),
             master_key: tokio::sync::Mutex::new(None),
+            translate_key: tokio::sync::Mutex::new(None),
         };
         (dir, db)
     }

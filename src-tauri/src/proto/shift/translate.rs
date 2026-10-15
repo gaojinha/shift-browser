@@ -188,8 +188,10 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                 let payload = {
                     let r = match db.as_ref() {
                         Some(db) => {
+                            let mem_key = crate::db::translate_memory::hmac_key(db.inner()).await;
                             crate::translate::translate_text_cached(
                                 &db.pool, &text, "zh-CN", &engine, &dual_mode, timeout,
+                                mem_key.as_ref(),
                             )
                             .await
                         }
@@ -245,8 +247,10 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                 // C-9：命中记忆的段落不发第三方，仅翻未命中
                 let out = match db.as_ref() {
                     Some(db) => {
+                        let mem_key = crate::db::translate_memory::hmac_key(db.inner()).await;
                         crate::translate::translate_batch_cached(
                             &db.pool, &texts, &target, &engine, &dual_mode, timeout,
+                            mem_key.as_ref(),
                         )
                         .await
                     }

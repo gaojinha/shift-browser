@@ -388,7 +388,11 @@ pub async fn translate_memory_lookup(
     req: MemoryLookupReq,
 ) -> crate::error::CommandResult<Vec<BatchItem>> {
     let sources: Vec<String> = req.items.iter().map(|i| i.text.clone()).collect();
-    let hits = crate::db::translate_memory::lookup(&db.pool, &req.model, &sources).await;
+    // C-11：取 HMAC 密钥失败（translate.key 损坏/不可写）→ 记忆停用，按全 miss 处理
+    let hits = match crate::db::translate_memory::hmac_key(&db).await {
+        Some(key) => crate::db::translate_memory::lookup(&db.pool, &req.model, &sources, &key).await,
+        None => Default::default(),
+    };
     Ok(req
         .items
         .into_iter()
@@ -448,7 +452,13 @@ pub async fn translate_memory_remember(
         .into_iter()
         .map(|p| (p.orig, p.translated))
         .collect();
-    Ok(crate::db::translate_memory::remember(&db.pool, &req.model, &pairs).await as u64)
+    // C-11：密钥不可用时记忆停用（尽力而为语义，返回 0 不打断翻译）
+    Ok(match crate::db::translate_memory::hmac_key(&db).await {
+        Some(key) => {
+            crate::db::translate_memory::remember(&db.pool, &req.model, &pairs, &key).await as u64
+        }
+        None => 0,
+    })
 }
 
 /// 批量档位（字符上限，段数上限）：按模型名分档，纯函数可单测。

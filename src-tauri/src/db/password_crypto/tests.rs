@@ -27,7 +27,9 @@ async fn temp_db() -> (tempfile::TempDir, Db) {
         feed_pool: pool,
         key_path: dir.path().join("master.key"),
         vault_path: dir.path().join("vault.key"),
+        translate_key_path: dir.path().join("translate.key"),
         master_key: tokio::sync::Mutex::new(None),
+        translate_key: tokio::sync::Mutex::new(None),
     };
     (dir, db)
 }
@@ -129,7 +131,7 @@ async fn test_master_key_concurrent_generation_same_key() {
         "并发首次生成必须得到同一密钥（不能各自生成互相覆盖）"
     );
     assert!(db.key_path.exists(), "密钥文件应已生成");
-    let file_key = read_key_file(&db.key_path).unwrap();
+    let file_key = read_key_file(&db.key_path, "主").unwrap();
     assert_eq!(k1, file_key, "文件内容应与返回密钥一致");
 }
 
