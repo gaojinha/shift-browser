@@ -57,18 +57,24 @@ const shieldLevel = computed(() => {
 const delta = computed(() => shieldStore.pageDelta)
 
 let timer: number | null = null
+// 组件卸载标记：onMounted 里 await 期间可能已卸载，恢复后不得再起定时器
+let disposed = false
 
 onMounted(async () => {
   document.addEventListener('click', onDocClick)
+  document.addEventListener('keydown', onKeydown)
   await refresh()
+  if (disposed) return
   // 面板打开期间每 2 秒刷新计数（StatusBar 为 10s；面板场景更密）
   timer = window.setInterval(() => {
-    void shieldStore.loadStats()
+    if (!disposed) void shieldStore.loadStats()
   }, 2000)
 })
 
 onUnmounted(() => {
+  disposed = true
   document.removeEventListener('click', onDocClick)
+  document.removeEventListener('keydown', onKeydown)
   if (timer !== null) window.clearInterval(timer)
 })
 
@@ -76,11 +82,9 @@ function onDocClick(e: MouseEvent) {
   if (root.value && !root.value.contains(e.target as Node)) emit('close')
 }
 
+// Esc 关闭走 document 级监听（面板不抢焦点，焦点仍留在地址栏触发按钮上）
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    e.stopPropagation()
-    emit('close')
-  }
+  if (e.key === 'Escape') emit('close')
 }
 
 async function refresh() {
@@ -92,11 +96,16 @@ async function refresh() {
 }
 
 async function onToggleAdblock(v: boolean) {
+  const prev = settingsStore.get('adblock_enabled')
   try {
     await settingsStore.set('adblock_enabled', v ? 'true' : 'false')
     await invokeOk('set_adblock_enabled', { enabled: v })
     toast.success(v ? t('shield.adblockOn') : t('shield.adblockOff'))
   } catch (e) {
+    // settingsStore.set 已成功但引擎同步失败：回滚内存值，UI 与后端保持一致
+    if (settingsStore.get('adblock_enabled') !== prev) {
+      await settingsStore.set('adblock_enabled', prev)
+    }
     console.error('[shield] 广告拦截同步失败:', e)
     toast.error(t('shield.setFailed'))
   }
@@ -151,7 +160,6 @@ async function onToggleShield() {
     class="shield-panel"
     role="dialog"
     :aria-label="t('shield.panelLabel')"
-    @keydown="onKeydown"
   >
     <!-- 头部：状态 + 站点 -->
     <div class="shield-head">

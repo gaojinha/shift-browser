@@ -57,7 +57,7 @@ export const useShieldStore = defineStore('shield', {
     },
   },
   actions: {
-    /** 拉取当前统计（失败返回 null，由 UI 显示"统计不可用"） */
+    /** 拉取当前统计（失败置 null，pageDelta 兜底显示 0） */
     async loadStats(): Promise<PrivacyStats | null> {
       try {
         this.stats = await invoke<PrivacyStats>('get_privacy_stats')
@@ -72,9 +72,9 @@ export const useShieldStore = defineStore('shield', {
       this.baselineUrl = url
       this.baseline = this.stats ? { ...this.stats } : null
     },
-    /** 兜底（面板打开时调用）：基线未建立或与当前 URL 不符时重置 */
+    /** 兜底（面板打开时调用）：基线未建立、与当前 URL 不符、或上次建基线时拉数失败（baseline 为空而 stats 已有）时重置 */
     ensureBaseline(url: string) {
-      if (this.baselineUrl !== url) {
+      if (this.baselineUrl !== url || (!this.baseline && this.stats)) {
         this.baselineUrl = url
         this.baseline = this.stats ? { ...this.stats } : null
       }

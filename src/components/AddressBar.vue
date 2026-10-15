@@ -2,6 +2,7 @@
 // 地址栏（对应 Electron 版 .address-bar 设计）
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { useI18n } from 'vue-i18n'
 import { useTabsStore } from '../stores/tabs'
 import { useSettingsStore } from '../stores/settings'
 import { useShieldStore } from '../stores/shield'
@@ -18,6 +19,7 @@ import { errText } from '../utils/invoke'
 import { setWebviewVisible } from '../utils/webview'
 
 const tabsStore = useTabsStore()
+const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const shieldStore = useShieldStore()
 const addressInput = ref('')
@@ -310,8 +312,8 @@ async function onReader() {
           class="shield-btn"
           role="button"
           tabindex="0"
-          title="护盾面板"
-          aria-label="护盾面板"
+          :title="t('shield.panelLabel')"
+          :aria-label="t('shield.panelLabel')"
           aria-haspopup="dialog"
           :aria-expanded="showShieldPanel"
           @click.stop="toggleShieldPanel"
