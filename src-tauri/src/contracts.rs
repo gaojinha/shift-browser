@@ -84,6 +84,7 @@ pub mod settings {
         SettingDef { key: "adblock_keywords", default: "", kind: Kind::Str, sensitive: false, desc: "自定义拦截关键词（换行分隔）" },
         SettingDef { key: "privacy_shield", default: "true", kind: Kind::Bool, sensitive: false, desc: "隐私防护（旧布尔开关，兼容）" },
         SettingDef { key: "privacy_shield_level", default: "standard", kind: Kind::Str, sensitive: false, desc: "隐私防护档位（off/standard/strict）" },
+        SettingDef { key: "privacy_fp_mode", default: "noise", kind: Kind::Str, sensitive: false, desc: "反指纹模式（noise 加噪=默认 / uniform 统一化）；与 privacy_shield_level 同为「通用可读写 + 专用命令同步注入」的键" },
         SettingDef { key: "privacy_whitelist", default: "", kind: Kind::Str, sensitive: false, desc: "隐私防护白名单域名" },
         SettingDef { key: "gpc_header", default: "true", kind: Kind::Bool, sensitive: false, desc: "发送 GPC 请求头（Sec-GPC: 1）" },
         SettingDef { key: "net_block_rules", default: "", kind: Kind::Str, sensitive: false, desc: "网络层拦截规则（每行一个 URL 子串）" },
@@ -111,13 +112,29 @@ pub mod settings {
         SettingDef { key: "api_readonly", default: "false", kind: Kind::Bool, sensitive: false, desc: "API 只读模式（禁写命令）" },
         SettingDef { key: "api_agent_actions", default: "false", kind: Kind::Bool, sensitive: false, desc: "允许 API 页面交互（click/fill/scroll/dismiss 等，默认关）" },
         SettingDef { key: "api_allowed_ips", default: "", kind: Kind::Str, sensitive: false, desc: "API IP 白名单（逗号分隔 IP/CIDR，如 192.168.1.0/24）" },
-        // ---- 内部键（仅专用命令读写，不开放通用 settings_set 直写）----
+        // ---- 内部键（仅专用命令/后端内部读写，不开放通用 settings_set 直写）----
+        // 登记义务：凡真实写入 settings 表的键都必须在此签约出现一次。漏登记即为「暗键」——
+        // get_all_settings 会把它滤掉（前端永远读回默认值），通用入口又静默拒绝写入。
+        // privacy_fp_mode 正是踩了这个坑（2026-10-15 F-9 审计发现，已收编进上方「隐私 / 拦截」段）。
         SettingDef { key: "vault_idle_lock_minutes", default: "15", kind: Kind::Int, sensitive: false, desc: "密码库空闲自动锁定（分钟，0=关）" },
         SettingDef { key: "todos", default: "[]", kind: Kind::Str, sensitive: false, desc: "启动页待办清单（JSON 数组字符串）" },
+        SettingDef { key: "webmcp_polyfill", default: "false", kind: Kind::Bool, sensitive: false, desc: "WebMCP polyfill 试验开关（默认关）；专用命令 set/get_webmcp_polyfill" },
+        SettingDef { key: "quick_sites", default: "[]", kind: Kind::Str, sensitive: false, desc: "启动页快捷站点（JSON 数组，空=用内置默认）；专用命令 save_quick_sites" },
+        SettingDef { key: "ua_site_overrides", default: "{}", kind: Kind::Str, sensitive: false, desc: "站点级 UA 覆盖（JSON 对象 host→UA）；专用命令 set_user_agent_override" },
+        SettingDef { key: "user_agent", default: "", kind: Kind::Str, sensitive: false, desc: "全局 User-Agent（空=用内置默认）；专用命令 set_user_agent" },
+        SettingDef { key: "perm_allow", default: "{}", kind: Kind::Str, sensitive: false, desc: "站点权限白名单（JSON 对象 kind→[host]）；由 perms.rs 内部读写" },
     ];
 
-    /// 内部键（仅专用命令读写，通用 settings_set 应拒绝直写）
-    pub const INTERNAL_KEYS: &[&str] = &["vault_idle_lock_minutes", "todos"];
+    /// 内部键（仅专用命令/后端内部读写，通用 settings_set 应拒绝直写）
+    pub const INTERNAL_KEYS: &[&str] = &[
+        "vault_idle_lock_minutes",
+        "todos",
+        "webmcp_polyfill",
+        "quick_sites",
+        "ua_site_overrides",
+        "user_agent",
+        "perm_allow",
+    ];
 
     /// 是否为敏感设置键
     pub fn is_sensitive(key: &str) -> bool {

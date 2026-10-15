@@ -63,6 +63,7 @@ export const SETTINGS_SCHEMA = {
   adblock_keywords: { default: '', kind: 'str', sensitive: false, desc: '自定义拦截关键词（换行分隔）' },
   privacy_shield: { default: 'true', kind: 'bool', sensitive: false, desc: '隐私防护（旧布尔开关，兼容）' },
   privacy_shield_level: { default: 'standard', kind: 'str', sensitive: false, desc: '隐私防护档位（off/standard/strict）' },
+  privacy_fp_mode: { default: 'noise', kind: 'str', sensitive: false, desc: '反指纹模式（noise 加噪=默认 / uniform 统一化）；与 privacy_shield_level 同为「通用可读写 + 专用命令同步注入」的键' },
   privacy_whitelist: { default: '', kind: 'str', sensitive: false, desc: '隐私防护白名单域名' },
   gpc_header: { default: 'true', kind: 'bool', sensitive: false, desc: '发送 GPC 请求头（Sec-GPC: 1）' },
   net_block_rules: { default: '', kind: 'str', sensitive: false, desc: '网络层拦截规则（每行一个 URL 子串）' },
@@ -87,6 +88,11 @@ export const SETTINGS_SCHEMA = {
   api_allowed_ips: { default: '', kind: 'str', sensitive: false, desc: 'API IP 白名单（逗号分隔 IP/CIDR，如 192.168.1.0/24）' },
   vault_idle_lock_minutes: { default: '15', kind: 'int', sensitive: false, desc: '密码库空闲自动锁定（分钟，0=关）' },
   todos: { default: '[]', kind: 'str', sensitive: false, desc: '启动页待办清单（JSON 数组字符串）' },
+  webmcp_polyfill: { default: 'false', kind: 'bool', sensitive: false, desc: 'WebMCP polyfill 试验开关（默认关）；专用命令 set/get_webmcp_polyfill' },
+  quick_sites: { default: '[]', kind: 'str', sensitive: false, desc: '启动页快捷站点（JSON 数组，空=用内置默认）；专用命令 save_quick_sites' },
+  ua_site_overrides: { default: '{}', kind: 'str', sensitive: false, desc: '站点级 UA 覆盖（JSON 对象 host→UA）；专用命令 set_user_agent_override' },
+  user_agent: { default: '', kind: 'str', sensitive: false, desc: '全局 User-Agent（空=用内置默认）；专用命令 set_user_agent' },
+  perm_allow: { default: '{}', kind: 'str', sensitive: false, desc: '站点权限白名单（JSON 对象 kind→[host]）；由 perms.rs 内部读写' },
 } as const
 
 export const DEFAULT_SETTINGS: Record<string, string> = Object.fromEntries(

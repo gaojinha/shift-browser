@@ -213,6 +213,70 @@ mod tests {
         assert_ne!(a, b, "nonce 不可重复");
     }
 
+    /// 契约完整性（F-9 审计 2026-10-15）：内部键必须同时出现在 SETTINGS 里。
+    /// 否则该键就是「暗键」——get_all_settings 会把它滤掉（前端永远读回默认值），
+    /// 而通用 set_setting 又拒绝写入，于是 UI 出现"看着能设、其实没保存"的静默失效。
+    /// privacy_fp_mode 曾长期处于这个状态。
+    #[test]
+    fn internal_keys_must_be_declared_in_settings() {
+        for k in crate::contracts::settings::INTERNAL_KEYS {
+            assert!(
+                crate::contracts::settings::SETTINGS.iter().any(|d| d.key == *k),
+                "INTERNAL_KEYS 里的 {} 未在 SETTINGS 中声明（暗键：读不到、写被拒）",
+                k
+            );
+            assert!(
+                crate::contracts::settings::is_allowed(k),
+                "内部键 {} 必须在白名单内，否则前端读不回值",
+                k
+            );
+            assert!(
+                !crate::contracts::settings::is_sensitive(k),
+                "内部键 {} 不是敏感键（敏感=读写全拒）",
+                k
+            );
+        }
+    }
+
+    /// 拥有专用命令的设置键必须在契约登记（防「真实库里有、契约里没有」的暗键）。
+    /// 清单来自 2026-10-15 F-9 对真实库 settings 表的审计：这 6 个键真实存在却全部漏登记，
+    /// 其中 privacy_fp_mode 已造成前端读不到持久值（界面恒显示默认「加噪」）。
+    /// 收编口径：
+    /// - privacy_fp_mode：通用可读写 + 专用命令同步注入（与兄弟键 privacy_shield_level 一致）
+    /// - 其余 5 个：内部键，保持「仅专用命令/后端内部可写」
+    #[test]
+    fn dedicated_keys_are_registered_in_contract() {
+        let expected = [
+            "privacy_fp_mode",
+            "webmcp_polyfill",
+            "quick_sites",
+            "ua_site_overrides",
+            "user_agent",
+            "perm_allow",
+        ];
+        for k in expected {
+            assert!(
+                crate::contracts::settings::SETTINGS.iter().any(|d| d.key == k),
+                "专用命令设置键 {} 未在 contracts::settings::SETTINGS 登记",
+                k
+            );
+        }
+        // privacy_fp_mode 必须可通用读写（前端 PrivacySection 走 settingsStore），且非内部键
+        assert!(crate::contracts::settings::is_allowed("privacy_fp_mode"));
+        assert!(!crate::contracts::settings::is_internal("privacy_fp_mode"));
+        // 另 5 个为内部键：读放行、通用写拒绝
+        for k in [
+            "webmcp_polyfill",
+            "quick_sites",
+            "ua_site_overrides",
+            "user_agent",
+            "perm_allow",
+        ] {
+            assert!(crate::contracts::settings::is_allowed(k));
+            assert!(crate::contracts::settings::is_internal(k));
+        }
+    }
+
     /// 生成物与契约镜像一致性：改 contracts.rs 未重生成即红（P0-2）
     #[test]
     fn contract_mirror() {
