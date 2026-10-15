@@ -14,6 +14,8 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { nextTick } from 'vue'
 import { i18n } from '../i18n'
+import { useTabsStore } from '../stores/tabs'
+import type { Tab } from '../types/tab'
 import CommandPalette from './CommandPalette.vue'
 
 const invokeMock = vi.fn()
@@ -183,6 +185,75 @@ describe('CommandPalette：基础渲染与交互', () => {
     await wrapper.find('.cp-overlay').trigger('mousedown')
 
     expect(wrapper.emitted('close')).toBeTruthy()
+    wrapper.unmount()
+  })
+})
+
+describe('CommandPalette：C-3 标签搜索子模式', () => {
+  function makeTab(id: string, title: string, url: string): Tab {
+    return {
+      id,
+      title,
+      url,
+      favicon: '',
+      is_active: false,
+      is_pinned: false,
+      is_muted: false,
+      hibernated: false,
+      private: false,
+      origin: 'user',
+    }
+  }
+
+  function seedTabs() {
+    useTabsStore().$patch({
+      tabs: [
+        makeTab('t1', 'GitHub', 'https://github.com'),
+        makeTab('t2', 'AtomGit', 'https://atomgit.com'),
+        makeTab('t3', '设置', 'shift://settings'),
+      ],
+    })
+  }
+
+  /** 点"标签"radio 进入标签子模式 */
+  async function selectTabMode(wrapper: ReturnType<typeof mount>) {
+    const modeTabs = wrapper.findAll('.cp-mode-tab')
+    expect(modeTabs.length).toBe(2)
+    await modeTabs[1].trigger('click')
+    await nextTick()
+  }
+
+  it('切到"标签"模式：只出标签候选，无命令/AI/历史', async () => {
+    const wrapper = mountPalette()
+    await open(wrapper)
+    seedTabs()
+    await nextTick()
+    await selectTabMode(wrapper)
+
+    const items = wrapper.findAll('.cp-item')
+    expect(items.length).toBe(3)
+    const titles = items.map((i) => i.find('.cp-title').text())
+    expect(titles).toContain('GitHub')
+    expect(titles).toContain('AtomGit')
+    // 命令候选（"新建标签页"）不出现在标签模式
+    expect(titles).not.toContain('新建标签页')
+    wrapper.unmount()
+  })
+
+  it('标签模式 + 搜索过滤：只显示匹配标签', async () => {
+    const wrapper = mountPalette()
+    await open(wrapper)
+    seedTabs()
+    await nextTick()
+    await selectTabMode(wrapper)
+
+    const input = wrapper.find('.cp-input')
+    await input.setValue('atom')
+    await nextTick()
+
+    const items = wrapper.findAll('.cp-item')
+    expect(items.length).toBe(1)
+    expect(items[0].find('.cp-title').text()).toBe('AtomGit')
     wrapper.unmount()
   })
 })

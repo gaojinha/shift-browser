@@ -45,6 +45,12 @@ interface Item {
 }
 
 const query = ref('')
+/** 候选范围子模式（C-3 标签搜索）：all=全部混合 / tab=只看标签 */
+const mode = ref<'all' | 'tab'>('all')
+const MODES: { id: 'all' | 'tab'; label: string }[] = [
+  { id: 'all', label: '全部' },
+  { id: 'tab', label: '标签' },
+]
 const historyEntries = ref<HistoryEntry[]>([])
 const inputRef = ref<InstanceType<typeof ComboboxInput> | null>(null)
 
@@ -78,10 +84,27 @@ function normalizeUrl(s: string): string {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : 'https://' + s
 }
 
+/** 标签候选（切换）：匹配标题/URL；全部模式与标签子模式共用（C-3） */
+function tabItems(q: string): Item[] {
+  const out: Item[] = []
+  for (const t of tabsStore.tabs) {
+    const title = t.title || t.url || '新标签页'
+    if (!q || title.toLowerCase().includes(q) || t.url.toLowerCase().includes(q)) {
+      out.push({ key: 'tab:' + t.id, kind: 'tab', icon: '🗔', title, subtitle: t.url, value: t.id })
+    }
+  }
+  return out
+}
+
 const items = computed<Item[]>(() => {
   const raw = query.value.trim()
   const q = raw.toLowerCase()
   const out: Item[] = []
+
+  // 标签子模式（C-3）：只出标签候选
+  if (mode.value === 'tab') {
+    return tabItems(q).slice(0, 50)
+  }
 
   // ① 问 AI（有输入即置顶候选）
   if (raw) {
@@ -106,12 +129,7 @@ const items = computed<Item[]>(() => {
   }
 
   // ③ 标签页（切换）
-  for (const t of tabsStore.tabs) {
-    const title = t.title || t.url || '新标签页'
-    if (!q || title.toLowerCase().includes(q) || t.url.toLowerCase().includes(q)) {
-      out.push({ key: 'tab:' + t.id, kind: 'tab', icon: '🗔', title, subtitle: t.url, value: t.id })
-    }
-  }
+  out.push(...tabItems(q))
 
   // ④ 历史（打开；无输入时只给最近 6 条，避免刷屏）
   const hist = historyEntries.value.filter((h) => {
@@ -193,6 +211,7 @@ watch(
   async (v) => {
     if (v) {
       query.value = ''
+      mode.value = 'all'
       historyEntries.value = []
       await setWebviewVisible(false, 'command-palette')
       loadHistory()
@@ -234,6 +253,20 @@ watch(
             @keydown.enter="onEnterKey"
           />
           <span class="cp-esc">Esc</span>
+        </div>
+        <!-- 候选范围子模式（C-3 标签搜索）：全部 / 标签 -->
+        <div class="cp-mode-row" role="radiogroup" aria-label="候选范围">
+          <button
+            v-for="m in MODES"
+            :key="m.id"
+            class="cp-mode-tab"
+            :class="{ active: mode === m.id }"
+            role="radio"
+            :aria-checked="mode === m.id"
+            @click="mode = m.id"
+          >
+            {{ m.label }}
+          </button>
         </div>
         <ComboboxContent class="cp-list-wrap" :aria-label="t('commandPalette.listLabel')" @escape-key-down="emit('close')">
           <ComboboxViewport class="cp-list">
@@ -326,6 +359,37 @@ watch(
   border-radius: var(--radius-xs);
   padding: 2px 7px;
   line-height: var(--leading-tight);
+}
+.cp-mode-row {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 8px;
+}
+.cp-mode-tab {
+  height: 24px;
+  padding: 0 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.cp-mode-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.cp-mode-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.cp-mode-tab.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 /* Reka Content 内联渲染：穿透布局，视觉与旧版一致 */
 .cp-list-wrap {
