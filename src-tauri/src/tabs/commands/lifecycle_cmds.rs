@@ -28,28 +28,8 @@ pub async fn create_tab(
     // 隐私防护：新建标签前清洗跨站追踪参数（只影响 http/https，内部页面不受影响）
     let url = clean_tracking_params(&url);
     log::info!("[tabs] create_tab: url={}", crate::redact_url(&url));
-    // P2：URL scheme 白名单——只允许 http/https、内部页面（file://newtab、shift://）。
-    // 拒绝 file:// 其他路径（本地文件泄露）与 javascript:/data: 等危险 scheme
-    // 例外：阅读模式生成的 file:///.../reader/r*.html（enter_reader_mode 写入 app_data/reader，
-    // 内容经 sanitize_html 净化，路径固定）——2026-09-19 修复：此前被白名单误拒，
-    // 阅读模式提取成功但新标签打不开
-    let parsed = url
-        .parse::<tauri::Url>()
-        .map_err(|e| AppError::validation(format!("URL 解析失败: {}", e)))?;
-    match parsed.scheme() {
-        "http" | "https" | "shift" => {}
-        "file" => {
-            if !url.contains(crate::contracts::urls::NEWTAB_MARKER)
-                && !url.contains(crate::contracts::urls::WORLD_NAV_FILE)
-                && !url.contains(crate::contracts::urls::READER_MARKER)
-            {
-                return Err(AppError::permission("不允许打开本地文件").into());
-            }
-        }
-        other => {
-            return Err(AppError::permission(format!("不允许的 URL scheme: {}", other)).into())
-        }
-    }
+    // P2：URL scheme 白名单（安全闸，口径见 validate_create_url）
+    validate_create_url(&url)?;
     let id = TabManager::uuid();
     // 建页限流：WebKit 建页是重操作，同时最多 4 个，恢复会话连建时排队（阈值见 contracts::limits）
     static CREATE_SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
@@ -363,6 +343,56 @@ pub async fn switch_tab(
     Ok(s.tabs.get(&id).cloned())
 }
 
+/// URL scheme 白名单（create_tab 安全闸，纯函数便于测试）：
+/// 只允许 http/https/shift；file 仅限内部页（newtab / worldnav / reader marker），
+/// 其余 file 路径拒绝（防本地文件泄露），javascript:/data: 等危险 scheme 拒绝。
+/// 例外：阅读模式生成的 file:///.../reader/r*.html（enter_reader_mode 写入 app_data/reader，
+/// 内容经 sanitize_html 净化，路径固定）——2026-09-19 修复：此前被白名单误拒，
+/// 阅读模式提取成功但新标签打不开
+pub(crate) fn validate_create_url(url: &str) -> Result<(), AppError> {
+    let parsed = url
+        .parse::<tauri::Url>()
+        .map_err(|e| AppError::validation(format!("URL 解析失败: {}", e)))?;
+    match parsed.scheme() {
+        "http" | "https" | "shift" => Ok(()),
+        "file" => {
+            if url.contains(crate::contracts::urls::NEWTAB_MARKER)
+                || url.contains(crate::contracts::urls::WORLD_NAV_FILE)
+                || url.contains(crate::contracts::urls::READER_MARKER)
+            {
+                Ok(())
+            } else {
+                Err(AppError::permission("不允许打开本地文件"))
+            }
+        }
+        other => Err(AppError::permission(format!("不允许的 URL scheme: {}", other))),
+    }
+}
+
+/// 休眠候选选择（纯函数，便于测试）：非激活、未休眠，且
+/// （标签数超阈值 count_pressure → 后台标签直接候选；否则最后激活早于阈值；
+/// 无激活记录视为早已空闲，候选）。
+pub(crate) fn hibernate_candidates<'a>(
+    tabs: impl Iterator<Item = (&'a String, &'a Tab)>,
+    active: Option<&str>,
+    last_active: &std::collections::HashMap<String, i64>,
+    threshold: i64,
+    count_pressure: bool,
+) -> Vec<String> {
+    tabs.filter(|(id, t)| {
+            if t.hibernated || Some(id.as_str()) == active {
+                return false;
+            }
+            count_pressure
+                || last_active
+                    .get(*id)
+                    .map(|ts| *ts < threshold)
+                    .unwrap_or(true)
+        })
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
 /// 空闲标签休眠：销毁长时间未激活的标签 webview，回收其渲染进程内存
 /// （WebKitGTK 默认不主动回收，实测 9 标签合计 3.75GB）。
 /// 返回本次休眠的标签数。超时分钟数来自 settings.tab_hibernate_minutes（0 = 关闭，默认 10）。
@@ -382,11 +412,8 @@ pub async fn hibernate_idle_tabs(
         return Ok(0);
     }
     let threshold = now_ts() - minutes * 60;
-    // 读锁内一次取全：活动标签 + 标签数（状态收敛实施）
-    let (active, tab_count) = {
-        let s = state.read_state();
-        (s.active_id.clone(), s.tabs.len())
-    };
+    // 读锁内一次取全：标签数（候选选择内部自行取 active，见 hibernate_candidates）
+    let tab_count = { state.read_state().tabs.len() };
 
     // 性能 P1（2026-09-22）：标签数阈值触发——标签数超过 tab_hibernate_count 时，
     // 后台（非激活）标签**切走即可休眠**（不再等 30 分钟无操作），
@@ -405,24 +432,16 @@ pub async fn hibernate_idle_tabs(
         );
     }
 
-    // 选出候选：非激活、未休眠，且（超时 或 标签数超阈值）
+    // 选出候选：非激活、未休眠，且（超时 或 标签数超阈值）——口径见 hibernate_candidates
     let candidates: Vec<String> = {
         let s = state.read_state();
-        s.tabs
-            .iter()
-            .filter(|(id, t)| {
-                if t.hibernated || Some((*id).clone()) == active {
-                    return false;
-                }
-                // 超阈值：后台标签直接候选；否则按"最后激活时间早于阈值"
-                count_pressure
-                    || s.last_active
-                        .get(*id)
-                        .map(|ts| *ts < threshold)
-                        .unwrap_or(true)
-            })
-            .map(|(id, _)| id.clone())
-            .collect()
+        hibernate_candidates(
+            s.tabs.iter(),
+            s.active_id.as_deref(),
+            &s.last_active,
+            threshold,
+            count_pressure,
+        )
     };
     if candidates.is_empty() {
         return Ok(0);
@@ -457,4 +476,83 @@ pub async fn hibernate_idle_tabs(
         log::info!("[perf] 本轮共休眠 {} 个空闲标签", count);
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_url_whitelist_allows_web_and_internal() {
+        // http/https/shift 放行
+        assert!(validate_create_url("https://example.com").is_ok());
+        assert!(validate_create_url("http://example.com/a?b=1").is_ok());
+        assert!(validate_create_url("shift://newtab").is_ok());
+        assert!(validate_create_url("shift://worldnav").is_ok());
+        // file 三类内部页放行（newtab marker / worldnav 文件 / reader 产物——
+        // reader 例外是 2026-09-19 修复：此前白名单误拒阅读模式）
+        assert!(validate_create_url("file:///appdata/newtab/index.html").is_ok());
+        assert!(validate_create_url("file:///appdata/world-nav.html").is_ok());
+        assert!(validate_create_url("file:///appdata/reader/r9f2c1.html").is_ok());
+    }
+
+    #[test]
+    fn create_url_whitelist_rejects_local_and_dangerous() {
+        // file 其他路径拒绝（本地文件泄露面）
+        assert!(validate_create_url("file:///etc/passwd").is_err());
+        assert!(validate_create_url("file:///home/gao/secret.txt").is_err());
+        // 危险 scheme 拒绝
+        assert!(validate_create_url("javascript:alert(1)").is_err());
+        assert!(validate_create_url("data:text/html,<h1>x</h1>").is_err());
+        assert!(validate_create_url("vbscript:x").is_err());
+        assert!(validate_create_url("ftp://x").is_err());
+        // 非法 URL 解析失败拒绝
+        assert!(validate_create_url("not a url at all").is_err());
+    }
+
+    fn tab(id: &str, hibernated: bool) -> Tab {
+        Tab {
+            id: id.into(),
+            url: "https://x.com".into(),
+            title: id.into(),
+            favicon: String::new(),
+            is_active: false,
+            is_pinned: false,
+            is_muted: false,
+            hibernated,
+            private: false,
+            origin: "user".into(),
+        }
+    }
+
+    #[test]
+    fn hibernate_candidates_timeout_and_pressure() {
+        let tabs = [
+            ("t-active".to_string(), tab("t-active", false)),   // 活动 → 永不候选
+            ("t-sleepy".to_string(), tab("t-sleepy", true)),    // 已休眠 → 不候选
+            ("t-old".to_string(), tab("t-old", false)),          // 早已空闲 → 候选
+            ("t-new".to_string(), tab("t-new", false)),          // 刚活跃 → 不候选
+            ("t-norec".to_string(), tab("t-norec", false)),      // 无激活记录 → 候选
+        ];
+        let mut last_active = std::collections::HashMap::new();
+        last_active.insert("t-old".to_string(), 100);
+        last_active.insert("t-new".to_string(), 10_000); // 晚于阈值
+        let threshold = 5_000;
+        // 无数量压力：按超时选（t-old 早于阈值；t-norec 无记录视为早已空闲）
+        let it = || tabs.iter().map(|(id, t)| (id, t));
+        let out = hibernate_candidates(it(), Some("t-active"), &last_active, threshold, false);
+        assert_eq!(out, vec!["t-old".to_string(), "t-norec".to_string()]);
+
+        // 数量压力：全部后台未休眠标签直接候选（活动/已休眠仍排除）
+        let out = hibernate_candidates(it(), Some("t-active"), &last_active, threshold, true);
+        assert_eq!(
+            out,
+            vec!["t-old".to_string(), "t-new".to_string(), "t-norec".to_string()]
+        );
+
+        // active=None（理论不发生，锁死函数语义：无人豁免——t-active 无激活记录
+        // 按超时规则同样是候选）
+        let out = hibernate_candidates(it(), None, &last_active, threshold, false);
+        assert_eq!(out, vec!["t-active".to_string(), "t-old".to_string(), "t-norec".to_string()]);
+    }
 }
