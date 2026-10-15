@@ -2,7 +2,7 @@
 // 背景：前端 keydown 在弹窗打开时拦截建签/关签等动作，但 GTK 层（页面持焦时）
 // 转发直接调 handleGlobalAction，不过守卫——AI 开着时点一下页面再按 Ctrl+T，
 // 两边行为分叉。两条路径共用本表，保证双焦点行为一致。
-// 非表中动作（devtools/focus-address/command-palette/lock-vault/next-tab/prev-tab）
+// 非表中动作（devtools/focus-address/command-palette/lock-vault/next-tab/prev-tab/tab-search）
 // 两边都不拦，改这里必须同步改 onGlobalKeydown（单测锁死对应关系）。
 export const DIALOG_GUARDED_ACTIONS: ReadonlySet<string> = new Set([
   'translate-panel',
