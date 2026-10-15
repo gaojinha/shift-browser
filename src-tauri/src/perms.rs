@@ -18,35 +18,34 @@ use gtk::glib;
 use webkit2gtk::{PermissionRequest, PermissionRequestExt, WebView, WebViewExt};
 
 static PERM_SEQ: AtomicU64 = AtomicU64::new(1);
-/// 白名单缓存：key = "kind|host"（启动时从 settings 载入，respond 时更新）
-static PERM_ALLOW: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+/// 白名单规则：(权限类型, 主机)。用元组而非 "kind|host" 拼串——
+/// 后者要在 `list_permission_rules` 里再 split 拆回来，属重复解释。
+type PermRule = (String, String);
+/// 白名单缓存（启动时从 settings 载入，respond 时更新）
+static PERM_ALLOW: OnceLock<Mutex<HashSet<PermRule>>> = OnceLock::new();
 
 thread_local! {
     /// 挂起中的权限请求（id → request），等前端回答
     static PENDING: RefCell<HashMap<u64, PermissionRequest>> = RefCell::new(HashMap::new());
 }
 
-fn allow_set() -> &'static Mutex<HashSet<String>> {
+fn allow_set() -> &'static Mutex<HashSet<PermRule>> {
     PERM_ALLOW.get_or_init(|| Mutex::new(HashSet::new()))
-}
-
-fn key(kind: &str, host: &str) -> String {
-    format!("{}|{}", kind, host)
 }
 
 pub fn is_allowed(kind: &str, host: &str) -> bool {
     allow_set()
         .lock()
-        .map(|s| s.contains(&key(kind, host)))
+        .map(|s| s.contains(&(kind.to_string(), host.to_string())))
         .unwrap_or(false)
 }
 
 fn set_allowed(kind: &str, host: &str, allow: bool) {
     if let Ok(mut s) = allow_set().lock() {
         if allow {
-            s.insert(key(kind, host));
+            s.insert((kind.to_string(), host.to_string()));
         } else {
-            s.remove(&key(kind, host));
+            s.remove(&(kind.to_string(), host.to_string()));
         }
     }
 }
@@ -170,54 +169,68 @@ pub async fn respond_permission(
     .map_err(|e| e.to_string())?;
 
     if remember {
-        set_allowed(&kind, &host, allow);
-        // 持久化：settings.perm_allow = JSON {kind: [host,...]}
-        let cur: Option<String> =
-            sqlx::query_scalar("SELECT value FROM settings WHERE key = 'perm_allow'")
-                .fetch_optional(&db.pool)
-                .await
-                .ok()
-                .flatten();
-        let mut map: HashMap<String, Vec<String>> = cur
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
-        let list = map.entry(kind.clone()).or_default();
-        if allow {
-            if !list.contains(&host) {
-                list.push(host.clone());
-            }
-        } else {
-            list.retain(|x| x != &host);
-        }
-        let json = serde_json::to_string(&map).unwrap_or_else(|_| "{}".into());
-        let _ = sqlx::query(
-            "INSERT INTO settings (key, value, updated_at) VALUES ('perm_allow', ?, datetime('now'))
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
-        )
-        .bind(&json)
-        .execute(&db.pool)
-        .await;
+        apply_rule(&db.pool, &kind, &host, allow).await;
         log::info!("[perm] 记忆生效：{} {} = {}", kind, host, allow);
     }
     Ok(())
 }
 
-/// 启动时从 settings 载入白名单到内存缓存
-pub async fn load_allowlist(pool: &sqlx::SqlitePool) {
+/// 读 settings.perm_allow → `{kind: [host, …]}`；缺失或损坏一律视为空表
+async fn read_allow_map(pool: &sqlx::SqlitePool) -> HashMap<String, Vec<String>> {
     let cur: Option<String> =
         sqlx::query_scalar("SELECT value FROM settings WHERE key = 'perm_allow'")
             .fetch_optional(pool)
             .await
             .ok()
             .flatten();
-    let map: HashMap<String, Vec<String>> = cur
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+    cur.and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// 写回 settings.perm_allow（upsert：无行则插入，不依赖调用方先建行）
+async fn write_allow_map(pool: &sqlx::SqlitePool, map: &HashMap<String, Vec<String>>) {
+    let json = serde_json::to_string(map).unwrap_or_else(|_| "{}".into());
+    let _ = sqlx::query(
+        "INSERT INTO settings (key, value, updated_at) VALUES ('perm_allow', ?, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
+    )
+    .bind(&json)
+    .execute(pool)
+    .await;
+}
+
+/// 纯函数：把一条规则并进白名单表。授权去重；撤销后若某 kind 空列表，
+/// 整条剔除，避免库里留下 `{"media": []}` 这种残壳。
+fn merge_rule(map: &mut HashMap<String, Vec<String>>, kind: &str, host: &str, allow: bool) {
+    let list = map.entry(kind.to_string()).or_default();
+    if allow {
+        if !list.iter().any(|x| x == host) {
+            list.push(host.to_string());
+        }
+    } else {
+        list.retain(|x| x != host);
+    }
+    if list.is_empty() {
+        map.remove(kind);
+    }
+}
+
+/// 记住/撤销一条授权：同步更新内存缓存并落库（唯一写入口）
+async fn apply_rule(pool: &sqlx::SqlitePool, kind: &str, host: &str, allow: bool) {
+    set_allowed(kind, host, allow);
+    let mut map = read_allow_map(pool).await;
+    merge_rule(&mut map, kind, host, allow);
+    write_allow_map(pool, &map).await;
+}
+
+/// 启动时从 settings 载入白名单到内存缓存
+pub async fn load_allowlist(pool: &sqlx::SqlitePool) {
+    let map = read_allow_map(pool).await;
     if let Ok(mut set) = allow_set().lock() {
         set.clear();
         for (kind, hosts) in &map {
             for h in hosts {
-                set.insert(key(kind, h));
+                set.insert((kind.clone(), h.clone()));
             }
         }
         log::info!("[perm] 白名单已载入：{} 条", set.len());
@@ -237,15 +250,10 @@ pub async fn list_permission_rules() -> Result<Vec<PermissionRule>, String> {
     let set = allow_set().lock().map_err(|e| e.to_string())?;
     Ok(set
         .iter()
-        .map(|s| {
-            let mut it = s.splitn(2, '|');
-            let kind = it.next().unwrap_or("").to_string();
-            let host = it.next().unwrap_or("").to_string();
-            PermissionRule {
-                kind_zh: kind_zh(&kind).to_string(),
-                kind,
-                host,
-            }
+        .map(|(kind, host)| PermissionRule {
+            kind_zh: kind_zh(kind).to_string(),
+            kind: kind.clone(),
+            host: host.clone(),
         })
         .collect())
 }
@@ -257,25 +265,132 @@ pub async fn remove_permission_rule(
     kind: String,
     host: String,
 ) -> Result<(), String> {
-    set_allowed(&kind, &host, false);
-    let cur: Option<String> =
-        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'perm_allow'")
-            .fetch_optional(&db.pool)
-            .await
-            .ok()
-            .flatten();
-    let mut map: HashMap<String, Vec<String>> = cur
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-    if let Some(list) = map.get_mut(&kind) {
-        list.retain(|x| x != &host);
-    }
-    let json = serde_json::to_string(&map).unwrap_or_else(|_| "{}".into());
-    let _ = sqlx::query(
-        "UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = 'perm_allow'",
-    )
-    .bind(&json)
-    .execute(&db.pool)
-    .await;
+    apply_rule(&db.pool, &kind, &host, false).await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Db;
+
+    /// 建一个跑完整迁移的真实库（含 settings 表）
+    async fn temp_db() -> (tempfile::TempDir, Db) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::init(dir.path().to_path_buf()).await.unwrap();
+        (dir, db)
+    }
+
+    #[test]
+    fn kind_zh_maps_known_kinds_and_falls_back() {
+        assert_eq!(kind_zh("media"), "摄像头/麦克风");
+        assert_eq!(kind_zh("geolocation"), "地理位置");
+        assert_eq!(kind_zh("notification"), "通知");
+        assert_eq!(kind_zh("pointer-lock"), "鼠标指针锁定");
+        assert_eq!(kind_zh("device-info"), "设备信息");
+        // 未知类型不 panic，落到统一兜底文案
+        assert_eq!(kind_zh("someth-new"), "其他权限");
+        assert_eq!(kind_zh(""), "其他权限");
+    }
+
+    #[test]
+    fn merge_rule_dedupes_adds_and_prunes_empty_kind() {
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+
+        merge_rule(&mut map, "media", "a.example", true);
+        merge_rule(&mut map, "media", "a.example", true); // 重复授权不重复记
+        merge_rule(&mut map, "media", "b.example", true);
+        assert_eq!(
+            map.get("media").unwrap(),
+            &vec!["a.example".to_string(), "b.example".to_string()]
+        );
+
+        // 撤掉一条：仍留 kind，只去掉该 host
+        merge_rule(&mut map, "media", "a.example", false);
+        assert_eq!(map.get("media").unwrap(), &vec!["b.example".to_string()]);
+
+        // 撤掉最后一条：整个 kind 剔除，不留空壳
+        merge_rule(&mut map, "media", "b.example", false);
+        assert!(!map.contains_key("media"));
+    }
+
+    #[test]
+    fn merge_rule_cancelling_unknown_host_is_noop() {
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        merge_rule(&mut map, "geolocation", "never.example", false);
+        assert!(map.is_empty(), "撤销从未授权的主机不该凭空建 kind");
+    }
+
+    #[tokio::test]
+    async fn apply_rule_persists_and_round_trips_through_db() {
+        let (_dir, db) = temp_db().await;
+        apply_rule(&db.pool, "media", "meet.example", true).await;
+        apply_rule(&db.pool, "geolocation", "maps.example", true).await;
+
+        let map = read_allow_map(&db.pool).await;
+        assert_eq!(map.get("media").unwrap(), &vec!["meet.example".to_string()]);
+        assert_eq!(
+            map.get("geolocation").unwrap(),
+            &vec!["maps.example".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_rule_twice_is_idempotent() {
+        let (_dir, db) = temp_db().await;
+        apply_rule(&db.pool, "notification", "dup.example", true).await;
+        apply_rule(&db.pool, "notification", "dup.example", true).await;
+
+        let map = read_allow_map(&db.pool).await;
+        assert_eq!(
+            map.get("notification").unwrap(),
+            &vec!["dup.example".to_string()],
+            "重复记住同一条规则不该在库里堆重复项"
+        );
+    }
+
+    #[tokio::test]
+    async fn revoking_last_host_removes_kind_from_db() {
+        let (_dir, db) = temp_db().await;
+        apply_rule(&db.pool, "media", "meet.example", true).await;
+        apply_rule(&db.pool, "media", "meet.example", false).await;
+
+        let map = read_allow_map(&db.pool).await;
+        assert!(
+            !map.contains_key("media"),
+            "撤权后不应在库里留下 {{media: []}} 残壳"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_allow_map_tolerates_missing_and_corrupt_value() {
+        let (_dir, db) = temp_db().await;
+        // 缺键 → 空表，不 panic
+        assert!(read_allow_map(&db.pool).await.is_empty());
+
+        // 损坏 JSON → 同样视为空表，不 panic、不误报
+        sqlx::query(
+            "INSERT INTO settings (key, value, updated_at) VALUES ('perm_allow', ?, datetime('now'))",
+        )
+        .bind("{ 这不是 JSON")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        assert!(read_allow_map(&db.pool).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn load_allowlist_populates_cache_from_db() {
+        let (_dir, db) = temp_db().await;
+        // 直接落库（绕过内存缓存），再模拟启动加载
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        merge_rule(&mut map, "notification", "load-test.example", true);
+        write_allow_map(&db.pool, &map).await;
+
+        load_allowlist(&db.pool).await;
+        assert!(is_allowed("notification", "load-test.example"));
+        // 未登记的主机不得命中（默认拒绝）
+        assert!(!is_allowed("notification", "other.example"));
+        assert!(!is_allowed("media", "load-test.example"));
+    }
 }
