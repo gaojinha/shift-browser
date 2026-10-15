@@ -284,15 +284,19 @@ pub async fn refresh_all(db: &Db) -> usize {
     total
 }
 
-/// 启动页渲染用的最新条目（混源，按抓取时间倒序，按 url 去重——转载文章不重复显示）
-pub async fn latest_items(db: &Db, limit: i64) -> Vec<(String, String, String, String, String)> {
+/// 启动页渲染用的最新条目（混源，按抓取时间倒序，按 url 去重——转载文章不重复显示）。
+/// 直接吃连接池（与 Tauri 解耦）：唯一调用方是 newtab 的 generate_inner。
+pub(crate) async fn latest_items_db(
+    pool: &sqlx::SqlitePool,
+    limit: i64,
+) -> Vec<(String, String, String, String, String)> {
     sqlx::query_as(
         "SELECT source, category, title, url, published_at FROM feed_items
          WHERE id IN (SELECT MAX(id) FROM feed_items GROUP BY url)
          ORDER BY id DESC LIMIT ?",
     )
     .bind(limit)
-    .fetch_all(&db.pool)
+    .fetch_all(pool)
     .await
     .unwrap_or_default()
 }

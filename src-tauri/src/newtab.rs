@@ -57,38 +57,47 @@ pub async fn generate(db: &Db, path: &std::path::Path) -> Result<String, AppErro
             }
         }
     }
+    generate_inner(&db.pool, path).await
+}
 
+/// 生成核心（与 Tauri 解耦，直接吃连接池，便于集成测试）：
+/// 数据采集（history/bookmarks/settings/feeds/wallpaper 缓存）+ 渲染 + 原子写。
+/// 防抖与并发锁留在 `generate` 壳（计时与锁依赖真实文件与运行时，不在 inner 重复）。
+async fn generate_inner(
+    pool: &sqlx::SqlitePool,
+    path: &std::path::Path,
+) -> Result<String, AppError> {
     // ---- 数据：最近访问 ----
     let recent: Vec<(String, String)> = sqlx::query_as(
         "SELECT url, COALESCE(title, '') FROM history ORDER BY last_visit_at DESC LIMIT 30",
     )
-    .fetch_all(&db.pool)
+    .fetch_all(pool)
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
 
     // ---- 数据：书签（扁平列表）----
     let bookmarks: Vec<(String, String)> =
         sqlx::query_as("SELECT title, url FROM bookmarks ORDER BY sort_order, id")
-            .fetch_all(&db.pool)
+            .fetch_all(pool)
             .await
             .map_err(|e| AppError::db(e.to_string()))?;
 
     // ---- 数据：设置（搜索引擎 / 快捷访问）----
-    async fn setting(db: &Db, key: &str) -> Option<String> {
+    async fn setting(pool: &sqlx::SqlitePool, key: &str) -> Option<String> {
         let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?")
             .bind(key)
-            .fetch_optional(&db.pool)
+            .fetch_optional(pool)
             .await
             .ok()
             .flatten();
         row.map(|r| r.0)
     }
-    let search_engine = setting(db, "search_engine")
+    let search_engine = setting(pool, "search_engine")
         .await
         .unwrap_or_else(|| crate::constants::search::DEFAULT_ENGINE.into());
     // 搜索引擎 URL 模板来自 constants.rs（唯一来源，未知 id 自动回退默认引擎）
     let search_url = crate::constants::search::url_template(&search_engine);
-    let quick_sites: Vec<(String, String, String)> = match setting(db, "quick_sites").await {
+    let quick_sites: Vec<(String, String, String)> = match setting(pool, "quick_sites").await {
         Some(j) => serde_json::from_str::<Vec<serde_json::Value>>(&j)
             .map(|arr| {
                 arr.iter()
@@ -110,10 +119,10 @@ pub async fn generate(db: &Db, path: &std::path::Path) -> Result<String, AppErro
     };
 
     // ---- 数据：资讯（内置源缓存最新 80 条）----
-    let feed_items = crate::feed::latest_items(db, 80).await;
+    let feed_items = crate::feed::latest_items_db(pool, 80).await;
 
     // ---- 数据：动态背景开关（原版 showBg，默认开）----
-    let show_bg = setting(db, "show_bg")
+    let show_bg = setting(pool, "show_bg")
         .await
         .map(|v| v != "0" && v != "false")
         .unwrap_or(true);
@@ -129,7 +138,7 @@ pub async fn generate(db: &Db, path: &std::path::Path) -> Result<String, AppErro
     };
 
     // ---- 数据：字体大小（原版 fontSize，默认 14）----
-    let font_size: u32 = setting(db, "font_size")
+    let font_size: u32 = setting(pool, "font_size")
         .await
         .and_then(|v| v.parse().ok())
         .unwrap_or(14);
@@ -206,49 +215,76 @@ const TODO_KEY: &str = "todos";
 /// 与快捷访问一样改走 settings 表（IPC）持久化。
 #[tauri::command]
 pub async fn todo_list(db: State<'_, Db>) -> CommandResult<String> {
-    let row: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
-        .bind(TODO_KEY)
-        .fetch_optional(&db.pool)
-        .await
-        .map_err(|e| AppError::db(e.to_string()))?;
-    Ok(row.unwrap_or_else(|| "[]".to_string()))
+    Ok(todo_list_inner(&db.pool).await)
 }
 
-/// 保存待办清单（JSON 数组字符串）。
-/// P2 防御：限制体积（防滥用撑爆 DB），内容按 JSON 数组校验。
+/// 读待办核心（吃连接池，便于测试）：缺键返回 "[]"。
+async fn todo_list_inner(pool: &sqlx::SqlitePool) -> String {
+    let row: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
+        .bind(TODO_KEY)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+    row.unwrap_or_else(|| "[]".to_string())
+}
+
 #[tauri::command]
 pub async fn todo_save(db: State<'_, Db>, todos: String) -> CommandResult<()> {
+    todo_save_inner(&db.pool, &todos).await?;
+    Ok(())
+}
+
+/// 保存待办核心（吃连接池，便于测试）：体积上限 + JSON 数组校验 + upsert。
+fn validate_todo(todos: &str) -> Result<(), AppError> {
     if todos.len() > 100 * 1024 {
-        return Err(AppError::validation("待办数据过大").into());
+        return Err(AppError::validation("待办数据过大"));
     }
     // 必须是 JSON 数组
-    let parsed: serde_json::Value = serde_json::from_str(&todos)
+    let parsed: serde_json::Value = serde_json::from_str(todos)
         .map_err(|e| AppError::validation(format!("待办格式错误: {e}")))?;
     if !parsed.is_array() {
-        return Err(AppError::validation("待办格式错误: 需为数组").into());
+        return Err(AppError::validation("待办格式错误: 需为数组"));
     }
+    Ok(())
+}
+
+async fn todo_save_inner(pool: &sqlx::SqlitePool, todos: &str) -> Result<(), AppError> {
+    validate_todo(todos)?;
     sqlx::query(
         "INSERT INTO settings (key, value) VALUES (?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     )
     .bind(TODO_KEY)
-    .bind(&todos)
-    .execute(&db.pool)
+    .bind(todos)
+    .execute(pool)
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     Ok(())
 }
 
-/// 保存主区快捷访问（原版 quick-sites-set IPC 迁移）。
-/// 启动页编辑完成后调用，写入 settings.quick_sites，下次生成 HTML 时生效。
 #[tauri::command]
 pub async fn save_quick_sites(
     db: State<'_, Db>,
     app: AppHandle,
     sites: Vec<serde_json::Value>,
 ) -> CommandResult<()> {
-    // P2：URL scheme 校验——新标签页是带 IPC 桥（invoke_key）的特权页面，
-    // 若允许 javascript: 等 scheme 渲染成 <a href>，点击即在特权上下文执行任意命令
+    save_quick_sites_inner(&db.pool, sites).await?;
+    // 重新生成 HTML，让主区网格立即生效
+    let path = newtab_path(&app).ok_or_else(|| AppError::internal("无法获取数据目录"))?;
+    generate(&db, &path)
+        .await
+        .map_err(crate::error::CommandError::from)?;
+    Ok(())
+}
+
+/// 保存快捷访问核心（吃连接池，便于测试）：URL scheme 校验/规范化 + upsert。
+/// P2：新标签页是带 IPC 桥（invoke_key）的特权页面，若允许 javascript: 等
+/// scheme 渲染成 <a href>，点击即在特权上下文执行任意命令。
+async fn save_quick_sites_inner(
+    pool: &sqlx::SqlitePool,
+    sites: Vec<serde_json::Value>,
+) -> Result<(), AppError> {
     let mut cleaned: Vec<serde_json::Value> = Vec::with_capacity(sites.len());
     for site in &sites {
         let mut s = site.clone();
@@ -266,14 +302,167 @@ pub async fn save_quick_sites(
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     )
     .bind(&json)
-    .execute(&db.pool)
+    .execute(pool)
     .await
     .map_err(|e| AppError::db(e.to_string()))?;
     log::info!("[newtab] 快捷访问已保存 {} 条", cleaned.len());
-    // 重新生成 HTML，让主区网格立即生效
-    let path = newtab_path(&app).ok_or_else(|| AppError::internal("无法获取数据目录"))?;
-    generate(&db, &path)
-        .await
-        .map_err(crate::error::CommandError::from)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 建一个跑完整迁移的真实库（settings/history/bookmarks/feed_items 表齐全）
+    async fn temp_db() -> (tempfile::TempDir, Db) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::init(dir.path().to_path_buf()).await.unwrap();
+        (dir, db)
+    }
+
+    /// 直写一行 settings（测试造数用；绕开命令层）
+    async fn seed_setting(pool: &sqlx::SqlitePool, key: &str, value: &str) {
+        sqlx::query("INSERT INTO settings (key, value) VALUES (?, ?)")
+            .bind(key)
+            .bind(value)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn generate_writes_both_pages_with_seeded_data() {
+        let (dir, db) = temp_db().await;
+        seed_setting(&db.pool, "search_engine", "bing").await;
+        seed_setting(&db.pool, "font_size", "18").await;
+        seed_setting(
+            &db.pool,
+            "quick_sites",
+            r#"[{"icon":"🌐","name":"例站","url":"https://example.com"},
+                {"icon":"💥","name":"危险","url":"javascript:alert(1)"}]"#,
+        )
+        .await;
+        // 历史两条 + 书签一条（generate 应渲染进 HTML）
+        sqlx::query("INSERT INTO history (url, title, visit_count, last_visit_at) VALUES ('https://a.com', '站点A', 1, datetime('now'))")
+            .execute(&db.pool).await.unwrap();
+        sqlx::query("INSERT INTO history (url, title, visit_count, last_visit_at) VALUES ('https://b.com', '站点B', 2, datetime('now'))")
+            .execute(&db.pool).await.unwrap();
+        sqlx::query("INSERT INTO bookmarks (title, url, folder_id, sort_order, created_at) VALUES ('书签甲', 'https://bm.com', NULL, 0, datetime('now'))")
+            .execute(&db.pool).await.unwrap();
+
+        let path = dir.path().join("newtab").join("index.html");
+        generate_inner(&db.pool, &path).await.unwrap();
+
+        // 两页均落盘且非空
+        assert!(path.is_file(), "index.html 应生成");
+        let html = std::fs::read_to_string(&path).unwrap();
+        assert!(!html.is_empty());
+        let worldnav = dir.path().join("newtab").join("world-nav.html");
+        assert!(worldnav.is_file(), "world-nav.html 应生成");
+        // 种子数据渲染进启动页
+        assert!(html.contains("https://a.com"), "最近访问应嵌入");
+        assert!(html.contains("https://bm.com"), "书签应嵌入");
+        assert!(html.contains("https://example.com"), "快捷访问应嵌入");
+        // P2 安全：危险 scheme 数据不得进入 HTML
+        assert!(
+            !html.contains("javascript:alert"),
+            "javascript: 必须被过滤"
+        );
+        let _ = db;
+    }
+
+    #[tokio::test]
+    async fn generate_defaults_when_settings_missing() {
+        let (dir, db) = temp_db().await;
+        let path = dir.path().join("newtab").join("index.html");
+        generate_inner(&db.pool, &path).await.unwrap();
+        let html = std::fs::read_to_string(&path).unwrap();
+        // 默认搜索引擎来自 constants.rs（唯一来源），未知/缺省回退默认引擎
+        assert!(
+            html.contains(crate::constants::search::url_template(
+                crate::constants::search::DEFAULT_ENGINE
+            )),
+            "缺省应回退默认搜索引擎模板"
+        );
+        // 默认快捷访问来自 render::default_quick_sites
+        assert!(!html.is_empty());
+    }
+
+    #[tokio::test]
+    async fn todo_roundtrip_and_defaults() {
+        let (_dir, db) = temp_db().await;
+        // 缺键默认 "[]"
+        assert_eq!(todo_list_inner(&db.pool).await, "[]");
+        // 写入读回
+        todo_save_inner(&db.pool, r#"[{"text":"买奶","done":false}]"#)
+            .await
+            .unwrap();
+        assert_eq!(
+            todo_list_inner(&db.pool).await,
+            r#"[{"text":"买奶","done":false}]"#
+        );
+        // 覆盖写（upsert 不重复插行）
+        todo_save_inner(&db.pool, "[]").await.unwrap();
+        assert_eq!(todo_list_inner(&db.pool).await, "[]");
+    }
+
+    #[tokio::test]
+    async fn todo_save_rejects_oversize_and_non_array() {
+        let (_dir, db) = temp_db().await;
+        // 超 100KiB 拒绝
+        let big = format!("[\"{}\"]", "x".repeat(100 * 1024));
+        assert!(todo_save_inner(&db.pool, &big).await.is_err(), "超大应拒绝");
+        // 非数组 JSON 拒绝
+        assert!(todo_save_inner(&db.pool, r#"{"a":1}"#).await.is_err());
+        assert!(todo_save_inner(&db.pool, "\"str\"").await.is_err());
+        // 非法 JSON 拒绝
+        assert!(todo_save_inner(&db.pool, "not json").await.is_err());
+        // 拒绝后库里无残值
+        assert_eq!(todo_list_inner(&db.pool).await, "[]");
+    }
+
+    #[tokio::test]
+    async fn save_quick_sites_normalizes_and_persists() {
+        let (_dir, db) = temp_db().await;
+        let sites = vec![
+            serde_json::json!({"icon": "🌐", "name": "例站", "url": "example.com"}),
+            serde_json::json!({"icon": "🔒", "name": "安全站", "url": "https://safe.com"}),
+        ];
+        save_quick_sites_inner(&db.pool, sites).await.unwrap();
+        let saved = todo_list_inner_value(&db.pool, "quick_sites").await;
+        let arr: Vec<serde_json::Value> = serde_json::from_str(&saved).unwrap();
+        assert_eq!(arr.len(), 2);
+        // 无 scheme 自动补 https://
+        assert_eq!(arr[0]["url"], "https://example.com");
+        assert_eq!(arr[1]["url"], "https://safe.com");
+    }
+
+    #[tokio::test]
+    async fn save_quick_sites_rejects_missing_url_and_dangerous_scheme() {
+        let (_dir, db) = temp_db().await;
+        // 缺 url 字段
+        let bad = vec![serde_json::json!({"icon": "🌐", "name": "无址站"})];
+        assert!(save_quick_sites_inner(&db.pool, bad).await.is_err());
+        // 危险 scheme
+        let bad = vec![serde_json::json!({"icon": "💥", "name": "注入", "url": "javascript:alert(1)"})];
+        assert!(save_quick_sites_inner(&db.pool, bad).await.is_err());
+        // 拒绝后库里无残值
+        let row: Option<String> =
+            sqlx::query_scalar("SELECT value FROM settings WHERE key = 'quick_sites'")
+                .fetch_optional(&db.pool)
+                .await
+                .unwrap();
+        assert!(row.is_none(), "被拒写入不得落库");
+    }
+
+    /// 读任意 settings 键（测试断言辅助）
+    async fn todo_list_inner_value(pool: &sqlx::SqlitePool, key: &str) -> String {
+        let row: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
+            .bind(key)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+        row.unwrap_or_default()
+    }
 }
