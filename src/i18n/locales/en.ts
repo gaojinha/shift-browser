@@ -53,5 +53,13 @@ export default {
     downloadDir: 'Download directory',
     downloadDirDesc: 'Custom location for downloaded files (empty = system default)',
     downloadDirPlaceholder: 'Empty for system default download directory',
+    resetSettings: 'Reset Settings',
+    resetSettingsDesc: 'Restore all settings to their default values. Bookmarks, browsing history, passwords, cookies, and login sessions are not affected.',
+    resetSettingsConfirmTitle: 'Reset Settings',
+    resetSettingsConfirmBody: 'This will restore all settings to their default values. Bookmarks, browsing history, passwords, cookies, and login sessions are not affected.',
+    resetSettingsConfirm: 'Reset',
+    resetSettingsCancel: 'Cancel',
+    resetSettingsSuccess: 'Settings have been reset to defaults',
+    resetSettingsFailed: 'Failed to reset settings',
   },
 }

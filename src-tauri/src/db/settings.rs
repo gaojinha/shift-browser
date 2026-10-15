@@ -311,6 +311,54 @@ pub async fn sync_ext_rules(db: tauri::State<'_, Db>) -> DbResult<()> {
     Ok(())
 }
 
+/// 一键重置设置：将所有设置项恢复默认值。
+///
+/// 只重置 settings 表（纯偏好项），绝不碰用户数据：
+/// 书签 / 浏览历史 / 密码 / Cookie / 登录态全部在独立表，不受影响。
+///
+/// 跳过的键：
+/// - 敏感键（master_key）：重置会锁死密码库
+/// - 凭据键（ai_api_key / opencode_password）：重置会破坏 AI 配置
+/// - 内部键（vault_idle_lock_minutes / todos）：走专用命令管理，不随通用重置
+#[tauri::command]
+pub async fn reset_settings(db: tauri::State<'_, Db>) -> DbResult<u32> {
+    let mut tx = db.pool.begin().await?;
+    let mut count: u32 = 0;
+    for s in crate::contracts::settings::SETTINGS {
+        // 跳过敏感 / 凭据 / 内部键
+        if crate::contracts::settings::is_sensitive(s.key)
+            || crate::contracts::settings::is_masked(s.key)
+            || crate::contracts::settings::is_internal(s.key)
+        {
+            continue;
+        }
+        sqlx::query(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
+        )
+        .bind(s.key)
+        .bind(s.default)
+        .execute(&mut *tx)
+        .await?;
+        count += 1;
+    }
+    tx.commit().await?;
+    // commit 成功后统一同步缓存与静态值（与 set_settings_bulk_inner 同模式）
+    for s in crate::contracts::settings::SETTINGS {
+        if crate::contracts::settings::is_sensitive(s.key)
+            || crate::contracts::settings::is_masked(s.key)
+            || crate::contracts::settings::is_internal(s.key)
+        {
+            continue;
+        }
+        crate::db::settings_cache::update(s.key, s.default);
+        sync_devtools_static(s.key, s.default);
+        sync_download_dir_static(s.key, s.default);
+    }
+    log::info!("[settings] 一键重置完成：{} 项恢复默认（跳过敏感/凭据/内部键）", count);
+    Ok(count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

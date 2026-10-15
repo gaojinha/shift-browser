@@ -9,6 +9,7 @@ import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toast'
 import UiDialog from './ui/UiDialog.vue'
 import GeneralSection from './settings/GeneralSection.vue'
+import ResetSettingsCard from './settings/ResetSettingsCard.vue'
 import SelfCheckSection from './settings/SelfCheckSection.vue'
 import AboutSection from './settings/AboutSection.vue'
 import AiSection from './settings/AiSection.vue'
@@ -197,6 +198,7 @@ watch(
             <AutomationCard />
           </div>
           <div v-else-if="activeSection === 'advanced'" class="settings-scroll">
+            <ResetSettingsCard />
             <ApiSection />
             <CompatCard />
             <SelfCheckSection />

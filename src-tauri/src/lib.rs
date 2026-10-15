@@ -187,6 +187,7 @@ pub fn run() {
             settings::set_setting,
             settings::delete_setting,
             settings::set_settings_bulk,
+            settings::reset_settings,
             // 网络层拦截规则落盘（阶段3.2：写 Web 进程扩展规则文件）
             settings::sync_ext_rules,
             // 默认浏览器（阶段 4：xdg-settings 集成）

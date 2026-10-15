@@ -68,7 +68,7 @@ export const SECTION_ANCHORS: Record<SectionId, string[]> = {
   data: [],
   ai: ['model', 'mcp', 'labs'],
   extensions: ['extensions', 'userscripts', 'automation'],
-  advanced: ['api', 'compat', 'selfcheck'],
+  advanced: ['reset', 'api', 'compat', 'selfcheck'],
   about: [],
 }
 
@@ -154,6 +154,7 @@ export const SETTING_SEARCH_INDEX: SearchEntry[] = [
   { label: '用户脚本', keywords: ['用户脚本', '油猴', 'tampermonkey', 'userscript', '脚本管理'], section: 'extensions', anchor: 'userscripts' },
   { label: '定时任务', keywords: ['定时任务', '自动清理', '定时刷新订阅', '定时 agent', 'auto', '自动化'], section: 'extensions', anchor: 'automation' },
   // —— 系统 · 高级 ——
+  { label: '重置设置', keywords: ['重置设置', 'reset', '恢复默认', 'reset settings'], section: 'advanced', anchor: 'reset' },
   { label: '开放 API', keywords: ['开放 api', 'api', 'eval', '端口', '局域网', 'ip 白名单', '模型网关', 'token', '状态面板'], section: 'advanced', anchor: 'api' },
   { label: 'API 只读模式', keywords: ['只读', 'readonly', 'api_readonly', '禁写'], section: 'advanced', anchor: 'api' },
   { label: 'API 页面交互闸门', keywords: ['页面交互', 'click', 'fill', 'scroll', 'dismiss', 'agent action', 'api_agent_actions'], section: 'advanced', anchor: 'api' },

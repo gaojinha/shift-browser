@@ -53,5 +53,13 @@ export default {
     downloadDir: '下载保存目录',
     downloadDirDesc: '自定义下载文件的保存位置（留空 = 系统默认下载目录）',
     downloadDirPlaceholder: '留空使用系统默认下载目录',
+    resetSettings: '重置设置',
+    resetSettingsDesc: '将所有设置项恢复默认值。书签、浏览历史、密码、Cookie 和登录态不受影响。',
+    resetSettingsConfirmTitle: '确认重置设置',
+    resetSettingsConfirmBody: '此操作会将所有设置项恢复默认值。书签、浏览历史、密码、Cookie 和登录态不受影响。',
+    resetSettingsConfirm: '确认重置',
+    resetSettingsCancel: '取消',
+    resetSettingsSuccess: '设置已重置',
+    resetSettingsFailed: '重置设置失败',
   },
 }
