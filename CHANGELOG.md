@@ -47,6 +47,8 @@
 - 新增**漏洞响应流程**文档（轻量版）。
 - 新增 **translate_memory 加密评估**：结论为「现阶段缓存本地明文为合理取舍」
   （威胁模型决定），并把「原文不落明文」列为待办。
+- 翻译记忆**原文不落明文**：`source` 列换 HMAC 查询键（独立 `translate.key`，
+  与密码库解锁状态解耦），库里不再有可读的用户浏览原文（C-11）。
 
 ### 测试
 
@@ -71,4 +73,4 @@
 
 ---
 
-[未发布]: https://example.invalid/shiftbrowser/compare
+[未发布]: https://keepachangelog.com/zh-CN/1.1.0/
