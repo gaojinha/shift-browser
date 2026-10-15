@@ -95,4 +95,23 @@ mod tests {
         assert_eq!(e["enabled"], true);
         assert_eq!(e["togglable"], true);
     }
+
+    #[test]
+    fn plugin_entry_passes_through_all_fields() {
+        // 透传字段逐一锁死：settings 页一屏看全依赖 kind/kindLabel/id/name/detail 全到位
+        let e = entry(PluginKind::McpServer, "srv1", "文件服务器", false, "stdio");
+        assert_eq!(e["kind"], "mcp_server");
+        assert_eq!(e["kindLabel"], "MCP 服务器");
+        assert_eq!(e["togglable"], true, "MCP 服务器支持运行时启停（仅 WebExtension 不可）");
+        assert_eq!(e["id"], "srv1");
+        assert_eq!(e["name"], "文件服务器");
+        assert_eq!(e["enabled"], false);
+        assert_eq!(e["detail"], "stdio");
+        // 其余形态的机器标识与启停能力
+        assert_eq!(PluginKind::ContentFilter.as_str(), "content_filter");
+        assert_eq!(PluginKind::WebExtension.as_str(), "web_extension");
+        assert!(PluginKind::ContentFilter.togglable());
+        assert!(PluginKind::McpServer.togglable());
+        assert!(!PluginKind::WebExtension.togglable(), "Web 扩展编译期加载，不可运行时启停");
+    }
 }

@@ -81,4 +81,23 @@ mod tests {
             assert!(!a.desc.is_empty());
         }
     }
+
+    #[test]
+    fn required_params_sane_and_ids_unique() {
+        // required 供 Agent 校验与提示词生成：关键原子操作的必填参数必须锁死
+        let need = |id: &str| ACTIONS.iter().find(|a| a.id == id).unwrap().required;
+        assert_eq!(need("fill"), &["selector", "value"]);
+        assert_eq!(need("click"), &["selector"]);
+        assert_eq!(need("submit"), &["selector"]);
+        assert_eq!(need("navigate"), &["url"]);
+        assert_eq!(need("wait"), &["ms"]);
+        for id in ["read", "back", "snapshot"] {
+            assert!(need(id).is_empty(), "{id} 应为无参动作");
+        }
+        // id 唯一（enum 生成 / 白名单查重依赖唯一性）
+        let mut sorted = IDS.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), IDS.len(), "动作 id 必须唯一");
+    }
 }

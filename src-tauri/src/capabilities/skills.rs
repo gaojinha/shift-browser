@@ -25,4 +25,19 @@ mod tests {
             assert_eq!(s.icon, *icon);
         }
     }
+
+    #[test]
+    fn skills_list_json_shape() {
+        // skills/list API 响应形状：键名/条数/字段透传，漂移即红（外部 MCP 消费方按此取数）
+        let v = super::skills_list_json();
+        let arr = v["skills"].as_array().expect("skills 应为数组");
+        assert_eq!(arr.len(), skills::SKILLS.len());
+        for (item, s) in arr.iter().zip(skills::SKILLS.iter()) {
+            assert_eq!(item["id"], s.id);
+            assert_eq!(item["name"], s.name);
+            assert_eq!(item["icon"], s.icon);
+            assert_eq!(item["desc"], s.desc);
+            assert_eq!(item["uses"], serde_json::json!(s.uses));
+        }
+    }
 }
