@@ -93,3 +93,89 @@ pub fn sanitize_filename(name: &str) -> String {
     }
     s
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tracking_params_removed_and_clean_kept() {
+        // utm_ 前缀族
+        assert_eq!(
+            clean_tracking_params("https://a.com/x?utm_source=rss&id=7"),
+            "https://a.com/x?id=7"
+        );
+        // 精确键族（fbclid/gclid/spm…）
+        assert_eq!(
+            clean_tracking_params("https://a.com/x?fbclid=abc&id=7&q=1"),
+            "https://a.com/x?id=7&q=1"
+        );
+        // 大小写不敏感（UTM_/FBCLID 变体同样清除）
+        assert_eq!(
+            clean_tracking_params("https://a.com/x?UTM_CAM=1&FBCLID=z"),
+            "https://a.com/x"
+        );
+        // 无值键也按 key 判定清除（?utm_source 无 = 号）
+        assert_eq!(
+            clean_tracking_params("https://a.com/x?utm_source"),
+            "https://a.com/x"
+        );
+    }
+
+    #[test]
+    fn tracking_clean_preserves_structure() {
+        // fragment 保留
+        assert_eq!(
+            clean_tracking_params("https://a.com/x?utm_source=1#sec"),
+            "https://a.com/x#sec"
+        );
+        assert_eq!(
+            clean_tracking_params("https://a.com/x?id=1&utm_source=1#sec"),
+            "https://a.com/x?id=1#sec"
+        );
+        // 全部被清且有正常参数：问号不残留
+        assert_eq!(
+            clean_tracking_params("https://a.com/x?gclid=1"),
+            "https://a.com/x"
+        );
+        // 干净 URL 原样返回
+        assert_eq!(
+            clean_tracking_params("https://a.com/x?id=1&q=%20"),
+            "https://a.com/x?id=1&q=%20"
+        );
+    }
+
+    #[test]
+    fn tracking_clean_passthrough_non_http() {
+        // 非 http(s) 或无 query 不动（内部页/本地路径绝不改写）
+        assert_eq!(clean_tracking_params("shift://newtab?utm_source=1"), "shift://newtab?utm_source=1");
+        assert_eq!(clean_tracking_params("https://a.com/noquery"), "https://a.com/noquery");
+        assert_eq!(clean_tracking_params(""), "");
+    }
+
+    #[test]
+    fn sanitize_filename_blocks_traversal_and_control_chars() {
+        // 路径穿越剥干净
+        assert_eq!(sanitize_filename("../../etc/passwd"), "etcpasswd");
+        assert_eq!(sanitize_filename("..\\..\\secret"), "secret");
+        // 控制字符（\0 \n \r \t）剥掉
+        assert_eq!(sanitize_filename("re\nport\r.txt"), "report.txt");
+        assert_eq!(sanitize_filename("a\0b"), "ab");
+    }
+
+    #[test]
+    fn sanitize_filename_fallbacks_and_limits() {
+        // 空/纯点 → download 兜底
+        assert_eq!(sanitize_filename(""), "download");
+        assert_eq!(sanitize_filename(".."), "download");
+        assert_eq!(sanitize_filename(" . "), "download");
+        // 首尾点裁剪（防隐藏文件），中间点保留
+        assert_eq!(sanitize_filename(".hidden"), "hidden");
+        assert_eq!(sanitize_filename("file.txt"), "file.txt");
+        // 首尾空白裁剪
+        assert_eq!(sanitize_filename("  报表.xlsx  "), "报表.xlsx");
+        // 限长 200
+        let long = "x".repeat(300);
+        assert_eq!(sanitize_filename(&long).chars().count(), 200);
+    }
+}

@@ -76,3 +76,32 @@ pub(super) async fn probe_page(app: &AppHandle, tab_id: &str) -> Option<Value> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn bool_arg_accepts_documented_forms() {
+        // 布尔 / 数字 / 字符串三档（MCP 客户端类型各异，口径必须锁死）
+        assert!(bool_arg(&json!({"k": true}), "k"));
+        assert!(!bool_arg(&json!({"k": false}), "k"));
+        assert!(bool_arg(&json!({"k": 1}), "k"));
+        assert!(!bool_arg(&json!({"k": 0}), "k"));
+        assert!(bool_arg(&json!({"k": "1"}), "k"));
+        assert!(bool_arg(&json!({"k": "true"}), "k"));
+        assert!(bool_arg(&json!({"k": "yes"}), "k"));
+    }
+
+    #[test]
+    fn bool_arg_defaults_false_on_junk() {
+        // 缺键 / null / 未识别字符串 / 浮点非 1 → false（不做宽松猜测）
+        assert!(!bool_arg(&json!({}), "k"));
+        assert!(!bool_arg(&json!({"k": null}), "k"));
+        assert!(!bool_arg(&json!({"k": "false"}), "k"));
+        assert!(!bool_arg(&json!({"k": "no"}), "k"));
+        assert!(!bool_arg(&json!({"k": 0.5}), "k"));
+        assert!(!bool_arg(&json!({"k": []}), "k"));
+    }
+}

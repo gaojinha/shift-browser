@@ -87,3 +87,49 @@ pub(crate) fn url_decode(s: &str) -> String {
     }
     String::from_utf8_lossy(&out).into_owned()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bearer_token_matches_case_insensitively() {
+        // 标准形态 / 小写头 + 小写 Bearer / 多行时第二行命中
+        assert!(bearer_token_ok("Authorization: Bearer s3cret", "s3cret"));
+        assert!(bearer_token_ok("authorization: bearer s3cret", "s3cret"));
+        assert!(bearer_token_ok("Host: x\r\nAuthorization: Bearer s3cret", "s3cret"));
+        // 无 Bearer 前缀的裸值也接受（现行口径：strip 失败用原值比较）
+        assert!(bearer_token_ok("Authorization: s3cret", "s3cret"));
+        // 否定路径：错 token / 无该头 / 空头
+        assert!(!bearer_token_ok("Authorization: Bearer wrong", "s3cret"));
+        assert!(!bearer_token_ok("Host: x", "s3cret"));
+        assert!(!bearer_token_ok("", "s3cret"));
+    }
+
+    #[test]
+    fn kv_value_extracts_with_decode() {
+        assert_eq!(kv_value("a=1&b=2", "b"), Some("2".into()));
+        // percent-decode 生效
+        assert_eq!(kv_value("q=a%20b&x=1", "q"), Some("a b".into()));
+        // '+' 转空格
+        assert_eq!(kv_value("q=a+b", "q"), Some("a b".into()));
+        // 值里带 = 不截断（splitn(2)）
+        assert_eq!(kv_value("tok=a=b=c", "tok"), Some("a=b=c".into()));
+        // 无值键 → 空串；缺键 → None
+        assert_eq!(kv_value("flag=", "flag"), Some("".into()));
+        assert_eq!(kv_value("a=1", "zz"), None);
+    }
+
+    #[test]
+    fn url_decode_rules_and_garbage_tolerance() {
+        assert_eq!(url_decode("%41%42"), "AB");
+        assert_eq!(url_decode("a+b"), "a b");
+        assert_eq!(url_decode("plain"), "plain");
+        // 非法/截断转义原样保留，不 panic
+        assert_eq!(url_decode("%ZZ"), "%ZZ");
+        assert_eq!(url_decode("%2"), "%2");
+        assert_eq!(url_decode("%"), "%");
+        // 非法保留时后续字符继续正常解码
+        assert_eq!(url_decode("%ZZ%41"), "%ZZA");
+    }
+}
