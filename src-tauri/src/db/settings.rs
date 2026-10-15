@@ -355,7 +355,10 @@ pub async fn reset_settings(db: tauri::State<'_, Db>) -> DbResult<u32> {
         sync_devtools_static(s.key, s.default);
         sync_download_dir_static(s.key, s.default);
     }
-    log::info!("[settings] 一键重置完成：{} 项恢复默认（跳过敏感/凭据/内部键）", count);
+    log::info!(
+        "[settings] 一键重置完成：{} 项恢复默认（跳过敏感/凭据/内部键）",
+        count
+    );
     Ok(count)
 }
 

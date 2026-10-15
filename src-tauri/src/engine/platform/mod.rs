@@ -34,8 +34,11 @@ static DOWNLOAD_DIR_OVERRIDE: RwLock<Option<String>> = RwLock::new(None);
 /// 设置下载目录覆盖值（空串 = 清除覆盖，回退系统默认）
 pub fn set_download_dir_override(path: &str) {
     let trimmed = path.trim();
-    *DOWNLOAD_DIR_OVERRIDE.write().unwrap() =
-        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) };
+    *DOWNLOAD_DIR_OVERRIDE.write().unwrap() = if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    };
 }
 
 /// 获取下载目录覆盖值（None = 未设置，调用方回退系统默认）
@@ -115,10 +118,7 @@ mod tests {
         set_download_dir_override("");
         let fallback = resolve_download_dir();
         assert!(!fallback.is_empty(), "回退目录不得为空");
-        assert_ne!(
-            fallback, override_str,
-            "清除覆盖后不得再指向覆盖目录"
-        );
+        assert_ne!(fallback, override_str, "清除覆盖后不得再指向覆盖目录");
 
         // 清理
         let _ = std::fs::remove_dir_all(&override_dir);
