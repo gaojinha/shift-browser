@@ -177,3 +177,63 @@ fn bearer_header_check() {
         "secret123"
     ));
 }
+
+#[test]
+fn ct_eq_semantics() {
+    // 常量时间比较（时序攻击防护）：语义与 String 相等一致，实现路径不同
+    assert!(crate::api::auth::ct_eq("s3cret", "s3cret"));
+    assert!(!crate::api::auth::ct_eq("s3cret", "s3cerX"));
+    // 长度不等短路（早退不含时序信息，语义仍是 false）
+    assert!(!crate::api::auth::ct_eq("short", "longer-string"));
+    assert!(!crate::api::auth::ct_eq("", "a"));
+    assert!(crate::api::auth::ct_eq("", ""));
+}
+
+#[test]
+fn generate_token_shape_64_hex() {
+    // 双 uuid simple 拼接：64 个小写 hex（无连字符）——token 轮换/日志校验的格式契约
+    let t = crate::api::auth::generate_token();
+    assert_eq!(t.len(), 64);
+    assert!(t.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+    assert!(!t.contains('-'));
+    // 两次生成不重号
+    assert_ne!(t, crate::api::auth::generate_token());
+}
+
+#[test]
+fn atomic_write_token_roundtrip_and_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("api-token");
+    // 写入 → 读回一致；无半写窗口（临时文件已 rename 走）
+    crate::api::auth::atomic_write_token(&path, "tok-abc123").unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "tok-abc123");
+    // 0600 权限（仅属主可读写）
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "token 文件必须 0600");
+    // 覆盖写生效，且无 .rotate-tmp 残留
+    crate::api::auth::atomic_write_token(&path, "tok-new456").unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "tok-new456");
+    assert!(!path.with_file_name("api-token.rotate-tmp").exists());
+}
+
+#[test]
+fn dashboard_login_html_escapes_error_and_banner() {
+    // error 插值必须过 HTML 转义（XSS 面：error 来自内部格式化，但口径锁死防漂移）
+    let html = crate::api::dashboard::dashboard_login_html(
+        Some("<script>alert(1)</script>"),
+        0,
+    );
+    assert!(html.contains("&lt;script&gt;"), "error 必须转义");
+    assert!(!html.contains("<script>alert"), "不得出现未转义 script");
+    // retry_after > 0 → 退避横幅出现并带秒数
+    let html = crate::api::dashboard::dashboard_login_html(None, 42);
+    assert!(html.contains("请 42 秒后再试"));
+    // retry_after = 0 → 无横幅
+    let html = crate::api::dashboard::dashboard_login_html(None, 0);
+    assert!(!html.contains("认证失败过多"));
+    // 页面骨架关键件在位
+    let html = crate::api::dashboard::dashboard_login_html(None, 0);
+    assert!(html.contains("<!doctype html>"));
+    assert!(html.contains("<title>ShiftBrowser API 登录</title>"));
+}
