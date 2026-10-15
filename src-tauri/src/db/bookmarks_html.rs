@@ -3,16 +3,11 @@
 //! 导出命令与 HTML 序列化/解析纯逻辑同域居住；导入命令在 `bookmarks.rs` 门面
 //! （其主体是 DB 写入），经 `parse_bookmarks_html` 复用解析器。
 
-use tauri::Manager;
-
 use crate::db::Db;
 
-/// 导出书签为 Netscape HTML，写入用户下载目录，返回文件路径。
+/// 导出书签为 Netscape HTML，写入下载目录（统一走 download_dir 设置键），返回文件路径。
 #[tauri::command]
-pub async fn export_bookmarks_html(
-    db: tauri::State<'_, Db>,
-    app: tauri::AppHandle,
-) -> Result<String, String> {
+pub async fn export_bookmarks_html(db: tauri::State<'_, Db>) -> Result<String, String> {
     // 书签（含文件夹归属）
     let bookmarks = sqlx::query_as::<_, (i64, String, String, Option<i64>, i64, String)>(
     "SELECT id, title, url, folder_id, sort_order, created_at FROM bookmarks ORDER BY sort_order, id",
@@ -58,15 +53,16 @@ pub async fn export_bookmarks_html(
     }
     html.push_str("</DL><p>\n");
 
-    // 写入下载目录
-    let dir = app
-        .path()
-        .download_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let file = dir.join("bookmarks.html");
+    // 写入下载目录（统一走 download_dir 设置键：三级优先级 覆盖 > XDG > ~/Downloads，
+    // 与 GTK 下载回调同链路；同名去重绝不覆盖）
+    let dir = crate::engine::platform::resolve_download_dir();
+    let file = crate::tabs::backend::unique_download_path(&dir, "bookmarks.html");
+    if let Some(parent) = std::path::Path::new(&file).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     std::fs::write(&file, html).map_err(|e| format!("写入导出文件失败: {}", e))?;
-    log::info!("[bookmarks] 导出书签 {} 个 → {:?}", bookmarks.len(), file);
-    Ok(file.to_string_lossy().to_string())
+    log::info!("[bookmarks] 导出书签 {} 个 → {}", bookmarks.len(), file);
+    Ok(file)
 }
 
 /// 导入书签（Netscape HTML 格式，Chrome/Firefox 导出标准）。
@@ -303,4 +299,77 @@ fn strip_tags(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::platform::{resolve_download_dir, set_download_dir_override};
+    use crate::tabs::backend::unique_download_path;
+
+    /// 覆盖态是全局 RwLock，测试串行化（cargo test 默认并行跑）。
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// 导出落盘路径走 download_dir 覆盖态：覆盖值 > XDG > ~/Downloads，
+    /// 与 GTK 下载回调行为一致（resolve_download_dir 三级优先级）。
+    #[test]
+    fn export_path_uses_download_dir_override() {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!(
+            "bm-export-{}-{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let dir_str = dir.to_string_lossy().to_string();
+        set_download_dir_override(&dir_str);
+        let resolved = resolve_download_dir();
+        assert_eq!(resolved, dir_str, "覆盖目录必须被解析优先");
+        let path = unique_download_path(&resolved, "bookmarks.html");
+        assert!(
+            path.starts_with(&dir_str),
+            "导出文件必须落在覆盖目录下: {}",
+            path
+        );
+        // 同名去重验证
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(&path, b"test");
+        let path2 = unique_download_path(&resolved, "bookmarks.html");
+        assert_ne!(path, path2, "同名应去重");
+        set_download_dir_override(""); // 还原
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 未设覆盖时 resolve_download_dir 返回非空路径
+    #[test]
+    fn export_path_fallback_non_empty() {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_download_dir_override("");
+        let dir = resolve_download_dir();
+        assert!(!dir.is_empty(), "回退目录不得为空");
+        let path = unique_download_path(&dir, "bookmarks.html");
+        assert!(path.contains("bookmarks.html"), "路径应包含文件名");
+    }
+
+    #[test]
+    fn escape_html_basic() {
+        assert_eq!(escape_html("<a & \"b\">"), "&lt;a &amp; &quot;b&quot;&gt;");
+    }
+
+    #[test]
+    fn parse_roundtrip() {
+        let html = "<!DOCTYPE NETSCAPE-Bookmark-file-1>\n\
+                    <DT><H3>Work</H3>\n<DL><p>\n\
+                    <DT><A HREF=\"https://a.com\">A</A>\n\
+                    </DL><p>\n\
+                    <DT><A HREF=\"https://b.com\">B</A>\n";
+        let items = parse_bookmarks_html(html);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].url, "https://a.com");
+        assert_eq!(items[0].folder_name.as_deref(), Some("Work"));
+        assert_eq!(items[1].url, "https://b.com");
+        assert!(items[1].folder_name.is_none());
+    }
 }
