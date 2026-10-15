@@ -23,6 +23,62 @@ code{color:#8a97b0;font-size:13px}</style></head><body><div class=\"box\">\
 <p>按 Ctrl+R 手动刷新试试；一直崩就是这个站与当前引擎犯冲。</p>\
 <code>ShiftBrowser · 崩溃保护</code></div></body></html>";
 
+/// 崩溃冷却判定（纯函数可单测）：距上次自动重载 ≥30s 才允许再重载（防崩溃循环），
+/// 判定通过即记录本次时间。时间单位与 `now_ts` 一致（秒）。
+pub(super) const CRASH_COOLDOWN_SECS: i64 = 30;
+
+fn crash_reload_allowed(
+    cooldowns: &mut std::collections::HashMap<String, i64>,
+    tab_id: &str,
+    now: i64,
+) -> bool {
+    let last = cooldowns.get(tab_id).copied().unwrap_or(0);
+    if now.saturating_sub(last) >= CRASH_COOLDOWN_SECS {
+        cooldowns.insert(tab_id.to_string(), now);
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 首次崩溃允许重载并记录时间() {
+        let mut m = std::collections::HashMap::new();
+        assert!(crash_reload_allowed(&mut m, "t1", 1000));
+        assert_eq!(m.get("t1"), Some(&1000), "判定通过须记录本次时间");
+    }
+
+    #[test]
+    fn 冷却窗口内连崩不再重载() {
+        let mut m = std::collections::HashMap::new();
+        assert!(crash_reload_allowed(&mut m, "t1", 1000));
+        assert!(!crash_reload_allowed(&mut m, "t1", 1029), "29s 内不允许");
+        assert!(
+            crash_reload_allowed(&mut m, "t1", 1030),
+            "恰好 30s 边界应放行（>= 语义）"
+        );
+        assert_eq!(m.get("t1"), Some(&1030), "放行后时间戳刷新");
+    }
+
+    #[test]
+    fn 冷却按标签隔离互不影响() {
+        let mut m = std::collections::HashMap::new();
+        assert!(crash_reload_allowed(&mut m, "t1", 1000));
+        assert!(crash_reload_allowed(&mut m, "t2", 1001), "别的标签不受 t1 冷却影响");
+    }
+
+    #[test]
+    fn 时间倒退按饱和减法放行() {
+        let mut m = std::collections::HashMap::new();
+        assert!(crash_reload_allowed(&mut m, "t1", 2000));
+        // now < last（时钟回拨）：saturating_sub 得 0 < 30 不放行，防异常时钟触发循环重载
+        assert!(!crash_reload_allowed(&mut m, "t1", 1999));
+    }
+}
 /// 给新建 child webview 接 GTK 信号：加载失败 / TLS 错误 / 权限 / 崩溃恢复 / 标题同步。
 /// 监听 WebKit title 变化 → 实时同步标签标题（on_page_load 的 host 只是初始占位）
 pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &str) {
@@ -74,16 +130,7 @@ pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &s
             let now = now_ts();
             let map = WEB_CRASH_COOLDOWN
                 .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-            let allow_reload = {
-                let mut m = map.lock().unwrap_or_else(|e| e.into_inner());
-                let last = m.get(&tab_id_crash).copied().unwrap_or(0);
-                if now - last >= 30 {
-                    m.insert(tab_id_crash.clone(), now);
-                    true
-                } else {
-                    false
-                }
-            };
+            let allow_reload = crash_reload_allowed(&mut map.lock().unwrap_or_else(|e| e.into_inner()), &tab_id_crash, now);
             use tauri::Emitter;
             let _ = app_crash.emit(
                 crate::contracts::events::WEB_PROCESS_CRASHED,
