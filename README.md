@@ -752,6 +752,10 @@ AI 对话默认使用 AGNES AI（OpenAI 兼容协议）。API Key 两种配置�
 | 3 · 交互形态与平台化 | 分屏 ✅、垂直标签 ✅、命令栏（Ctrl+K）✅、空间（Spaces）✅、真扩展体系（网络层拦截/头改写/热更新）✅、用户脚本 ✅、自动化（批量操作/定时任务/Agent 编排）✅、系统托盘 ✅ | ✅ |
 | 4 · 开放生态 | 开放 API（48 工具 + 7 元/旁路命令，Unix socket + HTTP 双形态，端口可配 / 局域网开关 / eval 闸门 / 只读模式 `api_readonly` / IP 白名单 `api_allowed_ips`）、MCP Server（`shift-browser-mcp`，48 工具，AI 标准协议驱动）、多端协同（密码库/书签/会话/历史 E2E 加密同步）、自托管服务端套件（同步 / 工具网关 MCP / 管理页状态面板 / 模型网关） | ✅（持续增强：多端形态） |
 
+## 安全报告
+
+发现安全漏洞请勿公开披露，发邮件至 **gaojinha@163.com**（响应承诺与定级见 [SECURITY.md](SECURITY.md)）。
+
 ## 文档
 
 | 文档 | 说明 |
