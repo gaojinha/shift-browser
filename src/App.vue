@@ -160,6 +160,8 @@ const showBookmarks = ref(false)
 const showSessions = ref(false)
 // 命令栏（Ctrl+K 万能入口，阶段 3.1）
 const showCommandPalette = ref(false)
+// 命令栏初始模式（Ctrl+Shift+A 标签搜索直达 tab 模式；Ctrl+K 默认 all）
+const commandPaletteMode = ref<'all' | 'tab'>('all')
 // 用户脚本管理（阶段 3.2）
 const showUserscripts = ref(false)
 const addressBarRef = ref<InstanceType<typeof AddressBar> | null>(null)
@@ -256,6 +258,9 @@ function handleGlobalAction(action: string) {
     case 'command-palette':
       openCommandPalette()
       break
+    case 'tab-search':
+      openCommandPalette('tab')
+      break
     case 'devtools':
       // 有意静默：开发者工具开关属调试辅助，webview 侧失败无任何用户可见后果，无需提示
       invokeOk('open_devtools').catch(() => {})
@@ -269,8 +274,8 @@ function handleGlobalAction(action: string) {
   }
 }
 
-/** 打开命令栏（Ctrl+K）：先收起其它模态，避免叠层 */
-function openCommandPalette() {
+/** 打开命令栏（Ctrl+K / Ctrl+Shift+A 标签搜索）：先收起其它模态，避免叠层 */
+function openCommandPalette(mode: 'all' | 'tab' = 'all') {
   showTranslate.value = false
   showSessions.value = false
   showHistory.value = false
@@ -279,6 +284,7 @@ function openCommandPalette() {
   showDownloads.value = false
   showSettings.value = false
   showBookmarks.value = false
+  commandPaletteMode.value = mode
   showCommandPalette.value = true
 }
 
@@ -386,6 +392,13 @@ function onGlobalKeydown(e: KeyboardEvent) {
     if (matchShortcut(e, SHORTCUTS.LOCK_VAULT)) {
       e.preventDefault()
       handleGlobalAction('lock-vault')
+      return
+    }
+    // Ctrl+Shift+A 标签搜索（命令栏标签模式直达；与 Ctrl+K 同级，任何情况下都生效）
+    if (matchShortcut(e, SHORTCUTS.TAB_SEARCH)) {
+      e.preventDefault()
+      showCommandPalette.value = !showCommandPalette.value
+      if (showCommandPalette.value) commandPaletteMode.value = 'tab'
       return
     }
     // 弹窗打开时，其余标签快捷键不响应（避免误关标签/新建标签）
@@ -782,6 +795,7 @@ watch(
     <PermissionPrompt :info="permReq" @close="shiftPermReq" />
     <CommandPalette
       :show="showCommandPalette"
+      :initial-mode="commandPaletteMode"
       @close="showCommandPalette = false"
       @command="onPaletteCommand"
       @ask-ai="onPaletteAskAi"

@@ -256,4 +256,25 @@ describe('CommandPalette：C-3 标签搜索子模式', () => {
     expect(items[0].find('.cp-title').text()).toBe('AtomGit')
     wrapper.unmount()
   })
+
+  it('initialMode=tab 直达标签模式（Ctrl+Shift+A tab-search 快捷键）', async () => {
+    const wrapper = mountPalette()
+    seedTabs()
+    // 与 App.vue tab-search 接线一致：打开同时带 initialMode
+    await wrapper.setProps({ show: true, initialMode: 'tab' })
+    await flushPromises()
+    await nextTick()
+    await nextTick()
+
+    // radio 选中态落在「标签」
+    const modeTabs = wrapper.findAll('.cp-mode-tab')
+    expect(modeTabs.length).toBe(2)
+    expect(modeTabs[0].classes()).not.toContain('active')
+    expect(modeTabs[1].classes()).toContain('active')
+    // 候选只有标签（3 个种子），无命令/AI/历史
+    const items = wrapper.findAll('.cp-item')
+    expect(items.length).toBe(3)
+    expect(items.map((i) => i.find('.cp-title').text())).toEqual(['GitHub', 'AtomGit', '设置'])
+    wrapper.unmount()
+  })
 })

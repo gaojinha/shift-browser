@@ -21,7 +21,7 @@ describe('shortcut-guard', () => {
     expect(DIALOG_GUARDED_ACTIONS.size).toBe(8)
   })
 
-  it('两边都不拦的动作不在表里（devtools/寻址/命令栏/锁库/切签）', () => {
+  it('两边都不拦的动作不在表里（devtools/寻址/命令栏/锁库/切签/标签搜索）', () => {
     for (const a of [
       'devtools',
       'focus-address',
@@ -29,6 +29,7 @@ describe('shortcut-guard', () => {
       'lock-vault',
       'next-tab',
       'prev-tab',
+      'tab-search',
     ]) {
       expect(isDialogGuardedAction(a)).toBe(false)
     }

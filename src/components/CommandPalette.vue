@@ -23,7 +23,11 @@ import { setWebviewVisible } from '../utils/webview'
 import { useTabsStore } from '../stores/tabs'
 import type { HistoryEntry } from '../types/history'
 
-const props = defineProps<{ show: boolean }>()
+const props = defineProps<{
+  show: boolean
+  /** 初始候选模式（tab-search 快捷键直达标签模式；缺省 all） */
+  initialMode?: 'all' | 'tab'
+}>()
 const { t } = useI18n()
 const emit = defineEmits<{
   (e: 'close'): void
@@ -211,7 +215,7 @@ watch(
   async (v) => {
     if (v) {
       query.value = ''
-      mode.value = 'all'
+      mode.value = props.initialMode ?? 'all'
       historyEntries.value = []
       await setWebviewVisible(false, 'command-palette')
       loadHistory()

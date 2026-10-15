@@ -510,6 +510,17 @@ pub mod shortcuts {
             gtk_always: false,
             desc: "立即锁定密码库",
         },
+        Shortcut {
+            id: "tab-search",
+            key: "a",
+            ctrl: true,
+            shift: true,
+            gdk_keyval: 0x61,
+            gdk_keyval_shift: 0x41,
+            gtk_fallback: true,
+            gtk_always: false,
+            desc: "标签搜索（命令栏标签模式）",
+        },
     ];
 
     /// 按 id 查找（取第一个匹配；同 id 多条为同一动作的不同按键）
@@ -534,6 +545,7 @@ pub mod shortcuts {
         ("DOWNLOADS", "ctrl+j"),
         ("BOOKMARKS", "ctrl+shift+o"),
         ("LOCK_VAULT", "ctrl+shift+l"),
+        ("TAB_SEARCH", "ctrl+shift+a"),
     ];
 }
 

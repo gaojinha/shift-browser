@@ -160,6 +160,7 @@ export const SHORTCUTS = {
   DOWNLOADS: 'ctrl+j',
   BOOKMARKS: 'ctrl+shift+o',
   LOCK_VAULT: 'ctrl+shift+l',
+  TAB_SEARCH: 'ctrl+shift+a',
 } as const
 
 export const SKILLS = [
