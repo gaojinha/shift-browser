@@ -26,6 +26,19 @@ pub fn normalize_source(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// 引擎翻译的记忆命名空间键（C-9）：把「引擎 + 目标语言」编进 `model` 隔离维度。
+///
+/// 复用同一张 `translate_memory` 表，用前缀命名空间与 AI 模型路径区隔：
+/// - AI 整页汉化：`model` = 模型名（如 `opencode/big-pickle`）
+/// - 引擎翻译：  `model` = `engine:google:zh-CN` / `engine:bing:zh-Hans`
+///
+/// 为什么把目标语言也编进去：同一原文翻成不同语言是不同结果，只按引擎隔离会
+/// 出现「换了目标语言却命中旧语言译文」的脏命中。前缀 `engine:` 保证不会与
+/// 无前缀的 AI 模型名撞键。
+pub fn engine_scope(engine: &str, target: &str) -> String {
+    format!("engine:{}:{}", engine.trim(), target.trim())
+}
+
 fn storable(model: &str, source: &str, target: &str) -> bool {
     !model.trim().is_empty()
         && !source.is_empty()
@@ -162,6 +175,43 @@ mod tests {
         assert_eq!(normalize_source("  Hello   world\n\t"), "Hello world");
         // 全角空格也算 unicode whitespace，split_whitespace 能处理
         assert_eq!(normalize_source("Sign\u{3000}in"), "Sign in");
+    }
+
+    #[test]
+    fn 引擎命名空间键按引擎与目标语言隔离() {
+        assert_eq!(engine_scope("google", "zh-CN"), "engine:google:zh-CN");
+        // 引擎不同 → 键不同
+        assert_ne!(
+            engine_scope("google", "zh-CN"),
+            engine_scope("bing", "zh-CN")
+        );
+        // 目标语言不同 → 键不同（防旧语言脏命中）
+        assert_ne!(engine_scope("google", "zh-CN"), engine_scope("google", "ja"));
+        // 前缀保证与无前缀的 AI 模型名不撞键
+        assert!(engine_scope("google", "zh-CN").starts_with("engine:"));
+    }
+
+    #[tokio::test]
+    async fn 引擎与模型命名空间互不命中() {
+        let dir = tempfile_like_dir();
+        let pool = test_pool(&dir).await;
+        let engine_key = engine_scope("google", "zh-CN");
+        remember(
+            &pool,
+            &engine_key,
+            &[("Home".to_string(), "首页".to_string())],
+        )
+        .await;
+        remember(
+            &pool,
+            "opencode/big-pickle",
+            &[("Home".to_string(), "主页".to_string())],
+        )
+        .await;
+        let engine_hit = lookup(&pool, &engine_key, &["Home".to_string()]).await;
+        let model_hit = lookup(&pool, "opencode/big-pickle", &["Home".to_string()]).await;
+        assert_eq!(engine_hit.get("Home"), Some(&"首页".to_string()));
+        assert_eq!(model_hit.get("Home"), Some(&"主页".to_string()));
     }
 
     #[tokio::test]

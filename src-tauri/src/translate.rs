@@ -384,6 +384,109 @@ pub async fn translate_with(
     }
 }
 
+/// 单段引擎翻译 + 翻译记忆（C-9）：命中记忆直接返回，未命中走网络并写回。
+///
+/// 目的（S-9 G-2）：重访页面、常见 UI 文案、重复划词不再每次都发第三方——
+/// 既省时（秒回）又减少外发（隐私）。缓存是「尽力而为」：记忆读写失败绝不影响
+/// 翻译本身（db 层已吞异常）。键把「引擎 + 目标语言」编成命名空间
+/// （见 `db::translate_memory::engine_scope`）。
+pub async fn translate_text_cached(
+    pool: &sqlx::SqlitePool,
+    text: &str,
+    target: &str,
+    engine: &str,
+    dual_mode: &str,
+    timeout: u64,
+) -> Result<String, CommandError> {
+    let scope = crate::db::translate_memory::engine_scope(engine, target);
+    let key = crate::db::translate_memory::normalize_source(text);
+    if !key.is_empty() {
+        let hits =
+            crate::db::translate_memory::lookup(pool, &scope, std::slice::from_ref(&key)).await;
+        if let Some(t) = hits.get(&key) {
+            log::debug!("[translate] 记忆命中，跳过第三方请求");
+            return Ok(t.clone());
+        }
+    }
+    let out = translate_with(text, target, engine, dual_mode, timeout).await?;
+    if !key.is_empty() {
+        crate::db::translate_memory::remember(pool, &scope, &[(text.to_string(), out.clone())])
+            .await;
+    }
+    Ok(out)
+}
+
+/// 批量引擎翻译 + 翻译记忆（C-9）：只对未命中的段落发第三方，命中直接回填。
+///
+/// 并发度 5（复用 [`translate_batch_plain`]）；失败段落保持空串，与既有批量口径一致。
+pub async fn translate_batch_cached(
+    pool: &sqlx::SqlitePool,
+    texts: &[String],
+    target: &str,
+    engine: &str,
+    dual_mode: &str,
+    timeout: u64,
+) -> Vec<String> {
+    let scope = crate::db::translate_memory::engine_scope(engine, target);
+    let hits = crate::db::translate_memory::lookup(pool, &scope, texts).await;
+    let mut out: Vec<String> = vec![String::new(); texts.len()];
+    let mut miss: Vec<usize> = Vec::new();
+    for (i, t) in texts.iter().enumerate() {
+        let key = crate::db::translate_memory::normalize_source(t);
+        match hits.get(&key) {
+            Some(v) if !v.is_empty() => out[i] = v.clone(),
+            _ => miss.push(i),
+        }
+    }
+    if miss.is_empty() {
+        return out;
+    }
+    let miss_texts: Vec<String> = miss.iter().map(|&i| texts[i].clone()).collect();
+    let fresh = translate_batch_plain(&miss_texts, target, engine, dual_mode, timeout).await;
+    let mut to_remember: Vec<(String, String)> = Vec::new();
+    for (k, &i) in miss.iter().enumerate() {
+        let t = &fresh[k];
+        if !t.is_empty() {
+            out[i] = t.clone();
+            to_remember.push((texts[i].clone(), t.clone()));
+        }
+    }
+    if !to_remember.is_empty() {
+        crate::db::translate_memory::remember(pool, &scope, &to_remember).await;
+    }
+    out
+}
+
+/// 批量翻译（无缓存）：每批 5 段并发、保序；失败段落留空串。
+/// 与既有 proto 批量路径的并发口径一致，供缓存版与 DB 缺失兜底复用。
+pub(crate) async fn translate_batch_plain(
+    texts: &[String],
+    target: &str,
+    engine: &str,
+    dual_mode: &str,
+    timeout: u64,
+) -> Vec<String> {
+    let mut out: Vec<String> = vec![String::new(); texts.len()];
+    for chunk_start in (0..texts.len()).step_by(5) {
+        let chunk_end = (chunk_start + 5).min(texts.len());
+        let mut set = tokio::task::JoinSet::new();
+        for (offset, t) in texts[chunk_start..chunk_end].iter().enumerate() {
+            let i = chunk_start + offset;
+            let t = t.clone();
+            let tgt = target.to_string();
+            let eng = engine.to_string();
+            let dm = dual_mode.to_string();
+            set.spawn(async move { (i, translate_with(&t, &tgt, &eng, &dm, timeout).await) });
+        }
+        while let Some(joined) = set.join_next().await {
+            if let Ok((i, Ok(t))) = joined {
+                out[i] = t;
+            }
+        }
+    }
+    out
+}
+
 /// 双引擎均失败时归码（纯函数，可单测）：两路全是超时 → E_TIMEOUT（可重试）；
 /// 混入其他失败或任务异常 → E_NET
 fn aggregate_dual_fail(codes: &[&'static str]) -> &'static str {
@@ -432,7 +535,7 @@ pub async fn translate_text(
     let engine = current_engine(db.inner()).await;
     let dual_mode = current_dual_mode(db.inner()).await;
     let timeout = current_timeout(db.inner()).await;
-    match translate_with(&text, &target, &engine, &dual_mode, timeout).await {
+    match translate_text_cached(&db.pool, &text, &target, &engine, &dual_mode, timeout).await {
         Ok(data) => Ok(TranslateResult {
             ok: true,
             msg: None,
@@ -507,5 +610,50 @@ mod tests {
             message: format!("双引擎均失败（{}）", ["超时"].join("；")),
         };
         assert_eq!(e.message, "双引擎均失败（超时）");
+    }
+
+    /// C-9 端到端：命中记忆时不发第三方请求。
+    ///
+    /// 用「预置记忆 + 1 秒超时」验证：只有命中缓存才能拿到预置译文；若未命中
+    /// 会走真实网络，返回的不会恰是「登录」（断言失败），或 1 秒内超时 Err（unwrap 失败）。
+    #[tokio::test]
+    async fn 记忆命中不发第三方请求() {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+        let dir = std::env::temp_dir().join(format!(
+            "sb_tr_cache_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(dir.join("tr.db"))
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        sqlx::raw_sql(include_str!(
+            "../migrations/20260927000000_translate_memory.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let scope = crate::db::translate_memory::engine_scope("google", "zh-CN");
+        crate::db::translate_memory::remember(
+            &pool,
+            &scope,
+            &[("Sign in".to_string(), "登录".to_string())],
+        )
+        .await;
+        // 原文带多余空白：归一化后仍应命中
+        let got = translate_text_cached(&pool, "Sign   in", "zh-CN", "google", "single", 1)
+            .await
+            .unwrap();
+        assert_eq!(got, "登录");
     }
 }

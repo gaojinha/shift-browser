@@ -175,7 +175,8 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                 return;
             }
             tauri::async_runtime::spawn(async move {
-                let (engine, dual_mode, timeout) = match app_clone.try_state::<crate::db::Db>() {
+                let db = app_clone.try_state::<crate::db::Db>();
+                let (engine, dual_mode, timeout) = match db.as_ref() {
                     Some(db) => (
                         crate::translate::current_engine(db.inner()).await,
                         crate::translate::current_dual_mode(db.inner()).await,
@@ -183,15 +184,28 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                     ),
                     None => ("google".to_string(), "single".to_string(), 15),
                 };
-                let payload = match crate::translate::translate_with(
-                    &text, "zh-CN", &engine, &dual_mode, timeout,
-                )
-                .await
-                {
-                    Ok(t) => serde_json::json!({ "text": t }),
-                    // e.to_string()：CommandError 序列化是 {code,message} 对象，
-                    // 注入 JS 只认字符串线格式（R4-1 类型化成对改）
-                    Err(e) => serde_json::json!({ "error": e.to_string() }),
+                // C-9：引擎译文落翻译记忆，命中则不发第三方
+                let payload = {
+                    let r = match db.as_ref() {
+                        Some(db) => {
+                            crate::translate::translate_text_cached(
+                                &db.pool, &text, "zh-CN", &engine, &dual_mode, timeout,
+                            )
+                            .await
+                        }
+                        None => {
+                            crate::translate::translate_with(
+                                &text, "zh-CN", &engine, &dual_mode, timeout,
+                            )
+                            .await
+                        }
+                    };
+                    match r {
+                        Ok(t) => serde_json::json!({ "text": t }),
+                        // e.to_string()：CommandError 序列化是 {code,message} 对象，
+                        // 注入 JS 只认字符串线格式（R4-1 类型化成对改）
+                        Err(e) => serde_json::json!({ "error": e.to_string() }),
+                    }
                 };
                 write_translate_result(&app_clone, &label, &callback, &payload);
             });
@@ -218,8 +232,8 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                     write_translate_result(&app_clone, &label, &callback, &payload);
                     return;
                 }
-                let mut out: Vec<String> = vec![String::new(); texts.len()];
-                let (engine, target, dual_mode, timeout) = match app_clone.try_state::<crate::db::Db>() {
+                let db = app_clone.try_state::<crate::db::Db>();
+                let (engine, target, dual_mode, timeout) = match db.as_ref() {
                     Some(db) => (
                         crate::translate::current_engine(db.inner()).await,
                         crate::translate::current_target(db.inner()).await,
@@ -228,28 +242,21 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                     ),
                     None => ("google".to_string(), "zh-CN".to_string(), "single".to_string(), 15),
                 };
-                for chunk_start in (0..texts.len()).step_by(5) {
-                    let chunk_end = (chunk_start + 5).min(texts.len());
-                    let mut handles = Vec::new();
-                    for (offset, t) in texts[chunk_start..chunk_end].iter().enumerate() {
-                        let i = chunk_start + offset;
-                        let t = t.clone();
-                        let eng = engine.clone();
-                        let tgt = target.clone();
-                        let dm = dual_mode.clone();
-                        handles.push((
-                            i,
-                            tauri::async_runtime::spawn(async move {
-                                crate::translate::translate_with(&t, &tgt, &eng, &dm, timeout).await
-                            }),
-                        ));
+                // C-9：命中记忆的段落不发第三方，仅翻未命中
+                let out = match db.as_ref() {
+                    Some(db) => {
+                        crate::translate::translate_batch_cached(
+                            &db.pool, &texts, &target, &engine, &dual_mode, timeout,
+                        )
+                        .await
                     }
-                    for (i, h) in handles {
-                        if let Ok(Ok(t)) = h.await {
-                            out[i] = t;
-                        }
+                    None => {
+                        crate::translate::translate_batch_plain(
+                            &texts, &target, &engine, &dual_mode, timeout,
+                        )
+                        .await
                     }
-                }
+                };
                 let payload = serde_json::json!({ "texts": out });
                 write_translate_result(&app_clone, &label, &callback, &payload);
             });
