@@ -21,8 +21,10 @@ for t in dpkg-deb fakeroot ar; do
 done
 echo "    工具齐活（dpkg-deb/fakeroot/ar）"
 
-echo "==> ② 扩展库 + 前端产物"
-bash scripts/build-extension.sh >/dev/null 2>&1 && echo "    扩展已构建（libshift_web_extension.so）"
+echo "==> ② 前端产物（扩展库由 tauri beforeBuildCommand 统一构建，不再重复跑）"
+# 说明：tauri.conf.json 的 beforeBuildCommand = npm run build && build-extension.sh，
+# 这里不再手动 build-extension（原第②步与它重复，扩展 release 编译一次约多花 1-2 分钟）。
+npm run build >/dev/null 2>&1 && echo "    前端已构建"
 [ -d dist ] || { echo "❌ dist 缺失"; exit 1; }
 
 echo "==> ③ tauri release 打包（--bundles deb，编译约 5-8 分钟）"

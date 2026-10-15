@@ -12,10 +12,18 @@ SRC="$ROOT/src-tauri/web-extension"
 DEST="$ROOT/src-tauri/target/release"          # 开发/便携运行：web extensions 目录 = exe 目录
 RES="$ROOT/src-tauri/resources"                # 生产打包：进 Tauri bundle.resources
 
-cargo build --release --manifest-path "$SRC/Cargo.toml"
-cp "$SRC/target/release/libshift_web_extension.so" "$DEST/"
+# 提速（F-4）：扩展源码没改（.so 比 src 新）就跳过 cargo release 重编，
+# 只确保两处拷贝就位；强刷可用 touch 任一源文件或 rm 产物
+SO="$SRC/target/release/libshift_web_extension.so"
+if [ -f "$SO" ] && [ -n "$(find "$SRC/src" -newer "$SO" -print -quit 2>/dev/null)" ]; then
+  cargo build --release --manifest-path "$SRC/Cargo.toml"
+else
+  echo "⏭ 扩展源码未变，跳过重编（mtime 判定）"
+fi
+
+cp "$SO" "$DEST/"
 mkdir -p "$RES"
-cp "$SRC/target/release/libshift_web_extension.so" "$RES/"
+cp "$SO" "$RES/"
 echo "✅ 扩展已构建并拷到："
 echo "   · $DEST/libshift_web_extension.so（开发运行用，web extensions 目录）"
 echo "   · $RES/libshift_web_extension.so（生产打包用，Tauri bundle.resources）"
