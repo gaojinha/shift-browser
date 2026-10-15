@@ -88,3 +88,73 @@ pub mod ui {
     /// 默认 favicon（地球版，横向/垂直标签栏统一使用；内联 SVG data URL）
     pub const DEFAULT_FAVICON: &str = "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%226.5%22%20fill%3D%22var(--accent)%22%2F%3E%3Cellipse%20cx%3D%228%22%20cy%3D%228%22%20rx%3D%223%22%20ry%3D%226.5%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%220.8%22%2F%3E%3Cpath%20d%3D%22M1.5%208h13%22%20stroke%3D%22%23fff%22%20stroke-width%3D%220.8%22%2F%3E%3C%2Fsvg%3E";
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 编译期锁死常量不变量（运行期 assert!(常量) 会被 clippy::assertions_on_constants 拒）
+    const _: () = assert!(layout::SPLIT_LEFT_RATIO > 0.0 && layout::SPLIT_LEFT_RATIO < 1.0);
+    const _: () = assert!(layout::MIN_CONTENT_WIDTH > 0.0 && layout::MIN_CONTENT_HEIGHT > 0.0);
+
+    #[test]
+    fn search_url_template_known_and_fallback() {
+        assert_eq!(search::url_template("bing"), "https://www.bing.com/search?q=");
+        assert_eq!(search::url_template("baidu"), "https://www.baidu.com/s?wd=");
+        assert_eq!(
+            search::url_template("google"),
+            "https://www.google.com/search?q="
+        );
+        // 未知/空 id 回退默认引擎（newtab generate 消费此行为，F-22 测试亦依赖）
+        assert_eq!(
+            search::url_template("duckduckgo"),
+            "https://www.bing.com/search?q="
+        );
+        assert_eq!(search::url_template(""), "https://www.bing.com/search?q=");
+    }
+
+    #[test]
+    fn search_url_for_concatenates_and_default_listed() {
+        assert_eq!(
+            search::url_for("bing", "rust"),
+            "https://www.bing.com/search?q=rust"
+        );
+        // 默认引擎必须列在 ENGINES 表里（否则回退链失效，url_template 落到空串）
+        assert!(
+            search::ENGINES
+                .iter()
+                .any(|(i, _, _)| *i == search::DEFAULT_ENGINE),
+            "DEFAULT_ENGINE 必须在 ENGINES 表内"
+        );
+        // 所有模板都以协议开头（防止改成相对路径悄悄破坏跳转）
+        for (_, _, u) in search::ENGINES {
+            assert!(u.starts_with("https://"), "引擎模板必须 https: {u}");
+        }
+    }
+
+    #[test]
+    fn layout_derived_offsets_match_sum() {
+        use layout::*;
+        // 两个顶部偏移是派生值（和必须与分量一致，改分量漏改派生即红）
+        assert_eq!(
+            CONTENT_TOP_OFFSET,
+            TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT + BOOKMARKS_BAR_HEIGHT
+        );
+        assert_eq!(
+            CONTENT_TOP_OFFSET_NO_BOOKMARKS,
+            TAB_BAR_HEIGHT + ADDRESS_BAR_HEIGHT
+        );
+    }
+
+    #[test]
+    fn ui_palettes_are_valid_colors() {
+        let ok = |c: &str| c.starts_with("var(") || (c.starts_with('#') && c.len() == 7);
+        for pool in [ui::GROUP_COLORS, ui::SPACE_COLORS, ui::GROUP_PALETTE] {
+            assert!(!pool.is_empty(), "配色池不得为空");
+            for c in pool {
+                assert!(ok(c), "非法色值: {c}");
+            }
+        }
+        assert!(ui::DEFAULT_FAVICON.starts_with("data:image/svg+xml"));
+    }
+}
