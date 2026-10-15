@@ -40,6 +40,7 @@ watch(
         // 关闭时清空已查看的明文，避免再次打开时密码还留在 UI 上
         revealId.value = null
         revealPassword.value = ''
+        query.value = ''
       }
     } catch (e) {
       console.error('[passwords] 加载失败:', e)
@@ -57,6 +58,16 @@ const showAdd = ref(false)
 const revealId = ref<number | null>(null)
 const revealPassword = ref('')
 const errorMsg = ref('')
+
+// C-2 搜索框：客户端实时过滤域名/用户名/备注，不新增后端调用
+const query = ref('')
+const filteredList = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  if (!q) return passwordsStore.list
+  return passwordsStore.list.filter((p) =>
+    [p.domain, p.username ?? '', p.notes ?? ''].some((f) => f.toLowerCase().includes(q)),
+  )
+})
 
 async function onAdd() {
   errorMsg.value = ''
@@ -116,6 +127,15 @@ async function onDelete(id: number) {
       </button>
     </template>
 
+        <input
+          v-model="query"
+          class="search-input"
+          type="search"
+          placeholder="搜索域名 / 用户名 / 备注"
+          aria-label="搜索密码"
+          spellcheck="false"
+        />
+
         <form v-if="showAdd" class="add-form" @submit.prevent="onAdd">
           <input v-model="form.domain" placeholder="域名（如 example.com）" />
           <input v-model="form.username" placeholder="用户名（可选）" />
@@ -125,8 +145,8 @@ async function onDelete(id: number) {
           <button type="submit" class="save-btn">保存</button>
         </form>
 
-        <div class="list" v-if="passwordsStore.list.length > 0">
-          <div v-for="p in passwordsStore.list" :key="p.id" class="item">
+        <div class="list" v-if="filteredList.length > 0">
+          <div v-for="p in filteredList" :key="p.id" class="item">
             <div class="item-info">
               <span class="item-domain">{{ p.domain }}</span>
               <span class="item-username">{{ p.username || '无用户名' }}</span>
@@ -147,7 +167,8 @@ async function onDelete(id: number) {
           </div>
         </div>
         <div v-else-if="!passwordsStore.loaded" class="empty loading-hint">加载中…</div>
-        <div v-else class="empty">还没有保存的密码</div>
+        <div v-else-if="passwordsStore.list.length === 0" class="empty">还没有保存的密码</div>
+        <div v-else class="empty">无匹配</div>
   </UiDialog>
 </template>
 
@@ -171,5 +192,23 @@ async function onDelete(id: number) {
   max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.search-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  height: 30px;
+  margin-bottom: 12px;
+  padding: 0 10px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
+  font-size: 13px;
+  outline: none;
+}
+.search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 </style>
