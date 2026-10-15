@@ -58,18 +58,8 @@ pub async fn navigate_tab(
         .parse::<tauri::Url>()
         .map_err(|e| AppError::validation(format!("URL 解析失败: {}", e)))?;
     // P2：导航同样做 scheme 白名单（与 create_tab 一致），防止注入的脚本导航到 file://
-    match parsed_url.scheme() {
-        "http" | "https" | "shift" => {}
-        "file" => {
-            if !url.contains(crate::contracts::urls::NEWTAB_MARKER)
-                && !url.contains(crate::contracts::urls::WORLD_NAV_FILE)
-            {
-                return Err(AppError::permission("不允许导航到本地文件").into());
-            }
-        }
-        other => {
-            return Err(AppError::permission(format!("不允许的 URL scheme: {}", other)).into())
-        }
+    if let Some(msg) = nav_scheme_error(parsed_url.scheme(), &url) {
+        return Err(AppError::permission(msg).into());
     }
     webview
         .navigate(parsed_url)
@@ -200,4 +190,69 @@ pub async fn get_nav_state(
         can_go_back: b,
         can_go_forward: f,
     })
+}
+
+/// 导航 scheme 白名单判定（纯函数可单测）：返回 None = 放行，Some = 拒绝文案。
+///
+/// P2 口径（与 create_tab 一致）：http/https/shift 直接过；file:// 仅放行内部页
+/// （newtab/world-nav，防注入脚本导航到任意本地文件）；其余 scheme 一律拒绝。
+fn nav_scheme_error(scheme: &str, url: &str) -> Option<String> {
+    match scheme {
+        "http" | "https" | "shift" => None,
+        "file" => {
+            if url.contains(crate::contracts::urls::NEWTAB_MARKER)
+                || url.contains(crate::contracts::urls::WORLD_NAV_FILE)
+            {
+                None
+            } else {
+                Some("不允许导航到本地文件".to_string())
+            }
+        }
+        other => Some(format!("不允许的 URL scheme: {}", other)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 常规scheme全部放行() {
+        for (url, scheme) in [
+            ("https://example.com", "https"),
+            ("http://example.com", "http"),
+            ("shift://newtab", "shift"),
+        ] {
+            assert!(nav_scheme_error(scheme, url).is_none(), "{url} 应放行");
+        }
+    }
+
+    #[test]
+    fn 内部页file放行普通file拒绝() {
+        let app_data = "/home/u/.local/share/com.shiftbrowser.app";
+        assert!(nav_scheme_error(
+            "file",
+            &format!("file://{}/newtab/index.html", app_data)
+        )
+        .is_none());
+        assert!(nav_scheme_error(
+            "file",
+            &format!("file://{}/newtab/world-nav.html", app_data)
+        )
+        .is_none());
+        let err = nav_scheme_error("file", "file:///etc/passwd");
+        assert_eq!(err.as_deref(), Some("不允许导航到本地文件"));
+    }
+
+    #[test]
+    fn 其他scheme一律拒绝且文案带scheme名() {
+        for (url, scheme) in [
+            ("ftp://example.com", "ftp"),
+            ("javascript:alert(1)", "javascript"),
+            ("data:text/html,x", "data"),
+        ] {
+            let err = nav_scheme_error(scheme, url).unwrap_or_default();
+            assert!(err.contains(scheme), "{url} 拒绝文案应含 scheme 名: {err}");
+        }
+    }
 }
