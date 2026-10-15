@@ -235,13 +235,8 @@ impl TabManager {
                   })
                   .unwrap_or_else(|| "download".to_string());
                 // 下载目录优先级：用户设置覆盖 > 系统 XDG 目录 > ~/Downloads 兜底。
-                // P0-2：平台目录解析下沉到 engine::platform
-                let dest_dir = crate::engine::platform::get_download_dir_override()
-                  .or_else(|| crate::engine::platform::download_dir().map(|p| p.to_string_lossy().to_string()))
-                  .unwrap_or_else(|| {
-                    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-                    format!("{}/Downloads", home)
-                  });
+                // P0-2：平台目录解析下沉到 engine::platform（统一 resolve_download_dir，行为保持、可单测）
+                let dest_dir = crate::engine::platform::resolve_download_dir();
                 let _ = std::fs::create_dir_all(&dest_dir);
                 // 同名文件已存在时加 (1)(2) 后缀，避免覆盖
                 let dest = unique_download_path(&dest_dir, &filename);
