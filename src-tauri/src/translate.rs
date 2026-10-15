@@ -317,14 +317,19 @@ async fn translate_one(
     }
 }
 
-/// 统一派发：双引擎并行双发，谁先成功要谁，慢者取消。
-/// （旧逻辑串行回退：首选超时 15 秒再换另一方，最坏双倍延迟。
-/// Google 国内常连不上、Bing 偶发限流，并行后单引擎故障不再翻倍。）
+/// 统一翻译：按数据流模式派发。
+///
+/// - `dual_mode = "dual"`（旧行为）：双引擎并行双发，谁先成功要谁，慢者取消。
+/// - `dual_mode = "single"`（默认，C-8 单发）：只发首选引擎（`engine`），
+///   不向另一引擎发送——用户内容不外流到两家。超时/失败直接报错，
+///   不换引擎（换引擎=换一家第三方，非"降级"；让用户在设置里切换）。
+///
 /// `timeout` 秒：来自设置 translate_timeout（默认 15）
 pub async fn translate_with(
     text: &str,
     target: &str,
     engine: &str,
+    dual_mode: &str,
     timeout: u64,
 ) -> Result<String, CommandError> {
     // 非 bing 即 google：未知引擎名回落 google（与旧分支一致）
@@ -333,43 +338,50 @@ pub async fn translate_with(
     } else {
         ("google", "bing")
     };
-    let mut set = tokio::task::JoinSet::new();
-    set.spawn(translate_one(
-        first.to_string(),
-        text.to_string(),
-        target.to_string(),
-        timeout,
-    ));
-    set.spawn(translate_one(
-        second.to_string(),
-        text.to_string(),
-        target.to_string(),
-        timeout,
-    ));
-    // 先完成的失败不致命：记下等另一个；首个成功直接返回，析构取消在途者
-    let mut errs: Vec<String> = Vec::new();
-    let mut codes: Vec<&'static str> = Vec::new();
-    while let Some(r) = set.join_next().await {
-        match r {
-            Ok(Ok(t)) => {
-                log::info!("[translate] 并行双发成功");
-                return Ok(t);
-            }
-            Ok(Err(e)) => {
-                log::warn!("[translate] 一路失败，等另一路: {}", e);
-                codes.push(e.code);
-                errs.push(e.message);
-            }
-            Err(e) => {
-                log::warn!("[translate] 引擎任务异常: {}", e);
-                errs.push(e.to_string());
+
+    if dual_mode == "dual" {
+        // ---- 双发：原并行双发逻辑 ----
+        let mut set = tokio::task::JoinSet::new();
+        set.spawn(translate_one(
+            first.to_string(),
+            text.to_string(),
+            target.to_string(),
+            timeout,
+        ));
+        set.spawn(translate_one(
+            second.to_string(),
+            text.to_string(),
+            target.to_string(),
+            timeout,
+        ));
+        let mut errs: Vec<String> = Vec::new();
+        let mut codes: Vec<&'static str> = Vec::new();
+        while let Some(r) = set.join_next().await {
+            match r {
+                Ok(Ok(t)) => {
+                    log::info!("[translate] 双发成功");
+                    return Ok(t);
+                }
+                Ok(Err(e)) => {
+                    log::warn!("[translate] 一路失败，等另一路: {}", e);
+                    codes.push(e.code);
+                    errs.push(e.message);
+                }
+                Err(e) => {
+                    log::warn!("[translate] 引擎任务异常: {}", e);
+                    errs.push(e.to_string());
+                }
             }
         }
+        Err(CommandError {
+            code: aggregate_dual_fail(&codes),
+            message: format!("双引擎均失败（{}）", errs.join("；")),
+        })
+    } else {
+        // ---- 单发（默认）：只走首选引擎，不向第二家发送 ----
+        log::debug!("[translate] 单发模式 engine={first}");
+        translate_one(first.to_string(), text.to_string(), target.to_string(), timeout).await
     }
-    Err(CommandError {
-        code: aggregate_dual_fail(&codes),
-        message: format!("双引擎均失败（{}）", errs.join("；")),
-    })
 }
 
 /// 双引擎均失败时归码（纯函数，可单测）：两路全是超时 → E_TIMEOUT（可重试）；
@@ -398,6 +410,15 @@ pub async fn current_target(db: &crate::db::Db) -> String {
     row.map(|r| r.0).unwrap_or_else(|| "zh-CN".to_string())
 }
 
+/// 当前翻译数据流模式（设置 → 通用 → 数据流，默认 single）
+pub async fn current_dual_mode(db: &crate::db::Db) -> String {
+    let row: Option<(String,)> =
+        crate::db::settings_cache::get(&db.pool, "translate_dual_mode")
+            .await
+            .map(|v| (v,));
+    row.map(|r| r.0).unwrap_or_else(|| "single".to_string())
+}
+
 /// 前端调用的统一翻译入口（与 SettingsDialog/AddressBar 的 invoke 约定一致）
 ///
 /// 返回 `{ ok: true, data: "译文" }` 或 `{ ok: false, msg: "错误信息" }`
@@ -409,8 +430,9 @@ pub async fn translate_text(
 ) -> Result<TranslateResult, String> {
     let target = target.unwrap_or_else(|| "zh-CN".to_string());
     let engine = current_engine(db.inner()).await;
+    let dual_mode = current_dual_mode(db.inner()).await;
     let timeout = current_timeout(db.inner()).await;
-    match translate_with(&text, &target, &engine, timeout).await {
+    match translate_with(&text, &target, &engine, &dual_mode, timeout).await {
         Ok(data) => Ok(TranslateResult {
             ok: true,
             msg: None,

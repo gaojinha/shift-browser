@@ -175,15 +175,16 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                 return;
             }
             tauri::async_runtime::spawn(async move {
-                let (engine, timeout) = match app_clone.try_state::<crate::db::Db>() {
+                let (engine, dual_mode, timeout) = match app_clone.try_state::<crate::db::Db>() {
                     Some(db) => (
                         crate::translate::current_engine(db.inner()).await,
+                        crate::translate::current_dual_mode(db.inner()).await,
                         crate::translate::current_timeout(db.inner()).await,
                     ),
-                    None => ("google".to_string(), 15),
+                    None => ("google".to_string(), "single".to_string(), 15),
                 };
                 let payload = match crate::translate::translate_with(
-                    &text, "zh-CN", &engine, timeout,
+                    &text, "zh-CN", &engine, &dual_mode, timeout,
                 )
                 .await
                 {
@@ -218,13 +219,14 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                     return;
                 }
                 let mut out: Vec<String> = vec![String::new(); texts.len()];
-                let (engine, target, timeout) = match app_clone.try_state::<crate::db::Db>() {
+                let (engine, target, dual_mode, timeout) = match app_clone.try_state::<crate::db::Db>() {
                     Some(db) => (
                         crate::translate::current_engine(db.inner()).await,
                         crate::translate::current_target(db.inner()).await,
+                        crate::translate::current_dual_mode(db.inner()).await,
                         crate::translate::current_timeout(db.inner()).await,
                     ),
-                    None => ("google".to_string(), "zh-CN".to_string(), 15),
+                    None => ("google".to_string(), "zh-CN".to_string(), "single".to_string(), 15),
                 };
                 for chunk_start in (0..texts.len()).step_by(5) {
                     let chunk_end = (chunk_start + 5).min(texts.len());
@@ -234,10 +236,11 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                         let t = t.clone();
                         let eng = engine.clone();
                         let tgt = target.clone();
+                        let dm = dual_mode.clone();
                         handles.push((
                             i,
                             tauri::async_runtime::spawn(async move {
-                                crate::translate::translate_with(&t, &tgt, &eng, timeout).await
+                                crate::translate::translate_with(&t, &tgt, &eng, &dm, timeout).await
                             }),
                         ));
                     }

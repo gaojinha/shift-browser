@@ -93,6 +93,7 @@ pub mod settings {
         SettingDef { key: "tab_hibernate_count", default: "8", kind: Kind::Int, sensitive: false, desc: "空闲标签休眠数量阈值（0=关）" },
         // ---- 翻译 ----
         SettingDef { key: "translate_engine", default: "google", kind: Kind::Str, sensitive: false, desc: "翻译源（google/bing）" },
+        SettingDef { key: "translate_dual_mode", default: "single", kind: Kind::Str, sensitive: false, desc: "翻译数据流：single=只发首选引擎（默认）/ dual=双发取先成；均发送原文到第三方" },
         SettingDef { key: "translate_target", default: "zh-CN", kind: Kind::Str, sensitive: false, desc: "翻译目标语言" },
         SettingDef { key: "translate_timeout", default: "15", kind: Kind::Int, sensitive: false, desc: "翻译超时（秒，5-120）" },
         // ---- 自动化 ----

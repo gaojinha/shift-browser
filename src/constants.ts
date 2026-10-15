@@ -70,6 +70,7 @@ export const SETTINGS_SCHEMA = {
   tab_hibernate_minutes: { default: '10', kind: 'int', sensitive: false, desc: '空闲标签休眠超时（分钟，0=关）' },
   tab_hibernate_count: { default: '8', kind: 'int', sensitive: false, desc: '空闲标签休眠数量阈值（0=关）' },
   translate_engine: { default: 'google', kind: 'str', sensitive: false, desc: '翻译源（google/bing）' },
+  translate_dual_mode: { default: 'single', kind: 'str', sensitive: false, desc: '翻译数据流：single=只发首选引擎（默认）/ dual=双发取先成；均发送原文到第三方' },
   translate_target: { default: 'zh-CN', kind: 'str', sensitive: false, desc: '翻译目标语言' },
   translate_timeout: { default: '15', kind: 'int', sensitive: false, desc: '翻译超时（秒，5-120）' },
   auto_clear_history_days: { default: '0', kind: 'int', sensitive: false, desc: '自动清理历史（天，0=关）' },

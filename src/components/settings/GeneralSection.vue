@@ -40,10 +40,20 @@ const HIBERNATE_OPTIONS = [
   { v: '60', label: '60 分钟' },
 ]
 
-/** 翻译源（后端 translate.rs 按 settings.translate_engine 派发，失败自动回退另一方） */
+/** 翻译源（后端 translate.rs 按 settings.translate_engine 派发首选引擎） */
 const TRANSLATE_ENGINES = [
   { id: 'google', label: 'Google' },
   { id: 'bing', label: 'Bing' },
+]
+
+/** 翻译数据流模式（C-8）：single=只发首选引擎（默认，隐私优先）/ dual=双发取先成（速度优先） */
+const translateDualMode = computed({
+  get: () => settingsStore.get('translate_dual_mode') || 'single',
+  set: (v: string) => void onSet('translate_dual_mode', v),
+})
+const TRANSLATE_DUAL_MODES = [
+  { id: 'single', label: '单发' },
+  { id: 'dual', label: '双发' },
 ]
 
 /** 翻译目标语言（Google/Bing 语言码，Bing 后端对 zh-CN 自动映射 zh-Hans） */
@@ -202,7 +212,20 @@ onMounted(loadDefaultBrowser)
       <HintBlock>
         「翻译当前页面」、右键划词翻译、翻译面板都用这个源。<br />
         <b>Google</b>：译文质量好，但国内网络常连不上；<b>Bing</b>（Edge 端点）国内一般可直连。
-        任一源失败会自动回退到另一方，改用即时生效、无需重启。
+        改用即时生效、无需重启。
+      </HintBlock>
+      <div class="field">
+        <label>数据流</label>
+        <SegControl
+          v-model="translateDualMode"
+          :options="TRANSLATE_DUAL_MODES.map((t) => ({ value: t.id, label: t.label }))"
+          label="翻译数据流"
+        />
+      </div>
+      <HintBlock>
+        <b>单发</b>（默认）：只把原文发给首选引擎，不外流给第二家；失败不自动换源（换源=换一家第三方）。
+        <b>双发</b>：同时发给 Google 和 Bing，谁先成功用谁、慢者取消——更快，但原文会同时发给两家。<br />
+        ⚠️ 无论哪种模式，<b>原文都会发送至第三方翻译服务</b>（Google / Bing），本机不保存原文。
       </HintBlock>
       <div class="field">
         <label for="translate-target">翻译目标语言</label>

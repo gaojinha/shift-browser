@@ -159,17 +159,20 @@ pub(crate) fn handle(
                         .unwrap();
                 }
                 tauri::async_runtime::spawn(async move {
-                    // 按设置里的翻译源（google/bing）派发，失败自动回退另一方
-                    let (engine, timeout) = match app_clone.try_state::<crate::db::Db>() {
+                    // 按设置里的翻译源与数据流模式（google/bing × single/dual）派发
+                    let (engine, dual_mode, timeout) = match app_clone.try_state::<crate::db::Db>() {
                         Some(db) => (
                             crate::translate::current_engine(db.inner()).await,
+                            crate::translate::current_dual_mode(db.inner()).await,
                             crate::translate::current_timeout(db.inner()).await,
                         ),
-                        None => ("google".to_string(), 15),
+                        None => ("google".to_string(), "single".to_string(), 15),
                     };
                     let payload =
-                        match crate::translate::translate_with(&text, "zh-CN", &engine, timeout)
-                            .await
+                        match crate::translate::translate_with(
+                            &text, "zh-CN", &engine, &dual_mode, timeout,
+                        )
+                        .await
                         {
                             Ok(t) => serde_json::json!({ "text": t }),
                             // e.to_string()：保住注入 JS 的字符串线格式（R4-1 成对改）
@@ -269,14 +272,15 @@ pub(crate) fn handle(
                         return;
                     }
                     let mut out: Vec<String> = vec![String::new(); texts.len()];
-                    // 整页翻译一次要翻几十段，设置只读一次，按引擎派发（失败自动回退另一方）
-                    let (engine, target, timeout) = match app_clone.try_state::<crate::db::Db>() {
+                    // 整页翻译一次要翻几十段，设置只读一次，按引擎与数据流模式派发
+                    let (engine, target, dual_mode, timeout) = match app_clone.try_state::<crate::db::Db>() {
                         Some(db) => (
                             crate::translate::current_engine(db.inner()).await,
                             crate::translate::current_target(db.inner()).await,
+                            crate::translate::current_dual_mode(db.inner()).await,
                             crate::translate::current_timeout(db.inner()).await,
                         ),
-                        None => ("google".to_string(), "zh-CN".to_string(), 15),
+                        None => ("google".to_string(), "zh-CN".to_string(), "single".to_string(), 15),
                     };
                     // 分批并发（每批 5 段），保持顺序
                     for chunk_start in (0..texts.len()).step_by(5) {
@@ -287,10 +291,11 @@ pub(crate) fn handle(
                             let t = t.clone();
                             let eng = engine.clone();
                             let tgt = target.clone();
+                            let dm = dual_mode.clone();
                             handles.push((
                                 i,
                                 tauri::async_runtime::spawn(async move {
-                                    crate::translate::translate_with(&t, &tgt, &eng, timeout).await
+                                    crate::translate::translate_with(&t, &tgt, &eng, &dm, timeout).await
                                 }),
                             ));
                         }
