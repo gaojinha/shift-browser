@@ -234,10 +234,10 @@ async function onSave() {
   flex-shrink: 0;
 }
 .ss-btn.accent {
-  /* 局部对比度修复（包5）：#1d4ed8 + 白字 = 6.70:1 ≥ 4.5:1（--accent 全局值 3.16:1 不达标） */
+  /* 硬编码深底 #1d4ed8 需显式白字（6.70:1 ≥ 4.5:1）；不用 --accent-contrast（深色主题下它已是深色，会成深字 on 深底） */
   background: #1d4ed8;
   border-color: #1d4ed8;
-  color: var(--accent-contrast);
+  color: #ffffff;
 }
 .ss-btn.accent:hover {
   opacity: 0.9;

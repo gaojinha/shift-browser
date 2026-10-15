@@ -231,7 +231,8 @@ async function goBack() {
   padding: 0;
 }
 .btn-link:hover {
-  color: var(--accent-contrast);
+  /* hover 显 accent（深浅底均可见）；--accent-contrast 深色主题为深、浅色主题为白，透明底上两主题都不可见 */
+  color: var(--accent);
 }
 .warn-detail {
   margin-top: var(--space-md);
