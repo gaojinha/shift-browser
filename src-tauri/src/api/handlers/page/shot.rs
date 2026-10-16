@@ -87,7 +87,9 @@ pub(crate) async fn screenshot(app: &AppHandle, req: &Value) -> Value {
 /// 截图保留上限（O2）：超过则按时间淘汰最旧。
 const SCREENSHOT_KEEP: usize = 100;
 
-/// 截图文件筛选：只认 `shot-<定长毫秒时间戳>.png`（字典序 = 时间序）。
+/// 截图文件筛选：只认 `shot-<毫秒时间戳>.png`。
+/// 淘汰靠文件名排序——依赖时间戳单调递增（SystemTime 同源），不要求定长；
+/// 当前 13 位（2262 年前），字典序 = 时间序在 100 张上限内成立。
 fn is_screenshot_name(name: &str) -> bool {
     name.starts_with("shot-") && name.ends_with(".png")
 }
