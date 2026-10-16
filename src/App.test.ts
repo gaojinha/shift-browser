@@ -11,7 +11,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { i18n } from './i18n'
-import { useSettingsStore } from './stores/settings'
 import App from './App.vue'
 
 const invokeMock = vi.fn()
