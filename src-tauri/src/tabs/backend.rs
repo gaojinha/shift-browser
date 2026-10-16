@@ -165,3 +165,73 @@ pub(crate) fn is_internal_newtab_url(url: &str) -> bool {
         Err(_) => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unique_download_path_no_collision_returns_as_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_str().unwrap().to_string();
+        let p = unique_download_path(&d, "a.pdf");
+        assert_eq!(p, format!("{d}/a.pdf"));
+        assert!(!std::path::Path::new(&p).exists());
+    }
+
+    #[test]
+    fn unique_download_path_collision_appends_counter() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_str().unwrap().to_string();
+        // 撞名 → (1) 插扩展名前；继续撞 → 递增到 (2)
+        std::fs::write(format!("{d}/a.pdf"), "").unwrap();
+        assert_eq!(unique_download_path(&d, "a.pdf"), format!("{d}/a(1).pdf"));
+        std::fs::write(format!("{d}/a(1).pdf"), "").unwrap();
+        assert_eq!(unique_download_path(&d, "a.pdf"), format!("{d}/a(2).pdf"));
+    }
+
+    #[test]
+    fn unique_download_path_extension_edge_cases() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_str().unwrap().to_string();
+        // 无扩展名：整个文件名加后缀
+        std::fs::write(format!("{d}/README"), "").unwrap();
+        assert_eq!(unique_download_path(&d, "README"), format!("{d}/README(1)"));
+        // 多点名：按最后一个点拆（a.b.tar.gz → a.b.tar + .gz）
+        std::fs::write(format!("{d}/a.b.tar.gz"), "").unwrap();
+        assert_eq!(
+            unique_download_path(&d, "a.b.tar.gz"),
+            format!("{d}/a.b.tar(1).gz")
+        );
+        // 首位点（隐藏文件）：点不视为扩展名分隔，整体加后缀
+        std::fs::write(format!("{d}/.hidden"), "").unwrap();
+        assert_eq!(unique_download_path(&d, ".hidden"), format!("{d}/.hidden(1)"));
+    }
+
+    #[test]
+    fn is_internal_newtab_url_shift_scheme_by_host() {
+        // 协议版：按 scheme+host 判断（host=newtab/worldnav）
+        assert!(is_internal_newtab_url("shift://newtab"));
+        assert!(is_internal_newtab_url("shift://newtab/#home"));
+        assert!(is_internal_newtab_url("shift://worldnav"));
+        // 其他 shift host 不算启动页
+        assert!(!is_internal_newtab_url("shift://reader"));
+    }
+
+    #[test]
+    fn is_internal_newtab_url_file_legacy_markers() {
+        // 旧 file:// 版：/newtab/ 标记（双侧带斜杠，无尾斜杠不匹配——现状）或 world-nav.html 文件名
+        assert!(is_internal_newtab_url("file:///app/dist/newtab/index.html"));
+        assert!(!is_internal_newtab_url("file:///app/dist/newtab"));
+        assert!(is_internal_newtab_url("file:///app/dist/world-nav.html"));
+        assert!(!is_internal_newtab_url("file:///app/dist/reader/index.html"));
+    }
+
+    #[test]
+    fn is_internal_newtab_url_external_and_garbage() {
+        // 外部页 → false（即使路径含 /newtab/：scheme 优先，锁死判定顺序）
+        assert!(!is_internal_newtab_url("https://example.com/newtab/"));
+        // 解析不了 → false
+        assert!(!is_internal_newtab_url("not a url"));
+    }
+}
