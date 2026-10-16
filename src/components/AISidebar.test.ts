@@ -240,9 +240,9 @@ describe('AISidebar：发送守卫', () => {
         (c) => c[0] === 'ai_cancel_stream' && (c[1] as Record<string, unknown>)?.requestId === 'req-1',
       ),
     ).toBe(true)
-    // 如实记录口径：云端 stopStreaming 只清 streamingId + 发取消命令，
-    // loading 由后端流结束事件兜底重置（本地 stopWebqa 才同步置 false）
+    // 统一口径（10-16）：云端 stopStreaming 取消即刻置 loading=false（与本地 stopWebqa 对齐）
     expect(aiStore.streamingId).toBeNull()
+    expect(aiStore.loading).toBe(false)
 
     invokeMock.mockClear()
     aiStore.$patch({ loading: true, streamingId: 'req-2', webqaMode: true })

@@ -187,11 +187,15 @@ describe('流式错误与停止', () => {
     const streamCall = invokeMock.mock.calls.find((c) => c[0] === 'ai_chat_stream')!
     const reqId = (streamCall[1] as { requestId: string }).requestId
     expect(ai.streamingId).toBe(reqId)
+    // 发送中 loading 应为 true（sendMessage 流式分支前置）
+    expect(ai.loading).toBe(true)
     await ai.stopStreaming()
     const cancelCalls = invokeMock.mock.calls.filter((c) => c[0] === 'ai_cancel_stream')
     expect(cancelCalls).toHaveLength(1)
     expect(cancelCalls[0]).toEqual(['ai_cancel_stream', { requestId: reqId }])
     expect(ai.streamingId).toBeNull()
+    // 统一口径：取消即刻置 loading=false（与本地 stopWebqa 对齐，不等事件兜底）
+    expect(ai.loading).toBe(false)
     // 释放悬挂的 sendMessage
     resolveStream(undefined)
     await sending

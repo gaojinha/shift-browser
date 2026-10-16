@@ -309,6 +309,9 @@ ${AI_BEHAVIOR_RULES}`
       } catch {
         // 忽略取消失败（后端流式循环会在 send 失败/超时后自行退出）
       }
+      // 与 stopWebqa 口径对齐：取消即刻清 loading，不等后端"已停止生成"事件兜底
+      // （消除云/本地两路径不一致；F-37 测试已锁现状，本笔为统一后的新口径）
+      this.loading = false
     },
 
     /** 移除最后一条空 assistant 占位（出错/停止时） */
