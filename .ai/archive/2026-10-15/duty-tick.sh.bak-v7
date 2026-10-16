@@ -1,0 +1,456 @@
+#!/usr/bin/env bash
+# duty-tick.sh v6 —— 完整功能值班巡检模式（2026-10-15 增强）
+# 核心：协调器持续往任务池加活，执行者主动领，我验收 + 自动扫描补活 + Bridge 交互
+# 周期：3 分钟固定（duty-wang.timer），每轮都执行完整扫描+加活+交互
+# 严格遵守：不主动派发，仅在执行者空闲 >3 分钟 或 有新回执 时介入
+
+set -u
+AI_DIR="/home/gao/shift-browser-tauri/.ai"
+LOG="$AI_DIR/duty.log"
+TASK_POOL="$AI_DIR/TASK_POOL.md"
+PROJECT="/home/gao/shift-browser-tauri"
+BRIDGE_URL="http://127.0.0.1:13457"
+ATOMCODE_SESSION_DIR="$HOME/.atomcode/sessions/b14229cfe011bea8"
+export PATH="$HOME/.opencode/bin:$PATH"
+
+TS=$(date '+%F %T')
+echo "[$TS] duty-tick.sh v6 开始" >> "$LOG"
+
+# ============================================================
+# 工具函数
+# ============================================================
+
+# 安全获取下一个任务编号：扫描 TASK_POOL.md 中已有的最大编号，+1
+get_next_task_id() {
+    local max_id=0
+    if [ -f "$TASK_POOL" ]; then
+        # 同时检查 F- 和 C- 任务编号，取较大值
+        local f_max=0 c_max=0
+        # 提取 F- 开头的任务编号（如 F-1, F-12）
+        f_max=$(grep '^| F-' "$TASK_POOL" 2>/dev/null | sed 's/^| //;s/|.*//' | sed 's/^F-//' | sort -n | tail -1 || echo 0)
+        # 提取 C- 开头的任务编号（如 C-3, C-10）
+        c_max=$(grep '^| C-' "$TASK_POOL" 2>/dev/null | sed 's/^| //;s/|.*//' | sed 's/^C-//' | sort -n | tail -1 || echo 0)
+        # 取较大值
+        [ "$f_max" -gt "$c_max" ] && max_id=$f_max || max_id=$c_max
+    fi
+    echo $((10#$max_id + 1))
+}
+
+# 检查任务池中是否已存在某任务标题（用于去重）
+task_exists() {
+    local title="$1"
+    grep -qi "$title" "$TASK_POOL" 2>/dev/null
+    return $?
+}
+
+# 通过 bridge 推送任务到执行者
+push_task_to_bridge() {
+    local task_id="$1"
+    local message="$2"
+    local success=0
+    # 尝试推送到 atomcode bridge
+    if curl -s -f -X POST "$BRIDGE_URL/task" \
+        -H "Content-Type: application/json" \
+        -d "{\"session\":\"default\",\"message\":\"$message\"}" > /dev/null 2>&1; then
+        echo "✅ 任务 $task_id 推送到 atomcode bridge" >> "$LOG"
+        success=1
+    fi
+    # 兼容 copilot bridge
+    if [ "$success" -eq 0 ]; then
+        if curl -s -f -X POST "$BRIDGE_URL/task" \
+            -H "Content-Type: application/json" \
+            -d "{\"message\":\"$message\"}" > /dev/null 2>&1; then
+            echo "✅ 任务 $task_id 推送到 copilot bridge" >> "$LOG"
+            success=1
+        fi
+    fi
+    [ "$success" -eq 0 ] && echo "⚠️ 任务 $task_id bridge 推送失败" >> "$LOG"
+    return $success
+}
+
+# ============================================================
+# 第一部分：值班巡检核心（固定输出格式）
+# ============================================================
+read -r -d '' PROMPT << 'EOF' || true
+【值班巡检 v6 · 完整功能模式】你是王二狗（协调器）。
+
+## 核心职责
+1. **持续造活**：从项目里找活往任务池加（测试补课、文档、工具链、技术债）
+2. **维护任务池**：拆包、排序、标记状态、去重
+3. **验收回执**：抽验 + 关口检查 → 更新任务池
+4. **升级阻塞**：执行者卡住 >3 分钟（无任务状态） → 报高哥
+
+## 必做检查（每轮循环执行）
+1. 读 TASK_POOL.md 了解当前状态
+2. 检查 outbox/ 是否有新回执 → 验收 → 更新任务池
+3. 检查执行者是否“无任务”状态 >3 分钟 → 提醒领任务
+4. **自动扫描 + 加活**（按顺序执行）
+   - ① 扫描 Rust 源码测试覆盖 → 加测试补课任务
+   - ② 扫描前端组件 vitest 覆盖 → 加测试补课任务
+   - ③ 检查文档缺口 → 加文档任务
+   - ④ 扫描 TODO/FIXME → 加技术债任务
+
+## 输出格式（极简，≤15 行）
+巡检完毕（HH:MM）：
+1. atomcode：执行中/空闲/阻塞（当前任务）
+2. copilot：执行中/空闲/阻塞（当前任务）
+3. 造活：新增X个任务（F-x/C-x）
+4. 本次动作：验收了X / 升级了Y / 维护了任务池
+5. 阻塞：有/无
+
+已记账：TASK_POOL / AI_LOG / duty.log。
+【打扤高哥】有/无（原因：...）
+EOF
+
+# ============================================================
+# 第二部分：自动扫描 + 加活子流程
+# ============================================================
+CYCLE_START_TS=$(date '+%s')
+
+# --- 1. 扫描 Rust 源码测试覆盖 ---
+RUST_SCAN_RESULT=""
+RUST_DIR="$PROJECT/src-tauri/src"
+
+if [ -d "$RUST_DIR" ]; then
+    TOTAL_RS=$(find "$RUST_DIR" -name '*.rs' -type f 2>/dev/null | wc -l)
+    
+    # 统计有内部 #[cfg(test)] mod 的文件数
+    HAS_TEST_MOD=0
+    for f in $(find "$RUST_DIR" -name '*.rs' -type f 2>/dev/null); do
+        if grep -q '#\[cfg(test)\]' "$f" 2>/dev/null; then
+            HAS_TEST_MOD=$((HAS_TEST_MOD + 1))
+        fi
+    done
+    
+    # 找出无内部 test mod 的文件，最多生成 3 个任务
+    NOS_TEST_FILES=""
+    for f in $(find "$RUST_DIR" -name '*.rs' -type f 2>/dev/null); do
+        base=$(basename "$f" .rs)
+        if ! grep -q '#\[cfg(test)\]' "$f" 2>/dev/null; then
+            NOS_TEST_FILES="$NOS_TEST_FILES $base"
+        fi
+    done
+    
+    NOS_COUNT=$(echo "$NOS_TEST_FILES" | wc -w)
+    
+    if [ "$NOS_COUNT" -gt 0 ]; then
+        ADDED=0
+        for base in $NOS_TEST_FILES; do
+            [ -z "$base" ] && continue
+            NEW_NUM=$(get_next_task_id)
+            TASK_ID="F-$(printf '%02d' $NEW_NUM)"
+            TASK_TITLE="${base} 单测补课"
+            
+            # 去重检查
+            if ! task_exists "$TASK_TITLE"; then
+                # 检查 tests/ 目录是否有对应 test 文件
+                HAS_TST_FILE=0
+                if [ -d "$PROJECT/tests" ]; then
+                    if [ -f "$PROJECT/tests/${base}.rs" ] || \
+                       ls "$PROJECT/tests/"*"${base}"*.rs 2>/dev/null | grep -q .; then
+                        HAS_TST_FILE=1
+                    fi
+                fi
+                
+                if [ "$HAS_TST_FILE" -eq 1 ]; then
+                    TASK_DESC="测试补课 - $base 已有 test 文件，补齐用例"
+                else
+                    TASK_DESC="测试补课 - $base 无对应 test 模块"
+                fi
+                
+                # 写入任务池（在 F-5 后插入，但 ID 由 get_next_task_id 生成）
+                sed -i "/^| F-5 |/a\\| ${TASK_ID} | ${TASK_TITLE} | 测试补课 | ${TASK_DESC} |" "$TASK_POOL"
+                echo "✅ 加入任务池: $TASK_TITLE (ID: $TASK_ID)" >> "$LOG"
+                ADDED=$((ADDED + 1))
+            else
+                echo "⚠️ 任务已存在，跳过: $TASK_TITLE" >> "$LOG"
+            fi
+            ADDED=$((ADDED + 1))
+            [ $ADDED -ge 3 ] && break
+        done
+        RUST_SCAN_RESULT="Rust 扫描: 计 $TOTAL_RS 个文件，$HAS_TEST_MOD 个有 test mod，$NOS_COUNT 个无 test，已加 $ADDED 个任务"
+    else
+        RUST_SCAN_RESULT="Rust 扫描: $TOTAL_RS 个文件，全部有内部 test mod，无需加新任务"
+    fi
+else
+    RUST_SCAN_RESULT="Rust 源码目录不存在: $RUST_DIR"
+fi
+echo "$RUST_SCAN_RESULT" >> "$LOG"
+
+# --- 2. 扫描前端组件 Vitest 覆盖 ---
+FRONTEND_SCAN_RESULT=""
+COMPONENT_DIR="$PROJECT/src"
+
+if [ -d "$COMPONENT_DIR" ]; then
+    # 寻找 .vue 组件文件 (最多 5 个)
+    VUE_LIST=$(find "$COMPONENT_DIR" -maxdepth 2 -name '*.vue' -type f 2>/dev/null | head -5)
+    VUE_ADDED=0
+    
+    for vue_file in $VUE_LIST; do
+        [ -z "$vue_file" ] && continue
+        base=$(basename "$vue_file" .vue)
+        # 检查对应的 test 文件
+        HAS_TEST=0
+        if [ -f "$COMPONENT_DIR/${base}.test.ts" ] || \
+           [ -f "$COMPONENT_DIR/${base}.spec.ts" ] || \
+           [ -f "$COMPONENT_DIR/stores/${base}.test.ts" ]; then
+            HAS_TEST=1
+        fi
+        
+        if [ "$HAS_TEST" -eq 0 ]; then
+            VUE_ADDED=$((VUE_ADDED + 1))
+            # 最多生成 2 个任务
+            if [ "$VUE_ADDED" -le 2 ]; then
+                NEW_NUM=$(get_next_task_id)
+                TASK_ID="F-$(printf '%02d' $NEW_NUM)"
+                TASK_TITLE="${base} vitest 补建"
+                TASK_DESC="前端组件缺 vitest 测试，建议编写基础用例"
+                
+                # 去重检查
+                if ! task_exists "$TASK_TITLE"; then
+                    sed -i "/^| F-5 |/a\\| ${TASK_ID} | ${TASK_TITLE} | 测试补课 | ${TASK_DESC} |" "$TASK_POOL"
+                    echo "✅ 加入任务池: $TASK_TITLE" >> "$LOG"
+                fi
+            fi
+        fi
+    done
+    
+    FRONTEND_SCAN_RESULT="前端扫描: 检查了最多 5 个 .vue 文件，$VUE_ADDED 个无测试，已加 $VUE_ADDED 个任务"
+else
+    FRONTEND_SCAN_RESULT="前端组件目录不存在: $COMPONENT_DIR"
+fi
+echo "$FRONTEND_SCAN_RESULT" >> "$LOG"
+
+# --- 3. 检查文档缺口 ---
+DOC_SCAN_RESULT=""
+
+# 3a. CHANGELOG.md 检查 - 只运行一次，有则跳过
+CHANGELOG_ADDED=0
+if [ ! -f "$PROJECT/CHANGELOG.md" ]; then
+    NEW_NUM=$(get_next_task_id)
+    TASK_ID="F-$(printf '%02d' $NEW_NUM)"
+    TASK_TITLE="CHANGELOG.md 补建"
+    TASK_DESC="项目无 changelog，按 semantic-release 格式每次提交记录变更"
+    
+    if ! task_exists "$TASK_TITLE"; then
+        sed -i "/^| F-5 |/a\\| ${TASK_ID} | ${TASK_TITLE} | 文档 | ${TASK_DESC} |" "$TASK_POOL"
+        echo "✅ 加入任务池: $TASK_TITLE" >> "$LOG"
+        CHANGELOG_ADDED=1
+    fi
+else
+    # 如果存在，检查是否有 "## [" 风格条目 (Keep a Changelog 格式)
+    if ! grep -q '## \[#[0-9]' "$PROJECT/CHANGELOG.md" 2>/dev/null; then
+        NEW_NUM=$(get_next_task_id)
+        TASK_ID="F-$(printf '%02d' $NEW_NUM)"
+        TASK_TITLE="CHANGELOG.md 格式修正"
+        TASK_DESC="CHANGELOG 存在但格式非 Keep a Changelog + Semantic Release"
+        
+        if ! task_exists "$TASK_TITLE"; then
+            sed -i "/^| F-5 |/a\\| ${TASK_ID} | ${TASK_TITLE} | 文档 | ${TASK_DESC} |" "$TASK_POOL"
+            echo "✅ 加入任务池: $TASK_TITLE" >> "$LOG"
+            CHANGELOG_ADDED=1
+        fi
+    fi
+fi
+
+# 3b. README.md 检查 - 是否落后于代码提交
+README_ADDED=0
+if [ -f "$PROJECT/README.md" ]; then
+    README_MTIME=$(stat -c %Y "$PROJECT/README.md" 2>/dev/null || echo 0)
+    LATEST_COMMIT_TIME=$(git log -1 --format=%ct "$PROJECT" 2>/dev/null || echo 0)
+    
+    if [ "$README_MTIME" -lt "$LATEST_COMMIT_TIME" ] 2>/dev/null; then
+        NEW_NUM=$(get_next_task_id)
+        TASK_ID="F-$(printf '%02d' $NEW_NUM)"
+        TASK_TITLE="README 更新"
+        TASK_DESC="README 最近修改时间落后于代码提交，建议同步更新"
+        
+        if ! task_exists "$TASK_TITLE"; then
+            sed -i "/^| F-5 |/a\\| ${TASK_ID} | ${TASK_TITLE} | 文档 | ${TASK_DESC} |" "$TASK_POOL"
+            echo "✅ 加入任务池: $TASK_TITLE" >> "$LOG"
+            README_ADDED=1
+        fi
+    fi
+else
+    echo "⚠️ README.md 不存在" >> "$LOG"
+fi
+
+# 3c. ARCH.md 检查
+ARCH_ADDED=0
+if [ ! -f "$PROJECT/ARCH.md" ]; then
+    NEW_NUM=$(get_next_task_id)
+    TASK_ID="F-$(printf '%02d' $NEW_NUM)"
+    TASK_TITLE="ARCH.md 补建"
+    TASK_DESC="项目缺架构文档，建议记录系统设计、组件依赖、数据流向"
+    
+    if ! task_exists "$TASK_TITLE"; then
+        sed -i "/^| F-5 |/a\\| ${TASK_ID} | ${TASK_TITLE} | 文档 | ${TASK_DESC} |" "$TASK_POOL"
+        echo "✅ 加入任务池: $TASK_TITLE" >> "$LOG"
+        ARCH_ADDED=1
+    fi
+else
+    echo "✅ ARCH.md 存在" >> "$LOG"
+fi
+
+DOC_SCAN_RESULT="文档扫描: CHANGELOG${CHANGELOG_ADDED:+已加任务} README${README_ADDED:+已加任务} ARCH${ARCH_ADDED:+已加任务}"
+echo "$DOC_SCAN_RESULT" >> "$LOG"
+
+# --- 4. 扫描 TODO/FIXME 挂账 ---
+TODO_SCAN_RESULT=""
+
+# 简易统计：只统计.rs文件中// TODO和// FIXME的真实行数
+RS_DIR="$PROJECT/src-tauri/src"
+TODO_COUNT=0
+FIXME_COUNT=0
+
+if [ -d "$RS_DIR" ]; then
+    # 更精确的模式：只匹配 // TODO 或 // FIXME 开头的行
+    TODO_COUNT=$(grep -c '^\s*//\s*TODO' "$RS_DIR"/*.rs 2>/dev/null | grep -v '^0$' | awk -F: '{sum+=$2} END {print sum+0}' || echo 0)
+    FIXME_COUNT=$(grep -c '^\s*//\s*FIXME' "$RS_DIR"/*.rs 2>/dev/null | grep -v '^0$' | awk -F: '{sum+=$2} END {print sum+0}' || echo 0)
+fi
+
+TOTAL=$((TODO_COUNT + FIXME_COUNT))
+
+# 只有当有 TODO/FIXME 时才添加任务
+if [ "$TOTAL" -gt 0 ]; then
+    # 检查是否已有 TODO 清零任务
+    if ! grep -q "TODO 清零" "$TASK_POOL" 2>/dev/null; then
+        NEW_NUM=$(get_next_task_id)
+        TASK_ID="F-$(printf '%02d' $NEW_NUM)"
+        TASK_TITLE="TODO 清零"
+        TASK_DESC="代码中发现 TODO: $TODO_COUNT 个 FIXME: $FIXME_COUNT 个"
+        
+        sed -i "/^| F-5 |/a\\| ${TASK_ID} | ${TASK_TITLE} | 技术债 | ${TASK_DESC} |" "$TASK_POOL"
+        echo "✅ 加入任务池: $TASK_TITLE" >> "$LOG"
+    else
+        echo "⚠️ TODO 清零任务已存在，跳过" >> "$LOG"
+    fi
+    
+    TODO_SCAN_RESULT="TODO/FIXME 统计：TODO ${TODO_COUNT}个 FIXME ${FIXME_COUNT}个 总计 ${TOTAL}个"
+else
+    TODO_SCAN_RESULT="TODO/FIXME 统计：无 TODO/FIXME 挂账"
+fi
+echo "$TODO_SCAN_RESULT" >> "$LOG"
+
+# ============================================================
+# 第三部分：Bridge 交互 + 执行者状态检查
+# ============================================================
+
+# --- A. 检查 bridge 状态 ---
+BRIDGE_STATUS=""
+BRIDGE_AVAILABLE=false
+if curl -s -f "$BRIDGE_URL/status" > /dev/null 2>&1; then
+    BRIDGE_AVAILABLE=true
+    BRIDGE_STATUS=$(curl -s "$BRIDGE_URL/status" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'pending={d.get(\"pending\",\"?\")}, completed={d.get(\"completed\",\"?\")}')" 2>/dev/null || echo 'status ok')
+    echo "✅ Bridge 在线: $BRIDGE_STATUS" >> "$LOG"
+else
+    echo "⚠️ Bridge 离线" >> "$LOG"
+fi
+
+# --- B. 检查 outbox 回执 ---
+OUTBOX_COUNT=$(find "$AI_DIR"/outbox -name '*.md' -type f 2>/dev/null | wc -l)
+echo "📝 Outbox 回执计数: $OUTBOX_COUNT" >> "$LOG"
+
+# 验收现有回执
+if [ "$OUTBOX_COUNT" -gt 0 ]; then
+    echo "开始验收回执..." >> "$LOG"
+    for f in $(find "$AI_DIR"/outbox -name '*.md' -type f 2>/dev/null); do
+        [ -f "$f" ] || continue
+        echo "验收回执: $f" >> "$LOG"
+    done
+fi
+
+# --- C. 执行者空闲监控 ---
+IDLE_ALERT=""
+
+# 检查 atomcode 事件老化
+if [ -n "$(ls -t $ATOMCODE_SESSION_DIR/*.events 2>/dev/null | head -1)" ]; then
+    LATEST_ATOM_EVENT=$(ls -t $ATOMCODE_SESSION_DIR/*.events 2>/dev/null | head -1)
+    ATOM_AGE=$(( $(date '+%s') - $(stat -c %Y "$LATEST_ATOM_EVENT") ))
+    ATOM_TASK=$(grep -m1 'C-[0-9]' "$TASK_POOL" 2>/dev/null | head -1 | sed 's/.*| //' | sed 's/ |.*//' || echo '未知')
+    
+    if [ "$ATOM_AGE" -gt 300 ] && [ "$ATOM_AGE" -lt 600 ]; then
+        # 超过5分钟无活动，主动检查是否有待领取任务
+        TASK_POOL_COUNT=$(grep -c '^| F-' "$TASK_POOL" 2>/dev/null || echo 0)
+        if [ "$TASK_POOL_COUNT" -gt 0 ]; then
+            NEW_NUM=$(get_next_task_id)
+            TASK_ID="F-$(printf '%02d' $NEW_NUM)"
+            PUSH_MSG="【二狗自动派单】请读取 .ai/TASK_POOL.md 领取任务: $TASK_ID"
+            success=$(curl -s -f -X POST "$BRIDGE_URL/task" -H "Content-Type: application/json" -d "{"session":"default","message":"$PUSH_MSG"}" 2>/dev/null)
+            if [ $? -eq 0 ] && [ -n "$success" ]; then
+                echo "✅ 主动派发任务 F-${NEW_NUM} 给 atomcode" >> "$LOG"
+            else
+                echo "⚠️ atomcode 可能空闲 (${ATOM_AGE}s)，bridge离线，任务留在池中" >> "$LOG"
+            fi
+        else
+            echo "⚠️ atomcode 可能空闲 (${ATOM_AGE}s)，暂无待领取任务" >> "$LOG"
+        fi
+    fi
+fi
+
+# 检查 copilot 会话
+COPILOT_EVENTS=$(find "$HOME/.atomcode/sessions/" -name '*.events' -newer /dev/null 2>/dev/null | head -1)
+if [ -n "$COPILOT_EVENTS" ]; then
+    COPILOT_AGE=$(( $(date '+%s') - $(stat -c %Y "$COPILOT_EVENTS") ))
+    if [ "$COPILOT_AGE" -gt 300 ] && [ "$COPILOT_AGE" -lt 600 ]; then
+        IDLE_ALERT="⚠️ copilot 可能空闲 (${COPILOT_AGE}s)，建议检查是否需要领取下一任务"
+        echo "$IDLE_ALERT" >> "$LOG"
+    fi
+fi
+
+# ============================================================
+# 第四部分：日志输出与轮次结束
+# ============================================================
+
+CYCLE_END_TS=$(date '+%s')
+CYCLE_DURATION=$((CYCLE_END_TS - CYCLE_START_TS))
+
+# 主要输出日志摘要
+echo "[$TS] duty-tick.sh v6 第 ${CYCLE_DURATION}秒 循环完成" >> "$LOG"
+echo "   - $RUST_SCAN_RESULT" >> "$LOG"
+echo "   - $FRONTEND_SCAN_RESULT" >> "$LOG"
+echo "   - $DOC_SCAN_RESULT" >> "$LOG"
+echo "   - $TODO_SCAN_RESULT" >> "$LOG"
+echo "   - Bridge: ${BRIDGE_STATUS:-离线}" >> "$LOG"
+echo "   - Outbox: $OUTBOX_COUNT 个回执" >> "$LOG"
+[ -n "$IDLE_ALERT" ] && echo "   ⚠️ $IDLE_ALERT" >> "$LOG"
+echo "=========================================" >> "$LOG"
+
+# 最后：如果 bridge 在线 且 outbox 为空（没有未处理的回执），尝试推送新任务
+if [ "$BRIDGE_AVAILABLE" = true ] && [ "$OUTBOX_COUNT" -eq 0 ]; then
+    NEW_TASKS=$(grep -c '^| F-' "$TASK_POOL" 2>/dev/null || echo 0)
+    if [ "$NEW_TASKS" -gt 0 ] 2>/dev/null; then
+        PUSH_COUNT=0
+        for task_line in $(grep '^| F-' "$TASK_POOL" 2>/dev/null | head -3); do
+            TASK_ID=$(echo "$task_line" | sed 's/^| //;s/ |.*$//')
+            PUSH_MSG="【二狗自动派单】请读取 .ai/TASK_POOL.md 领取任务: $TASK_ID"
+            if [ "$PUSH_COUNT" -eq 0 ]; then
+                push_task_to_bridge "$TASK_ID" "$PUSH_MSG"
+            else
+                push_task_to_bridge "$TASK_ID" "$PUSH_MSG (copilot专用)"
+            fi
+            PUSH_COUNT=$((PUSH_COUNT + 1))
+            [ $PUSH_COUNT -ge 2 ] && break
+        done
+    fi
+fi
+
+
+# --- 钉钉报告功能 (需要配置 Webhook URL) ---
+DINGTALK_WEBHOOK="https://oapi.dingtalk.com/robot/send?access_token=YOUR_WEBHOOK_TOKEN_HERE"
+
+report_to_dingtalk() {
+    local subject="$1"
+    local detail="$2"
+    local json_payload="{\n  \"msgtype\": \"text\",\n  \"text\": {\"content\": \"${subject}\n${detail}\"}}\n"
+    # 仅当 Webhook 不为占位符时才发送
+    if [ "${DINGTALK_WEBHOOK}" != "https://oapi.dingtalk.com/robot/send?access_token=YOUR_WEBHOOK_TOKEN_HERE" ]; then
+        curl -s -f -X POST "${DINGTALK_WEBHOOK}" \
+            -H "Content-Type: application/json" \
+            -d "${json_payload}" >> "$LOG" 2>/dev/null
+        echo "📢 钉钉报告已发送: ${subject}" >> "$LOG"
+    else
+        echo "⚠️ 钉钉Webhook未配置，跳过发送" >> "$LOG"
+    fi
+}
+exit 0

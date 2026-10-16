@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""静默自检守护 · 治"没动静"
+
+三方（atomcode / copilot / 王二狗）干活时段活动静默超阈值 → 自动写自检请求
+到协调器收件箱（复用 wakeup-daemon 唤醒链），让协调器醒来推进下一棒。
+
+规则：
+  - 活动信号 = 协作消息文件 / 关键文档 / git 提交 / 两个 agent 的会话事件
+  - 静默 ≥ 30 分钟 → 触发一次（写 CHECK 文件）
+  - 触发冷却 2 小时；安静时段（23:00-08:00）不触发
+"""
+import json
+import os
+import subprocess
+import time
+from glob import glob
+
+AI = "/home/gao/shift-browser-tauri/.ai"
+INBOX = os.path.join(AI, "inbox", "wang-ergou")
+STATE = os.path.join(AI, "state", "silence-watchdog.json")
+LOG = os.path.join(AI, "silence-watchdog.log")
+
+THRESHOLD = 1800      # 30 分钟无活动 → 触发
+CHECK_EVERY = 120     # 每 2 分钟检查一次
+COOLDOWN = 7200       # 触发后 2 小时冷却
+QUIET = (23, 8)       # 安静时段
+
+
+def log(msg: str) -> None:
+    with open(LOG, "a", encoding="utf-8") as f:
+        f.write(f"[{time.strftime('%F %T')}] {msg}\n")
+
+
+def latest_mtime(paths) -> float:
+    best = 0.0
+    for p in paths:
+        try:
+            m = os.path.getmtime(p)
+            if m > best:
+                best = m
+        except OSError:
+            pass
+    return best
+
+
+def activity_time() -> float:
+    cands = []
+    # 协作消息（含各级子目录）
+    for d in ("inbox", "outbox", "processed"):
+        cands += glob(os.path.join(AI, d, "**", "*.md"), recursive=True)
+    # 关键文档（我写作=有动静）
+    for f in ("AI_LOG.md", "TASK_QUEUE.md", "STATUS_REPORT.md"):
+        cands.append(os.path.join(AI, f))
+    # agent 会话事件（它们干活时实时更新）
+    cands.append(os.path.expanduser(
+        "~/.atomcode/sessions/b14229cfe011bea8/be6fe953-e84a-4530-8875-b3ef2f27431b.events"))
+    cands.append(os.path.expanduser(
+        "~/.copilot/session-state/57271ae1-e3e3-44a0-b583-c2780f8e4fab/events.jsonl"))
+    best = latest_mtime(cands)
+    # git 提交时间
+    try:
+        out = subprocess.run(
+            ["git", "-C", "/home/gao/shift-browser-tauri", "log", "-1", "--format=%ct"],
+            capture_output=True, text=True, timeout=10)
+        if out.returncode == 0 and out.stdout.strip():
+            t = float(out.stdout.strip())
+            if t > best:
+                best = t
+    except Exception:
+        pass
+    return best
+
+
+def check_guards() -> None:
+    """互检：agent-watchdog / copilot-live-feed 缺失（连续两轮）→ 拉起 + 报警。"""
+    gp = os.path.join(AI, "state", "silence-guards.json")
+    st2 = {}
+    try:
+        st2 = json.load(open(gp, encoding="utf-8"))
+    except Exception:
+        pass
+    for pat, script in (("[a]gent-watchdog", "agent-watchdog.py"),
+                        ("[c]opilot-live-feed", "copilot-live-feed.py")):
+        key = "miss_" + script
+        try:
+            out = subprocess.run(["pgrep", "-f", pat], capture_output=True, text=True, timeout=5)
+            alive = bool(out.stdout.strip())
+        except Exception:
+            alive = True
+        if alive:
+            st2[key] = 0
+            continue
+        cnt = st2.get(key, 0) + 1
+        st2[key] = cnt
+        if cnt == 2:
+            try:
+                subprocess.Popen(["python3", os.path.join(AI, script)],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+            except Exception:
+                pass
+            ts = time.strftime("%Y%m%d-%H%M%S")
+            fn = os.path.join(INBOX, "ALARM-%s-guard-miss.md" % ts)
+            try:
+                with open(fn, "w", encoding="utf-8") as f:
+                    f.write("# ⚠️ 守护缺失（silence 侧报告）\n\n%s 连续两轮未运行，已尝试拉起。\n" % script)
+            except Exception:
+                pass
+    try:
+        json.dump(st2, open(gp, "w", encoding="utf-8"))
+    except Exception:
+        pass
+
+
+def main() -> None:
+    log("静默守护启动（阈值 30 分钟 / 冷却 2 小时）")
+    last_fire = 0.0
+    while True:
+        time.sleep(CHECK_EVERY)
+        try:
+            now = time.time()
+            h = time.localtime(now).tm_hour
+            act = activity_time()
+            check_guards()
+            silent = now - act
+            quiet = h >= QUIET[0] or h < QUIET[1]
+            if silent >= THRESHOLD and not quiet and (now - last_fire) >= COOLDOWN:
+                fn = os.path.join(INBOX, f"CHECK-{time.strftime('%Y%m%d-%H%M%S')}-静默自检.md")
+                with open(fn, "w", encoding="utf-8") as f:
+                    f.write(
+                        "# ⏰ 静默自检\n\n"
+                        f"三方（atomcode / copilot / 王二狗）已约 {int(silent // 60)} 分钟无活动。\n\n"
+                        "请协调器立即：\n"
+                        "1. 检查是否有未推进的下一棒 → 有则立即推进\n"
+                        "2. 在等他人（高哥拍板等）→ 主动说明或催办\n"
+                        "3. 真无事 → 主动找活或写简报到 AI_LOG\n\n"
+                        "（处理完请归档本文件）\n")
+                last_fire = now
+                log(f"已触发自检（静默 {int(silent // 60)} 分钟）")
+        except Exception as e:  # noqa: BLE001
+            log(f"异常: {type(e).__name__}: {e}")
+
+
+if __name__ == "__main__":
+    main()

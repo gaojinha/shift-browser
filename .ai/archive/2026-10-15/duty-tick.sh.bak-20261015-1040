@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# 值班巡检 tick v2 —— "主动管理型" 二狗（2026-10-15 增强）
+# 由 systemd user timer 周期触发（默认 30 分钟）
+# 增强：储备区自动派活 + 待拍板一页纸呈报 + 交付即时通知
+set -u
+AI_DIR="/home/gao/shift-browser-tauri/.ai"
+LOG="$AI_DIR/duty.log"
+DUTY_SESSION_FILE="$AI_DIR/state/duty-session.txt"
+cd /home/gao/shift-browser-tauri || exit 1
+export PATH="$HOME/.opencode/bin:$PATH"
+
+TS=$(date '+%F %T')
+echo "[$TS] duty tick v2 开始" >> "$LOG"
+
+read -r -d '' PROMPT << 'EOF' || true
+【值班巡检 v2 · 主动管理型】你是王二狗（协调器），负责**主动管理项目进展**：
+
+## 一、读账本
+1. .ai/GOALS.md — 目标账本，G-1 进度
+2. .ai/TASK_QUEUE.md — 当前进行 + 储备区
+3. .ai/STATUS_REPORT.md — 各方状态段
+4. .ai/AI_LOG.md 最后 30 行 — 最近事件
+
+## 二、查三线
+a) 高哥会话：ls ~/.atomcode/sessions/b14229cfe011bea8/ 看 mtime（>30 分钟无活动则可疑）
+b) copilot：ls .ai/outbox/copilot/ 是否有未处理回执；pgrep -f 'resume=57271ae1'
+c) atomcode：ls .ai/outbox/atomcode/ 新回执？储备区有无"可派"货？
+
+## 三、行动（有则做）
+1. **储备区自动派活**：TASK_QUEUE 储备区有货 + 执行者空闲 → 立即派
+2. **交付验收**：outbox 有新回执 → 快速验收 → 归档 processed → 派下一棒
+3. **待拍板呈报**：有新信息时整理一页纸呈报高哥（不重复催旧项）
+4. **阻塞处理**：卡住 → 尝试修复；无法自修 → 发简报给高哥
+
+## 四、输出（≤15 行）
+巡检完毕（HH:MM–HH:MM）：
+1. 高哥会话：活跃/可疑/空闲
+2. copilot：有货/无货（在跑/待命）
+3. atomcode：有货/无货（在跑/待命）
+4. 本次动作：派了X / 验收了Y / 呈报了Z
+5. 阻塞：有/无
+已记账。【打扰高哥】有/无（原因：...）
+
+## 五、约束
+- 除非「故障无法自修 / 目标达成 / 需拍板且有新信息」，绝不发消息
+- 不空转；输出极简
+EOF
+
+if [ -f "$DUTY_SESSION_FILE" ] && [ -s "$DUTY_SESSION_FILE" ]; then
+  SID=$(cat "$DUTY_SESSION_FILE")
+  OUT=$(timeout 600 opencode run --session "$SID" --model agnes/agnes-2.5-flash --auto "$PROMPT" 2>&1)
+  RC=$?
+else
+  OUT=$(timeout 600 opencode run --model agnes/agnes-2.5-flash --auto --title "二狗值班巡检v2" "$PROMPT" 2>&1)
+  RC=$?
+fi
+
+echo "[$TS] 完成 rc=$RC" >> "$LOG"
+echo "$OUT" | tail -8 >> "$LOG"

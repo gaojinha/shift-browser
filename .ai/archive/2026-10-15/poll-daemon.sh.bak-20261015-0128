@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# 王二狗 · 三方通讯轮询守护脚本
+# 由 crontab 调用（每 2 分钟一次）
+# 功能：检查新消息/新提交 → 钉钉通知高哥 → 记录状态防重复
+set -u
+
+ROOT="/home/gao/shift-browser-tauri"
+AI_DIR="$ROOT/.ai"
+STATE_DIR="$AI_DIR/state"
+STATE_FILE="$STATE_DIR/poll-state.json"
+LOG_FILE="$AI_DIR/poll-daemon.log"
+EVENTS="$HOME/.atomcode/sessions/b14229cfe011bea8/be6fe953-e84a-4530-8875-b3ef2f27431b.events"
+CONTROL_URL="http://127.0.0.1:4097/send"
+TARGET="user:0350023946111258513"
+
+mkdir -p "$STATE_DIR"
+touch "$LOG_FILE"
+
+log() { echo "[$(date '+%F %T')] $*" >> "$LOG_FILE"; }
+
+# 发钉钉（失败静默，下次重试）
+send_dingtalk() {
+  python3 - "$1" << 'PYEOF' 2>/dev/null
+import json, sys, urllib.request
+text = sys.argv[1]
+body = json.dumps({"target": "user:0350023946111258513", "text": text}).encode("utf-8")
+req = urllib.request.Request("http://127.0.0.1:4097/send", data=body,
+                             headers={"Content-Type": "application/json"}, method="POST")
+try:
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        sys.exit(0 if 200 <= resp.status < 300 else 1)
+except Exception:
+    sys.exit(1)
+PYEOF
+}
+
+# 读取上次状态
+LAST_GIT=$(python3 -c "
+import json
+try: print(json.load(open('$STATE_FILE'))['last_git'])
+except: print('')
+" 2>/dev/null)
+LAST_FILES=$(python3 -c "
+import json
+try: print(' '.join(json.load(open('$STATE_FILE'))['seen_files']))
+except: print('')
+" 2>/dev/null)
+
+notify_lines=""
+
+# 1. 检查我的收件箱
+for f in "$AI_DIR/inbox/wang-ergou/"*.md; do
+  [ -f "$f" ] || continue
+  base=$(basename "$f")
+  case " $LAST_FILES " in *" inbox-wang-$base "*) ;; *)
+    notify_lines="$notify_lines"$'\n'"📨 收到新消息：$base"
+    LAST_FILES="$LAST_FILES inbox-wang-$base"
+  ;; esac
+done
+
+# 2. 检查 atomcode/copilot 发件箱
+for ai in atomcode copilot; do
+  for f in "$AI_DIR/outbox/$ai/"*.md; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f")
+    case " $LAST_FILES " in *" outbox-$ai-$base "*) ;; *)
+      notify_lines="$notify_lines"$'\n'"📨 [$ai] 发来：$base"
+      LAST_FILES="$LAST_FILES outbox-$ai-$base"
+    ;; esac
+  done
+done
+
+# 3. 检查新 git 提交
+cd "$ROOT" || exit 0
+CUR_GIT=$(git log --oneline -1 2>/dev/null | awk '{print $1}')
+if [ -n "$CUR_GIT" ] && [ "$CUR_GIT" != "$LAST_GIT" ]; then
+  if [ -n "$LAST_GIT" ]; then
+    new_count=$(git log --oneline "$LAST_GIT..$CUR_GIT" 2>/dev/null | wc -l)
+    [ "$new_count" -gt 0 ] && notify_lines="$notify_lines"$'\n'"📦 新提交 $new_count 个，最新：$(git log --oneline -1)"
+  fi
+  LAST_GIT="$CUR_GIT"
+fi
+
+# 4. 检查 atomcode 是否刚完成一个 turn（有断点）
+if [ -f "$EVENTS" ]; then
+  LAST_EVENT=$(tail -1 "$EVENTS" 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.loads(sys.stdin.readline().strip())
+    evt = d.get('event', {})
+    print(f\"{evt.get('kind','?')}|{evt.get('turn','?')}\")
+except: print('')
+" 2>/dev/null)
+  case "$LAST_EVENT" in
+    turn_end*)
+      # 记录但不每次通知（除非超过 30 分钟没通知过 turn 完成）
+      turn_num=$(echo "$LAST_EVENT" | cut -d'|' -f2)
+      case " $LAST_FILES " in *" atomcode-turnend-$turn_num "*) ;; *)
+        notify_lines="$notify_lines"$'\n'"🤖 atomcode 完成 turn=$turn_num"
+        LAST_FILES="$LAST_FILES atomcode-turnend-$turn_num"
+      ;; esac
+    ;; esac
+fi
+
+# 5. 有内容才通知
+notify_lines=$(printf '%s' "$notify_lines" | sed '/^$/d')
+if [ -n "$notify_lines" ]; then
+  MSG="【三方协作 · 王二狗轮询】$(date '+%H:%M')$notify_lines"
+  if send_dingtalk "$MSG"; then
+    log "已通知: $notify_lines"
+  else
+    log "通知失败（稍后重试）: $notify_lines"
+  fi
+fi
+
+# 保存状态
+python3 - << PYEOF
+import json
+state = {
+    "last_git": "$LAST_GIT",
+    "seen_files": "$LAST_FILES".split(),
+    "last_check": "$(date -Iseconds)"
+}
+json.dump(state, open("$STATE_FILE", "w"), ensure_ascii=False, indent=1)
+PYEOF
+
+exit 0

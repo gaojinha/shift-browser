@@ -1,0 +1,429 @@
+#!/usr/bin/env python3
+"""Agent 看护器 · 统一问题干涉机制
+
+监控 atomcode / copilot 的"异常状态"，发现后写 ALARM 到协调器收件箱
+（复用唤醒链 3 秒叫醒王二狗），由协调器按标准流程干涉。
+
+检测规则：
+  A. atomcode 死循环：同一工具调用（同名+同参）20 分钟内 ≥4 次 → 报警
+     （判重：短调用按前 120 字符；长调用按完整参数哈希——防长脚本"同前缀"误报）
+  B. atomcode 平台警告：事件流出现 "SAME tool call" → 立即报警（权威信号）
+  C. copilot 注入卡死：有注入进程运行中，但会话 events 超 15 分钟未更新 → 报警
+  D. atomcode 错误终态：turn_end 异常 stop（RateLimited/ProviderError/Error/
+     Timeout/ToolLoopDetected）→ 报警。（2026-10-14 补 Timeout：此前
+     "stream idle timeout" 中断漏报，高哥先发现）
+  E. atomcode 长任务：未结束 turn >30 分钟 → 信息型提醒。（2026-10-14 重写：
+     倒序定位 turn 边界；原 500 行窗口致 42 分钟长回合漏检、自上线从未生效）
+  F. atomcode 卡死兜底：events >15 分钟无更新且 turn 未结束 → 报警。
+     （覆盖"流空闲/等待批准"等无事件窗口，2026-10-14 加）
+  G. 执行者空闲待派：某执行者"最后一轮正常结束（或空闲）"且 >3 分钟无新
+     活动 → 报警提醒协调器派单。（2026-10-14 加：高哥两次点"交活了没人
+     管/待命没人派"——把"空窗盯防"从人肉移到机器；当日晚 12→3 收紧：
+     交付即派要求空窗最短化，3 分钟未派单即报）
+     ⤷ 豁免：turn_end stop=RateLimited（额度窗口耗尽，等重置期间不算空窗；
+       恢复由"窗口重置提醒"兜底）
+防抖：同类型报警 30 分钟只报一次（长任务按 turn 去重）；安静时段（23-8）不报。
+"""
+import hashlib
+import json
+import os
+import subprocess
+import time
+
+AI = "/home/gao/shift-browser-tauri/.ai"
+INBOX = os.path.join(AI, "inbox", "wang-ergou")
+STATE = os.path.join(AI, "state", "agent-watchdog.json")
+LOG = os.path.join(AI, "agent-watchdog.log")
+
+ATOM_EVENTS = os.path.expanduser(
+    "~/.atomcode/sessions/b14229cfe011bea8/be6fe953-e84a-4530-8875-b3ef2f27431b.events")
+COPILOT_EVENTS = os.path.expanduser(
+    "~/.copilot/session-state/57271ae1-e3e3-44a0-b583-c2780f8e4fab/events.jsonl")
+
+CHECK_EVERY = 60
+COOLDOWN = 1800                 # 同类报警防抖 30 分钟
+DUP_WINDOW_MS = 20 * 60 * 1000  # 重复检测窗口 20 分钟
+DUP_THRESHOLD = 4               # 同名同参 ≥4 次判定死循环
+IDLE_MINUTES = 3                # 执行者"空闲待派"报警阈值（分钟；2026-10-14 晚 12→3 收紧）
+COPILOT_STALL_MIN = 15          # copilot 注入中停滞阈值（分钟）
+QUIET = (23, 8)
+
+
+def log(msg: str) -> None:
+    with open(LOG, "a", encoding="utf-8") as f:
+        f.write(f"[{time.strftime('%F %T')}] {msg}\n")
+
+
+def load_state() -> dict:
+    try:
+        return json.load(open(STATE, encoding="utf-8"))
+    except Exception:
+        return {"last_alarm": {}, "warn_seqs": []}
+
+
+def save_state(st: dict) -> None:
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    json.dump(st, open(STATE, "w", encoding="utf-8"))
+
+
+def read_tail_lines(path: str, n: int = 500, block_bytes: int = 2 * 1024 * 1024):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            block = min(size, block_bytes)
+            f.seek(size - block)
+            data = f.read().decode("utf-8", errors="ignore")
+            return data.splitlines()[-n:]
+    except Exception:
+        return []
+
+
+def alarm(st: dict, typ: str, title: str, detail: str, cooldown: int = -1) -> bool:
+    # cooldown<=0：不防抖（调用方自行去重，如按 turn 去重的长任务提醒）
+    # 2026-10-14 修复：原签名无 cooldown 参数，check_guards 传参即 TypeError，
+    # 守护互检的报警路径从未真正执行过。
+    now = time.time()
+    if cooldown < 0:
+        cooldown = COOLDOWN
+    if cooldown and now - st["last_alarm"].get(typ, 0) < cooldown:
+        return False
+    h = time.localtime(now).tm_hour
+    if h >= QUIET[0] or h < QUIET[1]:
+        return False
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    fn = os.path.join(INBOX, f"ALARM-{ts}-{typ}.md")
+    with open(fn, "w", encoding="utf-8") as f:
+        f.write(f"""---
+msg_id: ALARM-{ts}
+from: agent-watchdog
+to: wang-ergou
+timestamp: {time.strftime('%F %T')}
+type: alarm
+priority: high
+---
+
+# ⚠️ {title}
+
+{detail}
+
+## 建议动作（标准干涉流程）
+
+- **循环类** → 发"循环脱困提示"：停重复 / 任务降级 / 先交付结论（模板已验证有效）
+- **卡死/中断类** → 重新注入提醒推它继续；仍无响应则进一步处理
+- **报错类** → 诊断（配置/额度我修；涉及高哥的上报）
+- 处理后归档本文件 + 记录 AI_LOG
+""")
+    st["last_alarm"][typ] = now
+    log(f"报警 [{typ}]: {title}")
+    return True
+
+
+def check_atomcode(st: dict) -> None:
+    lines = read_tail_lines(ATOM_EVENTS, 500)
+    if not lines:
+        return
+    now_ms = time.time() * 1000
+
+    # B. 平台警告（新出现才报）
+    for line in lines[-200:]:
+        if "SAME tool call" in line:
+            try:
+                seq = json.loads(line).get("seq", 0)
+            except Exception:
+                continue
+            if seq and seq not in st.get("warn_seqs", []):
+                st["warn_seqs"] = (st.get("warn_seqs", []) + [seq])[-50:]
+                alarm(st, "atom-loop-warn", "atomcode：平台检测到死循环",
+                      f"事件 seq={seq} 含平台警告「You have issued the SAME tool call」——"
+                      "模型在反复同一调用。\n\n建议：发循环脱困提示（停重复/降级/先交付）。")
+                return
+
+    # A. 重复调用统计（同名+同参）
+    recent = {}
+    for line in lines:
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        ev = d.get("event", {})
+        if ev.get("kind") == "tool_started" and d.get("at", 0) > now_ms - DUP_WINDOW_MS:
+            call = ev.get("call", {})
+            name = call.get("name", "")
+            # 等待/查询/读取类工具不算死循环证据
+            if name in ("bash_poll", "read", "read_bash", "read_file", "todowrite"):
+                continue
+            raw = str(call.get("arguments", ""))
+            if not raw.strip():
+                continue
+            # 验证类 bash 命令不算死循环证据：调试"跑→改→再跑"节奏会重复同一
+            # test/check 命令（2026-10-14 第 3 例同类误报后加：cargo test/check/
+            # clippy/fmt、npm test/run、npx vitest）
+            if name == "bash" and any(
+                tok in raw
+                for tok in ("cargo test", "cargo check", "cargo clippy",
+                            "cargo fmt", "npm test", "npm run", "npx vitest")
+            ):
+                continue
+            # 判重键：短调用按前 120 字符（兼容旧行为，可抓"带动态尾巴"的短循环）；
+            # 长调用（多为脚本/大段参数）按完整参数哈希——只有真·一模一样才计数，
+            # 防止"同前缀、内容各异"的长脚本（如 playwright 验证迭代）被误报为死循环。
+            if len(raw) <= 240:
+                key = f"{name}|{raw[:120]}"
+            else:
+                key = f"{name}|#{hashlib.sha1(raw.encode('utf-8', 'ignore')).hexdigest()}"
+            item = recent.setdefault(key, {"count": 0, "name": name, "raw": raw})
+            item["count"] += 1
+    if recent:
+        worst = max(recent.values(), key=lambda v: v["count"])
+        if worst["count"] >= DUP_THRESHOLD:
+            alarm(st, "atom-dup-call", "atomcode 疑似死循环（同名同参反复调用）",
+                  f"近 20 分钟内同名同参的调用出现 **{worst['count']} 次**：\n\n"
+                  f"```\n{worst['name']}|{worst['raw'][:300]}\n```\n\n建议：发循环脱困提示。")
+
+
+ATOM_ERR_PATTERNS = ["rate_limit_paused", "RateLimited", "ProviderError",
+                     "余额不足", "额度已用完", "insufficient", "quota", "402", "429"]
+
+def check_atomcode_errors(st: dict) -> None:
+    """检测 atomcode 额度/限流/错误退出类事件（新出现才报）。
+
+    stop 异常表（2026-10-14 补 Timeout/ToolLoopDetected：曾漏 "stream idle
+    timeout" 中断）：RateLimited / ProviderError / Error / Timeout /
+    ToolLoopDetected。正常结束（Stopped/EndTurn）与用户主动（Cancelled）不报。
+    """
+    lines = read_tail_lines(ATOM_EVENTS, 400)
+    if not lines:
+        return
+    seen = set(st.get("seen_err_seqs", []))
+    new_hit = None
+    for line in lines:
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        seq = d.get("seq", 0)
+        if seq in seen:
+            continue
+        ev = d.get("event", {})
+        kind = ev.get("kind", "")
+        stop = str(ev.get("stop") or "")
+        # 结构化匹配；"已报集合"去重（不依赖水位单调——防"快扫漏网"）
+        if kind == "rate_limit_paused" or stop in (
+                "RateLimited", "ProviderError", "Error", "Timeout", "ToolLoopDetected"):
+            seen.add(seq)
+            new_hit = d
+    st["seen_err_seqs"] = list(seen)[-300:]
+    if new_hit:
+        ev = new_hit.get("event", {})
+        detail = str(ev.get("server_message") or ev.get("error") or ev.get("stop") or ev.get("kind"))[:220]
+        alarm(st, "atom-err", "atomcode 额度/限流/错误事件",
+              "新事件 seq=%s：\n\n> %s\n\n建议：检查可用档（agnes / openrouter-free / AtomGit 窗口），必要时切换（/live/provider 或 atomcode-send.sh）；窗口限额则记录恢复时间。" % (new_hit.get("seq"), detail))
+
+
+def check_guards(st: dict) -> None:
+    """守护互检：姊妹守护缺失（连续两轮）→ 尝试拉起 + 报告。"""
+    for pat, script in (("[s]ilence-watchdog", "silence-watchdog.py"),
+                        ("[c]opilot-live-feed", "copilot-live-feed.py")):
+        key = "miss_" + script
+        try:
+            out = subprocess.run(["pgrep", "-f", pat], capture_output=True, text=True, timeout=5)
+            alive = bool(out.stdout.strip())
+        except Exception:
+            alive = True
+        if alive:
+            st[key] = 0
+            continue
+        cnt = st.get(key, 0) + 1
+        st[key] = cnt
+        if cnt == 2:
+            try:
+                subprocess.Popen(["python3", os.path.join(AI, script)],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+            except Exception:
+                pass
+            alarm(st, "guard-miss", "守护缺失（已尝试拉起）",
+                  "%s 连续两轮未运行，已尝试重新拉起，请核实。" % script, cooldown=300)
+
+
+def latest_turn_state(lines: list):
+    """从尾部倒序找最近一条 turn 事件，推断 turn 是否进行中。
+
+    返回 (turn, at_ms)：最近 turn_start 之后尚无 turn_end（进行中）；
+    返回 None：最近一条 turn 事件是 turn_end，或未找到任何 turn 事件。
+    2026-10-14 修复：原实现只看尾部 400 行内是否存在 turn_start——长回合的
+    turn_start 早已被顶出窗口，长任务检测自上线以来从未生效（42 分钟回合漏检）。
+    """
+    for line in reversed(lines):
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        ev = d.get("event", {})
+        kind = ev.get("kind")
+        if kind == "turn_end":
+            return None
+        if kind == "turn_start":
+            return ev.get("turn"), d.get("at", 0)
+    return None
+
+
+def check_long_tasks(st: dict) -> None:
+    """atomcode 长任务提醒：未结束 turn 运行 >30 分钟（信息型，每 turn 一次）。"""
+    lines = read_tail_lines(ATOM_EVENTS, 40000, 4 * 1024 * 1024)
+    state = latest_turn_state(lines)
+    if not state:
+        return
+    turn, at = state
+    if not at:
+        return
+    mins = (time.time() - at / 1000) / 60
+    done = st.get("long_reported", [])
+    if mins > 30 and turn not in done:
+        alarm(st, "atom-long-task", "atomcode 长任务提醒（>30 分钟）",
+              "turn=%s 已运行约 %d 分钟未结束——若为预期长任务（如审计扫描）可忽略；"
+              "持续无进展请按卡死流程检查。" % (turn, int(mins)),
+              cooldown=0)
+        done.append(turn)
+        st["long_reported"] = done[-20:]
+
+
+def check_atomcode_stall(st: dict) -> None:
+    """atomcode 卡死兜底：events 文件 >15 分钟无更新，且最近 turn 未结束。
+
+    背景（2026-10-14）：流空闲/等待响应阶段不产生事件，错误终态检测只能抓
+    "已成文的结束事件"；本检测覆盖"进行中卡死、平台尚未判超时"的窗口。
+    可能场景：模型无响应 / 等待人工批准（结论供协调器判断）。
+    """
+    state = latest_turn_state(read_tail_lines(ATOM_EVENTS, 40000, 4 * 1024 * 1024))
+    if not state:
+        return
+    turn, _ = state
+    try:
+        age = time.time() - os.path.getmtime(ATOM_EVENTS)
+    except OSError:
+        return
+    if age > 15 * 60:
+        alarm(st, "atom-stall", "atomcode 疑似卡死（无事件 >15 分钟）",
+              "turn=%s 未结束，且 events 已约 %d 分钟无更新（模型无响应/等待批准等）。\n\n"
+              "建议：检查会话状态；必要时发『继续』或重注入。" % (turn, int(age // 60)),
+              cooldown=1800)
+
+
+def idle_exempt(who: str) -> bool:
+    """休整豁免（2026-10-14 晚）：交付链收官/储备空期，协调器置
+    state/idle-exempt.json（如 {"atomcode": true}）避免定期"空闲待派"
+    噪音；清标记即恢复监测。"""
+    try:
+        p = os.path.join(os.path.dirname(STATE), "idle-exempt.json")
+        with open(p, encoding="utf-8") as f:
+            return bool(json.load(f).get(who))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def check_idle_agents(st: dict) -> None:
+    """执行者空闲待派：最后一轮结束/无活动超阈值 → 报警提醒协调器派单。
+
+    2026-10-14 加：高哥两次点"atom 交活了没人管"。此前监控只覆盖
+    "出错/卡死/循环"，"安静地待命"没有信号——本检查补上该盲区。
+    """
+    # atomcode：最后事件为 turn_end 且 events 超阈值未更新
+    # （2026-10-14：turn_end stop=RateLimited 时豁免——额度窗口未重置前无法工作，
+    #   恢复由"窗口重置提醒"兜底，避免限流期间反复误报"空闲待派"）
+    try:
+        last_kind = None
+        last_stop = ""
+        for line in reversed(read_tail_lines(ATOM_EVENTS, 30)):
+            try:
+                d = json.loads(line)
+            except Exception:  # noqa: BLE001
+                continue
+            ev = d.get("event", {})
+            last_kind = ev.get("kind")
+            last_stop = str(ev.get("stop") or "")
+            break
+        age = time.time() - os.path.getmtime(ATOM_EVENTS)
+        rate_limited = last_kind == "turn_end" and last_stop == "RateLimited"
+        if last_kind == "turn_end" and not rate_limited and not idle_exempt("atomcode") and age > IDLE_MINUTES * 60:
+            alarm(st, "atom-idle", "atomcode 空闲待派（>%d 分钟）" % IDLE_MINUTES,
+                  "atomcode 最后一轮已结束、约 %d 分钟无新活动——立即处理："
+                  "①查 outbox/events 是否交付（含收尾三件套：关口/提交/回执）"
+                  "②从储备池（TASK_QUEUE）派下一棒。" % int(age // 60))
+    except Exception:  # noqa: BLE001
+        pass
+    # copilot：无注入进程 且 events 超阈值未更新
+    # （2026-10-14：最后事件为 session.shutdown 时豁免——会话已因故停摆
+    #   （如档位耗尽），属"不可用"而非"空闲待派"，恢复由协调器人工盯）
+    try:
+        out = subprocess.run(["pgrep", "-f", "resume=57271ae1"],
+                             capture_output=True, text=True, timeout=5)
+        if not out.stdout.strip():
+            tail_kind = ""
+            for line in reversed(read_tail_lines(COPILOT_EVENTS, 30)):
+                try:
+                    d = json.loads(line)
+                except Exception:  # noqa: BLE001
+                    continue
+                tail_kind = str(d.get("type") or "")
+                break
+            if tail_kind == "session.shutdown":
+                return
+            age = time.time() - os.path.getmtime(COPILOT_EVENTS)
+            if age > IDLE_MINUTES * 60 and not idle_exempt("copilot"):
+                alarm(st, "copilot-idle", "copilot 空闲待派（>%d 分钟）" % IDLE_MINUTES,
+                      "copilot 约 %d 分钟无新活动且无注入进程。"
+                      "若无进行中任务，请尽快派下一棒。" % int(age // 60))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def check_copilot(st: dict) -> None:
+    try:
+        out = subprocess.run(["pgrep", "-f", "resume=57271ae1"],
+                             capture_output=True, text=True, timeout=5)
+        injecting = bool(out.stdout.strip())
+    except Exception:
+        injecting = False
+    if not injecting:
+        return
+    try:
+        age = time.time() - os.path.getmtime(COPILOT_EVENTS)
+    except OSError:
+        return
+    if age > COPILOT_STALL_MIN * 60:
+        alarm(st, "copilot-stall", "copilot 注入疑似卡死",
+              f"有注入进程在跑，但会话事件已 **{int(age // 60)} 分钟**未更新"
+              f"（阈值 {COPILOT_STALL_MIN} 分钟）。\n\n建议：检查注入进程/会话状态，必要时终止并重注入。")
+
+
+def main() -> None:
+    log("agent 看护器启动（atomcode 循环检测 / copilot 注入卡死检测）")
+    st = load_state()
+    if "seen_err_seqs" not in st:
+        init = set()
+        for line in read_tail_lines(ATOM_EVENTS, 400):
+            try:
+                init.add(json.loads(line).get("seq", 0))
+            except Exception:
+                pass
+        st["seen_err_seqs"] = list(init)[-300:]
+        log("错误检测首跑：登记 %d 个既存 seq" % len(init))
+    while True:
+        time.sleep(CHECK_EVERY)
+        try:
+            check_atomcode(st)
+            check_atomcode_errors(st)
+            check_atomcode_stall(st)
+            check_guards(st)
+            check_long_tasks(st)
+            check_idle_agents(st)
+            check_copilot(st)
+        except Exception as e:  # noqa: BLE001
+            log(f"异常: {type(e).__name__}: {e}")
+        save_state(st)
+
+
+if __name__ == "__main__":
+    main()

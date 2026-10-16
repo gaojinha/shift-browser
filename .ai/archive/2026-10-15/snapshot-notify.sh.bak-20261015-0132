@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# 二狗快报 · 三方协作定时快照（cron 每 30 分钟）
+# 目的：让高哥知道系统活着、在干什么——"没消息≠死机"
+# 规则：
+#   - 有活动（新提交/新消息/AI 活动）→ 发快照
+#   - 无活动 → 距上次存活信号超 2 小时才发"待机正常"
+#   - 安静时段（23:00-08:00）→ 只记录不发送
+set -u
+
+ROOT="/home/gao/shift-browser-tauri"
+AI_DIR="$ROOT/.ai"
+LOG="$AI_DIR/snapshot.log"
+STATE="$AI_DIR/state/snapshot-state.json"
+EVENTS="$HOME/.atomcode/sessions/b14229cfe011bea8/be6fe953-e84a-4530-8875-b3ef2f27431b.events"
+CONTROL_URL="http://127.0.0.1:4097/send"
+TARGET="user:0350023946111258513"
+
+NOW=$(date +%s)
+NOW_H=$(date +%H)
+mkdir -p "$AI_DIR/state"
+touch "$LOG"
+
+log() { echo "[$(date '+%F %T')] $*" >> "$LOG"; }
+
+send_dingtalk() {
+  python3 - "$1" << 'PYEOF' 2>/dev/null
+import json, sys, urllib.request
+text = sys.argv[1]
+body = json.dumps({"target": "user:0350023946111258513", "text": text}).encode("utf-8")
+req = urllib.request.Request("http://127.0.0.1:4097/send", data=body,
+                             headers={"Content-Type": "application/json"}, method="POST")
+try:
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        sys.exit(0 if 200 <= resp.status < 300 else 1)
+except Exception:
+    sys.exit(1)
+PYEOF
+}
+
+# ===== 数据收集 =====
+cd "$ROOT" || exit 0
+
+# 1. 近 35 分钟新提交
+RECENT_COMMITS=$(git log --since="35 minutes ago" --oneline 2>/dev/null | wc -l)
+LAST_COMMIT=$(git log --oneline -1 2>/dev/null | cut -c1-60)
+
+# 2. .ai 近 35 分钟新消息
+RECENT_MSGS=$(find "$AI_DIR/inbox" "$AI_DIR/outbox" -name "*.md" -newermt "35 minutes ago" 2>/dev/null | wc -l)
+PENDING_INBOX=$(ls "$AI_DIR/inbox/wang-ergou/"*.md 2>/dev/null | wc -l)
+
+# 3. atomcode 活动（events 文件年龄）
+if [ -f "$EVENTS" ]; then
+  EV_AGE=$(( NOW - $(stat -c %Y "$EVENTS") ))
+  if [ "$EV_AGE" -lt 600 ]; then AC="🔥活动中"
+  elif [ "$EV_AGE" -lt 3600 ]; then AC="💤近期活跃"
+  else AC="😴安静"; fi
+else AC="❓无数据"; fi
+
+# 3b. copilot 活动（专用会话 events.jsonl 年龄）
+COPILOT_EV="$HOME/.copilot/session-state/57271ae1-e3e3-44a0-b583-c2780f8e4fab/events.jsonl"
+CP_AGE=999999
+if [ -f "$COPILOT_EV" ]; then
+  CP_AGE=$(( NOW - $(stat -c %Y "$COPILOT_EV") ))
+  if [ "$CP_AGE" -lt 300 ]; then CC="🔥工作中"
+  elif [ "$CP_AGE" -lt 1800 ]; then CC="💤近期活跃"
+  else CC="😴待命"; fi
+else CC="❓无数据"; fi
+
+# 4. 上次快照状态
+LAST_SNAP_TS=$(python3 -c "
+import json
+try: print(json.load(open('$STATE'))['last_snap'])
+except: print(0)
+" 2>/dev/null || echo 0)
+LAST_ACTIVE_SNAP=$(python3 -c "
+import json
+try: print(json.load(open('$STATE'))['last_active_snap'])
+except: print(0)
+" 2>/dev/null || echo 0)
+
+# ===== 判断 =====
+HAS_ACTIVITY=0
+[ "$RECENT_COMMITS" -gt 0 ] && HAS_ACTIVITY=1
+[ "$RECENT_MSGS" -gt 0 ] && HAS_ACTIVITY=1
+[ "$EV_AGE" -lt 1200 ] && HAS_ACTIVITY=1 2>/dev/null || true
+[ "$CP_AGE" -lt 1200 ] && HAS_ACTIVITY=1 2>/dev/null || true
+
+# 安静时段（23:00-07:59）：只记录
+if [ "$NOW_H" -ge 23 ] || [ "$NOW_H" -lt 8 ]; then
+  log "安静时段，跳过（活动=$HAS_ACTIVITY 提交=$RECENT_COMMITS 消息=$RECENT_MSGS）"
+  exit 0
+fi
+
+# 无活动：2 小时内发过一次存活就跳过
+if [ "$HAS_ACTIVITY" -eq 0 ]; then
+  if [ $(( NOW - LAST_SNAP_TS )) -lt 7200 ]; then
+    log "无活动且 2h 内已发过，跳过"
+    exit 0
+  fi
+fi
+
+# ===== 生成快照 =====
+TS=$(date '+%H:%M')
+if [ "$HAS_ACTIVITY" -eq 1 ]; then
+  SNAP="📊 二狗快报 $TS
+· 新提交：$RECENT_COMMITS 条（最新：$LAST_COMMIT）
+· 新消息：$RECENT_MSGS 条 | 待我处理：$PENDING_INBOX 条
+· atomcode：$AC | copilot：$CC
+· 系统：正常"
+else
+  SNAP="😴 二狗待机 $TS
+· 近 35 分钟无新活动（系统正常待命）
+· 最新提交：$LAST_COMMIT"
+fi
+
+# ===== 发送 =====
+if send_dingtalk "$SNAP"; then
+  log "已发送快照: 活动=$HAS_ACTIVITY"
+else
+  log "发送失败"
+fi
+
+# 保存状态
+python3 - "$STATE" "$NOW" "$HAS_ACTIVITY" << 'PYEOF'
+import json, sys
+state_file, now, has = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+try:
+    d = json.load(open(state_file))
+except Exception:
+    d = {}
+d['last_snap'] = now
+if has:
+    d['last_active_snap'] = now
+json.dump(d, open(state_file, 'w'))
+PYEOF
+
+exit 0

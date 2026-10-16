@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# 给 atomcode 会话发消息（自动取 token；用于干涉/提示）
+# 用法: bash .ai/atomcode-send.sh "消息内容"
+set -u
+MSG="${1:?用法: atomcode-send.sh \"消息\"}"
+TOK=$(grep -a -o 'cce4ddc0[a-zA-Z0-9_-]\{24\}' ~/.local/share/opencode/log/opencode.log 2>/dev/null | sort -u | head -1)
+if [ ${#TOK} -ne 32 ]; then
+  TOK=$(strings ~/.local/share/opencode/opencode.db 2>/dev/null | grep -o "cce4ddc0[a-zA-Z0-9_-]\{24\}" | sort -u | head -1)
+fi
+if [ ${#TOK} -ne 32 ]; then
+  echo "❌ token 不可用（可能已失效，需高哥重跑 /webui）"; exit 1
+fi
+TOK="$TOK" MSG="$MSG" python3 << 'PYEOF'
+import json, os, urllib.request
+tok, msg = os.environ["TOK"], os.environ["MSG"]
+body = json.dumps({"message": msg, "session_id": "be6fe953-e84a-4530-8875-b3ef2f27431b"}).encode("utf-8")
+req = urllib.request.Request("http://127.0.0.1:13459/live/message", data=body,
+    headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json",
+             "X-AtomCode-Client": "cli"}, method="POST")
+try:
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        print("✅ 已发送:", resp.read().decode()[:220])
+except Exception as e:
+    print("❌ 发送失败:", type(e).__name__, str(e)[:150])
+PYEOF

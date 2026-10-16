@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# 值班巡检 tick v4 —— 持续造活模式（2026-10-15 增强）
+# 核心：协调器持续往任务池加活，执行者主动领
+set -u
+AI_DIR="/home/gao/shift-browser-tauri/.ai"
+LOG="$AI_DIR/duty.log"
+TASK_POOL="$AI_DIR/TASK_POOL.md"
+cd /home/gao/shift-browser-tauri || exit 1
+export PATH="$HOME/.opencode/bin:$PATH"
+
+TS=$(date '+%F %T')
+echo "[$TS] duty tick v4 开始" >> "$LOG"
+
+read -r -d '' PROMPT << 'EOF' || true
+【值班巡检 v4 · 持续造活模式】你是王二狗（协调器）。
+
+## 核心职责
+1. **持续造活**：从项目里找活往任务池加（测试补课、文档、工具链、技术债）
+2. **维护任务池**：拆包、排序、标记状态
+3. **验收回执**：抽验 + 关口检查
+4. **升级阻塞**：执行者卡住 >30 分钟 → 报高哥
+
+## 必做检查
+1. 读 TASK_POOL.md 了解当前状态
+2. 检查 outbox/ 是否有新回执 → 验收 → 更新任务池
+3. 检查执行者是否空闲（>15 分钟无活动）→ 提醒领任务
+4. **造活**：从以下方向找新任务加入任务池：
+   - 测试补课（哪个模块缺单测？）
+   - 文档缺口（README/ARCH/CHANGELOG 落后于代码？）
+   - 工具链（有没有重复劳动可以脚本化？）
+   - 技术债（TODO/GH issues 里的挂账项）
+   - 质量扫描（clippy/vitest 有没有可优化的点？）
+
+## 输出格式（极简，≤15 行）
+巡检完毕（HH:MM）：
+1. atomcode：执行中/空闲/阻塞（当前任务）
+2. copilot：执行中/空闲/阻塞（当前任务）
+3. 造活：新增X个任务（C-x/F-x）
+4. 本次动作：验收了X / 升级了Y / 维护了任务池
+5. 阻塞：有/无
+
+已记账：TASK_POOL / AI_LOG / duty.log。
+【打扰高哥】有/无（原因：...）
+EOF
+
+DUTY_SESSION_FILE="$AI_DIR/state/duty-session.txt"
+if [ -f "$DUTY_SESSION_FILE" ] && [ -s "$DUTY_SESSION_FILE" ]; then
+  SID=$(cat "$DUTY_SESSION_FILE")
+  OUT=$(timeout 600 opencode run --session "$SID" --model agnes/agnes-2.5-flash --auto "$PROMPT" 2>&1)
+  RC=$?
+else
+  OUT=$(timeout 600 opencode run --model agnes/agnes-2.5-flash --auto --title "值班巡检v4" "$PROMPT" 2>&1)
+  RC=$?
+fi
+
+echo "[$TS] 完成 rc=$RC" >> "$LOG"
+echo "$OUT" | tail -8 >> "$LOG"

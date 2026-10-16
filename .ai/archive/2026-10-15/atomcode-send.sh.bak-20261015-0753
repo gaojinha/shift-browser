@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# 给 atomcode 会话发消息（自动取 token + 自动跟随当前活跃会话；用于干涉/提示）
+# 用法: bash .ai/atomcode-send.sh "消息内容"
+#       会话覆盖: ATOMCODE_SESSION_ID=<会话id> bash .ai/atomcode-send.sh "消息"
+set -u
+
+# 会话 ID（2026-10-14 修复：换会话后原硬编码会失效；自动跟随最新活跃会话）
+SESS_BASE="$HOME/.atomcode/sessions/b14229cfe011bea8"
+SESSION_ID="${ATOMCODE_SESSION_ID:-$(ls -t "$SESS_BASE"/*.events 2>/dev/null | head -1 | xargs -r -n1 basename 2>/dev/null | sed 's/\.events$//')}"
+[ -n "$SESSION_ID" ] || SESSION_ID="f1042b30-d775-421d-a399-13dd9a73c2b1"
+MSG="${1:?用法: atomcode-send.sh \"消息\"}"
+TOK=$(grep -a -o 'cce4ddc0[a-zA-Z0-9_-]\{24\}' ~/.local/share/opencode/log/opencode.log 2>/dev/null | sort -u | head -1)
+if [ ${#TOK} -ne 32 ]; then
+  TOK=$(strings ~/.local/share/opencode/opencode.db 2>/dev/null | grep -o "cce4ddc0[a-zA-Z0-9_-]\{24\}" | sort -u | head -1)
+fi
+if [ ${#TOK} -ne 32 ]; then
+  echo "❌ token 不可用（可能已失效，需高哥重跑 /webui）"; exit 1
+fi
+TOK="$TOK" MSG="$MSG" SESSION_ID="$SESSION_ID" python3 << 'PYEOF'
+import json, os, urllib.request
+tok, msg = os.environ["TOK"], os.environ["MSG"]
+body = json.dumps({"message": msg, "session_id": os.environ["SESSION_ID"]}).encode("utf-8")
+req = urllib.request.Request("http://127.0.0.1:13459/live/message", data=body,
+    headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json",
+             "X-AtomCode-Client": "cli"}, method="POST")
+try:
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        print("✅ 已发送:", resp.read().decode()[:220])
+except Exception as e:
+    print("❌ 发送失败:", type(e).__name__, str(e)[:150])
+PYEOF

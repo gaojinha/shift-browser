@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""Agent 看护器 · 统一问题干涉机制
+
+监控 atomcode / copilot 的"异常状态"，发现后写 ALARM 到协调器收件箱
+（复用唤醒链 3 秒叫醒王二狗），由协调器按标准流程干涉。
+
+检测规则：
+  A. atomcode 死循环：同一工具调用（同名+同参）20 分钟内 ≥4 次 → 报警
+  B. atomcode 平台警告：事件流出现 "SAME tool call" → 立即报警（权威信号）
+  C. copilot 注入卡死：有注入进程运行中，但会话 events 超 15 分钟未更新 → 报警
+防抖：同类型报警 30 分钟只报一次；安静时段（23-8）不报。
+"""
+import json
+import os
+import subprocess
+import time
+
+AI = "/home/gao/shift-browser-tauri/.ai"
+INBOX = os.path.join(AI, "inbox", "wang-ergou")
+STATE = os.path.join(AI, "state", "agent-watchdog.json")
+LOG = os.path.join(AI, "agent-watchdog.log")
+
+ATOM_EVENTS = os.path.expanduser(
+    "~/.atomcode/sessions/b14229cfe011bea8/be6fe953-e84a-4530-8875-b3ef2f27431b.events")
+COPILOT_EVENTS = os.path.expanduser(
+    "~/.copilot/session-state/57271ae1-e3e3-44a0-b583-c2780f8e4fab/events.jsonl")
+
+CHECK_EVERY = 60
+COOLDOWN = 1800                 # 同类报警防抖 30 分钟
+DUP_WINDOW_MS = 20 * 60 * 1000  # 重复检测窗口 20 分钟
+DUP_THRESHOLD = 4               # 同名同参 ≥4 次判定死循环
+COPILOT_STALL_MIN = 15          # copilot 注入中停滞阈值（分钟）
+QUIET = (23, 8)
+
+
+def log(msg: str) -> None:
+    with open(LOG, "a", encoding="utf-8") as f:
+        f.write(f"[{time.strftime('%F %T')}] {msg}\n")
+
+
+def load_state() -> dict:
+    try:
+        return json.load(open(STATE, encoding="utf-8"))
+    except Exception:
+        return {"last_alarm": {}, "warn_seqs": []}
+
+
+def save_state(st: dict) -> None:
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    json.dump(st, open(STATE, "w", encoding="utf-8"))
+
+
+def read_tail_lines(path: str, n: int = 500):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            block = min(size, 2 * 1024 * 1024)
+            f.seek(size - block)
+            data = f.read().decode("utf-8", errors="ignore")
+            return data.splitlines()[-n:]
+    except Exception:
+        return []
+
+
+def alarm(st: dict, typ: str, title: str, detail: str) -> bool:
+    now = time.time()
+    if now - st["last_alarm"].get(typ, 0) < COOLDOWN:
+        return False
+    h = time.localtime(now).tm_hour
+    if h >= QUIET[0] or h < QUIET[1]:
+        return False
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    fn = os.path.join(INBOX, f"ALARM-{ts}-{typ}.md")
+    with open(fn, "w", encoding="utf-8") as f:
+        f.write(f"""---
+msg_id: ALARM-{ts}
+from: agent-watchdog
+to: wang-ergou
+timestamp: {time.strftime('%F %T')}
+type: alarm
+priority: high
+---
+
+# ⚠️ {title}
+
+{detail}
+
+## 建议动作（标准干涉流程）
+
+- **循环类** → 发"循环脱困提示"：停重复 / 任务降级 / 先交付结论（模板已验证有效）
+- **卡死/中断类** → 重新注入提醒推它继续；仍无响应则进一步处理
+- **报错类** → 诊断（配置/额度我修；涉及高哥的上报）
+- 处理后归档本文件 + 记录 AI_LOG
+""")
+    st["last_alarm"][typ] = now
+    log(f"报警 [{typ}]: {title}")
+    return True
+
+
+def check_atomcode(st: dict) -> None:
+    lines = read_tail_lines(ATOM_EVENTS, 500)
+    if not lines:
+        return
+    now_ms = time.time() * 1000
+
+    # B. 平台警告（新出现才报）
+    for line in lines[-200:]:
+        if "SAME tool call" in line:
+            try:
+                seq = json.loads(line).get("seq", 0)
+            except Exception:
+                continue
+            if seq and seq not in st.get("warn_seqs", []):
+                st["warn_seqs"] = (st.get("warn_seqs", []) + [seq])[-50:]
+                alarm(st, "atom-loop-warn", "atomcode：平台检测到死循环",
+                      f"事件 seq={seq} 含平台警告「You have issued the SAME tool call」——"
+                      "模型在反复同一调用。\n\n建议：发循环脱困提示（停重复/降级/先交付）。")
+                return
+
+    # A. 重复调用统计（同名+同参）
+    recent = {}
+    for line in lines:
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        ev = d.get("event", {})
+        if ev.get("kind") == "tool_started" and d.get("at", 0) > now_ms - DUP_WINDOW_MS:
+            call = ev.get("call", {})
+            name = call.get("name", "")
+            # 等待/查询类工具不算死循环证据
+            if name in ("bash_poll", "read", "read_bash", "todowrite"):
+                continue
+            key = f"{name}|{str(call.get('arguments', ''))[:120]}"
+            if key.strip("|"):
+                recent[key] = recent.get(key, 0) + 1
+    if recent:
+        worst = max(recent.items(), key=lambda kv: kv[1])
+        if worst[1] >= DUP_THRESHOLD:
+            alarm(st, "atom-dup-call", "atomcode 疑似死循环（同名同参反复调用）",
+                  f"近 20 分钟内同一工具调用出现 **{worst[1]} 次**：\n\n```\n{worst[0]}\n```\n\n建议：发循环脱困提示。")
+
+
+def check_copilot(st: dict) -> None:
+    try:
+        out = subprocess.run(["pgrep", "-f", "resume=57271ae1"],
+                             capture_output=True, text=True, timeout=5)
+        injecting = bool(out.stdout.strip())
+    except Exception:
+        injecting = False
+    if not injecting:
+        return
+    try:
+        age = time.time() - os.path.getmtime(COPILOT_EVENTS)
+    except OSError:
+        return
+    if age > COPILOT_STALL_MIN * 60:
+        alarm(st, "copilot-stall", "copilot 注入疑似卡死",
+              f"有注入进程在跑，但会话事件已 **{int(age // 60)} 分钟**未更新"
+              f"（阈值 {COPILOT_STALL_MIN} 分钟）。\n\n建议：检查注入进程/会话状态，必要时终止并重注入。")
+
+
+def main() -> None:
+    log("agent 看护器启动（atomcode 循环检测 / copilot 注入卡死检测）")
+    st = load_state()
+    while True:
+        time.sleep(CHECK_EVERY)
+        try:
+            check_atomcode(st)
+            check_copilot(st)
+        except Exception as e:  # noqa: BLE001
+            log(f"异常: {type(e).__name__}: {e}")
+        save_state(st)
+
+
+if __name__ == "__main__":
+    main()

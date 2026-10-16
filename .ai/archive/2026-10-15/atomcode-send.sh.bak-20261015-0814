@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# 给 atomcode 会话发消息 v3（2026-10-15 改造：daemon 直连通道）
+# 用法: bash .ai/atomcode-send.sh "消息内容"
+#
+# v3 机制（2026-10-15 07:50 二狗改造，背景：atomcode 重启后内嵌 webui 13459 不再常驻）：
+#   主通道 = daemon 13456 /live/message
+#     · token 读 ~/.atomcode/daemon-13456.json（稳定本地文件，daemon 30 分钟 idle 自动重启会重写）
+#     · 不带 session_id —— 消息进入 live runtime 当前绑定的会话（换会话/重启自动跟随）
+#   回退通道 = 旧内嵌 webui 13459（若在监听；token 从 opencode 日志/db 提取，保留原逻辑）
+set -u
+MSG="${1:?用法: atomcode-send.sh \"消息\"}"
+
+# ---------- 主通道：daemon 13456 ----------
+DTOK=$(python3 -c "import json; print(json.load(open('$HOME/.atomcode/daemon-13456.json'))['token'])" 2>/dev/null || true)
+if [ ${#DTOK} -eq 32 ]; then
+  RES=$(DTOK="$DTOK" MSG="$MSG" python3 << 'PYEOF'
+import json, os, urllib.request, sys
+tok, msg = os.environ["DTOK"], os.environ["MSG"]
+body = json.dumps({"message": msg}).encode("utf-8")
+req = urllib.request.Request("http://127.0.0.1:13456/live/message", data=body,
+    headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json",
+             "X-AtomCode-Client": "cli"}, method="POST")
+try:
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        print("✅ [daemon] 已发送:", resp.read().decode()[:220])
+        sys.exit(0)
+except Exception as e:
+    print("⚠️ [daemon] 发送失败:", type(e).__name__, str(e)[:180])
+    sys.exit(1)
+PYEOF
+)
+  RC=$?
+  echo "$RES"
+  if [ $RC -eq 0 ]; then exit 0; fi
+  echo "→ 回退旧通道（13459）…"
+else
+  echo "⚠️ daemon token 不可得，回退旧通道（13459）…"
+fi
+
+# ---------- 回退通道：内嵌 webui 13459（旧逻辑保留） ----------
+TOK=$(grep -a -o 'cce4ddc0[a-zA-Z0-9_-]\{24\}' ~/.local/share/opencode/log/opencode.log 2>/dev/null | sort -u | head -1)
+if [ ${#TOK} -ne 32 ]; then
+  TOK=$(strings ~/.local/share/opencode/opencode.db 2>/dev/null | grep -o "cce4ddc0[a-zA-Z0-9_-]\{24\}" | sort -u | head -1)
+fi
+if [ ${#TOK} -ne 32 ]; then
+  echo "❌ 两条通道均不可用（daemon 失败 + 旧 token 不可得）"; exit 1
+fi
+TOK="$TOK" MSG="$MSG" python3 << 'PYEOF'
+import json, os, urllib.request
+tok, msg = os.environ["TOK"], os.environ["MSG"]
+body = json.dumps({"message": msg}).encode("utf-8")
+req = urllib.request.Request("http://127.0.0.1:13459/live/message", data=body,
+    headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json",
+             "X-AtomCode-Client": "cli"}, method="POST")
+try:
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        print("✅ [13459] 已发送:", resp.read().decode()[:220])
+except Exception as e:
+    print("❌ [13459] 发送失败:", type(e).__name__, str(e)[:150])
+PYEOF

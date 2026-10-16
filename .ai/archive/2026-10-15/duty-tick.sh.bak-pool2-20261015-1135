@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# 值班巡检 tick v3 —— 任务池模式（2026-10-15 增强）
+# 核心规则：执行者主动领任务，协调器只验收 + 升级阻塞
+set -u
+AI_DIR="/home/gao/shift-browser-tauri/.ai"
+LOG="$AI_DIR/duty.log"
+TASK_POOL="$AI_DIR/TASK_POOL.md"
+cd /home/gao/shift-browser-tauri || exit 1
+export PATH="$HOME/.opencode/bin:$PATH"
+
+TS=$(date '+%F %T')
+echo "[$TS] duty tick v3 开始" >> "$LOG"
+
+read -r -d '' PROMPT << 'EOF' || true
+【值班巡检 v3 · 任务池模式】你是王二狗（协调器）。
+
+## 核心规则
+- 执行者（atomcode/copilot）完成当前任务后，**主动读 TASK_POOL.md 领取下一棒**
+- 你的职责：**验收回执 + 升级阻塞 + 维护任务池**
+- 不主动派发（除非执行者空闲 > 15 分钟）
+
+## 必做检查
+1. 读 TASK_POOL.md 了解任务池和执行者状态
+2. 检查 outbox/atomcode/ 和 outbox/copilot/ 是否有新回执
+3. 验收回执（抽验关键依据 + 关口检查）
+4. 更新 TASK_POOL.md（完成标记 + 执行者状态）
+5. 检查执行者是否空闲（>15 分钟无活动 → 提醒领任务）
+
+## 输出格式（极简，≤10 行）
+巡检完毕（HH:MM）：
+1. atomcode：执行中/空闲/阻塞（当前任务）
+2. copilot：执行中/空闲/阻塞（当前任务）
+3. 本次动作：验收了X / 升级了Y / 维护了任务池
+4. 阻塞：有/无
+
+已记账：TASK_POOL / AI_LOG / duty.log。
+【打扰高哥】有/无（原因：...）
+EOF
+
+DUTY_SESSION_FILE="$AI_DIR/state/duty-session.txt"
+if [ -f "$DUTY_SESSION_FILE" ] && [ -s "$DUTY_SESSION_FILE" ]; then
+  SID=$(cat "$DUTY_SESSION_FILE")
+  OUT=$(timeout 600 opencode run --session "$SID" --model agnes/agnes-2.5-flash --auto "$PROMPT" 2>&1)
+  RC=$?
+else
+  OUT=$(timeout 600 opencode run --model agnes/agnes-2.5-flash --auto --title "值班巡检v3" "$PROMPT" 2>&1)
+  RC=$?
+fi
+
+echo "[$TS] 完成 rc=$RC" >> "$LOG"
+echo "$OUT" | tail -8 >> "$LOG"
