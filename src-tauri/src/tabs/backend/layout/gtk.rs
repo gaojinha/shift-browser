@@ -20,6 +20,62 @@ use webkit2gtk::{DownloadExt, URIRequestExt, URIResponseExt, WebContextExt, WebV
 
 use super::super::{unique_download_path, UI_FOCUSED};
 
+// ---- 下载/滚动判定纯函数（便于单测；F-36 从 fix_gtk_layout 闭包抽出，行为等价）----
+
+/// 从下载 URL 推导下载文件名：
+/// 用 url 解析取解码后的 path（%2e%2e/%2f 点段按 URL 规范被规范化掉），
+/// 取最后一段，再经 sanitize_filename 剥路径分隔符/点段/控制字符，防路径穿越；
+/// 解析不了的 URL 退回按 '?' 取首段；空段兜底 "download"。
+fn download_filename_from_url(url: Option<&str>) -> String {
+    url.map(|u| {
+        let path = url::Url::parse(u)
+            .map(|p| p.path().to_string())
+            .unwrap_or_else(|_| u.split('?').next().unwrap_or(u).to_string());
+        let name = path.rsplit('/').next().unwrap_or("download").to_string();
+        sanitize_filename(&name)
+    })
+    .unwrap_or_else(|| "download".to_string())
+}
+
+/// 构造下载目的地的 file URI：路径含中文/空格时手拼 "file://…" 是非法 URI，
+/// WebKit 会取消下载（表现为"下载不能开始"），必须走 from_file_path（percent-编码）；
+/// 失败（相对路径/非 UTF-8）退回手拼，保证链路不断。
+fn file_uri_for_path(dest: &str) -> String {
+    url::Url::from_file_path(dest)
+        .map(|u| u.to_string())
+        .unwrap_or_else(|_| format!("file://{}", dest))
+}
+
+/// 滚轮诊断开关：精确值 "1" 才开（此前 is_ok() 导致空值也开，
+/// 诊断 info 刷屏压垮主线程致 ANR，copilot 会诊确认 2026-09-29 修复）
+fn scroll_debug_enabled(raw: Option<&str>) -> bool {
+    raw == Some("1")
+}
+
+/// 兜底补滚检查闸门：在途检查未完成时跳过（防 eval 积压）、
+/// 100ms 节流（正常页面 WebKit 100ms 内必滚动，不误伤）、零位移跳过
+fn scroll_check_due(in_flight: bool, since_last: std::time::Duration, dx: f64, dy: f64) -> bool {
+    !in_flight
+        && since_last >= std::time::Duration::from_millis(100)
+        && (dy != 0.0 || dx != 0.0)
+}
+
+/// GTK smooth delta（单位约行）→ 像素：1 行按 100px 换算
+fn delta_to_px(delta: f64) -> i32 {
+    (delta * 100.0) as i32
+}
+
+/// 等待下载记录 id 就绪（最多 100×50ms=5s）
+async fn wait_download_id(state: &Arc<Mutex<Option<i64>>>) -> Option<i64> {
+    for _ in 0..100 {
+        if let Some(id) = *state.lock().unwrap_or_else(|e| e.into_inner()) {
+            return Some(id);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    None
+}
+
 impl TabManager {
     /// Linux/GTK 布局修复：把 child webview reparent 到 GtkFixed 容器，定位到内容区
     /// 结构：窗口 vbox → [GtkFixed] → 主 webview(0,0 全屏) + child webview(0,82 内容区)
@@ -56,7 +112,7 @@ impl TabManager {
           // 滚轮诊断开关（2026-09-29）：SHIFT_SCROLL_DEBUG=1 精确值才开
           // （此前 is_ok() 导致空值也开；诊断 info 刷屏压垮主线程致 ANR，
           // copilot 会诊确认，2026-09-29 修复：精确值+限频+在途限制）
-          let scroll_dbg = std::env::var("SHIFT_SCROLL_DEBUG").as_deref() == Ok("1");
+          let scroll_dbg = scroll_debug_enabled(std::env::var("SHIFT_SCROLL_DEBUG").ok().as_deref());
           if scroll_dbg {
             fixed.connect_scroll_event(|_, event| {
               let (dx, dy) = event.delta();
@@ -151,16 +207,18 @@ impl TabManager {
               // 横纵一起对比（scrollY*1000+scrollX 合成）。100ms 节流，性能可接受。
               let now = std::time::Instant::now();
               // 在途检查未完成时跳过（防 eval 积压）；100ms 节流；零位移跳过
-              if !scroll_in_flight.get()
-                && now.duration_since(scroll_check.get()) >= std::time::Duration::from_millis(100)
-                && (dy != 0.0 || dx != 0.0)
-              {
+              if scroll_check_due(
+                scroll_in_flight.get(),
+                now.duration_since(scroll_check.get()),
+                dx,
+                dy,
+              ) {
                 scroll_check.set(now);
                 scroll_in_flight.set(true);
                 let flight = scroll_in_flight.clone();
                 let wv2 = wv.clone();
-                let dx_px = (dx * 100.0) as i32;
-                let dy_px = (dy * 100.0) as i32;
+                let dx_px = delta_to_px(dx);
+                let dy_px = delta_to_px(dy);
                 crate::engine::webview::eval_js_with(
                   wv,
                   "(function(){return Math.round(window.scrollY*1000+window.scrollX);})()",
@@ -224,16 +282,7 @@ impl TabManager {
                   .request()
                   .and_then(|r| r.uri())
                   .map(|s| s.to_string());
-                let filename = url
-                  .as_deref()
-                  .map(|u| {
-                    let path = url::Url::parse(u)
-                      .map(|p| p.path().to_string())
-                      .unwrap_or_else(|_| u.split('?').next().unwrap_or(u).to_string());
-                    let name = path.rsplit('/').next().unwrap_or("download").to_string();
-                    sanitize_filename(&name)
-                  })
-                  .unwrap_or_else(|| "download".to_string());
+                let filename = download_filename_from_url(url.as_deref());
                 // 下载目录优先级：用户设置覆盖 > 系统 XDG 目录 > ~/Downloads 兜底。
                 // P0-2：平台目录解析下沉到 engine::platform（统一 resolve_download_dir，行为保持、可单测）
                 let dest_dir = crate::engine::platform::resolve_download_dir();
@@ -242,9 +291,7 @@ impl TabManager {
                 let dest = unique_download_path(&dest_dir, &filename);
                 // 目的地必须是合法 file URI——路径含中文/空格时手拼 "file://…" 非法，
                 // WebKit 会取消下载（表现为"下载不能开始"）。
-                let dest_uri = url::Url::from_file_path(&dest)
-                  .map(|u| u.to_string())
-                  .unwrap_or_else(|_| format!("file://{}", dest));
+                let dest_uri = file_uri_for_path(&dest);
                 download.set_destination(&dest_uri);
                 // 总字节：从 response 拿（可能未知为 0）
                 let total = download
@@ -281,16 +328,7 @@ impl TabManager {
                   }
                 });
 
-                // 等待下载记录 id 就绪（最多 5 秒）
-                async fn wait_download_id(state: &Arc<Mutex<Option<i64>>>) -> Option<i64> {
-                  for _ in 0..100 {
-                    if let Some(id) = *state.lock().unwrap_or_else(|e| e.into_inner()) {
-                      return Some(id);
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                  }
-                  None
-                }
+                // 等待下载记录 id 就绪（最多 5s）：wait_download_id 已提模块级（F-36）
 
                 // 进度回调（每次收到数据，异步更新，不阻塞主线程）
                 // 节流：500ms 内最多写一次数据库（下载快时 received_data 每秒多次，全写会锁竞争）
@@ -399,4 +437,105 @@ impl TabManager {
         rx.recv().map_err(|e| format!("主线程布局失败: {}", e))?;
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn download_filename_from_url_normal_and_query() {
+        // 取解码后 path 的最后一段；query 不参与文件名推导（不能靠 query 注入路径）
+        assert_eq!(
+            download_filename_from_url(Some("https://example.com/files/report.pdf?v=1&x=../evil")),
+            "report.pdf"
+        );
+        assert_eq!(
+            download_filename_from_url(Some("https://example.com/a.zip?file=../../etc/shadow")),
+            "a.zip"
+        );
+        // %2e%2e 点段按 URL 规范被规范化，末段仍经 sanitize 复剥
+        assert_eq!(
+            download_filename_from_url(Some("https://example.com/%2e%2e/%2e%2e/etc/passwd")),
+            "passwd"
+        );
+    }
+
+    #[test]
+    fn download_filename_from_url_fallbacks() {
+        // 域名根/尾斜杠 → 空段 → sanitize 兜底 download
+        assert_eq!(download_filename_from_url(Some("https://example.com")), "download");
+        assert_eq!(download_filename_from_url(Some("https://example.com/")), "download");
+        // URL 缺失 → download
+        assert_eq!(download_filename_from_url(None), "download");
+        // 解析不了 → 按 '?' 取首段
+        assert_eq!(download_filename_from_url(Some("not a url?x=1")), "not a url");
+    }
+
+    #[test]
+    fn file_uri_for_path_encodes_and_falls_back() {
+        // 中文/空格 → percent-编码的合法 file URI（无裸空格/非 ASCII）
+        let uri = file_uri_for_path("/home/gao/Downloads/报表 v1.xlsx");
+        assert!(uri.starts_with("file:///home/gao/Downloads/"));
+        assert!(uri.ends_with("v1.xlsx"));
+        assert!(!uri.contains(' '));
+        assert!(!uri.contains('报'));
+        // from_file_path 对相对路径失败 → 手拼兜底（保证链路不断）
+        assert_eq!(file_uri_for_path("relative/x.zip"), "file://relative/x.zip");
+    }
+
+    #[test]
+    fn scroll_debug_enabled_exact_one_only() {
+        // 精确值 "1" 才开（此前 is_ok() 空值也开，诊断刷屏致 ANR）
+        assert!(scroll_debug_enabled(Some("1")));
+        assert!(!scroll_debug_enabled(Some("")));
+        assert!(!scroll_debug_enabled(Some("0")));
+        assert!(!scroll_debug_enabled(Some("2")));
+        assert!(!scroll_debug_enabled(None));
+    }
+
+    #[test]
+    fn scroll_check_gate() {
+        // 在途 → 跳过
+        assert!(!scroll_check_due(true, Duration::from_millis(999), 0.0, -1.0));
+        // 未到 100ms 节流窗 → 跳过
+        assert!(!scroll_check_due(false, Duration::from_millis(99), 0.0, -1.0));
+        // 恰好 100ms + 有位移 → 触发
+        assert!(scroll_check_due(false, Duration::from_millis(100), 0.0, -1.0));
+        // 零位移 → 跳过
+        assert!(!scroll_check_due(false, Duration::from_millis(999), 0.0, 0.0));
+        // 横向位移同样算
+        assert!(scroll_check_due(false, Duration::from_millis(100), 2.0, 0.0));
+    }
+
+    #[test]
+    fn delta_to_px_converts_rows_to_pixels() {
+        // 1 行 ≈ 100px（GTK smooth delta 单位约行）
+        assert_eq!(delta_to_px(-1.0), -100);
+        assert_eq!(delta_to_px(0.0), 0);
+        assert_eq!(delta_to_px(0.5), 50);
+        assert_eq!(delta_to_px(1.25), 125);
+    }
+
+    #[tokio::test]
+    async fn wait_download_id_returns_when_ready() {
+        // 模拟异步插入 60ms 完成 → 50ms 轮询取到
+        let state = Arc::new(Mutex::new(None));
+        let s2 = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            *s2.lock().unwrap() = Some(42);
+        });
+        assert_eq!(wait_download_id(&state).await, Some(42));
+    }
+
+    #[tokio::test]
+    async fn wait_download_id_returns_immediately_when_presumed_set() {
+        // id 已就绪 → 首轮即返，不空等
+        let state = Arc::new(Mutex::new(Some(7)));
+        assert_eq!(wait_download_id(&state).await, Some(7));
+    }
+    // 超时路径（100×50ms=5s 返 None）不专测：真实时钟 5s/次拖慢全量关口，
+    // 100/50 两数已随函数单一实现，漂移走代码评审
 }
