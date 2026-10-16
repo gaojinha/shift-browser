@@ -586,4 +586,36 @@ mod tests {
         assert!(str_arg(&json!({"role": "button"}), "role", 64).is_ok());
         assert!(str_arg(&json!({"role": "x".repeat(65)}), "role", 64).is_err());
     }
+
+    #[test]
+    fn wrap_action_error_maps_to_ok_false() {
+        // action_error 在 → ok:false，错误码透传，原文保留，原始结构进 data
+        let w = wrap(json!({"action_error": "password_refused", "error": "密码框受保护"}));
+        assert_eq!(w["ok"], false);
+        assert_eq!(w["code"], "password_refused");
+        assert_eq!(w["error"], "密码框受保护");
+        assert!(w["data"].is_object());
+        // code 非字符串/缺失 → "action_error" 兜底；error 缺失 → "交互失败" 兜底
+        let w2 = wrap(json!({"action_error": true}));
+        assert_eq!(w2["code"], "action_error");
+        assert_eq!(w2["error"], "交互失败");
+    }
+
+    #[test]
+    fn wrap_plain_result_passthrough() {
+        let w = wrap(json!({"clicked": true}));
+        assert_eq!(w["ok"], true);
+        assert_eq!(w["data"]["clicked"], true);
+    }
+
+    #[test]
+    fn required_selector_validation() {
+        // 缺失/纯空白 → E_VALIDATION；trim 后放行
+        assert!(required_selector(&json!({})).is_err());
+        assert!(required_selector(&json!({"selector": "   "})).is_err());
+        assert_eq!(required_selector(&json!({"selector": " #buy "})).unwrap(), "#buy");
+        // 1024 字符硬顶（边界放行，超 1 拒）
+        assert!(required_selector(&json!({"selector": "a".repeat(1024)})).is_ok());
+        assert!(required_selector(&json!({"selector": "a".repeat(1025)})).is_err());
+    }
 }
