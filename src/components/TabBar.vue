@@ -794,15 +794,16 @@ function onFaviconError(e: Event) {
 }
 .tab .close-btn {
   display: none;
-  width: 17px;
-  height: 17px;
+  /* a11y（F-1 2026-10-16）：WCAG 2.2 target-size 要求命中区 ≥24px（原 17px，axe 判 serious）；视觉圆形略放大，属标准修复 */
+  width: 24px;
+  height: 24px;
   border: none;
   background: transparent;
   color: var(--text-muted);
   border-radius: var(--radius-full);
   cursor: pointer;
   font-size: 13px;
-  line-height: 17px;
+  line-height: 24px;
   padding: 0;
   margin-left: 4px;
   flex-shrink: 0;

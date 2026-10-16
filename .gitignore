@@ -42,3 +42,5 @@ src-tauri/resources/libshift_web_extension.so
 
 # 发布物归档（B-06 R4 · 符号/调试文件，不进仓库）
 release-artifacts/
+e2e/.last-report.json
+test-results/
