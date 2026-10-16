@@ -16,6 +16,26 @@ mod signals;
 #[path = "create/url.rs"]
 mod url;
 
+// on_new_window 判定纯函数（便于单测；F-38 从 create_webview 闭包抽出，行为等价）
+
+/// on_new_window 的 scheme 闸门（P2 远程页面可控入口）：只放行 http/https。
+/// 拒绝 file:/javascript:/data: 等——恶意页面可 window.open('file:///etc/passwd')
+/// 强制打开本地文件标签；内部页面（shift://newtab 等）由可信前端 create_tab
+/// 命令打开，不走此入口。
+fn new_window_scheme_allowed(scheme: &str) -> bool {
+    matches!(scheme, "http" | "https")
+}
+
+/// 新窗口去重闸门：同一 URL 500ms 内已处理过（原生 create 信号 + JS window.open
+/// 双通道）则视为重复，应忽略，防重复建标签。500ms 严格小于（边界 500ms 放行）。
+fn new_window_duplicate(
+    last: Option<(&str, std::time::Instant)>,
+    url: &str,
+    now: std::time::Instant,
+) -> bool {
+    matches!(&last, Some((prev, at)) if *prev == url && now.duration_since(*at).as_millis() < 500)
+}
+
 impl TabManager {
     /// 创建嵌入式 webview
     #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -88,11 +108,11 @@ impl TabManager {
                             "[tabs] on_new_window: url={}",
                             crate::redact_url(url.as_str())
                         );
-                        // P2：远程页面可控入口——只放行 http/https。
+                        // P2：远程页面可控入口——只放行 http/https（new_window_scheme_allowed，F-38 抽出）。
                         // 拒绝 file:/javascript:/data: 等：恶意页面可 window.open('file:///etc/passwd')
                         // 强制打开本地文件标签（create_webview 对非 newtab 的 file:// 保持 External 渲染）。
                         // 内部页面（shift://newtab 等）由可信前端 create_tab 命令打开，不走此入口。
-                        if url.scheme() != "http" && url.scheme() != "https" {
+                        if !new_window_scheme_allowed(url.scheme()) {
                             log::warn!(
                                 "[tabs] on_new_window: 拒绝非 http/https scheme: {}",
                                 crate::redact_url(url.as_str())
@@ -101,20 +121,21 @@ impl TabManager {
                         }
                         let url_str = url.to_string();
                         // 去重：500ms 内同 URL 已处理过则忽略，防止原生+JS 双通道重复建标签
+                        // （new_window_duplicate，F-38 抽出）
                         {
                             let mut last =
                                 last_new_window.lock().unwrap_or_else(|e| e.into_inner());
                             let now = std::time::Instant::now();
-                            if let Some((prev_url, prev_at)) = last.as_ref() {
-                                if *prev_url == url_str
-                                    && now.duration_since(*prev_at).as_millis() < 500
-                                {
-                                    log::info!(
-                                        "[tabs] on_new_window: 重复请求已忽略 url={}",
-                                        crate::redact_url(&url_str)
-                                    );
-                                    return tauri::webview::NewWindowResponse::Deny;
-                                }
+                            if new_window_duplicate(
+                                last.as_ref().map(|(u, at)| (u.as_str(), *at)),
+                                &url_str,
+                                now,
+                            ) {
+                                log::info!(
+                                    "[tabs] on_new_window: 重复请求已忽略 url={}",
+                                    crate::redact_url(&url_str)
+                                );
+                                return tauri::webview::NewWindowResponse::Deny;
                             }
                             *last = Some((url_str.clone(), now));
                         }
@@ -187,5 +208,52 @@ impl TabManager {
         });
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn new_window_scheme_whitelist() {
+        // P2 安全闸门：只放行 http/https
+        assert!(new_window_scheme_allowed("http"));
+        assert!(new_window_scheme_allowed("https"));
+        // 本地文件/脚本/data/内部协议全拒（恶意页面 window.open('file:///etc/passwd') 面）
+        for s in ["file", "javascript", "data", "shift"] {
+            assert!(!new_window_scheme_allowed(s), "{s} 应拒绝");
+        }
+    }
+
+    #[test]
+    fn new_window_dedup_gate() {
+        let t0 = std::time::Instant::now();
+        let last = Some(("https://a.com", t0));
+        // 无历史 → 非重复
+        assert!(!new_window_duplicate(
+            None,
+            "https://a.com",
+            t0 + Duration::from_millis(100)
+        ));
+        // 同 URL 500ms 内 → 重复（原生+JS 双通道去重）
+        assert!(new_window_duplicate(
+            last,
+            "https://a.com",
+            t0 + Duration::from_millis(499)
+        ));
+        // 恰好 500ms 边界 → 非重复（< 500 严格）
+        assert!(!new_window_duplicate(
+            last,
+            "https://a.com",
+            t0 + Duration::from_millis(500)
+        ));
+        // 不同 URL 不受去重窗影响
+        assert!(!new_window_duplicate(
+            last,
+            "https://b.com",
+            t0 + Duration::from_millis(10)
+        ));
     }
 }
