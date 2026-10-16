@@ -41,44 +41,6 @@ fn crash_reload_allowed(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn 首次崩溃允许重载并记录时间() {
-        let mut m = std::collections::HashMap::new();
-        assert!(crash_reload_allowed(&mut m, "t1", 1000));
-        assert_eq!(m.get("t1"), Some(&1000), "判定通过须记录本次时间");
-    }
-
-    #[test]
-    fn 冷却窗口内连崩不再重载() {
-        let mut m = std::collections::HashMap::new();
-        assert!(crash_reload_allowed(&mut m, "t1", 1000));
-        assert!(!crash_reload_allowed(&mut m, "t1", 1029), "29s 内不允许");
-        assert!(
-            crash_reload_allowed(&mut m, "t1", 1030),
-            "恰好 30s 边界应放行（>= 语义）"
-        );
-        assert_eq!(m.get("t1"), Some(&1030), "放行后时间戳刷新");
-    }
-
-    #[test]
-    fn 冷却按标签隔离互不影响() {
-        let mut m = std::collections::HashMap::new();
-        assert!(crash_reload_allowed(&mut m, "t1", 1000));
-        assert!(crash_reload_allowed(&mut m, "t2", 1001), "别的标签不受 t1 冷却影响");
-    }
-
-    #[test]
-    fn 时间倒退按饱和减法放行() {
-        let mut m = std::collections::HashMap::new();
-        assert!(crash_reload_allowed(&mut m, "t1", 2000));
-        // now < last（时钟回拨）：saturating_sub 得 0 < 30 不放行，防异常时钟触发循环重载
-        assert!(!crash_reload_allowed(&mut m, "t1", 1999));
-    }
-}
 /// 给新建 child webview 接 GTK 信号：加载失败 / TLS 错误 / 权限 / 崩溃恢复 / 标题同步。
 /// 监听 WebKit title 变化 → 实时同步标签标题（on_page_load 的 host 只是初始占位）
 pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &str) {
@@ -234,4 +196,43 @@ pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &s
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 首次崩溃允许重载并记录时间() {
+        let mut m = std::collections::HashMap::new();
+        assert!(crash_reload_allowed(&mut m, "t1", 1000));
+        assert_eq!(m.get("t1"), Some(&1000), "判定通过须记录本次时间");
+    }
+
+    #[test]
+    fn 冷却窗口内连崩不再重载() {
+        let mut m = std::collections::HashMap::new();
+        assert!(crash_reload_allowed(&mut m, "t1", 1000));
+        assert!(!crash_reload_allowed(&mut m, "t1", 1029), "29s 内不允许");
+        assert!(
+            crash_reload_allowed(&mut m, "t1", 1030),
+            "恰好 30s 边界应放行（>= 语义）"
+        );
+        assert_eq!(m.get("t1"), Some(&1030), "放行后时间戳刷新");
+    }
+
+    #[test]
+    fn 冷却按标签隔离互不影响() {
+        let mut m = std::collections::HashMap::new();
+        assert!(crash_reload_allowed(&mut m, "t1", 1000));
+        assert!(crash_reload_allowed(&mut m, "t2", 1001), "别的标签不受 t1 冷却影响");
+    }
+
+    #[test]
+    fn 时间倒退按饱和减法放行() {
+        let mut m = std::collections::HashMap::new();
+        assert!(crash_reload_allowed(&mut m, "t1", 2000));
+        // now < last（时钟回拨）：saturating_sub 得 0 < 30 不放行，防异常时钟触发循环重载
+        assert!(!crash_reload_allowed(&mut m, "t1", 1999));
+    }
 }

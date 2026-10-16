@@ -146,9 +146,7 @@ pub(crate) fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
         if let Ok(gtk_win) = window.gtk_window() {
             let app_handle = app.handle().clone();
             gtk_win.connect_key_press_event(move |_, event| {
-                // 快捷键表来自 contracts.rs（单一来源）：keyval / 修饰键 / 兜底标记
-                // 都在那里定义，避免此前裸 keycode（0xFFC9/0x69/0x74…）散落各处
-                use crate::contracts::shortcuts::SHORTCUTS;
+                // 快捷键表来自 contracts.rs（单一来源，匹配逻辑见 match_shortcut）
                 let key: u32 = *event.keyval();
                 let state = event.state();
                 let ctrl = state.contains(gtk::gdk::ModifierType::CONTROL_MASK);
@@ -163,28 +161,22 @@ pub(crate) fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
                     return gtk::glib::Propagation::Proceed;
                 }
 
-                let Some(sc) = SHORTCUTS.iter().find(|s| {
-                    (key == s.gdk_keyval || key == s.gdk_keyval_shift)
-                        && ctrl == s.ctrl
-                        && shift == s.shift
-                }) else {
+                let Some(sc) = match_shortcut(key, ctrl, shift) else {
                     return gtk::glib::Propagation::Proceed;
                 };
 
-                // ① 无条件响应（F12 / Ctrl+Shift+I：不论焦点在哪都开开发者工具）
-                if sc.gtk_always {
-                    open_devtools_for_active(&app_handle);
-                    return gtk::glib::Propagation::Stop;
+                match shortcut_action(sc, UI_FOCUSED.load(std::sync::atomic::Ordering::Relaxed)) {
+                    GtkShortcutAction::OpenDevtools => {
+                        open_devtools_for_active(&app_handle);
+                        gtk::glib::Propagation::Stop
+                    }
+                    GtkShortcutAction::Forward(id) => {
+                        log::debug!("[tabs] GTK 层转发快捷键: {}", id);
+                        let _ = app_handle.emit(crate::contracts::events::GLOBAL_SHORTCUT, id);
+                        gtk::glib::Propagation::Stop
+                    }
+                    GtkShortcutAction::Proceed => gtk::glib::Propagation::Proceed,
                 }
-
-                // ② 其余浏览器级快捷键：仅在「页面持焦」时兜底。
-                // UI 层持焦时前端 keydown 已处理，这里必须放行，否则会重复触发（如建两个标签）。
-                if !UI_FOCUSED.load(std::sync::atomic::Ordering::Relaxed) {
-                    log::debug!("[tabs] GTK 层转发快捷键: {}", sc.id);
-                    let _ = app_handle.emit(crate::contracts::events::GLOBAL_SHORTCUT, sc.id);
-                    return gtk::glib::Propagation::Stop;
-                }
-                gtk::glib::Propagation::Proceed
             });
             log::info!("[tabs] 全局快捷键已挂载：F12 / Ctrl+Shift+I 打开开发者工具");
         }
@@ -297,4 +289,81 @@ pub(crate) fn open_devtools_for_active(app: &AppHandle) {
             log::info!("[tabs] 已打开开发者工具: tab={}", id);
         }
     });
+}
+
+// ---- GTK 快捷键判定（纯函数，便于单测；F-35 从 key_press 闭包抽出）----
+
+#[cfg(target_os = "linux")]
+enum GtkShortcutAction {
+    /// 无条件响应（gtk_always）：打开开发者工具
+    OpenDevtools,
+    /// 页面持焦兜底：向前端转发 GLOBAL_SHORTCUT 事件
+    Forward(&'static str),
+    /// 放行（UI 持焦时前端已处理，避免重复触发）
+    Proceed,
+}
+
+#[cfg(target_os = "linux")]
+fn match_shortcut(key: u32, ctrl: bool, shift: bool) -> Option<&'static crate::contracts::shortcuts::Shortcut> {
+    use crate::contracts::shortcuts::SHORTCUTS;
+    SHORTCUTS.iter().find(|s| {
+        (key == s.gdk_keyval || key == s.gdk_keyval_shift) && ctrl == s.ctrl && shift == s.shift
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn shortcut_action(sc: &crate::contracts::shortcuts::Shortcut, ui_focused: bool) -> GtkShortcutAction {
+    // ① 无条件响应（F12 / Ctrl+Shift+I：不论焦点在哪都开开发者工具）
+    if sc.gtk_always {
+        return GtkShortcutAction::OpenDevtools;
+    }
+    // ② 其余浏览器级快捷键：仅在「页面持焦」时兜底。
+    // UI 层持焦时前端 keydown 已处理，这里必须放行，否则会重复触发（如建两个标签）。
+    if !ui_focused {
+        return GtkShortcutAction::Forward(sc.id);
+    }
+    GtkShortcutAction::Proceed
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn f12与ctrl_shift_i命中devtools() {
+        use crate::contracts::shortcuts::{GDK_F12, GDK_TAB, SHORTCUTS};
+        // F12：gdk_keyval 直命中
+        let sc = match_shortcut(GDK_F12, false, false).expect("F12 应命中");
+        assert_eq!(sc.id, "devtools");
+        assert!(sc.gtk_always);
+        // Ctrl+Shift+I：走 gdk_keyval_shift（大写 I 的 keyval）
+        let sc = match_shortcut(0x049, true, true).expect("Ctrl+Shift+I 应命中");
+        assert_eq!(sc.id, "devtools");
+        // 修饰键不匹配不命中（Ctrl+T 用错了 shift）
+        let _ = GDK_TAB;
+        let _ = SHORTCUTS.len();
+        assert!(match_shortcut(GDK_F12, true, false).is_none(), "F12 带 ctrl 不应命中");
+    }
+
+    #[test]
+    fn 快捷键动作按gtk标记与焦点分派() {
+        use crate::contracts::shortcuts::SHORTCUTS;
+        // gtk_always（F12）：UI 持焦也开 devtools
+        let f12 = SHORTCUTS.iter().find(|s| s.gtk_always).unwrap();
+        assert!(matches!(
+            shortcut_action(f12, true),
+            GtkShortcutAction::OpenDevtools
+        ));
+        // 非always：UI 持焦 → 放行（前端已处理）
+        let plain = SHORTCUTS.iter().find(|s| !s.gtk_always).unwrap();
+        assert!(matches!(
+            shortcut_action(plain, true),
+            GtkShortcutAction::Proceed
+        ));
+        // 非always：页面持焦 → 转发事件，id 原样
+        match shortcut_action(plain, false) {
+            GtkShortcutAction::Forward(id) => assert_eq!(id, plain.id),
+            _ => panic!("页面持焦应转发"),
+        }
+    }
 }
