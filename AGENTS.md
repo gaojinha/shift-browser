@@ -42,7 +42,7 @@
 
 ## 六、多 AI 协作（2026-10-14 加；2026-10-16 统一协作总线上游配套）
 
-三方协作：**王二狗**（协调器）· **atomcode**（执行者）· **copilot**（审查/执行）；**codex**（外部接活，2026-10-16 接入）。
+三方协作：**王二狗**（协调器）· **atomcode**（执行者）· **copilot**（审查/执行）。
 
 - **统一入口（2026-10-16 起）**：领取/交付/状态/消息一律走 `.ai/WORKBOARD.md`（单一状态源）+ `.ai/MESSAGES.md`（追加式消息总线）。旧 TASK_POOL / STATUS_REPORT / TASK_QUEUE / AI_LOG 转历史归档，不再更新。
 - **领卡**：在 WORKBOARD 在途任务表找「状态=待领取」且「限定」列不限定别人的行，写自己名字+时间即领取；交付改状态+写回执。
@@ -50,4 +50,3 @@
 - **每轮任务开始前**：检查 `.ai/inbox/<自己>/` 是否有定向派单（协调器点名）；否则自取 WORKBOARD 公共池空卡。
 - **处理完**：回复写 `.ai/outbox/<自己>/`（格式见 `.ai/README.md`），追加一行到 `.ai/MESSAGES.md`，更新 WORKBOARD 本行状态。
 - **有阻塞/疑问**：立即写 `.ai/outbox/<自己>/` + MESSAGES 一行，标记 `priority: high`。
-- **codex（外部接活）专用**：无收件通道，只认 WORKBOARD + MESSAGES 两入口；派单写 `.ai/inbox/codex/`，回执写 `.ai/outbox/codex/`（wakeup-daemon 3 秒唤醒协调器）；失联 60 分钟自动报警释放任务。
