@@ -137,3 +137,131 @@ pub(crate) fn civil_from_days(z: i64) -> (i64, i64, i64) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     (if m <= 2 { y + 1 } else { y }, (m as i64), (d as i64))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 校验用户名字符集与长度（2..=20）边界
+    #[test]
+    fn test_valid_username_rules() {
+        // 合法长度与字符
+        assert!(valid_username("ab"));
+        assert!(valid_username("user_123"));
+        assert!(valid_username("test-user"));
+        assert!(valid_username("12345678901234567890")); // 20 字符
+
+        // 长度越界
+        assert!(!valid_username(""));
+        assert!(!valid_username("a"));
+        assert!(!valid_username("123456789012345678901")); // 21 字符
+
+        // 非法字符拦截
+        assert!(!valid_username("user name"));
+        assert!(!valid_username("user@domain"));
+        assert!(!valid_username("user.name"));
+        assert!(!valid_username("user#1"));
+    }
+
+    /// 校验算法标识与迭代次数映射，以及未知算法的向下兼容兜底
+    #[test]
+    fn test_iterations_for_algo() {
+        assert_eq!(iterations_for_algo(HASH_ALGO_CURRENT), PBKDF2_ITER);
+        assert_eq!(iterations_for_algo("pbkdf2-sha512-100000"), 100_000);
+        assert_eq!(iterations_for_algo("pbkdf2-sha512-50000"), 50_000);
+
+        // 未知或老格式 'pbkdf2' 均兜底为历史参数 100,000
+        assert_eq!(iterations_for_algo("pbkdf2"), LEGACY_PBKDF2_ITER);
+        assert_eq!(iterations_for_algo("unknown-algo"), LEGACY_PBKDF2_ITER);
+        assert_eq!(iterations_for_algo("pbkdf2-sha512-notanumber"), LEGACY_PBKDF2_ITER);
+    }
+
+    /// 校验密码哈希在相同/不同参数下的确定性与雪崩效应
+    #[test]
+    fn test_hash_password_with_iter_deterministic() {
+        let pw = "mypassword123";
+        let salt = "a1b2c3d4e5f60718";
+
+        let h1 = hash_password_with_iter(pw, salt, 100);
+        let h2 = hash_password_with_iter(pw, salt, 100);
+        assert_eq!(h1, h2);
+        assert_eq!(h1.len(), 128); // 64 字节 SHA-512 hex 编码后为 128 字符
+
+        let h3 = hash_password_with_iter(pw, salt, 101);
+        assert_ne!(h1, h3);
+
+        let h_diff_pw = hash_password_with_iter("mypassword124", salt, 100);
+        assert_ne!(h1, h_diff_pw);
+
+        let h_diff_salt = hash_password_with_iter(pw, "b1b2c3d4e5f60718", 100);
+        assert_ne!(h1, h_diff_salt);
+    }
+
+    /// 校验异步 blocking 版 hash_password_blocking 计算一致性
+    #[tokio::test]
+    async fn test_hash_password_blocking_consistency() {
+        let pw = "async_test_pw".to_string();
+        let salt = "deadbeefcafebabe".to_string();
+        let iter = 200;
+
+        let sync_hash = hash_password_with_iter(&pw, &salt, iter);
+        let async_hash = hash_password_blocking(pw, salt, iter).await;
+        assert_eq!(sync_hash, async_hash);
+    }
+
+    /// 校验随机 salt 长度（16 字节 = 32 hex 字符）与唯一性
+    #[test]
+    fn test_generate_salt() {
+        let s1 = generate_salt();
+        let s2 = generate_salt();
+        assert_eq!(s1.len(), 32);
+        assert_eq!(s2.len(), 32);
+        assert_ne!(s1, s2);
+        assert!(s1.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    /// 校验防爆破守卫：失败递增、锁定触发、锁定到期时间及成功清理
+    #[test]
+    fn test_login_guard_failure_and_lockout() {
+        let test_user = "test_guard_user";
+        guard_clear(test_user);
+
+        // 初始状态
+        assert_eq!(guard_get(test_user), (0, 0));
+
+        // 记录 1 到 4 次失败（未达到 5 次，不锁定）
+        for expected_f in 1..MAX_LOGIN_FAILURES {
+            guard_record_failure(test_user);
+            let (f, lock_until) = guard_get(test_user);
+            assert_eq!(f, expected_f);
+            assert_eq!(lock_until, 0);
+        }
+
+        // 第 5 次失败，触发锁定：失败计数清 0，lock_until 设置为未来时间
+        let before_now = now_ms();
+        guard_record_failure(test_user);
+        let (f, lock_until) = guard_get(test_user);
+        assert_eq!(f, 0);
+        assert!(lock_until >= before_now + LOCK_MS);
+
+        // 成功登录后清除守卫状态
+        guard_clear(test_user);
+        assert_eq!(guard_get(test_user), (0, 0));
+    }
+
+    /// 校验历法换算算法 civil_from_days 关键基准点
+    #[test]
+    fn test_civil_from_days_benchmarks() {
+        // 1970-01-01 -> epoch day 0
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+
+        // 2000-01-01 -> 10957 days
+        assert_eq!(civil_from_days(10957), (2000, 1, 1));
+
+        // 闰年：2024-02-29 -> 19782 days
+        assert_eq!(civil_from_days(19782), (2024, 2, 29));
+
+        // 2024-03-01 -> 19783 days
+        assert_eq!(civil_from_days(19783), (2024, 3, 1));
+    }
+}
