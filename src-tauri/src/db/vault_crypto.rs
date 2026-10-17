@@ -202,3 +202,136 @@ pub(super) fn replace_vault_file(path: &Path, encoded: &str) -> DbResult<()> {
 pub(super) fn read_vault_file(path: &Path) -> DbResult<String> {
     std::fs::read_to_string(path).map_err(|e| DbError::Other(format!("读取主密码文件失败: {}", e)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 校验 NFKC 归一化：全角与兼容字符归一到相同形态
+    #[test]
+    fn test_normalize_password() {
+        assert_eq!(normalize_password("ＡＢＣ"), "ABC");
+        assert_eq!(normalize_password("ﬁ"), "fi");
+        assert_eq!(normalize_password("hello 123"), "hello 123");
+    }
+
+    /// 校验密钥派生：相同参数输出确定，NFKC 两侧派生一致，低轮次快速验证
+    #[test]
+    fn test_derive_with_rounds_deterministic_and_nfkc() {
+        let salt = [42u8; SALT_LEN];
+        let k1 = derive_with_rounds("ＡＢＣ-pass", &salt, 100);
+        let k2 = derive_with_rounds("ABC-pass", &salt, 100);
+        assert_eq!(k1, k2);
+
+        let k3 = derive_with_rounds("ABC-pass", &salt, 101);
+        assert_ne!(k1, k3);
+    }
+
+    /// 校验 v2 wrap_key 与 unwrap_key 完整闭环，且支持 NFKC 归一化解锁
+    #[test]
+    fn test_wrap_unwrap_roundtrip_v2() {
+        let master = [7u8; KEY_LEN];
+        let wrapped = wrap_key(&master, "my-secret-密码-ﬁ");
+
+        assert!(wrapped.starts_with(V2_HEADER));
+        assert!(!is_legacy_v1_file(&wrapped));
+
+        // 相同密码解锁成功
+        let unwrapped = unwrap_key(&wrapped, "my-secret-密码-ﬁ").unwrap();
+        assert_eq!(unwrapped, master);
+
+        // 兼容字符形态解锁成功
+        let unwrapped_nfkc = unwrap_key(&wrapped, "my-secret-密码-fi").unwrap();
+        assert_eq!(unwrapped_nfkc, master);
+
+        // 错误密码解锁必须失败并返回友好提示
+        let err = unwrap_key(&wrapped, "wrong-password").unwrap_err();
+        assert_eq!(err, "主密码错误");
+    }
+
+    /// 校验 v1 历史格式（无头裸 base64）解析、判定及解锁闭环
+    #[test]
+    fn test_legacy_v1_format_parse_and_unwrap() {
+        let master = [9u8; KEY_LEN];
+        let salt = [1u8; SALT_LEN];
+        let nonce = [2u8; NONCE_LEN];
+
+        // 按照 v1 参数手动构造一个裸 base64 payload
+        let dk = derive_with_rounds("v1-legacy-pass", &salt, PBKDF2_ROUNDS_V1);
+        let cipher = Aes256Gcm::new_from_slice(&dk).unwrap();
+        let ct = cipher.encrypt(Nonce::from_slice(&nonce), master.as_ref()).unwrap();
+
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&salt);
+        blob.extend_from_slice(&nonce);
+        blob.extend_from_slice(&ct);
+        let raw_b64 = BASE64.encode(blob);
+
+        assert!(is_legacy_v1_file(&raw_b64));
+
+        let unwrapped = unwrap_key(&raw_b64, "v1-legacy-pass").unwrap();
+        assert_eq!(unwrapped, master);
+
+        let err = unwrap_key(&raw_b64, "wrong-pass").unwrap_err();
+        assert_eq!(err, "主密码错误");
+    }
+
+    /// 校验畸形 payload / 篡改密文与非法 header 的防护
+    #[test]
+    fn test_malformed_and_tampered_payloads() {
+        // 1. 乱码 base64
+        assert!(unwrap_key("not-valid-base64!@#$", "pw").is_err());
+
+        // 2. 长度不足
+        let too_short = BASE64.encode([0u8; 10]);
+        let err_short = unwrap_key(&too_short, "pw").unwrap_err();
+        assert_eq!(err_short, "主密码文件长度不足");
+
+        // 3. v2 头缺少载荷（无第二段 `$`）与空载荷
+        let err_no_payload = unwrap_key("v2$pbkdf2-sha256-600000", "pw").unwrap_err();
+        assert!(err_no_payload.contains("缺少载荷"));
+
+        let err_empty_b64 = unwrap_key("v2$pbkdf2-sha256-600000$", "pw").unwrap_err();
+        assert!(err_empty_b64.contains("格式非法") || err_empty_b64.contains("长度不足"));
+
+        // 4. v2 头中 KDF 轮次非法（0 或超出 MAX_HEADER_ROUNDS）
+        let err_zero_rounds = unwrap_key("v2$pbkdf2-sha256-0$AAAA", "pw").unwrap_err();
+        assert!(err_zero_rounds.contains("KDF 参数不合法"));
+
+        let err_huge_rounds = unwrap_key("v2$pbkdf2-sha256-9999999999$AAAA", "pw").unwrap_err();
+        assert!(err_huge_rounds.contains("KDF 参数不合法"));
+
+        // 5. 密文篡改拦截（GCM 认证标签校验失败）
+        let master = [3u8; KEY_LEN];
+        let wrapped = wrap_key(&master, "test-pass");
+        let mut tampered = wrapped.into_bytes();
+        let len = tampered.len();
+        tampered[len - 2] = if tampered[len - 2] == b'A' { b'B' } else { b'A' };
+        let tampered_str = String::from_utf8(tampered).unwrap();
+        let err_tamper = unwrap_key(&tampered_str, "test-pass").unwrap_err();
+        assert_eq!(err_tamper, "主密码错误");
+    }
+
+    /// 校验 write_vault_file / read_vault_file / replace_vault_file 文件原子操作
+    #[test]
+    fn test_vault_file_io_operations() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.key");
+
+        let content = "v2$pbkdf2-sha256-600000$test-content";
+        write_vault_file(&path, content).unwrap();
+
+        // 校验读取内容一致
+        let read = read_vault_file(&path).unwrap();
+        assert_eq!(read, content);
+
+        // create_new 防二次覆盖
+        assert!(write_vault_file(&path, "new-content").is_err());
+
+        // 原子替换 replace_vault_file
+        let replaced_content = "v2$pbkdf2-sha256-600000$replaced-content";
+        replace_vault_file(&path, replaced_content).unwrap();
+        let read2 = read_vault_file(&path).unwrap();
+        assert_eq!(read2, replaced_content);
+    }
+}
