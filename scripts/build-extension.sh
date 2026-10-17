@@ -21,6 +21,7 @@ else
   echo "⏭ 扩展源码未变，跳过重编（mtime 判定）"
 fi
 
+mkdir -p "$DEST"                             # tauri 编译前该目录可能不存在（干净 target），先建
 cp "$SO" "$DEST/"
 mkdir -p "$RES"
 cp "$SO" "$RES/"
