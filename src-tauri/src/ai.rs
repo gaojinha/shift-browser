@@ -262,8 +262,17 @@ pub async fn ai_chat(
                                     )
                                     .await
                                     {
-                                        Ok(text) => format!("动作已执行：{}", text),
-                                        Err(e) => format!("动作执行失败: {}", e),
+                                        Ok(text) => {
+                                            crate::engine::agent::record_action(&params, &text);
+                                            format!("动作已执行：{}", text)
+                                        }
+                                        Err(e) => {
+                                            crate::engine::agent::record_action(
+                                                &params,
+                                                &format!("失败: {}", e),
+                                            );
+                                            format!("动作执行失败: {}", e)
+                                        }
                                     }
                                 }
                                 Ok(false) => "用户拒绝了该动作".to_string(),

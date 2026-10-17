@@ -259,6 +259,61 @@ pub async fn agent_actions_batch_retry(
     execute_multi_step_action(&app, &window, &state, &plan).await
 }
 
+/// 校验 Agent 导航 URL 是否符合安全护栏（U-2 规约：纯函数，供 execute_agent_action 与单测共用）。
+///
+/// 规约（对标 Brave 诀窍 5 第 3 条）：
+/// - 仅允许 `https` scheme（非 HTTPS/http 均拒绝，防明文窃听/篡改；仅在非 strict 下保留测试，默认拒绝非 HTTPS）；
+/// - 严禁 `about:` / `chrome:` / `javascript:` / `data:` / `file:` / `view-source:` 等内部特权页；
+/// - 严禁扩展商店域名（如 `chrome.google.com/webstore`, `chromewebstore.google.com`, `addons.mozilla.org`）；
+/// - 拒绝内网地址（与既有 net_guard 同口径）。
+pub fn validate_agent_nav_url(url_str: &str) -> CommandResult<url::Url> {
+    let parsed = url::Url::parse(url_str)
+        .map_err(|e| AppError::validation(format!("网址不合法: {e}")))?;
+
+    // 1. 严格 scheme 校验：仅允许 https（严禁 about/chrome/file/javascript 等）
+    match parsed.scheme() {
+        "https" => {}
+        "about" | "chrome" | "javascript" | "data" | "file" | "view-source" => {
+            return Err(AppError::permission(format!(
+                "Agent 禁入内部/敏感页面 scheme: {}",
+                parsed.scheme()
+            ))
+            .into());
+        }
+        _ => {
+            return Err(AppError::permission(format!(
+                "Agent 仅允许访问 HTTPS 安全页面，拒绝 scheme: {}",
+                parsed.scheme()
+            ))
+            .into());
+        }
+    }
+
+    let host = parsed.host_str().unwrap_or("").to_lowercase();
+    if host.is_empty() {
+        return Err(AppError::validation("网址缺少主机名").into());
+    }
+
+    // 2. 严禁扩展商店
+    if host.contains("chromewebstore.google.com")
+        || (host.ends_with("chrome.google.com") && parsed.path().starts_with("/webstore"))
+        || host.ends_with("addons.mozilla.org")
+    {
+        return Err(AppError::permission(format!(
+            "Agent 严禁访问浏览器扩展商店: {}",
+            host
+        ))
+        .into());
+    }
+
+    // 3. 内网守卫（net_guard host_permitted 校验）
+    if !crate::net_guard::host_permitted(&host) {
+        return Err(AppError::permission(format!("Agent 不允许导航到内网地址：{host}")).into());
+    }
+
+    Ok(parsed)
+}
+
 pub async fn execute_agent_action(
     app: &AppHandle,
     window: &tauri::WebviewWindow,
@@ -289,29 +344,13 @@ pub async fn execute_agent_action(
             let wv = window
                 .get_webview(&label)
                 .ok_or_else(|| AppError::internal("活动标签的 webview 不存在"))?;
-            // Agent 导航守卫（非用户直驱，必须设防）：scheme 白名单 + 内网拒绝。
-            // 用户标签页自己逛内网不管（路由器后台要能开），但 AI 驱使的跳转走三件套，
-            // 与 open_and_read 的 guard_url 同口径，防“导航+读取”内网链。
-            let parsed = url::Url::parse(&url)
-                .map_err(|e| AppError::validation(format!("网址不合法: {e}")))?;
-            match parsed.scheme() {
-                "http" | "https" | "shift" => {}
-                _ => {
-                    return Err(AppError::permission(format!(
-                        "Agent 不允许导航到该地址类型: {}",
-                        parsed.scheme()
-                    ))
-                    .into())
-                }
-            }
+
+            // Agent 导航守卫（U-2 规约：纯函数护栏校验 + 异步 DNS 解析 SSRF 校验）
+            let parsed = validate_agent_nav_url(&url)?;
             let host = parsed.host_str().unwrap_or("").to_string();
-            if !host.is_empty() && !crate::net_guard::host_permitted(&host) {
-                return Err(
-                    AppError::permission(format!("Agent 不允许导航到内网地址：{host}")).into(),
-                );
-            }
+
             if host.parse::<std::net::IpAddr>().is_err() && !host.is_empty() {
-                let port = parsed.port_or_known_default().unwrap_or(80);
+                let port = parsed.port_or_known_default().unwrap_or(443);
                 let sock: Vec<std::net::SocketAddr> =
                     tokio::net::lookup_host((host.as_str(), port))
                         .await
@@ -429,5 +468,104 @@ mod tests {
         assert_eq!(err.code, crate::error::E_VALIDATION);
         let err = agent_confirm_multi_step("no-such-request".to_string(), false).unwrap_err();
         assert_eq!(err.code, crate::error::E_VALIDATION);
+    }
+
+    /// U-1 验证：单步动作人工确认管道正确接收用户允许与拒绝
+    #[tokio::test]
+    async fn single_action_confirm_approved_and_rejected() {
+        // 允许通道测试
+        let req_id = "test-req-allow".to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        pending().lock().unwrap().insert(req_id.clone(), tx);
+
+        let res = agent_confirm_action(req_id, true);
+        assert!(res.is_ok());
+        let approved = rx.await.expect("channel failed");
+        assert!(approved, "用户允许应传达 true");
+
+        // 拒绝通道测试（拒绝必须中止）
+        let req_id_deny = "test-req-deny".to_string();
+        let (tx2, rx2) = tokio::sync::oneshot::channel();
+        pending().lock().unwrap().insert(req_id_deny.clone(), tx2);
+
+        let res2 = agent_confirm_action(req_id_deny, false);
+        assert!(res2.is_ok());
+        let approved2 = rx2.await.expect("channel failed");
+        assert!(!approved2, "用户拒绝应传达 false 并导致动作中止");
+    }
+
+    /// U-1 验证：多步计划人工确认管道正确接收用户确认与拒绝
+    #[tokio::test]
+    async fn multi_step_confirm_approved_and_rejected() {
+        let req_id = "test-multi-req-allow".to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        pending().lock().unwrap().insert(req_id.clone(), tx);
+
+        let res = agent_confirm_multi_step(req_id, true);
+        assert!(res.is_ok());
+        assert!(rx.await.expect("channel failed"), "多步计划允许应为 true");
+
+        let req_id_deny = "test-multi-req-deny".to_string();
+        let (tx2, rx2) = tokio::sync::oneshot::channel();
+        pending().lock().unwrap().insert(req_id_deny.clone(), tx2);
+
+        let res2 = agent_confirm_multi_step(req_id_deny, false);
+        assert!(res2.is_ok());
+        assert!(!rx2.await.expect("channel failed"), "多步计划拒绝应为 false");
+    }
+
+    /// U-1 验证：白名单外动作直接被白名单拒绝（E_PERM），不能执行
+    #[test]
+    fn agent_action_params_whitelist_enforced() {
+        let p = crate::engine::agent::AgentActionParams {
+            action: "malicious_script_eval".to_string(),
+            selector: None,
+            value: None,
+            direction: None,
+            url: None,
+            ms: None,
+        };
+        let res = crate::engine::agent::build_action_js(&p);
+        assert!(res.is_err(), "非白名单动作必须被拒绝");
+        assert_eq!(res.unwrap_err().code, crate::error::E_PERM);
+    }
+
+    /// U-2 验证：Agent 浏览访问限制守卫
+    #[test]
+    fn test_validate_agent_nav_url_guards() {
+        // 1. 合法 HTTPS 允许
+        assert!(validate_agent_nav_url("https://example.com/test").is_ok());
+
+        // 2. 拒绝非 HTTPS (如 http)
+        let http_err = validate_agent_nav_url("http://example.com/test").unwrap_err();
+        assert_eq!(http_err.code, crate::error::E_PERM);
+
+        // 3. 拒绝 about: / chrome: / javascript: / file: 等内部特权页
+        for internal in &[
+            "about:blank",
+            "chrome://settings",
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "data:text/html,<h1>hi</h1>",
+        ] {
+            let err = validate_agent_nav_url(internal).unwrap_err();
+            assert_eq!(err.code, crate::error::E_PERM, "必须拒绝 {}", internal);
+        }
+
+        // 4. 拒绝扩展商店
+        for store in &[
+            "https://chromewebstore.google.com/detail/123",
+            "https://chrome.google.com/webstore/category/extensions",
+            "https://addons.mozilla.org/zh-CN/firefox/",
+        ] {
+            let err = validate_agent_nav_url(store).unwrap_err();
+            assert_eq!(err.code, crate::error::E_PERM, "必须拒绝扩展商店 {}", store);
+        }
+
+        // 5. 拒绝内网（localhost / 127.0.0.1）
+        for lan in &["https://localhost/admin", "https://127.0.0.1:8080/"] {
+            let err = validate_agent_nav_url(lan).unwrap_err();
+            assert_eq!(err.code, crate::error::E_PERM, "必须拒绝内网地址 {}", lan);
+        }
     }
 }

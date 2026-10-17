@@ -1,9 +1,9 @@
 //! Agent 浏览器动作（AI 执行层的动作白名单，单一来源，R1 拆分 · 2026-09-25）。
 //!
 //! 与 `registry::tool_defs()`（MCP/API 工具）区别：动作是 AI 在**当前标签页**上的原子操作，
-//! 每步需人工确认（见 `engine/agent.rs`）。这里集中声明，
+//! 每步需人工确认（见 `engine/agent.rs` 与 `agent_cmd.rs`）。这里集中声明，
 //! 供 function calling 的 `enum` 生成、白名单校验、以及后续的 AI 能力自述。
-// 动作注册表待 AI 执行层（engine/agent.rs）接线后消费，接线前允许死代码
+// 动作注册表已由 AI 执行层（engine/agent.rs/agent_cmd.rs）通过 IDS/ACTIONS 消费
 #![allow(dead_code)]
 
 /// 一个动作
@@ -67,6 +67,11 @@ pub const ACTIONS: &[Action] = &[
 pub const IDS: [&str; 9] = [
     "click", "fill", "scroll", "read", "wait", "navigate", "back", "snapshot", "submit",
 ];
+
+/// 按 ID 检索动作定义
+pub fn find_action(id: &str) -> Option<&'static Action> {
+    ACTIONS.iter().find(|a| a.id == id)
+}
 
 #[cfg(test)]
 mod tests {

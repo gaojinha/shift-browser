@@ -161,7 +161,7 @@ pub(crate) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
                 app.clone(),
                 state,
                 url.clone(),
-                None,
+                Some(true), // U-3：AI 标签走独立 ephemeral WebContext，Cookie/缓存/存储与主 Profile 零交叉隔离
                 None,
                 Some(true), // J6：AI 标签后台打开，不抢用户焦点
                 None,       // AI 标签读内容不能等，不延迟（probe 紧接着读页）

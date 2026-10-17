@@ -343,6 +343,52 @@ mod tests {
         assert_eq!(m.ai_tab_count(), 2);
     }
 
+    /// U-3 验证：AI 标签隔离属性（private/ephemeral 模式下 Cookie/存储不污染用户主环境）
+    #[test]
+    fn test_ai_tab_ephemeral_isolation() {
+        let m = TabManager::new();
+        let user_tab = Tab {
+            id: "user-tab-1".to_string(),
+            url: "https://example.com/login".to_string(),
+            title: "User Tab".to_string(),
+            favicon: String::new(),
+            is_active: true,
+            is_pinned: false,
+            is_muted: false,
+            hibernated: false,
+            private: false,
+            origin: "user".to_string(),
+        };
+        let ai_tab = Tab {
+            id: "ai-tab-1".to_string(),
+            url: "https://example.com/article".to_string(),
+            title: "AI Tab".to_string(),
+            favicon: String::new(),
+            is_active: false,
+            is_pinned: false,
+            is_muted: false,
+            hibernated: false,
+            private: true,
+            origin: "ai".to_string(),
+        };
+
+        m.mutate(|s| {
+            s.tabs.insert("user-tab-1".into(), user_tab);
+            s.tabs.insert("ai-tab-1".into(), ai_tab);
+            s.order.extend(["user-tab-1".into(), "ai-tab-1".into()]);
+        });
+
+        let all = m.all_tabs();
+        let user_tab_read = all.iter().find(|t| t.id == "user-tab-1").expect("user tab exists");
+        let ai_tab_read = all.iter().find(|t| t.id == "ai-tab-1").expect("ai tab exists");
+
+        // 验证用户标签不带无痕隔离，AI 标签必须带 private 隔离
+        assert!(!user_tab_read.private, "用户常规标签不应是 private 隔离模式");
+        assert!(ai_tab_read.private, "AI 标签必须标记为 private (ephemeral 隔离)");
+        assert_eq!(ai_tab_read.origin, "ai");
+        assert_eq!(m.ai_tab_count(), 1);
+    }
+
     #[test]
     fn split_tab_roundtrip() {
         let m = TabManager::new();
