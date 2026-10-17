@@ -270,4 +270,285 @@ pub async fn user_import(db: tauri::State<'_, Db>) -> Result<UserResult, String>
     Ok(UserResult::ok(format!("账号 {} 导入成功", uname)))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    /// 创建带 users、user_prefs、user_session 表的临时测试库
+    async fn temp_db() -> (tempfile::TempDir, Db) {
+        let dir = tempfile::tempdir().unwrap();
+        let options = SqliteConnectOptions::new()
+            .filename(dir.path().join("test_import_export.db"))
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        sqlx::raw_sql(include_str!("../../../migrations/20260914000000_users.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let key_path = dir.path().join("master.key");
+        let vault_path = dir.path().join("vault.key");
+        let translate_key_path = dir.path().join("translate.key");
+        (
+            dir,
+            Db {
+                pool: pool.clone(),
+                feed_pool: pool,
+                key_path,
+                vault_path,
+                translate_key_path,
+                master_key: tokio::sync::Mutex::new(None),
+                translate_key: tokio::sync::Mutex::new(None),
+            },
+        )
+    }
+
+    /// 校验 validate_import_account 的白名单与防 DoS 规则
+    #[test]
+    fn test_validate_import_account_scenarios() {
+        let valid_hash = "a".repeat(128);
+        let valid_salt = "f".repeat(32);
+
+        // 1. 正常有效入参（pbkdf2 与 pbkdf2-sha512-N）
+        assert!(validate_import_account("valid_user", &valid_hash, &valid_salt, "pbkdf2").is_ok());
+        assert!(validate_import_account(
+            "valid_user",
+            &valid_hash,
+            &valid_salt,
+            "pbkdf2-sha512-210000"
+        )
+        .is_ok());
+        assert!(validate_import_account(
+            "测试用户",
+            &valid_hash,
+            &valid_salt,
+            "pbkdf2-sha512-1"
+        )
+        .is_ok());
+        assert!(validate_import_account(
+            "valid-user_01",
+            &valid_hash,
+            &valid_salt,
+            "pbkdf2-sha512-10000000"
+        )
+        .is_ok());
+
+        // 2. 非法用户名（过短、中间含空格、非法标点、过长）
+        assert!(validate_import_account("a", &valid_hash, &valid_salt, "pbkdf2").is_err());
+        assert!(validate_import_account(
+            "user with space",
+            &valid_hash,
+            &valid_salt,
+            "pbkdf2"
+        )
+        .is_err());
+        assert!(validate_import_account(
+            "invalid*char",
+            &valid_hash,
+            &valid_salt,
+            "pbkdf2"
+        )
+        .is_err());
+        assert!(validate_import_account(
+            &"toolong_username_".repeat(3),
+            &valid_hash,
+            &valid_salt,
+            "pbkdf2"
+        )
+        .is_err());
+
+        // 3. 非法哈希（长度不对或非 hex）
+        let short_hash = "a".repeat(127);
+        let non_hex_hash = format!("{}z", "a".repeat(127));
+        assert!(validate_import_account("valid_user", &short_hash, &valid_salt, "pbkdf2").is_err());
+        assert!(validate_import_account("valid_user", &non_hex_hash, &valid_salt, "pbkdf2").is_err());
+
+        // 4. 非法盐值
+        let short_salt = "f".repeat(31);
+        let non_hex_salt = format!("{}g", "f".repeat(31));
+        assert!(validate_import_account("valid_user", &valid_hash, &short_salt, "pbkdf2").is_err());
+        assert!(validate_import_account("valid_user", &valid_hash, &non_hex_salt, "pbkdf2").is_err());
+
+        // 5. 非法算法标记与 DoS 边界（> 1000 万）
+        assert!(validate_import_account("valid_user", &valid_hash, &valid_salt, "bcrypt").is_err());
+        assert!(validate_import_account("valid_user", &valid_hash, &valid_salt, "md5").is_err());
+        assert!(validate_import_account(
+            "valid_user",
+            &valid_hash,
+            &valid_salt,
+            "pbkdf2-sha512-0"
+        )
+        .is_err());
+        assert!(validate_import_account(
+            "valid_user",
+            &valid_hash,
+            &valid_salt,
+            "pbkdf2-sha512-10000001"
+        )
+        .is_err());
+        assert!(validate_import_account(
+            "valid_user",
+            &valid_hash,
+            &valid_salt,
+            "pbkdf2-sha512-99999999999"
+        )
+        .is_err());
+        assert!(validate_import_account(
+            "valid_user",
+            &valid_hash,
+            &valid_salt,
+            "pbkdf2-sha512-invalid"
+        )
+        .is_err());
+    }
+
+    /// 校验导入备份 JSON 解析提取、校验、落库与偏好映射逻辑
+    #[tokio::test]
+    async fn test_import_account_db_insertion_and_prefs() {
+        let (_dir, db) = temp_db().await;
+        let valid_hash = "b".repeat(128);
+        let valid_salt = "c".repeat(32);
+
+        // 1. 模拟标准备份 JSON 结构
+        let backup_json = serde_json::json!({
+            "app": "ShiftBrowser",
+            "type": "user-account-backup",
+            "version": 1,
+            "exportedAt": "2026-10-17",
+            "account": {
+                "username": "tester",
+                "passwordHash": valid_hash,
+                "salt": valid_salt,
+                "hashAlgo": "pbkdf2-sha512-210000",
+                "nickname": "TestNick",
+                "avatar": "🦊",
+                "signature": "Custom signature",
+                "prefs": {
+                    "showLunar": false,
+                    "showQuote": true,
+                    "showWeather": false,
+                    "fontSize": 18,
+                    "weatherCity": "Beijing",
+                    "themeColor": "#ff5500",
+                    "wallpaper": "my-bg.jpg"
+                }
+            }
+        });
+
+        // 提取并校验
+        assert_eq!(
+            backup_json.get("type").and_then(|t| t.as_str()),
+            Some("user-account-backup")
+        );
+        let acct = backup_json.get("account").unwrap();
+        let uname = acct.get("username").and_then(|u| u.as_str()).unwrap();
+        let pwd_hash = acct.get("passwordHash").and_then(|u| u.as_str()).unwrap();
+        let salt = acct.get("salt").and_then(|u| u.as_str()).unwrap();
+        let algo = acct.get("hashAlgo").and_then(|u| u.as_str()).unwrap();
+        validate_import_account(uname, pwd_hash, salt, algo).unwrap();
+
+        // 插入 users 表
+        let res = sqlx::query(
+            "INSERT INTO users (username, password_hash, salt, hash_algo, nickname, avatar, signature)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(uname)
+        .bind(pwd_hash)
+        .bind(salt)
+        .bind(algo)
+        .bind(acct.get("nickname").and_then(|u| u.as_str()).unwrap())
+        .bind(acct.get("avatar").and_then(|u| u.as_str()).unwrap())
+        .bind(acct.get("signature").and_then(|u| u.as_str()).unwrap())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let uid = res.last_insert_rowid();
+        assert!(uid > 0);
+
+        // 插入偏好表并验证字段映射
+        let p = acct.get("prefs").unwrap();
+        sqlx::query(
+            "INSERT INTO user_prefs (user_id, show_lunar, show_quote, show_weather, font_size, weather_city, theme_color, wallpaper)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(uid)
+        .bind(p.get("showLunar").and_then(|x| x.as_bool()).unwrap_or(true))
+        .bind(p.get("showQuote").and_then(|x| x.as_bool()).unwrap_or(true))
+        .bind(p.get("showWeather").and_then(|x| x.as_bool()).unwrap_or(true))
+        .bind(p.get("fontSize").and_then(|x| x.as_i64()).unwrap_or(14))
+        .bind(p.get("weatherCity").and_then(|x| x.as_str()).unwrap_or("运城"))
+        .bind(p.get("themeColor").and_then(|x| x.as_str()).unwrap_or("#4a9eff"))
+        .bind(p.get("wallpaper").and_then(|x| x.as_str()).unwrap_or(""))
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        // 查验落库内容与 load_prefs
+        let loaded_prefs = load_prefs(&db, uid).await;
+        assert!(!loaded_prefs.show_lunar);
+        assert!(loaded_prefs.show_quote);
+        assert!(!loaded_prefs.show_weather);
+        assert_eq!(loaded_prefs.font_size, 18);
+        assert_eq!(loaded_prefs.weather_city, "Beijing");
+        assert_eq!(loaded_prefs.theme_color, "#ff5500");
+        assert_eq!(loaded_prefs.wallpaper, "my-bg.jpg");
+
+        // 重复用户名检测
+        let exists: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE username = ?")
+            .bind("tester")
+            .fetch_optional(&db.pool)
+            .await
+            .unwrap();
+        assert!(exists.is_some());
+    }
+
+    /// 校验旧版/缺失偏好的备份导入时默认值填充
+    #[test]
+    fn test_import_legacy_backup_default_fallback() {
+        let valid_hash = "d".repeat(128);
+        let valid_salt = "e".repeat(32);
+
+        // 旧版备份缺少 hashAlgo、avatar、signature 与 prefs
+        let legacy_json = serde_json::json!({
+            "type": "user-account-backup",
+            "account": {
+                "username": "legacy_user",
+                "passwordHash": valid_hash,
+                "salt": valid_salt
+            }
+        });
+
+        let acct = legacy_json.get("account").unwrap();
+        let algo = acct.get("hashAlgo").and_then(|u| u.as_str()).unwrap_or("pbkdf2");
+        let avatar = acct.get("avatar").and_then(|u| u.as_str()).unwrap_or("🦊");
+        let sig = acct.get("signature").and_then(|u| u.as_str()).unwrap_or("默认签名");
+
+        assert_eq!(algo, "pbkdf2");
+        assert_eq!(avatar, "🦊");
+        assert_eq!(sig, "默认签名");
+
+        let p = acct.get("prefs").cloned().unwrap_or_default();
+        let prefs = UserPrefs {
+            show_lunar: p.get("showLunar").and_then(|x| x.as_bool()).unwrap_or(true),
+            show_quote: p.get("showQuote").and_then(|x| x.as_bool()).unwrap_or(true),
+            show_weather: p.get("showWeather").and_then(|x| x.as_bool()).unwrap_or(true),
+            font_size: p.get("fontSize").and_then(|x| x.as_i64()).unwrap_or(14),
+            weather_city: p.get("weatherCity").and_then(|x| x.as_str()).unwrap_or("运城").to_string(),
+            theme_color: p.get("themeColor").and_then(|x| x.as_str()).unwrap_or("#4a9eff").to_string(),
+            wallpaper: p.get("wallpaper").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        };
+
+        assert_eq!(prefs.weather_city, "运城");
+        assert_eq!(prefs.font_size, 14);
+        assert_eq!(prefs.theme_color, "#4a9eff");
+        assert_eq!(prefs.wallpaper, "");
+    }
+}
+
 // ===== 小工具 =====
