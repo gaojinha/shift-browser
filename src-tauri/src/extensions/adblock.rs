@@ -4,6 +4,14 @@
 
 use super::*;
 
+/// 反指纹会话 key：进程启动时随机生成一次（同会话内固定，重启即换）。
+/// privacy.js 据此派生种子 = f(会话 key, origin)：同会话同源稳定、跨会话变化。
+static SESSION_KEY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn session_key() -> &'static str {
+    SESSION_KEY.get_or_init(|| uuid::Uuid::new_v4().simple().to_string())
+}
+
 /// 内置广告拦截 CSS 规则（精简版，常见广告选择器）
 /// 设置 adblock_enabled=true 时自动注入，优先级低于用户扩展（扩展后注入）
 const ADBLOCK_CSS: &str = include_str!("../../resources/js/adblock.css");
@@ -141,10 +149,12 @@ pub async fn collect_enabled_items(
     // 反指纹模式（阶段 2）：noise（加噪，默认）/ uniform（统一化）
     let fp_mode = normalize_fp_mode(take("privacy_fp_mode").as_deref());
     let wl_prefix = format!(
-        "window.__SHIFT_PRIVACY_WHITELIST__ = {};\nwindow.__SHIFT_TRANSLATE_TIMEOUT = {};\nwindow.__SHIFT_FP_MODE__ = {};\nwindow.__SHIFT_UA_BRANDS__ = {};\nwindow.__SHIFT_SITE_OVERRIDES__ = {};\n",
+        "window.__SHIFT_PRIVACY_WHITELIST__ = {};\nwindow.__SHIFT_TRANSLATE_TIMEOUT = {};\nwindow.__SHIFT_FP_MODE__ = {};\nwindow.__SHIFT_SESSION_KEY__ = {};\nwindow.__SHIFT_UA_BRANDS__ = {};\nwindow.__SHIFT_SITE_OVERRIDES__ = {};\n",
         serde_json::to_string(&whitelist).unwrap_or_else(|_| "[]".to_string()),
         timeout,
         serde_json::to_string(fp_mode).unwrap_or_else(|_| "\"noise\"".to_string()),
+        // U-5：进程级会话 key（启动随机生成）→ 反指纹种子 = f(会话 key, origin)
+        serde_json::to_string(session_key()).unwrap_or_else(|_| "\"\"".to_string()),
         // Client Hints brands 与 UA 版本对齐（方案 B）：否则"UA 说 Chrome、brands 无 Chrome"被识破
         crate::useragent::brands_json(&crate::useragent::ua_for("")),
         // 站点覆盖表（2026-09-29）：注入全局不分站点，JS 按 location.host 查表

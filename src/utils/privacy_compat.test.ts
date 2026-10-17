@@ -187,3 +187,34 @@ describe('adblock.js · 跨域 iframe 零介入', () => {
     expect(adEl.style.display).toBe('none')
   })
 })
+
+describe('U-5: 反指纹种子会话维度（Brave farbling 同口径）', () => {
+  function getSeed(url: string, sessionKey?: string): number {
+    const w = jsdomWindow(url)
+    if (sessionKey !== undefined) {
+      w.eval(`window.__SHIFT_SESSION_KEY__ = ${JSON.stringify(sessionKey)};`)
+    }
+    w.eval(PRIVACY_JS)
+    return w.eval('window.__shiftOriginSeed') as number
+  }
+
+  it('同会话同源：种子完全稳定', () => {
+    const s1 = getSeed('https://example.com/page1', 'session-alpha')
+    const s2 = getSeed('https://example.com/page2', 'session-alpha')
+    expect(typeof s1).toBe('number')
+    expect(s1).toBeGreaterThan(0)
+    expect(s1).toBe(s2)
+  })
+
+  it('跨会话（不同 session key）：种子发生变化', () => {
+    const s1 = getSeed('https://example.com/', 'session-alpha')
+    const s2 = getSeed('https://example.com/', 'session-beta')
+    expect(s1).not.toBe(s2)
+  })
+
+  it('同会话跨源：种子互不相同', () => {
+    const s1 = getSeed('https://example.com/', 'session-alpha')
+    const s2 = getSeed('https://site-b.org/', 'session-alpha')
+    expect(s1).not.toBe(s2)
+  })
+})

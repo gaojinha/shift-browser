@@ -54,17 +54,23 @@
     });
   } catch (e) {}
 
-  // ---- 2) per-origin 确定性种子（FNV-1a 哈希 origin）----
+  // ---- 2) per-session + per-origin 确定性种子（FNV-1a）----
+  // 种子 = f(会话随机 key, origin)：同会话同源稳定（不破坏功能）、
+  // 跨会话（进程重启后 key 换新）或跨源即变（追踪失效）。对标 Brave farbling。
+  // 会话 key 由 Rust 注入侧生成并在脚本前拼 window.__SHIFT_SESSION_KEY__。
   function originSeed() {
     var o = String(location.origin || location.href || '');
+    var k = String(window.__SHIFT_SESSION_KEY__ || '');
+    var s = k + '|' + o;
     var h = 2166136261;
-    for (var i = 0; i < o.length; i++) {
-      h ^= o.charCodeAt(i);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
       h = Math.imul(h, 16777619);
     }
     return h >>> 0;
   }
   var SEED = originSeed();
+  try { window.__shiftOriginSeed = SEED; } catch (e) {}
   // xorshift32 确定性伪随机：同源同会话稳定，换站点即变
   function rnd(i) {
     var x = (SEED + Math.imul(i, 2654435761)) >>> 0;

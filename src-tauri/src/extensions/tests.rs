@@ -1,6 +1,16 @@
 use super::*;
 
 #[test]
+fn session_key_is_non_empty_and_stable_within_process() {
+    let k1 = adblock::session_key();
+    let k2 = adblock::session_key();
+    assert!(!k1.is_empty(), "会话 key 不应为空");
+    assert_eq!(k1, k2, "同一进程生命周期内 session_key 应恒定");
+    // simple uuid 格式为 32 位 hex
+    assert_eq!(k1.len(), 32, "会话 key 应为 32 字符的 UUID Simple 字符串");
+}
+
+#[test]
 fn build_js_includes_builtin_and_custom() {
     let js = adblock::build_adblock_js(&["自定义词".to_string()]);
     assert!(js.contains("'关闭广告'"), "应包含内置词");
