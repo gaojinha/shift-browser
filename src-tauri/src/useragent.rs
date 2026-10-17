@@ -200,9 +200,9 @@ mod tests {
     static STATE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     /// 复位全局静态到默认态（每个状态类测试开头调用，防用例间状态泄漏）
-    fn reset_ua_state() {
-        overrides().lock().unwrap().clear();
-        *global_ua().lock().unwrap() = DEFAULT_UA.to_string();
+    fn reset_shared_state() {
+        *global_ua().lock().unwrap_or_else(|e| e.into_inner()) = DEFAULT_UA.to_string();
+        overrides().lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     /// 建一个跑完整迁移的真实库（settings 表齐全），同 newtab.rs temp_db 模式
@@ -210,12 +210,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::Db::init(dir.path().to_path_buf()).await.unwrap();
         (dir, db)
-    }
-
-    /// 把进程级静态状态复位到已知基线（改状态的测试必须先调，保证与执行顺序无关）
-    fn reset_shared_state() {
-        *global_ua().lock().unwrap_or_else(|e| e.into_inner()) = DEFAULT_UA.to_string();
-        overrides().lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     /// 直写一行 settings（测试造数用；绕开命令层）
@@ -272,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn ua_for_prefers_site_override_then_global_and_skips_empty_value() {
         let _g = STATE_LOCK.lock().await;
-        reset_ua_state();
+        reset_shared_state();
         assert_eq!(ua_for(""), DEFAULT_UA); // 空 host 回落全局
         // 站点覆盖优先于全局
         overrides()
@@ -292,7 +286,7 @@ mod tests {
     #[tokio::test]
     async fn overrides_json_empty_table_returns_empty_object() {
         let _g = STATE_LOCK.lock().await;
-        reset_ua_state();
+        reset_shared_state();
         let json = overrides_json();
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("overrides_json 必须是合法 JSON");
         assert!(parsed.as_object().unwrap().is_empty());
@@ -328,10 +322,8 @@ mod tests {
     // ── DB 命令层：persist_setting + load（真实库） ─────────────────
 
     #[tokio::test]
-    // 测试专用串行锁（整段测试为单一临界区，#[tokio::test] 单线程运行时，无实际阻塞风险）
-    #[allow(clippy::await_holding_lock)]
     async fn persist_setting_upserts_and_load_reads_back() {
-        let _g = STATE_LOCK.lock().unwrap();
+        let _g = STATE_LOCK.lock().await;
         reset_shared_state();
         let (_dir, db) = temp_db().await;
         // 首次插入
@@ -348,10 +340,8 @@ mod tests {
     }
 
     #[tokio::test]
-    // 同上：测试专用串行锁
-    #[allow(clippy::await_holding_lock)]
     async fn load_keeps_default_when_user_agent_blank_or_absent() {
-        let _g = STATE_LOCK.lock().unwrap();
+        let _g = STATE_LOCK.lock().await;
         reset_shared_state();
         let (_dir, db) = temp_db().await;
         // 不写任何 settings → 全部缺省
