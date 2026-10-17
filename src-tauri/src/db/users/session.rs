@@ -317,3 +317,209 @@ pub async fn user_logout(db: tauri::State<'_, Db>) -> CommandResult<UserResult> 
     log::info!("[users] 用户退出登录");
     Ok(UserResult::ok("已退出登录"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    /// 创建带 users、user_session、user_prefs、settings 表的独立测试库
+    async fn temp_db() -> (tempfile::TempDir, Db) {
+        let dir = tempfile::tempdir().unwrap();
+        let options = SqliteConnectOptions::new()
+            .filename(dir.path().join("test_session.db"))
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        // 执行 users 迁移建表（包含 users, user_session, user_prefs 等）
+        sqlx::raw_sql(include_str!("../../../migrations/20260914000000_users.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        // 补充 settings 表结构以支撑偏好同步
+        sqlx::raw_sql(
+            "CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let key_path = dir.path().join("master.key");
+        let vault_path = dir.path().join("vault.key");
+        let translate_key_path = dir.path().join("translate.key");
+        (
+            dir,
+            Db {
+                pool: pool.clone(),
+                feed_pool: pool,
+                key_path,
+                vault_path,
+                translate_key_path,
+                master_key: tokio::sync::Mutex::new(None),
+                translate_key: tokio::sync::Mutex::new(None),
+            },
+        )
+    }
+
+    /// 辅助插入用户
+    async fn insert_test_user(db: &Db, name: &str, pwd: &str, algo: &str) -> i64 {
+        let salt = generate_salt();
+        let iter = iterations_for_algo(algo);
+        let hash = hash_password_with_iter(pwd, &salt, iter);
+        let res = sqlx::query(
+            "INSERT INTO users (username, password_hash, salt, hash_algo, nickname, avatar, signature)
+             VALUES (?, ?, ?, ?, ?, '🦊', 'bio')",
+        )
+        .bind(name)
+        .bind(&hash)
+        .bind(&salt)
+        .bind(algo)
+        .bind(name)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        res.last_insert_rowid()
+    }
+
+    /// 校验会话状态机：初始未登录、set_session 写入与切换、clear_session 覆盖与注销
+    #[tokio::test]
+    async fn test_session_state_machine() {
+        let (_dir, db) = temp_db().await;
+
+        // 插入有效用户以满足 user_session.user_id 外键约束
+        let u1 = insert_test_user(&db, "user_one", "pass123", HASH_ALGO_CURRENT).await;
+        let u2 = insert_test_user(&db, "user_two", "pass123", HASH_ALGO_CURRENT).await;
+
+        // 1. 初始库中 user_session 无记录，current_user_id 为 None
+        assert_eq!(current_user_id(&db).await, None);
+
+        // 2. 写入用户 u1 登录态
+        set_session(&db, Some(u1)).await.unwrap();
+        assert_eq!(current_user_id(&db).await, Some(u1));
+
+        // 3. 覆盖写入用户 u2
+        set_session(&db, Some(u2)).await.unwrap();
+        assert_eq!(current_user_id(&db).await, Some(u2));
+
+        // 4. set_session(None) 标记 logged_in = 0
+        set_session(&db, None).await.unwrap();
+        assert_eq!(current_user_id(&db).await, None);
+
+        // 5. 再次登录后调用 clear_session，必须重置为 NULL / 0
+        set_session(&db, Some(u1)).await.unwrap();
+        assert_eq!(current_user_id(&db).await, Some(u1));
+        clear_session(&db).await.unwrap();
+        assert_eq!(current_user_id(&db).await, None);
+    }
+
+    /// 校验偏好读写与 settings 表同步
+    #[tokio::test]
+    async fn test_load_prefs_and_apply_to_settings() {
+        let (_dir, db) = temp_db().await;
+
+        // 插入有效用户作为偏好绑定的外键宿主
+        let uid = insert_test_user(&db, "pref_user", "pass123", HASH_ALGO_CURRENT).await;
+
+        // 1. 未配置偏好的用户回退为 UserPrefs::default()
+        let default_prefs = load_prefs(&db, 999).await;
+        assert_eq!(default_prefs.weather_city, UserPrefs::default().weather_city);
+
+        // 2. 插入自定义偏好行
+        sqlx::query(
+            "INSERT INTO user_prefs (user_id, show_lunar, show_quote, show_weather, font_size, weather_city, theme_color, wallpaper)
+             VALUES (?, 0, 1, 0, 18, 'Shanghai', '#123456', 'custom.png')",
+        )
+        .bind(uid)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let loaded = load_prefs(&db, uid).await;
+        assert!(!loaded.show_lunar);
+        assert!(loaded.show_quote);
+        assert!(!loaded.show_weather);
+        assert_eq!(loaded.font_size, 18);
+        assert_eq!(loaded.weather_city, "Shanghai");
+        assert_eq!(loaded.theme_color, "#123456");
+        assert_eq!(loaded.wallpaper, "custom.png");
+
+        // 3. 应用偏好到 settings 表
+        apply_prefs_to_settings(&db, &loaded).await.unwrap();
+
+        let val_city: String = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'weather_city'")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        let val_quote: String = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'show_quote'")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        let val_lunar: String = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'show_lunar'")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+
+        assert_eq!(val_city, "Shanghai");
+        assert_eq!(val_quote, "1");
+        assert_eq!(val_lunar, "0");
+    }
+
+    /// 校验 verify_password 纯密码验证：匹配、错误密码、空用户名/密码、以及历史算法透明升级
+    #[tokio::test]
+    async fn test_verify_password_and_transparent_upgrade() {
+        let (_dir, db) = temp_db().await;
+
+        // 空入参拦截
+        assert!(!verify_password(&db, "", "pwd123").await.unwrap());
+        assert!(!verify_password(&db, "user", "").await.unwrap());
+        assert!(!verify_password(&db, "nonexistent", "pwd123").await.unwrap());
+
+        // 插入当前算法用户验证
+        let uid = insert_test_user(&db, "alice", "Secret123", HASH_ALGO_CURRENT).await;
+        assert!(uid > 0);
+        assert!(verify_password(&db, "alice", "Secret123").await.unwrap());
+        assert!(!verify_password(&db, "alice", "WrongPwd").await.unwrap());
+
+        // 插入历史算法（10 万次）用户验证
+        insert_test_user(&db, "bob", "OldPass456", "pbkdf2").await;
+        let algo_before: String = sqlx::query_scalar("SELECT hash_algo FROM users WHERE username = 'bob'")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(algo_before, "pbkdf2");
+
+        // 历史算法密码校验成功后，触发透明升级落库
+        let ok = verify_password(&db, "bob", "OldPass456").await.unwrap();
+        assert!(ok);
+
+        let algo_after: String = sqlx::query_scalar("SELECT hash_algo FROM users WHERE username = 'bob'")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(algo_after, HASH_ALGO_CURRENT);
+
+        // 升级后再次校验依然通过
+        assert!(verify_password(&db, "bob", "OldPass456").await.unwrap());
+    }
+
+    /// 校验 load_user 加载基础信息与关联偏好
+    #[tokio::test]
+    async fn test_load_user_with_prefs() {
+        let (_dir, db) = temp_db().await;
+        assert!(load_user(&db, 999).await.is_none());
+
+        let uid = insert_test_user(&db, "carol", "Pass789", HASH_ALGO_CURRENT).await;
+        let user = load_user(&db, uid).await.expect("user should exist");
+        assert_eq!(user.id, uid);
+        assert_eq!(user.username, "carol");
+        assert_eq!(user.nickname, "carol");
+        assert_eq!(user.avatar, "🦊");
+    }
+}
