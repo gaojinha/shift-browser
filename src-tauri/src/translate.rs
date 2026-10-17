@@ -648,6 +648,63 @@ mod tests {
         assert_eq!(e.message, "双引擎均失败（超时）");
     }
 
+    /// extract_between：命中 / 多候选取首个 / start 或 end 缺失 / 空串边界
+    #[test]
+    fn extract_between_边界与首个候选() {
+        // 命中
+        assert_eq!(
+            extract_between("a=\"XYZ\";b", "a=\"", "\";").as_deref(),
+            Some("XYZ")
+        );
+        // 多个候选取首个
+        assert_eq!(
+            extract_between("[x]-[y]-[z]", "[", "]").as_deref(),
+            Some("x")
+        );
+        // start 缺失 / end 缺失 → None
+        assert_eq!(extract_between("abc", "Q", "c"), None);
+        assert_eq!(extract_between("abc", "a", "Z"), None);
+        // start 之后无 end（end 只在 start 之前出现）→ None
+        assert_eq!(extract_between("end-start", "start", "end"), None);
+        // 相邻无内容 → 空串（而非 None）
+        assert_eq!(extract_between("<>", "<", ">").as_deref(), Some(""));
+        // 空输入
+        assert_eq!(extract_between("", "a", "b"), None);
+    }
+
+    /// upstream_failure：错误文本透传，码固定为 E_NET（上游异常不可当超时重试）
+    #[test]
+    fn upstream_failure_passes_message_and_uses_net_code() {
+        let e = upstream_failure("HTTP 500");
+        assert_eq!(e.code, crate::error::E_NET);
+        assert_eq!(e.message, "HTTP 500");
+        // 接受 String 与 &str（impl Into<String>）且原样保留，含中文与空串
+        let e2 = upstream_failure(String::from("解析失败：缺 tkk"));
+        assert_eq!(e2.message, "解析失败：缺 tkk");
+        assert_eq!(upstream_failure("").message, "");
+    }
+
+    /// classify_send：超时 / 非超时两条路径；message 原样透传（含空串）
+    #[test]
+    fn classify_send_passes_message_through_on_both_branches() {
+        let t = classify_send(true, "reqwest timeout".into());
+        assert_eq!(t.code, crate::error::E_TIMEOUT);
+        assert_eq!(t.message, "reqwest timeout");
+        let n = classify_send(false, String::new());
+        assert_eq!(n.code, crate::error::E_NET);
+        assert_eq!(n.message, "");
+    }
+
+    /// bing_cache_fresh 边界：1799s 仍新鲜，恰 1800s 即过期（< 1800 语义）
+    #[test]
+    fn bing_cache_fresh_exact_boundary() {
+        let now = std::time::Instant::now();
+        let d = |s: u64| std::time::Duration::from_secs(s);
+        assert!(bing_cache_fresh(now - d(1799)));
+        assert!(!bing_cache_fresh(now - d(1800)));
+        assert!(!bing_cache_fresh(now - d(1801)));
+    }
+
     /// C-9 端到端：命中记忆时不发第三方请求。
     ///
     /// 用「预置记忆 + 1 秒超时」验证：只有命中缓存才能拿到预置译文；若未命中
