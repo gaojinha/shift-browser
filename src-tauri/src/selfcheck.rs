@@ -367,8 +367,17 @@ mod tests {
         let a = CheckItem::ok("x", "正常");
         assert!(a.ok);
         assert_eq!(a.name, "x");
+        assert_eq!(a.detail, "正常");
+
         let b = CheckItem::bad("y", "坏了");
         assert!(!b.ok);
+        assert_eq!(b.name, "y");
+        assert_eq!(b.detail, "坏了");
+
+        // 接受 String 与 Into<String> 类型
+        let c = CheckItem::ok("z", String::from("动态生成信息"));
+        assert!(c.ok);
+        assert_eq!(c.detail, "动态生成信息");
     }
 
     #[test]
@@ -381,6 +390,37 @@ mod tests {
         // 残行/非法行跳过不计数
         assert_eq!(super::parse_if_inet6("garbage line\n\n"), (0, 0));
         assert_eq!(super::parse_if_inet6(""), (0, 0));
+    }
+
+    #[test]
+    fn parse_if_inet6_边界格式与无效字段过滤() {
+        // 字段少于 6 个跳过（前 5 个字段存在但缺少网卡名）
+        let missing_col = "240887260000001d0003000000000011 02 40 00 00\n";
+        assert_eq!(super::parse_if_inet6(missing_col), (0, 0));
+
+        // 地址长度不等于 32 位（31 位与 33 位 hex）跳过
+        let short_addr = "240887260000001d000300000000001 02 40 00 00 eth0\n";
+        let long_addr = "240887260000001d00030000000000111 02 40 00 00 eth0\n";
+        assert_eq!(super::parse_if_inet6(short_addr), (0, 0));
+        assert_eq!(super::parse_if_inet6(long_addr), (0, 0));
+
+        // 地址包含非 16 进制字符（例如包含 g）跳过
+        let non_hex_addr = "240887260000001d000300000000001g 02 40 00 00 eth0\n";
+        assert_eq!(super::parse_if_inet6(non_hex_addr), (0, 0));
+
+        // scope 为非 16 进制（如 xx）时进入 unwrap_or(0xff)，计入 total 但不计入 global
+        let invalid_scope = "240887260000001d0003000000000011 02 40 xx 00 eth0\n";
+        assert_eq!(super::parse_if_inet6(invalid_scope), (0, 1));
+
+        // 多行混合：仅合法行计入，全局 scope (00) 准确识别
+        let mixed = "\
+            # 注释或空行\n\
+            \n\
+            240887260000001d0003000000000011 02 40 00 00 eth0\n\
+            fe800000000000000000000000000002 02 40 20 80 eth0\n\
+            invalid row\n\
+            20010db8000000000000000000000001 03 40 00 00 wlan0\n";
+        assert_eq!(super::parse_if_inet6(mixed), (2, 3));
     }
 
     #[test]
