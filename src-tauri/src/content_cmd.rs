@@ -250,5 +250,166 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, crate::error::E_VALIDATION);
+        assert_eq!(err.message, "问题不能为空");
+
+        // 仅空白字符同样视为有效性错误
+        let err_blank = content_qa_prompt(
+            "title".into(),
+            "url".into(),
+            "source".into(),
+            "coverage".into(),
+            "content".into(),
+            "   \t\n ".into(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err_blank.code, crate::error::E_VALIDATION);
+        assert_eq!(err_blank.message, "问题不能为空");
+    }
+
+    /// content_qa_prompt：内容为空或纯空白时归 E_VALIDATION
+    #[tokio::test]
+    async fn content_qa_prompt_empty_content_is_validation() {
+        let err = content_qa_prompt(
+            "title".into(),
+            "url".into(),
+            "source".into(),
+            "coverage".into(),
+            "".into(),
+            "页面讲了什么？".into(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, crate::error::E_VALIDATION);
+        assert_eq!(err.message, "页面数据为空，无法组装问答提示词");
+
+        let err_blank = content_qa_prompt(
+            "title".into(),
+            "url".into(),
+            "source".into(),
+            "coverage".into(),
+            "  \r\n  ".into(),
+            "页面讲了什么？".into(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err_blank.code, crate::error::E_VALIDATION);
+        assert_eq!(err_blank.message, "页面数据为空，无法组装问答提示词");
+    }
+
+    /// content_qa_prompt：正常入参稳定拼接关键字段，不截断与截断标记正确
+    #[tokio::test]
+    async fn content_qa_prompt_constructs_stable_prompt_and_sets_truncated() {
+        let res = content_qa_prompt(
+            "测试文章".into(),
+            "https://example.com/post".into(),
+            "正文全文".into(),
+            "全文".into(),
+            "Rust 是一门系统级编程语言。".into(),
+            "Rust 适合做什么？".into(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(res.chars, "Rust 是一门系统级编程语言。".chars().count());
+        assert!(!res.truncated);
+        // 关键子串均存在于组装后的 prompt 中
+        assert!(res.prompt.contains("测试文章"));
+        assert!(res.prompt.contains("https://example.com/post"));
+        assert!(res.prompt.contains("正文全文"));
+        assert!(res.prompt.contains("Rust 是一门系统级编程语言。"));
+        assert!(res.prompt.contains("Rust 适合做什么？"));
+
+        // 超过预算字符时标记 truncated
+        let long_content = "X".repeat(crate::content_prompts::CONTENT_BUDGET_CHARS + 1);
+        let res_long = content_qa_prompt(
+            "t".into(),
+            "u".into(),
+            "s".into(),
+            "c".into(),
+            long_content,
+            "q".into(),
+        )
+        .await
+        .unwrap();
+        assert!(res_long.truncated);
+    }
+
+    /// feed_dedup_prompt：空 items 归 E_VALIDATION
+    #[tokio::test]
+    async fn feed_dedup_prompt_empty_items_is_validation() {
+        let err = feed_dedup_prompt(vec![]).await.unwrap_err();
+        assert_eq!(err.code, crate::error::E_VALIDATION);
+        assert_eq!(err.message, "订阅条目为空，无法组装去重提示词");
+    }
+
+    /// feed_dedup_prompt：超过 50 条拦截归 E_VALIDATION
+    #[tokio::test]
+    async fn feed_dedup_prompt_over_50_items_is_validation() {
+        let items = (0..51)
+            .map(|i| FeedDigestItem {
+                id: format!("id-{}", i),
+                title: format!("Title {}", i),
+                source: "RSS".into(),
+            })
+            .collect();
+        let err = feed_dedup_prompt(items).await.unwrap_err();
+        assert_eq!(err.code, crate::error::E_VALIDATION);
+        assert_eq!(err.message, "单次去重最多 50 条，请分页");
+    }
+
+    /// feed_dedup_prompt：正常入参拼接稳定，所有条目关键字段存在
+    #[tokio::test]
+    async fn feed_dedup_prompt_stable_content() {
+        let items = vec![
+            FeedDigestItem {
+                id: "item-1".into(),
+                title: "第一条资讯".into(),
+                source: "源A".into(),
+            },
+            FeedDigestItem {
+                id: "item-2".into(),
+                title: "第二条资讯".into(),
+                source: "源B".into(),
+            },
+        ];
+        let prompt = feed_dedup_prompt(items).await.unwrap();
+        assert!(prompt.contains("item-1"));
+        assert!(prompt.contains("第一条资讯"));
+        assert!(prompt.contains("源A"));
+        assert!(prompt.contains("item-2"));
+        assert!(prompt.contains("第二条资讯"));
+        assert!(prompt.contains("源B"));
+    }
+
+    /// feed_recommend_prompt：空标题 / 纯空白标题归 E_VALIDATION
+    #[tokio::test]
+    async fn feed_recommend_prompt_empty_title_is_validation() {
+        let err = feed_recommend_prompt("".into(), "源A".into(), "简介".into())
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, crate::error::E_VALIDATION);
+        assert_eq!(err.message, "标题不能为空");
+
+        let err_blank = feed_recommend_prompt("   ".into(), "源A".into(), "简介".into())
+            .await
+            .unwrap_err();
+        assert_eq!(err_blank.code, crate::error::E_VALIDATION);
+        assert_eq!(err_blank.message, "标题不能为空");
+    }
+
+    /// feed_recommend_prompt：正常拼接各关键字段
+    #[tokio::test]
+    async fn feed_recommend_prompt_stable_content() {
+        let prompt = feed_recommend_prompt(
+            "Rust 1.85 发布".into(),
+            "Rust Blog".into(),
+            "本次版本带来全新 Edition 支持".into(),
+        )
+        .await
+        .unwrap();
+        assert!(prompt.contains("Rust 1.85 发布"));
+        assert!(prompt.contains("Rust Blog"));
+        assert!(prompt.contains("本次版本带来全新 Edition 支持"));
     }
 }
