@@ -426,4 +426,63 @@ mod article_tests {
             "Heading\n\nFirst & paragraph.\n\nSecond\nline.\n\nOne\n\nTwo"
         );
     }
+
+    #[test]
+    fn article_title_all_empty_falls_back_to_blank_and_trims() {
+        // 全空兜底：返回空串（不 panic、不取 None）
+        assert_eq!(article_title("", " ", ""), "");
+        assert_eq!(article_title("   ", "", "  "), "");
+        // trim 语义：首个非空候选取 trim 后的值
+        assert_eq!(article_title("  Extracted  ", "Page", "OG"), "Extracted");
+        assert_eq!(article_title("", "  Page  ", "OG"), "Page");
+        assert_eq!(article_title("", "", "  OG  "), "OG");
+    }
+
+    #[test]
+    fn html_to_structured_text_strips_script_style_and_nests() {
+        // script/style/noscript：整棵子树剔除（含引号内的"文本"，不得漏进输出）
+        assert_eq!(
+            html_to_structured_text(
+                "<div>keep</div>\
+                 <script>var s = \"drop me\";</script>\
+                 <style>.a { color: red; }</style>\
+                 <noscript>nojs</noscript>"
+            ),
+            "keep"
+        );
+        // 嵌套：行内标签不断行，块级标签之间空行分隔
+        assert_eq!(
+            html_to_structured_text("<div><p><em>bold-ish</em> tail</p></div>"),
+            "bold-ish tail"
+        );
+        // 空文档 / 纯空白
+        assert_eq!(html_to_structured_text(""), "");
+        assert_eq!(html_to_structured_text("<div></div><p>  </p>"), "");
+        // 实体解码（命名 + 十进制数字）
+        assert_eq!(
+            html_to_structured_text("<p>&lt;tag&gt; &#65; &amp;</p>"),
+            "<tag> A &"
+        );
+    }
+
+    #[test]
+    fn html_to_structured_text_table_cells_and_newline_capping() {
+        // 表格：tr 是块级、td 后补分隔符。现状行为——normalize 把 \t 当普通空白
+        // 压成单个空格（列分隔实际以空格呈现；是否保留 tab 待拍板，先钉住现状）
+        assert_eq!(
+            html_to_structured_text(
+                "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></table>"
+            ),
+            "a b\n\nc"
+        );
+        // 连续块级嵌套产生的 3+ 换行压缩为最多 2 个（空行不超过 1 行）
+        assert_eq!(
+            html_to_structured_text("<p>a</p><div><div>b</div></div>"),
+            "a\n\nb"
+        );
+        assert_eq!(
+            html_to_structured_text("<div><div><p>x</p></div></div>"),
+            "x"
+        );
+    }
 }
