@@ -133,4 +133,39 @@ describe("useSettingsSet.onSet", () => {
     await expect(onSet("vertical_tabs", "true")).resolves.toBeUndefined();
     expect(s.get("vertical_tabs")).toBe("true");
   });
+
+  // ---- F-81 补齐：onSet 未被覆盖的分支（net_headers / compat_chrome_fp / show_bg / font_size）----
+  it("net_headers：也触发 sync_ext_rules（网络规则三件套完整）", async () => {
+    const { onSet } = useSettingsSet();
+    await onSet("net_headers", "[]");
+    expect(invokeMock).toHaveBeenCalledWith("sync_ext_rules");
+  });
+
+  it("compat_chrome_fp：额外通知 Rust，enabled 转布尔", async () => {
+    const { onSet } = useSettingsSet();
+    await onSet("compat_chrome_fp", "true");
+    expect(invokeMock).toHaveBeenCalledWith("set_compat_chrome_fp", { enabled: true });
+    invokeMock.mockClear();
+    await onSet("compat_chrome_fp", "false");
+    expect(invokeMock).toHaveBeenCalledWith("set_compat_chrome_fp", { enabled: false });
+  });
+
+  it("启动页相关 key（show_bg / font_size）：触发 refresh_newtab", async () => {
+    const { onSet } = useSettingsSet();
+    await onSet("show_bg", "true");
+    expect(invokeMock).toHaveBeenCalledWith("refresh_newtab");
+    invokeMock.mockClear();
+    await onSet("font_size", "18");
+    expect(invokeMock).toHaveBeenCalledWith("refresh_newtab");
+  });
+
+  it("compat_chrome_fp 副作用失败：主设置仍落盘、错误被吞为 toast（不向上抛）", async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "set_compat_chrome_fp" ? Promise.reject(new Error("inject fail")) : Promise.resolve(undefined),
+    );
+    const s = useSettingsStore();
+    const { onSet } = useSettingsSet();
+    await expect(onSet("compat_chrome_fp", "true")).resolves.toBeUndefined();
+    expect(s.get("compat_chrome_fp")).toBe("true");
+  });
 });
