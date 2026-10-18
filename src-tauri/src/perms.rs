@@ -169,7 +169,12 @@ pub async fn respond_permission(
     .map_err(|e| e.to_string())?;
 
     if remember {
-        apply_rule(&db.pool, &kind, &host, allow).await;
+        apply_rule(&db.pool, &kind, &host, allow)
+            .await
+            .map_err(|e| {
+                log::error!("[perm] 记忆落库失败：{} {} = {} — {}", kind, host, allow, e);
+                e
+            })?;
         log::info!("[perm] 记忆生效：{} {} = {}", kind, host, allow);
     }
     Ok(())
@@ -188,15 +193,22 @@ async fn read_allow_map(pool: &sqlx::SqlitePool) -> HashMap<String, Vec<String>>
 }
 
 /// 写回 settings.perm_allow（upsert：无行则插入，不依赖调用方先建行）
-async fn write_allow_map(pool: &sqlx::SqlitePool, map: &HashMap<String, Vec<String>>) {
+///
+/// 失败返回 `Err` 上抛——内存放行表与 DB 失同步会导致下次启动权限状态不一致
+/// （F-79 D1：安全相关，不允许静默吞错）。
+async fn write_allow_map(
+    pool: &sqlx::SqlitePool,
+    map: &HashMap<String, Vec<String>>,
+) -> Result<(), sqlx::Error> {
     let json = serde_json::to_string(map).unwrap_or_else(|_| "{}".into());
-    let _ = sqlx::query(
+    sqlx::query(
         "INSERT INTO settings (key, value, updated_at) VALUES ('perm_allow', ?, datetime('now'))
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
     )
     .bind(&json)
     .execute(pool)
-    .await;
+    .await
+    .map(|_| ())
 }
 
 /// 纯函数：把一条规则并进白名单表。授权去重；撤销后若某 kind 空列表，
@@ -216,11 +228,21 @@ fn merge_rule(map: &mut HashMap<String, Vec<String>>, kind: &str, host: &str, al
 }
 
 /// 记住/撤销一条授权：同步更新内存缓存并落库（唯一写入口）
-async fn apply_rule(pool: &sqlx::SqlitePool, kind: &str, host: &str, allow: bool) {
+///
+/// 落库失败返回 `Err`（内存缓存已更新——本会话生效，但持久化未成，
+/// 下次启动会不一致，故如实上报而非吞掉）。
+async fn apply_rule(
+    pool: &sqlx::SqlitePool,
+    kind: &str,
+    host: &str,
+    allow: bool,
+) -> Result<(), String> {
     set_allowed(kind, host, allow);
     let mut map = read_allow_map(pool).await;
     merge_rule(&mut map, kind, host, allow);
-    write_allow_map(pool, &map).await;
+    write_allow_map(pool, &map)
+        .await
+        .map_err(|e| format!("权限白名单落库失败: {}", e))
 }
 
 /// 启动时从 settings 载入白名单到内存缓存
@@ -265,7 +287,12 @@ pub async fn remove_permission_rule(
     kind: String,
     host: String,
 ) -> Result<(), String> {
-    apply_rule(&db.pool, &kind, &host, false).await;
+    apply_rule(&db.pool, &kind, &host, false)
+        .await
+        .map_err(|e| {
+            log::error!("[perm] 删除规则落库失败：{} {} — {}", kind, host, e);
+            e
+        })?;
     Ok(())
 }
 
@@ -324,8 +351,8 @@ mod tests {
     #[tokio::test]
     async fn apply_rule_persists_and_round_trips_through_db() {
         let (_dir, db) = temp_db().await;
-        apply_rule(&db.pool, "media", "meet.example", true).await;
-        apply_rule(&db.pool, "geolocation", "maps.example", true).await;
+        apply_rule(&db.pool, "media", "meet.example", true).await.unwrap();
+        apply_rule(&db.pool, "geolocation", "maps.example", true).await.unwrap();
 
         let map = read_allow_map(&db.pool).await;
         assert_eq!(map.get("media").unwrap(), &vec!["meet.example".to_string()]);
@@ -338,8 +365,8 @@ mod tests {
     #[tokio::test]
     async fn apply_rule_twice_is_idempotent() {
         let (_dir, db) = temp_db().await;
-        apply_rule(&db.pool, "notification", "dup.example", true).await;
-        apply_rule(&db.pool, "notification", "dup.example", true).await;
+        apply_rule(&db.pool, "notification", "dup.example", true).await.unwrap();
+        apply_rule(&db.pool, "notification", "dup.example", true).await.unwrap();
 
         let map = read_allow_map(&db.pool).await;
         assert_eq!(
@@ -352,8 +379,8 @@ mod tests {
     #[tokio::test]
     async fn revoking_last_host_removes_kind_from_db() {
         let (_dir, db) = temp_db().await;
-        apply_rule(&db.pool, "media", "meet.example", true).await;
-        apply_rule(&db.pool, "media", "meet.example", false).await;
+        apply_rule(&db.pool, "media", "meet.example", true).await.unwrap();
+        apply_rule(&db.pool, "media", "meet.example", false).await.unwrap();
 
         let map = read_allow_map(&db.pool).await;
         assert!(
@@ -385,7 +412,7 @@ mod tests {
         // 直接落库（绕过内存缓存），再模拟启动加载
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
         merge_rule(&mut map, "notification", "load-test.example", true);
-        write_allow_map(&db.pool, &map).await;
+        write_allow_map(&db.pool, &map).await.unwrap();
 
         load_allowlist(&db.pool).await;
         assert!(is_allowed("notification", "load-test.example"));

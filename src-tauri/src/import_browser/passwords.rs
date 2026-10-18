@@ -187,8 +187,7 @@ async fn snapshot_login_rows(
         .ok()?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700));
+        crate::harden::restrict_mode(tmp.path(), 0o700);
     }
     let base_name = db_path.file_name()?.to_string_lossy().into_owned();
     let dst = tmp.path().join(&base_name);

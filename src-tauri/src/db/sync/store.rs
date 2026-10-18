@@ -97,8 +97,7 @@ fn write_600(path: &std::path::Path, data: &str) -> DbResult<()> {
         f.write_all(data.as_bytes()).map_err(write_err)?;
         f.sync_all().map_err(write_err)?;
         // mode 仅在创建时生效；已存在文件补一次收紧兜底
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        crate::harden::restrict_mode(path, 0o600);
     }
     #[cfg(not(unix))]
     {

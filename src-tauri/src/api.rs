@@ -129,8 +129,7 @@ pub fn spawn(app: AppHandle) {
         // 权限 0600：仅本用户可连
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            crate::harden::restrict_mode(&path, 0o600);
         }
         log::info!("[api] 开放 API 已启动: {}", path.display());
         loop {

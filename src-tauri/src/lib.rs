@@ -77,6 +77,20 @@ mod panic_hook;
 pub use harden::harden_sensitive_files;
 pub(crate) use panic_hook::PANIC_LOG_DIR;
 
+/// `let _ = expr;` 的“失败留痕”版（F-79 D2）。
+///
+/// 用于 GTK/WebKit/文件系统等 best-effort 操作：失败不该中断主流程，但静默吞掉
+/// 会掩盖 UI 状态不一致、下载进度卡死、权限收紧失败等问题——统一按 warn 留痕，
+/// 调用点写作 `crate::log_if_err!("标签", expr);`。
+#[macro_export]
+macro_rules! log_if_err {
+    ($label:literal, $e:expr $(,)?) => {
+        if let Err(err) = $e {
+            log::warn!("[{}] 操作失败: {}", $label, err);
+        }
+    };
+}
+
 use db::{
     bookmarks, downloads, history, passwords, sessions, settings, tab_groups, users, workspaces,
 };

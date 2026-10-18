@@ -53,8 +53,7 @@ impl Db {
         // 目录不可进则同机其他用户无法读取内部任何文件）
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&app_data_dir, std::fs::Permissions::from_mode(0o700));
+            crate::harden::restrict_mode(&app_data_dir, 0o700);
         }
 
         // 安全：预创建数据库文件并直接以 600 落盘。sqlx 的 create_if_missing 会按 umask
@@ -93,8 +92,7 @@ impl Db {
         // 否则首次运行时文件尚未创建，收紧不生效、以 umask 默认权限落盘
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600));
+            crate::harden::restrict_mode(&db_path, 0o600);
         }
 
         // 开启 WAL 与外键约束

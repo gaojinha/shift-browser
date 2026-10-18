@@ -15,6 +15,42 @@ use super::{
     WHOLE_PAGE_TRANSLATE_JS,
 };
 
+/// 构造 shift:// 响应（不返回 Result）。
+///
+/// 用 `Response::new` + 就地改 status/headers，替代会返回 `Result` 的
+/// `Response::builder()...body()...unwrap()`——builder 的 `body()` 理论可失败，
+/// 一旦 panic 会崩掉整个协议 handler 线程（所有内部页 / 翻译 IPC 请求全灭）；
+/// 而 URI scheme handler 签名强制返回具体 Response（无 Result 通道），没有优雅降级路径。
+/// 非法 header 值只记日志并跳过（header 均为编译期常量，实际不会触发）。
+fn shift_response(
+    status: u16,
+    headers: &[(tauri::http::HeaderName, &str)],
+    body: Vec<u8>,
+) -> tauri::http::Response<Vec<u8>> {
+    let mut res = tauri::http::Response::new(body);
+    let code = tauri::http::StatusCode::from_u16(status)
+        .unwrap_or(tauri::http::StatusCode::INTERNAL_SERVER_ERROR);
+    *res.status_mut() = code;
+    for (name, value) in headers {
+        match tauri::http::HeaderValue::from_str(value) {
+            Ok(v) => {
+                res.headers_mut().insert(name.clone(), v);
+            }
+            Err(e) => log::error!("[shift://] 非法响应头 {}={:?}: {}", name, value, e),
+        }
+    }
+    res
+}
+
+/// 翻译 IPC 的同步空响应：image/gif 空体（菜单 JS 用 `Image().src` 触发，不读响应体）。
+fn empty_gif_response() -> tauri::http::Response<Vec<u8>> {
+    shift_response(
+        200,
+        &[(tauri::http::header::CONTENT_TYPE, "image/gif")],
+        Vec::new(),
+    )
+}
+
 // ---- 纯逻辑抽出（供单测；行为与 handle 内联版逐字一致，勿改语义）----
 
 /// host=="main"：请求路径 → dist 相对资源路径（"/" 与 "/index.html" 归一化为 index.html）
@@ -58,11 +94,9 @@ fn resolve_internal_file(
     }
 }
 
-// URI scheme handler 的签名强制返回具体 Response（无 Result 通道）；下面的 unwrap
-// 全部作用于"静态 CONTENT_TYPE + Vec<u8>/字节体"的 builder，header 为编译期常量、
-// body 为任意字节，http 类型上不可能构造失败，也无优雅降级路径，与 lib.rs/nav_cmds.rs
-// 里既有同款豁免一致。
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+// URI scheme handler 的签名强制返回具体 Response（无 Result 通道），响应构造统一走
+// `shift_response`（用 `Response::new` 就地改 status/headers，不返回 Result），
+// 不再有 `Response::builder().body().unwrap()`。
 pub(crate) fn handle(
     ctx: &tauri::UriSchemeContext<'_, tauri::Wry>,
     request: tauri::http::Request<Vec<u8>>,
@@ -89,26 +123,23 @@ pub(crate) fn handle(
                     html = inject_script_nonce(&html, &nonce);
                     csp = csp_with_script_nonce(&nonce);
                 }
-                return tauri::http::Response::builder()
-                    .header(
-                        tauri::http::header::CONTENT_TYPE,
-                        "text/html; charset=utf-8",
-                    )
-                    .header(tauri::http::header::CONTENT_SECURITY_POLICY, csp)
-                    .body(html.into_bytes())
-                    .unwrap();
+                return shift_response(
+                    200,
+                    &[
+                        (tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                        (tauri::http::header::CONTENT_SECURITY_POLICY, csp.as_str()),
+                    ],
+                    html.into_bytes(),
+                );
             }
-            return tauri::http::Response::builder()
-                .header(tauri::http::header::CONTENT_TYPE, mime)
-                .body(bytes)
-                .unwrap();
+            return shift_response(200, &[(tauri::http::header::CONTENT_TYPE, mime)], bytes);
         }
         log::warn!("[shift://] main 资源未找到: {}", rel);
-        return tauri::http::Response::builder()
-            .status(404)
-            .header(tauri::http::header::CONTENT_TYPE, "text/plain")
-            .body("Not Found".as_bytes().to_vec())
-            .unwrap();
+        return shift_response(
+            404,
+            &[(tauri::http::header::CONTENT_TYPE, "text/plain")],
+            b"Not Found".to_vec(),
+        );
     }
 
     // 翻译 IPC：child webview 的右键菜单 JS 通过 shift://__translate__/* 调翻译
@@ -136,11 +167,11 @@ pub(crate) fn handle(
                 wv_url,
                 webview_label
             );
-            return tauri::http::Response::builder()
-                .status(403)
-                .header(tauri::http::header::CONTENT_TYPE, "text/plain")
-                .body("Forbidden".as_bytes().to_vec())
-                .unwrap();
+            return shift_response(
+                403,
+                &[(tauri::http::header::CONTENT_TYPE, "text/plain")],
+                b"Forbidden".to_vec(),
+            );
         }
         let query = request.uri().query().unwrap_or("");
         let params = parse_query(query);
@@ -149,11 +180,11 @@ pub(crate) fn handle(
         // 例外：/progress 只做进度上报（emit 事件给界面），不写回调变量、不 eval，无需 callback
         if path != "/progress" && !valid_callback(&callback) {
             log::warn!("[translate] 非法 callback 拒绝: {:?}", callback);
-            return tauri::http::Response::builder()
-                .status(400)
-                .header(tauri::http::header::CONTENT_TYPE, "text/plain")
-                .body("Bad Request".as_bytes().to_vec())
-                .unwrap();
+            return shift_response(
+                400,
+                &[(tauri::http::header::CONTENT_TYPE, "text/plain")],
+                b"Bad Request".to_vec(),
+            );
         }
         let app_clone = app.clone();
 
@@ -163,11 +194,7 @@ pub(crate) fn handle(
             log::warn!("[translate] 翻译请求超频拒绝: label={}", webview_label);
             let payload = serde_json::json!({ "error": "翻译请求过于频繁，请稍后再试" });
             write_translate_result(&app_clone, &webview_label, &callback, &payload);
-            return tauri::http::Response::builder()
-                .status(200)
-                .header(tauri::http::header::CONTENT_TYPE, "image/gif")
-                .body(Vec::<u8>::new())
-                .unwrap();
+            return empty_gif_response();
         }
 
         match path.as_str() {
@@ -183,11 +210,7 @@ pub(crate) fn handle(
                 if text.len() > 5000 {
                     let payload = serde_json::json!({ "error": "待翻译文本过长（>5000 字符）" });
                     write_translate_result(&app_clone, &webview_label, &callback, &payload);
-                    return tauri::http::Response::builder()
-                        .status(200)
-                        .header(tauri::http::header::CONTENT_TYPE, "image/gif")
-                        .body(Vec::<u8>::new())
-                        .unwrap();
+                    return empty_gif_response();
                 }
                 tauri::async_runtime::spawn(async move {
                     // 按设置里的翻译源与数据流模式（google/bing × single/dual）派发
@@ -237,11 +260,7 @@ pub(crate) fn handle(
                     let last = map.get(&webview_label).copied();
                     if let Some(t0) = last {
                         if now.duration_since(t0).as_millis() < 300 {
-                            return tauri::http::Response::builder()
-                                .status(200)
-                                .header(tauri::http::header::CONTENT_TYPE, "image/gif")
-                                .body(Vec::<u8>::new())
-                                .unwrap();
+                            return empty_gif_response();
                         }
                     }
                     map.insert(webview_label.clone(), now);
@@ -365,11 +384,7 @@ pub(crate) fn handle(
         }
 
         // shift handler 同步返回（菜单 JS 用 Image().src 触发，不读响应体）
-        return tauri::http::Response::builder()
-            .status(200)
-            .header(tauri::http::header::CONTENT_TYPE, "image/gif")
-            .body(Vec::<u8>::new())
-            .unwrap();
+        return empty_gif_response();
     }
 
     let app_data = app
@@ -382,11 +397,11 @@ pub(crate) fn handle(
         Some(p) => p,
         None => {
             log::warn!("[shift://] 未知路径: {} {}", host, path);
-            return tauri::http::Response::builder()
-                .status(404)
-                .header(tauri::http::header::CONTENT_TYPE, "text/plain")
-                .body("Not Found".as_bytes().to_vec())
-                .unwrap();
+            return shift_response(
+                404,
+                &[(tauri::http::header::CONTENT_TYPE, "text/plain")],
+                b"Not Found".to_vec(),
+            );
         }
     };
     log::info!("[shift://] 加载: {:?}", file_path);
@@ -401,28 +416,28 @@ pub(crate) fn handle(
             html = inject_script_nonce(&html, &nonce);
             csp = csp_with_script_nonce(&nonce);
         }
-        tauri::http::Response::builder()
-            .header(
-                tauri::http::header::CONTENT_TYPE,
-                "text/html; charset=utf-8",
-            )
-            // 2026-09-19：WebKit 对自定义协议默认缓存（刷新走缓存不重新请求），
-            // 导致改启动页后高哥刷新看不到变化——强制 no-store，每次加载都读最新文件
-            .header(
-                tauri::http::header::CACHE_CONTROL,
-                "no-store, no-cache, must-revalidate",
-            )
-            .header(tauri::http::header::PRAGMA, "no-cache")
-            .header(tauri::http::header::CONTENT_SECURITY_POLICY, csp)
-            .body(html.into_bytes())
-            .unwrap()
+        shift_response(
+            200,
+            &[
+                (tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                // 2026-09-19：WebKit 对自定义协议默认缓存（刷新走缓存不重新请求），
+                // 导致改启动页后高哥刷新看不到变化——强制 no-store，每次加载都读最新文件
+                (
+                    tauri::http::header::CACHE_CONTROL,
+                    "no-store, no-cache, must-revalidate",
+                ),
+                (tauri::http::header::PRAGMA, "no-cache"),
+                (tauri::http::header::CONTENT_SECURITY_POLICY, csp.as_str()),
+            ],
+            html.into_bytes(),
+        )
     } else {
         log::error!("[shift://] 文件读取失败: {:?}", file_path);
-        tauri::http::Response::builder()
-            .status(404)
-            .header(tauri::http::header::CONTENT_TYPE, "text/plain")
-            .body("File not found".as_bytes().to_vec())
-            .unwrap()
+        shift_response(
+            404,
+            &[(tauri::http::header::CONTENT_TYPE, "text/plain")],
+            b"File not found".to_vec(),
+        )
     }
 }
 

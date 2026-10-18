@@ -2,7 +2,7 @@
 //! 拖拽排序 / 列表同步 / 元数据更新 / 固定 / 静音 / 清除浏览数据。
 
 use super::super::*;
-use crate::error::CommandResult;
+use crate::error::{AppError, CommandResult};
 use tauri::Manager;
 
 /// 拖拽排序合并（纯函数，便于测试）：前端新顺序只保留现存标签，
@@ -135,7 +135,8 @@ pub async fn clear_browsing_data(
     scopes: Vec<String>,
 ) -> CommandResult<Vec<String>> {
     // ---- 数据库侧（吃池，可测；scope 匹配口径见 clear_browsing_data_db）----
-    let done = clear_browsing_data_db(&db.pool, &scopes).await;
+    // 失败如实上抛：不能把"未真正清掉的数据"当成功回报（对齐 feed.rs 的既有口径）
+    let done = clear_browsing_data_db(&db.pool, &scopes).await?;
 
     // ---- WebKit 侧（GTK 对象只能在主线程操作）----
     let has = |k: &str| scopes.iter().any(|s| s == k || s == "all");
@@ -174,26 +175,38 @@ pub async fn clear_browsing_data(
 
 /// 清除浏览数据的 DB 侧（吃连接池，便于测试）：history/downloads/sessions 三表
 /// 按 scopes 清空（"all" 等价全部 scope），返回实际执行过的 scope 清单。
+///
+/// 任一表删除失败即 `Err` 上抛——**不允许**把失败静默记入 done 后仍汇报"已清除"
+/// （F-79 D1：用户可见的行为不一致）。
 async fn clear_browsing_data_db(
     pool: &sqlx::SqlitePool,
     scopes: &[String],
-) -> Vec<String> {
+) -> Result<Vec<String>, AppError> {
     let has = |k: &str| scopes.iter().any(|s| s == k || s == "all");
     let mut done: Vec<String> = Vec::new();
 
     if has("history") {
-        let _ = sqlx::query("DELETE FROM history").execute(pool).await;
+        sqlx::query("DELETE FROM history")
+            .execute(pool)
+            .await
+            .map_err(|e| AppError::db(format!("清除浏览历史失败: {}", e)))?;
         done.push("history".into());
     }
     if has("downloads") {
-        let _ = sqlx::query("DELETE FROM downloads").execute(pool).await;
+        sqlx::query("DELETE FROM downloads")
+            .execute(pool)
+            .await
+            .map_err(|e| AppError::db(format!("清除下载记录失败: {}", e)))?;
         done.push("downloads".into());
     }
     if has("sessions") {
-        let _ = sqlx::query("DELETE FROM sessions").execute(pool).await;
+        sqlx::query("DELETE FROM sessions")
+            .execute(pool)
+            .await
+            .map_err(|e| AppError::db(format!("清除会话记录失败: {}", e)))?;
         done.push("sessions".into());
     }
-    done
+    Ok(done)
 }
 
 #[cfg(test)]
@@ -253,14 +266,14 @@ mod tests {
         seed_all(&db.pool).await;
 
         // 单 scope：只清 history，其余两表不动
-        let done = clear_browsing_data_db(&db.pool, &["history".to_string()]).await;
+        let done = clear_browsing_data_db(&db.pool, &["history".to_string()]).await.unwrap();
         assert_eq!(done, vec!["history".to_string()]);
         assert_eq!(count(&db.pool, "history").await, 0);
         assert_eq!(count(&db.pool, "downloads").await, 1);
         assert_eq!(count(&db.pool, "sessions").await, 1);
 
         // "all" 等价全部 DB scope：downloads/sessions 一并清空
-        let done = clear_browsing_data_db(&db.pool, &["all".to_string()]).await;
+        let done = clear_browsing_data_db(&db.pool, &["all".to_string()]).await.unwrap();
         assert_eq!(
             done,
             vec!["history".to_string(), "downloads".to_string(), "sessions".to_string()]
@@ -274,7 +287,7 @@ mod tests {
         let (_dir, db) = temp_db().await;
         seed_all(&db.pool).await;
         // 只要求 WebKit 侧 scope：DB 侧零动作，三表数据原样
-        let done = clear_browsing_data_db(&db.pool, &["cookies".to_string(), "cache".to_string()]).await;
+        let done = clear_browsing_data_db(&db.pool, &["cookies".to_string(), "cache".to_string()]).await.unwrap();
         assert!(done.is_empty());
         assert_eq!(count(&db.pool, "history").await, 1);
         assert_eq!(count(&db.pool, "downloads").await, 1);

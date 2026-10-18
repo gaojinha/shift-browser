@@ -38,7 +38,6 @@ fn new_window_duplicate(
 
 impl TabManager {
     /// 创建嵌入式 webview
-    #[allow(clippy::unwrap_used, clippy::expect_used)]
     pub(crate) fn create_webview(
         app: &AppHandle,
         id: &str,
@@ -175,10 +174,11 @@ impl TabManager {
             )
             .map_err(|e| format!("创建 webview 失败: {}", e))?;
 
+        // 取几何仅用于日志：失败（Result::Err）照原样打出来，不为一行日志 panic 掉整个建标签流程
         log::info!(
             "[tabs] child_webview: pos={:?} size={:?}",
-            child.position().unwrap(),
-            child.size().unwrap()
+            child.position(),
+            child.size()
         );
 
         // GTK 的 vbox 会忽略 add_child 的位置参数并平分空间（webview 落到窗口下半部分）。
