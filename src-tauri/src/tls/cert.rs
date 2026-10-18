@@ -150,3 +150,60 @@ pub(super) fn parse_host_port(uri: &str) -> (String, u16) {
         Err(_) => (String::new(), 443),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_fp_takes_first_16_chars() {
+        let mut c = CertInfo::default();
+        assert_eq!(c.short_fp(), "");
+        c.fingerprint_sha256 = "abc".into();
+        assert_eq!(c.short_fp(), "abc");
+        c.fingerprint_sha256 = "0123456789abcdef0123".into();
+        assert_eq!(c.short_fp(), "0123456789abcdef");
+    }
+
+    #[test]
+    fn parse_host_port_defaults_and_fallback() {
+        assert_eq!(
+            parse_host_port("https://example.com/a"),
+            ("example.com".into(), 443)
+        );
+        assert_eq!(
+            parse_host_port("http://example.com"),
+            ("example.com".into(), 80)
+        );
+        assert_eq!(
+            parse_host_port("https://example.com:8443/"),
+            ("example.com".into(), 8443)
+        );
+        // 解析失败 / 无主机：空主机 + 443 兜底
+        assert_eq!(parse_host_port("not a url"), (String::new(), 443));
+        assert_eq!(parse_host_port("file:///tmp/x"), (String::new(), 443));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn flags_to_names_maps_each_flag_in_order() {
+        assert!(flags_to_names(gio::TlsCertificateFlags::empty()).is_empty());
+        let one = flags_to_names(gio::TlsCertificateFlags::EXPIRED);
+        assert_eq!(one, vec!["证书已过期".to_string()]);
+        let two = flags_to_names(
+            gio::TlsCertificateFlags::EXPIRED | gio::TlsCertificateFlags::UNKNOWN_CA,
+        );
+        assert_eq!(two.len(), 2);
+        assert!(two[0].starts_with("未知的 CA"));
+        assert_eq!(two[1], "证书已过期");
+        assert_eq!(flags_to_names(gio::TlsCertificateFlags::all()).len(), 7);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fmt_dt_formats_utc_and_none() {
+        assert_eq!(fmt_dt(None), None);
+        let dt = glib::DateTime::from_utc(2026, 1, 2, 3, 4, 5.0).unwrap();
+        assert_eq!(fmt_dt(Some(dt)), Some("2026-01-02 03:04:05".to_string()));
+    }
+}
