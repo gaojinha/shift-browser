@@ -424,6 +424,7 @@ pub fn run() {
             // 从浏览器导入（F-89 起的模块链：扫描 → 解密 → 书签/密码落库）
             import_browser::scan_browser_import,
             import_browser::bookmarks::import_bookmarks_from_browser,
+            import_browser::passwords::import_passwords_from_browser,
             // 用户账号（个人中心）
             users::user_register,
             users::user_login,

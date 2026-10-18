@@ -43,6 +43,32 @@ const CHROME_PASSWORD_FILES: &[&str] = &["Login Data For Account", "Login Data"]
 const BRAVE_BOOKMARK_FILES: &[&str] = &["Bookmarks"];
 
 pub(crate) mod bookmarks;
+pub(crate) mod passwords;
+
+/// profile 子目录列表（含任一目标源文件才算 profile；排除名单同 F-89 扫描）。
+/// 书签（F-91）与密码（F-92）导入共用。
+pub(crate) fn profile_dirs(
+    base: &std::path::Path,
+    rel_root: &str,
+    files: &[&str],
+) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(base.join(rel_root)) else {
+        return Vec::new();
+    };
+    let mut dirs: Vec<std::path::PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_dir()
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| !EXCLUDED_PROFILE_DIRS.contains(&n))
+        })
+        .filter(|p| files.iter().any(|f| p.join(f).is_file()))
+        .collect();
+    dirs.sort();
+    dirs
+}
 /// Brave 密码源
 const BRAVE_PASSWORD_FILES: &[&str] = &["Login Data"];
 
