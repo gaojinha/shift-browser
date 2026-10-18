@@ -246,3 +246,36 @@ pub(super) async fn maximize_window(app: &AppHandle, _req: &Value) -> Value {
         Err(e) => AppError::from(e).error_json(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_validation(r: Result<String, Value>, msg: &str) {
+        let e = r.expect_err("应返回校验错误");
+        assert_eq!(e["ok"], json!(false));
+        assert_eq!(e["code"], json!("E_VALIDATION"));
+        assert_eq!(e["error"], json!(msg));
+    }
+
+    #[test]
+    fn required_str_missing_or_wrong_type_is_validation() {
+        assert_validation(required_str(&json!({}), "id", "缺少 id"), "缺少 id");
+        assert_validation(required_str(&json!({"id": 5}), "id", "缺少 id"), "缺少 id");
+        assert_validation(required_str(&json!({"id": null}), "id", "x"), "x");
+    }
+
+    #[test]
+    fn required_str_blank_is_validation() {
+        assert_validation(required_str(&json!({"id": ""}), "id", "空"), "空");
+        assert_validation(required_str(&json!({"id": " \t\n "}), "id", "空"), "空");
+    }
+
+    #[test]
+    fn required_str_trims_and_ignores_other_fields() {
+        let req = json!({"id": "  tab-1 ", "url": "https://a.b"});
+        assert_eq!(required_str(&req, "id", "e").unwrap(), "tab-1");
+        assert_eq!(required_str(&req, "url", "e").unwrap(), "https://a.b");
+        assert_validation(required_str(&req, "query", "缺 query"), "缺 query");
+    }
+}
