@@ -28,6 +28,7 @@ mod error;
 mod extensions;
 mod feed;
 mod gpc;
+mod import_browser;
 // P2-5：仅 fuzz feature 下把手写解析器驱动入口暴露给 fuzz/ crate；生产构建不可见
 #[cfg(feature = "fuzz")]
 pub mod fuzz_bridge {
@@ -418,6 +419,8 @@ pub fn run() {
             newtab::open_ai_from_newtab,
             newtab::open_settings_from_newtab,
             newtab::open_url_from_newtab,
+            // 从浏览器导入（F-89 起的模块链：扫描 → 解密 → 书签/密码落库）
+            import_browser::scan_browser_import,
             // 用户账号（个人中心）
             users::user_register,
             users::user_login,

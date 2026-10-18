@@ -70,6 +70,8 @@ mod tests {
             include_str!("reader.rs"),
             include_str!("translate.rs"),
             include_str!("gpc.rs"),
+            // 从浏览器导入（F-89 起的模块链）
+            include_str!("import_browser.rs"),
             include_str!("audit.rs"),
             include_str!("mcp_cmd.rs"),
             include_str!("agent_cmd.rs"),
