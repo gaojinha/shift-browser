@@ -66,10 +66,13 @@ fn row_to_record(r: &sqlx::sqlite::SqliteRow) -> CertRecord {
         last_seen: r.get("last_seen"),
         change_count: r.get("change_count"),
         days_left: r
-            .try_get::<Option<f64>, _>("days_left")
-            .ok()
-            .flatten()
-            .map(|d| d as i64),
+            .try_get::<Option<i64>, _>("days_left")
+            .unwrap_or_else(|e| {
+                // F-66：SQL 侧 CAST AS INTEGER，解码端对齐 i64；类型不匹配不再静默吞成
+                // None（此前 f64 解码 INTEGER 恒失败 → 前端「剩余天数」列恒空），至少落一条日志
+                log::warn!("[certificates] days_left 解码失败: {e:?}");
+                None
+            }),
     }
 }
 
@@ -526,18 +529,30 @@ mod tests {
             ],
             "days_left 升序：已过期(-5) → 20 天 → 30 天边界；31 天与 NULL 不入窗"
         );
-        // days_left 结构体字段：已知产品怪癖（回执已上报、待拍板立卡）——
-        // row_to_record 用 try_get::<Option<f64>> 解 INTEGER 列，sqlx 0.8.6 报
-        // "mismatched types (REAL vs INTEGER)" → 恒 None（SQL 侧窗口/排序不受影响）。
-        // 此处钉住现状；解码修复后（f64→i64 或 CAST AS REAL）本断言应改为
-        // Some(-5)/Some(19|20)/Some(29|30) 并删除本注释。
-        for r in &got {
-            assert!(
-                r.days_left.is_none(),
-                "已知怪癖：days_left 解码失败恒 None（{}）",
-                r.host
-            );
-        }
+        // days_left 解码（F-66 已修：try_get::<Option<i64>> 对齐 SQL 的 CAST AS INTEGER）。
+        // 插入与查询同用 SQL datetime('now') 钟源，查询时刻恒不早于插入时刻，差值为
+        // ±0 的极小负偏移：CAST 截断后 soon/edge 可能落 19/20、29/30 边界，按区间断言。
+        let days = |host: &str| -> i64 {
+            got.iter()
+                .find(|r| r.host == host)
+                .and_then(|r| r.days_left)
+                .unwrap_or_else(|| panic!("days_left 解码失败（{}）", host))
+        };
+        assert_eq!(
+            days("expired.com"),
+            -5,
+            "已过期 -5 天：负值截断后恒 -5"
+        );
+        assert!(
+            (19..=20).contains(&days("soon.com")),
+            "soon.com 应为 +20 天边界（实际 {}）",
+            days("soon.com")
+        );
+        assert!(
+            (29..=30).contains(&days("edge.com")),
+            "edge.com 应为 +30 天边界（实际 {}）",
+            days("edge.com")
+        );
         // 窄窗口（4 天）：只剩已过期
         let got4 = expiring_within(&pool, 4).await.unwrap();
         assert_eq!(got4.len(), 1);
