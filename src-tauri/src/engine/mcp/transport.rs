@@ -298,7 +298,9 @@ pub(super) async fn connect(
 #[cfg(test)]
 mod tests {
     use super::read_line_limited;
-    use tokio::io::BufReader;
+    use std::pin::Pin;
+    use std::task::Context;
+    use tokio::io::{AsyncBufRead, AsyncRead, BufReader, ReadBuf};
 
     #[tokio::test]
     async fn limited_line_reader_accepts_boundary_and_eof() {
@@ -319,5 +321,89 @@ mod tests {
         let mut reader = BufReader::new(std::io::Cursor::new(b"abcde\nnext\n".to_vec()));
         let error = read_line_limited(&mut reader, 4).await.unwrap_err();
         assert!(error.contains("上限 4 字节"));
+    }
+
+    /// 按固定块长吐出字节，强制 read_line_limited 跨多次 fill_buf 累积
+    /// （BufReader<Cursor> 一次给整段，累积路径走不到；不起真进程）
+    struct ChunkedReader {
+        data: Vec<u8>,
+        pos: usize,
+        chunk: usize,
+    }
+
+    impl AsyncRead for ChunkedReader {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            _buf: &mut ReadBuf<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            // 超 trait 占位：read_line_limited 只走 fill_buf/consume 路径，不会调 poll_read
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    impl AsyncBufRead for ChunkedReader {
+        fn poll_fill_buf(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> std::task::Poll<std::io::Result<&[u8]>> {
+            // get_mut：借出内层 &mut Self，返回引用挂在内层生命周期上（标准 Cursor 模式）
+            let this = self.get_mut();
+            let end = (this.pos + this.chunk).min(this.data.len());
+            std::task::Poll::Ready(Ok(&this.data[this.pos..end]))
+        }
+
+        fn consume(mut self: Pin<&mut Self>, n: usize) {
+            self.pos += n;
+        }
+    }
+
+    #[tokio::test]
+    async fn limited_line_reader_accumulates_across_chunks() {
+        // chunk=2：每行都要跨多次 fill_buf 拼装
+        let mut reader = ChunkedReader {
+            data: b"abc\ndef\n\nlast".to_vec(),
+            pos: 0,
+            chunk: 2,
+        };
+        assert_eq!(
+            read_line_limited(&mut reader, 4).await.unwrap(),
+            Some("abc\n".to_string()),
+            "跨块累积 + 恰好 4 字节（== 上限）放行"
+        );
+        assert_eq!(
+            read_line_limited(&mut reader, 4).await.unwrap(),
+            Some("def\n".to_string())
+        );
+        // 空行：单个 \n 也是完整一行（request() 层跳过空行，函数本身原样返回）
+        assert_eq!(
+            read_line_limited(&mut reader, 4).await.unwrap(),
+            Some("\n".to_string())
+        );
+        // EOF 无换行（数据跨块累积后收尾）
+        assert_eq!(
+            read_line_limited(&mut reader, 4).await.unwrap(),
+            Some("last".to_string())
+        );
+        assert_eq!(read_line_limited(&mut reader, 4).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn limited_line_reader_rejects_overlong_across_chunks() {
+        // 累积中才超限（既有例只覆盖单块内超限）：4 字节在限内，再来 4 字节 8>6 报错
+        let mut reader = ChunkedReader {
+            data: b"abcdefgh\n".to_vec(),
+            pos: 0,
+            chunk: 4,
+        };
+        let error = read_line_limited(&mut reader, 6).await.unwrap_err();
+        assert!(error.contains("上限 6 字节"));
+    }
+
+    #[tokio::test]
+    async fn limited_line_reader_rejects_invalid_utf8() {
+        let mut reader = BufReader::new(std::io::Cursor::new(b"\xff\xfe\n".to_vec()));
+        let error = read_line_limited(&mut reader, 10).await.unwrap_err();
+        assert!(error.contains("非 UTF-8"));
     }
 }
