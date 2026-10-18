@@ -106,6 +106,7 @@ export const EVENTS = {
   GLOBAL_SHORTCUT: 'global-shortcut',
   OPEN_AI_FROM_NEWTAB: 'open-ai-from-newtab',
   OPEN_SETTINGS_FROM_NEWTAB: 'open-settings-from-newtab',
+  OPEN_IMPORT_FROM_NEWTAB: 'open-import-from-newtab',
   OPEN_URL_FROM_NEWTAB: 'open-url-from-newtab',
   TABS_UPDATED: 'tabs-updated',
   TRANSLATE_PROGRESS: 'translate-progress',

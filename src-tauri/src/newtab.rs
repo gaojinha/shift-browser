@@ -184,6 +184,12 @@ pub async fn get_newtab_url(app: AppHandle) -> CommandResult<String> {
         .ok_or_else(|| AppError::internal("无法生成新标签页").into())
 }
 
+/// 启动页右侧栏按钮：通知主界面打开导入模块
+#[tauri::command]
+pub fn open_import_from_newtab(app: AppHandle) {
+    let _ = app.emit(crate::contracts::events::OPEN_IMPORT_FROM_NEWTAB, ());
+}
+
 /// 启动页右侧栏按钮：通知主界面打开 AI 助手侧栏
 #[tauri::command]
 pub fn open_ai_from_newtab(app: AppHandle) {

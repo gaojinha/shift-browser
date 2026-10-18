@@ -419,6 +419,8 @@ pub fn run() {
             newtab::open_ai_from_newtab,
             newtab::open_settings_from_newtab,
             newtab::open_url_from_newtab,
+            // 启动页侧栏「导入」图标 → 主界面事件（F-93）
+            newtab::open_import_from_newtab,
             // 从浏览器导入（F-89 起的模块链：扫描 → 解密 → 书签/密码落库）
             import_browser::scan_browser_import,
             // 用户账号（个人中心）

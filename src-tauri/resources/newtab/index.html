@@ -295,6 +295,7 @@
     <button class="icon-btn" data-panel="recent" title="最近访问" aria-label="最近访问"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></button>
     <button class="icon-btn" data-panel="quick" title="快捷访问" aria-label="快捷访问"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></button>
     <a class="icon-btn" href="world-nav.html" title="世界导航" aria-label="世界导航"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg></a>
+    <button class="icon-btn" id="importBtn" title="从浏览器导入" aria-label="从浏览器导入"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15l-6-6L5 12l6 6M12 3v2l4 4-4 4M5 10l6 6H2"/></svg></button>
     <button class="icon-btn" id="aiBtn" title="AI 助手" aria-label="AI 助手"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18.5 9.5l-4.7 1.9L12 16l-1.8-4.6L5.5 9.5l4.7-1.9z"/></svg></button>
     <button class="icon-btn" id="settingsBtn" title="设置" aria-label="设置"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg></button>
     <button class="icon-btn bottom" data-panel="profile" title="我的" aria-label="我的"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a7 7 0 0 1 14 0v1"/></svg></button>
@@ -1523,7 +1524,12 @@
   bindOpenInTab(document.getElementById('recentList'));
   bindOpenInTab(document.getElementById('quickSites'));
 
-  // ---- 右侧栏：AI / 设置（经 IPC 通知主界面打开对应组件）----
+  // ---- 右侧栏：导入 / AI / 设置（经 IPC 通知主界面打开对应组件）----
+  document.getElementById('importBtn').addEventListener('click', function() {
+    if (window.__TAURI_INTERNALS__) {
+      window.__TAURI_INTERNALS__.invoke('open_import_from_newtab').catch(function(e) { showToast('打开失败：' + e); });
+    } else { showToast('📥 从浏览器导入'); }
+  });
   document.getElementById('aiBtn').addEventListener('click', function() {
     if (window.__TAURI_INTERNALS__) {
       window.__TAURI_INTERNALS__.invoke('open_ai_from_newtab').catch(function(e) { showToast('打开失败：' + e); });

@@ -170,6 +170,7 @@ pub mod events {
     pub const GLOBAL_SHORTCUT: &str = "global-shortcut";
     pub const OPEN_AI_FROM_NEWTAB: &str = "open-ai-from-newtab";
     pub const OPEN_SETTINGS_FROM_NEWTAB: &str = "open-settings-from-newtab";
+    pub const OPEN_IMPORT_FROM_NEWTAB: &str = "open-import-from-newtab";
     pub const OPEN_URL_FROM_NEWTAB: &str = "open-url-from-newtab";
     pub const TABS_UPDATED: &str = "tabs-updated";
     pub const TRANSLATE_PROGRESS: &str = "translate-progress";
@@ -194,6 +195,7 @@ pub mod events {
         ("GLOBAL_SHORTCUT", GLOBAL_SHORTCUT),
         ("OPEN_AI_FROM_NEWTAB", OPEN_AI_FROM_NEWTAB),
         ("OPEN_SETTINGS_FROM_NEWTAB", OPEN_SETTINGS_FROM_NEWTAB),
+        ("OPEN_IMPORT_FROM_NEWTAB", OPEN_IMPORT_FROM_NEWTAB),
         ("OPEN_URL_FROM_NEWTAB", OPEN_URL_FROM_NEWTAB),
         ("TABS_UPDATED", TABS_UPDATED),
         ("TRANSLATE_PROGRESS", TRANSLATE_PROGRESS),

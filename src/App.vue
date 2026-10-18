@@ -92,6 +92,8 @@ function openSettings(section?: string) {
   showSettings.value = true
 }
 const showAI = ref(false)
+// 从浏览器导入模块（F-93：启动页侧栏图标触发）
+const showImport = ref(false)
 // 证书中心（P1/P3）+ 证书错误拦截页（P2）
 const showCerts = ref(false)
 // 权限请求提示（安全 #2）
@@ -200,6 +202,7 @@ function anyDialogOpen() {
     showHistory.value ||
     showSessions.value ||
     showBookmarks.value ||
+    showImport.value ||
     showCommandPalette.value ||
     showUserscripts.value ||
     showCerts.value ||
@@ -464,6 +467,8 @@ function onGlobalKeydown(e: KeyboardEvent) {
     showUserscripts.value = false
   } else if (showBookmarks.value) {
     showBookmarks.value = false
+  } else if (showImport.value) {
+    showImport.value = false
   } else if (showCerts.value) {
     showCerts.value = false
   }
@@ -628,6 +633,9 @@ onMounted(async () => {
   onEvent(EVENTS.OPEN_SETTINGS_FROM_NEWTAB, () => {
     showSettings.value = true
   })
+  onEvent(EVENTS.OPEN_IMPORT_FROM_NEWTAB, () => {
+    showImport.value = true
+  }),
   // 启动页资讯点击 → 左窗格保持列表页，右窗格分屏打开资讯原文（占满右半区域）
   onEvent<string>(EVENTS.OPEN_URL_FROM_NEWTAB, async (e) => {
     if (!e.payload) return
