@@ -4235,6 +4235,7 @@ dependencies = [
 name = "shift-browser"
 version = "5.8.3"
 dependencies = [
+ "aes",
  "aes-gcm",
  "ammonia",
  "async-trait",
@@ -4255,6 +4256,7 @@ dependencies = [
  "readability",
  "reqwest 0.12.28",
  "rfd",
+ "ring",
  "serde",
  "serde_json",
  "sha2",
@@ -4272,6 +4274,8 @@ dependencies = [
  "url",
  "uuid",
  "webkit2gtk",
+ "zbus",
+ "zeroize",
 ]
 
 [[package]]

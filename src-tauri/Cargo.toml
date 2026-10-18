@@ -88,7 +88,11 @@ ksni = "0.3"
 ts-rs = "10.1.0"
 # 浏览器导入（F-89）：SQLite 源 WAL 快照的一次性 0700 临时目录（读副本不碰源）
 tempfile = "3"
-# F-90（解密原语）在下一卡引入 sha1/cbc/aes 显式依赖，本卡不动
+# 浏览器导入（F-90）：Chromium os_crypt v11/v10 解密原语（以下四个均已在 lock，零新增下载）
+ring = "0.17"    # PBKDF2-HMAC-SHA1（iter=1, salt="saltysalt"）
+aes = "0.8"      # AES-128-CBC 裸块解密（cbc crate 不在 lock，链式异或手搓）
+zeroize = "1"    # 密钥/明文副本用完即清（明文零落盘红线）
+zbus = "5"       # Secret Service 按 label 精确匹配取钥匙（keyring crate 只按属性检索，找不到 Chromium 条目）
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", features = ["v3_24"] }

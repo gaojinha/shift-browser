@@ -72,7 +72,9 @@ pub async fn scan_browser_import() -> CommandResult<Vec<SourceReport>> {
         // 无 HOME（非常规环境）：空结果而非报错，前端按"未发现浏览器"展示
         return Ok(Vec::new());
     };
-    Ok(scan_from(&base).await)
+    // F-90 已接线：加密书签源就地解密计数、密码源补 decryptable（keyring
+    // 不可用时逐源降级，不影响扫描本身）。probe_keys=true 生产路径。
+    Ok(scan_from(&base, true).await)
 }
 
 /// `~/.config`（本期仅 Linux；HOME 缺失返回 None → 空结果）
@@ -80,7 +82,7 @@ fn config_root() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config"))
 }
 
-async fn scan_from(base: &Path) -> Vec<SourceReport> {
+async fn scan_from(base: &Path, probe_keys: bool) -> Vec<SourceReport> {
     let mut out = Vec::new();
     scan_browser(
         base,
@@ -88,6 +90,7 @@ async fn scan_from(base: &Path) -> Vec<SourceReport> {
         "chrome",
         CHROME_BOOKMARK_FILES,
         CHROME_PASSWORD_FILES,
+        probe_keys,
         &mut out,
     )
     .await;
@@ -97,6 +100,7 @@ async fn scan_from(base: &Path) -> Vec<SourceReport> {
         "brave",
         BRAVE_BOOKMARK_FILES,
         BRAVE_PASSWORD_FILES,
+        probe_keys,
         &mut out,
     )
     .await;
@@ -105,12 +109,16 @@ async fn scan_from(base: &Path) -> Vec<SourceReport> {
 
 /// 扫一个浏览器的全部 profile：含目标源文件的子目录才算 profile
 ///（自然滤除 Brave 下的 32 位扩展缓存目录）；排除名单精确匹配目录名。
+/// `probe_keys=false`（单测路径）不碰 keyring/DBus：Encrypted* 恒 count=None /
+/// decryptable=None，保证测试确定性。
+#[allow(clippy::too_many_arguments)]
 async fn scan_browser(
     base: &Path,
     rel_root: &str,
     browser: &'static str,
     bookmark_files: &[&str],
     password_files: &[&str],
+    probe_keys: bool,
     out: &mut Vec<SourceReport>,
 ) {
     let root = base.join(rel_root);
@@ -143,42 +151,103 @@ async fn scan_browser(
         for f in bookmark_files {
             let p = prof.join(f);
             if p.is_file() {
-                out.push(inspect_bookmark_file(&p, browser, &name));
+                out.push(inspect_bookmark_file(&p, browser, &name, probe_keys).await);
             }
         }
         for f in password_files {
             let p = prof.join(f);
             if p.is_file() {
-                out.push(inspect_password_file(&p, browser, &name).await);
+                out.push(inspect_password_file(&p, browser, &name, probe_keys).await);
             }
         }
     }
 }
 
-/// 书签源：明文 JSON 递归数 `type == "url"` 节点；`Encrypted*` 是 v11 密文，
-/// 条数与可解密性待 F-90 原语接线后填充（本卡 count=None / decryptable=None）。
-fn inspect_bookmark_file(path: &Path, browser: &'static str, profile: &str) -> SourceReport {
+/// 书签源：
+/// - 明文 JSON：直接递归数 `type == "url"` 节点，decryptable 不适用（None）
+/// - `Encrypted*`（v11 密文）：F-90 原语就地解密计数——keyring 可用则给条数
+///   （decryptable=Some(true)）；keyring 锁着/不可达则降级（count=None、
+///   decryptable=Some(false)），绝不猜 label、绝不弹解锁
+async fn inspect_bookmark_file(
+    path: &Path,
+    browser: &'static str,
+    profile: &str,
+    probe_keys: bool,
+) -> SourceReport {
     let file = file_name_of(path);
-    let encrypted = file.starts_with("Encrypted");
-    let count = if encrypted {
-        None
+    if file.starts_with("Encrypted") {
+        // 单测路径不碰 DBus（确定性）：没探测过 → decryptable=None，不冒充探测结果
+        if !probe_keys {
+            return SourceReport {
+                browser,
+                profile: profile.to_string(),
+                kind: "bookmarks",
+                file,
+                count: None,
+                encrypted: true,
+                decryptable: None,
+            };
+        }
+        // 生产路径：解密计数，keyring 失败降级 Some(false)
+        match fetch_v11_key(browser).await {
+            Ok(key) => {
+                // key = keyring 条目值原文（口令），decrypt_os_crypt 内部做 PBKDF2
+                let count = std::fs::read(path)
+                    .ok()
+                    .and_then(|blob| decrypt_os_crypt(&blob, Some(&key)).ok())
+                    .and_then(|json| {
+                        serde_json::from_str::<serde_json::Value>(&json)
+                            .ok()
+                            .map(|v| count_url_nodes(&v))
+                    });
+                SourceReport {
+                    browser,
+                    profile: profile.to_string(),
+                    kind: "bookmarks",
+                    file,
+                    count,
+                    encrypted: true,
+                    decryptable: Some(true),
+                }
+            }
+            Err(_) => SourceReport {
+                browser,
+                profile: profile.to_string(),
+                kind: "bookmarks",
+                file,
+                count: None,
+                encrypted: true,
+                decryptable: Some(false),
+            },
+        }
     } else {
-        count_bookmark_json(path)
-    };
-    SourceReport {
-        browser,
-        profile: profile.to_string(),
-        kind: "bookmarks",
-        file,
-        count,
-        encrypted,
-        decryptable: None,
+        SourceReport {
+            browser,
+            profile: profile.to_string(),
+            kind: "bookmarks",
+            file,
+            count: count_bookmark_json(path),
+            encrypted: false,
+            decryptable: None,
+        }
     }
 }
 
 /// 密码源：SQLite `logins` 表行数（WAL 快照，见 [`count_logins_snapshot`]）。
-/// 文件级 `encrypted=false`（库本体不加密，行内 blob 才是 v10/v11——F-90 处理）。
-async fn inspect_password_file(path: &Path, browser: &'static str, profile: &str) -> SourceReport {
+/// 文件级 `encrypted=false`（库本体不加密，行内 blob 才是 v10/v11）；
+/// decryptable = 该浏览器 keyring 密钥可取（每文件探一次，命令频度低可接受）。
+async fn inspect_password_file(
+    path: &Path,
+    browser: &'static str,
+    profile: &str,
+    probe_keys: bool,
+) -> SourceReport {
+    // 单测路径不碰 DBus；生产路径探一次 keyring 得 decryptable
+    let decryptable = if probe_keys {
+        fetch_v11_key(browser).await.is_ok()
+    } else {
+        false
+    };
     SourceReport {
         browser,
         profile: profile.to_string(),
@@ -186,7 +255,7 @@ async fn inspect_password_file(path: &Path, browser: &'static str, profile: &str
         file: file_name_of(path),
         count: count_logins_snapshot(path).await,
         encrypted: false,
-        decryptable: None,
+        decryptable: Some(decryptable),
     }
 }
 
@@ -247,6 +316,308 @@ async fn count_logins_snapshot(db_path: &Path) -> Option<usize> {
         .await
         .ok()?;
     Some(usize::try_from(n.max(0)).unwrap_or(0))
+}
+
+// ===== F-90：Chromium os_crypt（Linux）v11/v10 解密原语 =====
+// 算法照 Chromium os_crypt_linux.cc（P0 实测 83/83 全解）：
+//   v11：key = PBKDF2-HMAC-SHA1(keyring 条目值本身（24 字符串，不解 base64）,
+//         salt="saltysalt", iter=1, dklen=16)
+//   v10：同算法，password 硬编码 "peanuts"（无 keyring 档）
+//   密文去 3 字节前缀 → AES-128-CBC，IV=16×0x20 → PKCS7 去填充
+// 判据铁律（.learnings/2026-10-18-brave-v11-password-decrypt.md）：
+//   解密成败必须在 PKCS7 去填充【之后】判（UTF-8/填充合法性），不得拿原始块判——
+//   否则正确密钥也会被判失败。填充非法一律 Err，绝不 panic。
+// 安全：明文只在内存驻留、密钥与含填充副本用完即 zeroize；
+//   错误信息不含任何明文/密钥；keyring label 硬映射不猜不试。
+
+use zeroize::Zeroize;
+
+#[derive(Debug, thiserror::Error, PartialEq)]
+enum DecryptError {
+    #[error("密文过短")]
+    TooShort,
+    #[error("未知前缀（非 v10/v11）")]
+    UnknownPrefix,
+    #[error("密文长度非块对齐")]
+    BadLength,
+    #[error("PKCS7 填充非法")]
+    BadPadding,
+    #[error("明文非 UTF-8")]
+    NotUtf8,
+    #[error("keyring 无可用密钥（该浏览器无法解密）")]
+    NoKeyringKey,
+}
+
+/// v10（无 keyring 档）的硬编码口令（Chromium 源码常量）
+const V10_PASSWORD: &[u8] = b"peanuts";
+/// PBKDF2 盐（Chromium os_crypt_linux.cc 常量）
+const PBKDF2_SALT: &[u8] = b"saltysalt";
+/// AES-128-CBC IV：16 个空格（0x20）
+const CBC_IV: [u8; 16] = [0x20; 16];
+
+/// keyring label 硬映射：只认这两个精确 label，其余一律 None（不许猜、不许硬试）
+fn keyring_label(browser: &str) -> Option<&'static str> {
+    match browser {
+        "chrome" => Some("Chrome Safe Storage"),
+        "brave" => Some("Brave Safe Storage"),
+        _ => None,
+    }
+}
+
+/// PBKDF2-HMAC-SHA1(salt="saltysalt", iter=1, dklen=16) → 16 字节 AES-128 key
+fn derive_key(password: &[u8]) -> [u8; 16] {
+    let mut key = [0u8; 16];
+    ring::pbkdf2::derive(
+        ring::pbkdf2::PBKDF2_HMAC_SHA1,
+        std::num::NonZeroU32::MIN, // iter=1
+        PBKDF2_SALT,
+        password,
+        &mut key,
+    );
+    key
+}
+
+/// AES-128-CBC 解密（IV=CBC_IV，倒序原地逐块：块 i 解完与前一块密文异或）
+fn aes_cbc_decrypt(body: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, DecryptError> {
+    use aes::cipher::{BlockDecrypt, KeyInit};
+    if body.is_empty() || body.len() % 16 != 0 {
+        return Err(DecryptError::BadLength);
+    }
+    let cipher = aes::Aes128::new_from_slice(key).map_err(|_| DecryptError::BadLength)?;
+    let mut buf = body.to_vec();
+    let n = buf.len() / 16;
+    let mut prev_ct = [0u8; 16];
+    let mut block = [0u8; 16];
+    for i in (1..n).rev() {
+        prev_ct.copy_from_slice(&buf[(i - 1) * 16..i * 16]);
+        block.copy_from_slice(&buf[i * 16..(i + 1) * 16]);
+        cipher.decrypt_block(aes::Block::from_mut_slice(&mut block));
+        for j in 0..16 {
+            buf[i * 16 + j] = block[j] ^ prev_ct[j];
+        }
+    }
+    block.copy_from_slice(&buf[0..16]);
+    cipher.decrypt_block(aes::Block::from_mut_slice(&mut block));
+    for j in 0..16 {
+        buf[j] = block[j] ^ CBC_IV[j];
+    }
+    Ok(buf)
+}
+
+/// PKCS7 去填充：末尾 n 字节必须全等于 n（1..=16），否则填充非法
+fn pkcs7_unpad(buf: &[u8]) -> Result<&[u8], DecryptError> {
+    let len = buf.len();
+    let pad = *buf.last().ok_or(DecryptError::BadPadding)? as usize;
+    if pad == 0 || pad > 16 || pad > len || buf[len - pad..].iter().any(|&b| b as usize != pad) {
+        return Err(DecryptError::BadPadding);
+    }
+    Ok(&buf[..len - pad])
+}
+
+/// 解一条 v10/v11 密文 → 明文字符串。
+/// `v11_key` 是 keyring 条目值**原文**（24 字符串的字节，不解 base64）——
+/// 内部整体进 PBKDF2 派生出 AES key；None → NoKeyringKey 降级，绝不猜。
+fn decrypt_os_crypt(blob: &[u8], v11_key: Option<&[u8]>) -> Result<String, DecryptError> {
+    if blob.len() < 3 {
+        return Err(DecryptError::TooShort);
+    }
+    let (prefix, body) = blob.split_at(3);
+    let mut key: [u8; 16] = match prefix {
+        b"v10" => derive_key(V10_PASSWORD),
+        // keyring 条目值整体做口令（P0 实测：不解 base64、不截断）
+        b"v11" => derive_key(v11_key.ok_or(DecryptError::NoKeyringKey)?),
+        _ => return Err(DecryptError::UnknownPrefix),
+    };
+    let mut plain = aes_cbc_decrypt(body, &key)?;
+    key.zeroize(); // 密钥用完即清
+    let out = pkcs7_unpad(&plain)?;
+    let s = std::str::from_utf8(out).map_err(|_| DecryptError::NotUtf8)?.to_string();
+    plain.zeroize(); // 含填充的明文副本清零
+    Ok(s)
+}
+
+// ---- keyring 取钥匙（org.freedesktop.secrete，与 P0 Python 验证算法一一对应）----
+// 说明：keyring crate 只能按 service/username 属性检索，检索不到 Chromium 条目
+//（其属性是 application=chrome，唯一稳定特征是 label）→ 按"不许猜"铁律，这里用
+// keyring 底层同一套 Secret Service 协议（zbus）做 label 精确匹配。
+// 锁定条目不弹解锁、不硬试 → 直接降级。返回值是密钥本体：调用方用完必须
+// zeroize，绝不写日志/错误串。
+
+/// GetSecret 回执结构（D-Bus 结构体 (oaysay)，按字段序取 value）
+#[derive(serde::Deserialize, zbus::zvariant::Type)]
+struct SecretPayload(
+    #[allow(dead_code)] zbus::zvariant::OwnedObjectPath, // session
+    #[allow(dead_code)] Vec<u8>, // parameters
+    #[allow(dead_code)] String,  // content_type
+    pub Vec<u8>,                 // 密钥本体（value）
+);
+
+#[zbus::proxy(
+    interface = "org.freedesktop.Secret.Service",
+    default_service = "org.freedesktop.secrets",
+    default_path = "/org/freedesktop/secrets"
+)]
+trait SecretService {
+    fn open_session(
+        &self,
+        algorithm: &str,
+        input: zbus::zvariant::Value<'_>,
+    ) -> zbus::Result<(
+        zbus::zvariant::OwnedObjectPath,
+        zbus::zvariant::OwnedValue,
+    )>;
+    fn search_items(
+        &self,
+        attributes: std::collections::HashMap<&str, &str>,
+    ) -> zbus::Result<(
+        Vec<zbus::zvariant::OwnedObjectPath>,
+        Vec<zbus::zvariant::OwnedObjectPath>,
+    )>;
+}
+
+#[zbus::proxy(
+    interface = "org.freedesktop.Secret.Item",
+    default_service = "org.freedesktop.secrets"
+)]
+trait SecretItem {
+    #[zbus(property)]
+    fn label(&self) -> zbus::Result<String>;
+    #[zbus(property)]
+    fn locked(&self) -> zbus::Result<bool>;
+    fn get_secret(&self, session: zbus::zvariant::ObjectPath<'_>) -> zbus::Result<SecretPayload>;
+}
+
+/// 任何 keyring 侧失败统一降级（不许把 DBus 细节泄进用户错误）
+fn nokey<T>(_: T) -> DecryptError {
+    DecryptError::NoKeyringKey
+}
+
+/// 取某浏览器 v11 keyring 密钥（原始字节）。失败一律 Err 降级（keyring 锁着 /
+/// DBus 不可达 / label 无条目），不猜 label、不硬试。空查询 = 全量枚举后按
+/// label 精确匹配（与 P0 Python 逐项 load_secret 的行为一致）。
+async fn fetch_v11_key(browser: &str) -> Result<Vec<u8>, DecryptError> {
+    let label = keyring_label(browser).ok_or(DecryptError::NoKeyringKey)?;
+    let conn = zbus::Connection::session().await.map_err(nokey)?;
+    let svc = SecretServiceProxy::new(&conn).await.map_err(nokey)?;
+    let (session, _) = svc
+        .open_session("plain", zbus::zvariant::Value::from(Vec::<u8>::new()))
+        .await
+        .map_err(nokey)?;
+    let (unlocked, locked) = svc
+        .search_items(std::collections::HashMap::new())
+        .await
+        .map_err(nokey)?;
+    for path in unlocked.into_iter().chain(locked) {
+        let item = SecretItemProxy::builder(&conn)
+            .path(path.as_str())
+            .map_err(nokey)?
+            .build()
+            .await
+            .map_err(nokey)?;
+        if item.label().await.as_deref() != Ok(label) {
+            continue;
+        }
+        // 锁定 → 不弹解锁 → 降级
+        if item.locked().await.unwrap_or(true) {
+            return Err(DecryptError::NoKeyringKey);
+        }
+        let session_path: zbus::zvariant::ObjectPath<'_> =
+            session.as_str().try_into().map_err(nokey)?;
+        let secret = item.get_secret(session_path).await.map_err(nokey)?;
+        if secret.3.is_empty() {
+            return Err(DecryptError::NoKeyringKey);
+        }
+        return Ok(secret.3);
+    }
+    Err(DecryptError::NoKeyringKey)
+}
+
+// 扫描结果 decryptable 已在 inspect_*_file 就地填充（F-90）。
+
+#[cfg(test)]
+mod f90_tests {
+    use super::*;
+
+    fn hex(s: &str) -> Vec<u8> {
+        hex::decode(s).unwrap()
+    }
+
+    // 黄金向量：openssl enc -aes-128-cbc + hashlib.pbkdf2_hmac(sha1) 生成（2026-10-18）
+    const GOLDEN_V10_KEY_HEX: &str = "fd621fe5a2b402539dfa147ca9272778";
+    const GOLDEN_V10_CT_HEX: &str = "8a2f0711b2b584b62bd4f134bd2d425636de3c42f4b17b617ba3fa739ad827a7";
+    const GOLDEN_V11_SECRET: &str = "q7b7aG9hbm9yaXNlaGVpZGVp"; // 24 字符，不解 base64
+    const GOLDEN_V11_KEY_HEX: &str = "07481d5306203a61a6bebdaf489f49d9";
+    const GOLDEN_V11_CT_HEX: &str = "035436fe29e7cbbcf01298db6336bf4f";
+    const GOLDEN_NONUTF8_CT_HEX: &str = "64e5b5699c3fb63b966a08e8e17bb45c"; // 明文 ff fe fd
+
+    #[test]
+    fn v10_peanuts_golden_vector() {
+        assert_eq!(&derive_key(V10_PASSWORD)[..], &hex(GOLDEN_V10_KEY_HEX)[..]);
+        let blob = [b"v10".as_slice(), &hex(GOLDEN_V10_CT_HEX)].concat();
+        assert_eq!(
+            decrypt_os_crypt(&blob, None).unwrap(),
+            "https://example.com/"
+        );
+    }
+
+    #[test]
+    fn v11_keyring_value_used_raw_no_base64_decode() {
+        // 条目值按原始 24 字符串进 PBKDF2（不解 base64）——向量对上即证明
+        assert_eq!(
+            &derive_key(GOLDEN_V11_SECRET.as_bytes())[..],
+            &hex(GOLDEN_V11_KEY_HEX)[..]
+        );
+        let blob = [b"v11".as_slice(), &hex(GOLDEN_V11_CT_HEX)].concat();
+        // 传 keyring 条目值原文（口令）；derive 在 decrypt_os_crypt 内部完成
+        // 明文含非 ASCII（é / 中文）：去填充后判 UTF-8 的判据铁律回归
+        assert_eq!(
+            decrypt_os_crypt(&blob, Some(GOLDEN_V11_SECRET.as_bytes())).unwrap(),
+            "p@ssw0rd-é中"
+        );
+    }
+
+    #[test]
+    fn bad_padding_fails_not_panics() {
+        // 教训文档回归：判据必须"去填充后再判"；坏填充 → Err，绝不 panic
+        let mut ct = hex(GOLDEN_V10_CT_HEX);
+        let last = ct.len() - 1;
+        ct[last] ^= 0xff;
+        let blob = [b"v10".as_slice(), &ct].concat();
+        assert_eq!(decrypt_os_crypt(&blob, None), Err(DecryptError::BadPadding));
+    }
+
+    #[test]
+    fn non_utf8_plaintext_fails_cleanly() {
+        // 填充合法但明文非 UTF-8（ff fe fd）→ NotUtf8，不 panic 不给半截数据
+        let blob = [b"v11".as_slice(), &hex(GOLDEN_NONUTF8_CT_HEX)].concat();
+        assert_eq!(
+            decrypt_os_crypt(&blob, Some(GOLDEN_V11_SECRET.as_bytes())),
+            Err(DecryptError::NotUtf8)
+        );
+    }
+
+    #[test]
+    fn malformed_blobs_rejected() {
+        assert_eq!(decrypt_os_crypt(b"v1", None), Err(DecryptError::TooShort));
+        assert_eq!(decrypt_os_crypt(b"v99xxxx", None), Err(DecryptError::UnknownPrefix));
+        // v11 无 key → 降级（keyring 锁着/不可用的命令级映射就是这条）
+        let blob = [b"v11".as_slice(), &hex(GOLDEN_V11_CT_HEX)].concat();
+        assert_eq!(decrypt_os_crypt(&blob, None), Err(DecryptError::NoKeyringKey));
+        // 块长不对齐
+        assert_eq!(
+            decrypt_os_crypt(b"v10short", None),
+            Err(DecryptError::BadLength)
+        );
+    }
+
+    #[test]
+    fn keyring_label_hard_mapping_exact() {
+        assert_eq!(keyring_label("chrome"), Some("Chrome Safe Storage"));
+        assert_eq!(keyring_label("brave"), Some("Brave Safe Storage"));
+        // 不许猜：未知浏览器一律 None
+        assert_eq!(keyring_label("chromium"), None);
+        assert_eq!(keyring_label(""), None);
+    }
 }
 
 #[cfg(test)]
@@ -311,7 +682,7 @@ mod tests {
             "ms-playwright-mcp",
             &[("Bookmarks", bookmarks_json(&["https://x.com"]).into_bytes())],
         );
-        let out = scan_from(base.path()).await;
+        let out = scan_from(base.path(), false).await;
         assert!(out.iter().all(|r| r.profile == "Default"), "排除目录不得入结果: {out:?}");
         let default = reports_for(&out, "Default");
         assert_eq!(default.len(), 1);
@@ -340,7 +711,7 @@ mod tests {
             "Default",
             &[("Bookmarks", shell.into_bytes())],
         );
-        let out = scan_from(base.path()).await;
+        let out = scan_from(base.path(), false).await;
         let r = reports_for(&out, "Default");
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].count, Some(0), "空壳必须扫到并标记为 0，不得静默丢失");
@@ -364,7 +735,8 @@ mod tests {
                 ("EncryptedBookmarks2", b"v10\xb7\xfb\xf6g\x74\xab".to_vec()),
             ],
         );
-        let out = scan_from(base.path()).await;
+        // probe_keys=false：不碰 DBus，加密源 count=None / decryptable=None
+        let out = scan_from(base.path(), false).await;
         let r = reports_for(&out, "Default");
         let files: Vec<&str> = r.iter().map(|x| x.file.as_str()).collect();
         assert_eq!(
@@ -376,6 +748,8 @@ mod tests {
         assert_eq!(counts, [Some(3), Some(1), Some(0), None, None]);
         let encrypted: Vec<bool> = r.iter().map(|x| x.encrypted).collect();
         assert_eq!(encrypted, [false, false, false, true, true]);
+        let decryptable: Vec<Option<bool>> = r.iter().map(|x| x.decryptable).collect();
+        assert_eq!(decryptable, [None, None, None, None, None]);
     }
 
     // ---- 非法 JSON → None（读取失败），不影响其余源 ----
@@ -392,7 +766,7 @@ mod tests {
                 ("Login Data", Vec::new()), // 0 字节文件：非 SQLite → None
             ],
         );
-        let out = scan_from(base.path()).await;
+        let out = scan_from(base.path(), false).await;
         let r = reports_for(&out, "Default");
         assert_eq!(r.len(), 2);
         assert_eq!(r.iter().find(|x| x.kind == "bookmarks").unwrap().count, None);
