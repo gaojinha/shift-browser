@@ -178,3 +178,116 @@ pub(super) fn host_of(url: &str) -> String {
         .unwrap_or(url)
         .to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seal_open_roundtrip_and_tamper_detection() {
+        let k = [0x42u8; 32];
+        let plain = br#"{"url":"https://dav.example/shift","username":"u","password":"p"}"#;
+        let sealed = seal(&k, plain).unwrap();
+        // 往返一致 + 空明文
+        assert_eq!(open(&k, &sealed).unwrap(), plain);
+        assert_eq!(open(&k, &seal(&k, b"").unwrap()).unwrap(), b"");
+        // 随机 nonce：同明文两次封装密文必不同（可检测"两次上传同一份"之外的重放）
+        assert_ne!(seal(&k, plain).unwrap(), sealed);
+        // 密文两侧空白容错（open 先 trim，兼容换行落盘）
+        assert_eq!(open(&k, &format!("  {}\n", sealed)).unwrap(), plain);
+        // 密钥不符必须失败（GCM 认证）
+        let wrong = [0x43u8; 32];
+        assert!(matches!(
+            open(&wrong, &sealed),
+            Err(DbError::Other(m)) if m.contains("解密失败")
+        ));
+        // 密文篡改：翻转密文区一个 base64 字符（解码后必变字节）必须失败
+        let mut chars: Vec<char> = sealed.chars().collect();
+        let i = 20usize.min(chars.len() - 1);
+        chars[i] = if chars[i] == 'A' { 'B' } else { 'A' };
+        let tampered: String = chars.into_iter().collect();
+        assert!(matches!(
+            open(&k, &tampered),
+            Err(DbError::Other(m)) if m.contains("解密失败")
+        ));
+        // 长度非法：恰好 nonce 长（12B，无密文）与更短
+        assert!(matches!(
+            open(&k, &BASE64.encode(vec![0u8; 12])),
+            Err(DbError::Other(m)) if m.contains("密文长度非法")
+        ));
+        assert!(matches!(
+            open(&k, &BASE64.encode(vec![0u8; 11])),
+            Err(DbError::Other(m)) if m.contains("密文长度非法")
+        ));
+        // 畸形 base64
+        assert!(matches!(
+            open(&k, "!!!not-base64!!!"),
+            Err(DbError::Other(m)) if m.contains("密文解码失败")
+        ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn write_600_creates_and_tightens_to_600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        // 新建文件：落盘即 600，内容一致
+        let fresh = dir.path().join("sync.key");
+        write_600(&fresh, "v1").unwrap();
+        assert_eq!(std::fs::read_to_string(&fresh).unwrap(), "v1");
+        assert_eq!(
+            std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        // 已存在的 644 文件：重写后必须重新收紧到 600（set_permissions 兜底路径）
+        let old = dir.path().join("old.key");
+        std::fs::write(&old, "stale").unwrap();
+        std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_600(&old, "v2").unwrap();
+        assert_eq!(std::fs::read_to_string(&old).unwrap(), "v2");
+        assert_eq!(
+            std::fs::metadata(&old).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[tokio::test]
+    async fn store_path_lives_next_to_vault_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::init(dir.path().to_path_buf()).await.unwrap();
+        let p = store_path(&db);
+        assert_eq!(p.file_name(), Some(std::ffi::OsStr::new("sync.key")));
+        // 与 vault.key 同目录（换文件名，不是换地方）
+        assert_eq!(p.parent(), db.vault_path.parent());
+    }
+
+    #[test]
+    fn repo_dir_url_and_host_of() {
+        let s = SyncStore {
+            url: "https://h:8080".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            repo_url(&s),
+            "https://h:8080/shift-browser/sync.v1.e2e"
+        );
+        assert_eq!(dir_url(&s), "https://h:8080/shift-browser");
+        // 结尾斜杠（多个）全部去除，不产生双斜杠
+        let s2 = SyncStore {
+            url: "https://h:8080///".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            repo_url(&s2),
+            "https://h:8080/shift-browser/sync.v1.e2e"
+        );
+        // host_of：只留 host:port（路径/查询不带）
+        assert_eq!(host_of("https://h:8080/a/b?c=d"), "h:8080");
+        assert_eq!(host_of("http://host"), "host");
+        // 无 // 前缀：取到第一个 / 为止
+        assert_eq!(host_of("bare-host:9000/x"), "bare-host:9000");
+        // 现状钉住：userinfo 不剥离（注释写"只留 host:port"与实际不一致，
+        // 是否剥 @ 前缀待拍板；当前 SyncStore 的 url 惯例不含 userinfo，无实际泄露面）
+        assert_eq!(host_of("https://u:p@h:8080/x"), "u:p@h:8080");
+    }
+}
