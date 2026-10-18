@@ -165,3 +165,40 @@ pub fn apply_cookie_policy(strict: bool) {
         log::info!("[privacy] 标准档：第三方 Cookie 保持浏览器默认（不阻断）");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SO: &str = "libshift_web_extension.so";
+
+    #[test]
+    fn find_returns_resource_dir_when_so_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(SO), b"").unwrap();
+        let found = find_web_extensions_dir(Some(tmp.path().to_path_buf()));
+        assert_eq!(found.as_deref(), Some(tmp.path()));
+    }
+
+    #[test]
+    fn find_skips_resource_dir_without_so() {
+        let tmp = tempfile::tempdir().unwrap();
+        let found = find_web_extensions_dir(Some(tmp.path().to_path_buf()));
+        assert_ne!(found.as_deref(), Some(tmp.path()));
+    }
+
+    #[test]
+    fn find_none_resource_dir_never_returns_dir_without_so() {
+        if let Some(d) = find_web_extensions_dir(None) {
+            assert!(d.join(SO).exists());
+        }
+    }
+
+    #[test]
+    fn public_wrapper_matches_find() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(SO), b"").unwrap();
+        let p = Some(tmp.path().to_path_buf());
+        assert_eq!(web_extensions_dir(p.clone()), find_web_extensions_dir(p));
+    }
+}
