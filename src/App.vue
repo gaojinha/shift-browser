@@ -26,6 +26,8 @@ const SessionDialog = defineAsyncComponent(() => import('./components/SessionDia
 const UserscriptsDialog = defineAsyncComponent(() => import('./components/UserscriptsDialog.vue'))
 const CommandPalette = defineAsyncComponent(() => import('./components/CommandPalette.vue'))
 const CertificatesDialog = defineAsyncComponent(() => import('./components/CertificatesDialog.vue'))
+// 从浏览器导入（F-94：启动页侧栏图标 / showImport 触发）
+const ImportModule = defineAsyncComponent(() => import('./components/ImportModule.vue'))
 import CertWarning from './components/CertWarning.vue'
 import PermissionPrompt from './components/PermissionPrompt.vue'
 import AppToast from './components/AppToast.vue'
@@ -799,6 +801,7 @@ watch(
     <SessionDialog :show="showSessions" @close="showSessions = false" />
     <UserscriptsDialog :show="showUserscripts" @close="showUserscripts = false" />
     <CertificatesDialog :show="showCerts" @close="showCerts = false" />
+    <ImportModule :show="showImport" @close="showImport = false" />
     <CertWarning :info="tlsError" @close="shiftTlsError" />
     <PermissionPrompt :info="permReq" @close="shiftPermReq" />
     <CommandPalette
