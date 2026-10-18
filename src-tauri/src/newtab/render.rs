@@ -194,3 +194,93 @@ pub(super) fn render_worldnav_html() -> String {
             .unwrap_or_else(|_| "[]".to_string()),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn esc_escapes_html_metachars_with_amp_first() {
+        assert_eq!(
+            esc("<a href=\"x\">&</a>"),
+            "&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;"
+        );
+        // & 先转义：已有实体不被二次破坏成未转义形态
+        assert_eq!(esc("&lt;"), "&amp;lt;");
+        assert_eq!(esc("plain 中文"), "plain 中文");
+    }
+
+    #[test]
+    fn json_script_safe_never_emits_raw_lt() {
+        let v = serde_json::json!(["</script><img src=x onerror=alert(1)>", {"k": "<b>"}]);
+        let s = json_script_safe(&v);
+        assert!(!s.contains('<'));
+        assert!(s.contains("\\u003c/script>"));
+        // JS 解析结果不变：\u003c 还原后与原值一致
+        let back: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, v);
+    }
+
+    #[test]
+    fn render_html_escapes_untrusted_fields_and_fills_placeholders() {
+        let evil = "</script><img src=x onerror=alert(1)>";
+        let html = render_html(
+            "https://s.example/?q=%s",
+            &[(evil.to_string(), evil.to_string())],
+            &[(evil.to_string(), evil.to_string())],
+            &[(evil.to_string(), evil.to_string(), evil.to_string())],
+            &[(
+                evil.to_string(),
+                evil.to_string(),
+                evil.to_string(),
+                evil.to_string(),
+                evil.to_string(),
+            )],
+            &[evil.to_string()],
+            true,
+            14,
+        );
+        // 不可信输入的原始形态不得出现在输出里（HTML 转义或 \u003c 转义）
+        assert!(!html.contains(evil));
+        assert!(!html.contains("<img src=x onerror"));
+        // 全部占位符已替换
+        assert!(!html.contains("{{"), "仍有未替换占位符");
+        // show_bg 生效；font_size 14 → 缩放 1
+        assert!(html.contains("id=\"bgLayer\""));
+    }
+
+    #[test]
+    fn render_html_empty_lists_and_bg_toggle() {
+        let html = render_html("https://s/?q=%s", &[], &[], &[], &[], &[], false, 28);
+        assert!(html.contains("暂无访问记录"));
+        assert!(html.contains("暂无书签"));
+        assert!(!html.contains("id=\"bgLayer\""));
+        assert!(!html.contains("{{"));
+    }
+
+    #[test]
+    fn render_worldnav_html_embeds_data_without_placeholder() {
+        let html = render_worldnav_html();
+        assert!(!html.contains("__WORLDAV_DATA__"));
+        assert!(!WORLDNAV_JSON.is_empty() && html.len() > WORLDNAV_TPL.len());
+    }
+
+    #[test]
+    fn default_quick_sites_matches_const_and_atomic_write_replaces() {
+        let sites = default_quick_sites();
+        assert_eq!(sites.len(), DEFAULT_QUICK_SITES.len());
+        assert!(sites
+            .iter()
+            .all(|(_, n, u)| !n.is_empty() && u.starts_with("https://")));
+
+        let dir = std::env::temp_dir().join(format!("sb-render-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("page.html");
+        atomic_write(&p, "v1").unwrap();
+        atomic_write(&p, "v2").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "v2");
+        // 临时文件已 rename 掉，目录里只剩目标
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
