@@ -5,6 +5,8 @@ import { computed, ref, watch } from 'vue'
 import { invokeOk, errText } from '../utils/invoke'
 import { setWebviewVisible } from '../utils/webview'
 import { useToastStore } from '../stores/toast'
+import { useBookmarksStore } from '../stores/bookmarks'
+import { usePasswordsStore } from '../stores/passwords'
 import UiDialog from './ui/UiDialog.vue'
 
 const props = defineProps<{ show: boolean }>()
@@ -19,6 +21,19 @@ const showModel = computed({
 })
 
 const toastStore = useToastStore()
+// 导入成功后刷新对应 store（派单要求：让 BookmarksBar / PasswordsDialog 立即可见）
+const bookmarksStore = useBookmarksStore()
+const passwordsStore = usePasswordsStore()
+
+/** 刷新失败只记日志不阻断导入回执（照 tabs.ts refresh_newtab 兜底范式） */
+function refreshAfterImport(kind: 'bookmarks' | 'passwords') {
+  if (kind === 'bookmarks') {
+    bookmarksStore.loadBookmarks().catch((e) => console.error('[import] 刷新书签列表失败:', e))
+    bookmarksStore.loadFolders() // 内部自带兜底（失败返回 []）
+  } else {
+    passwordsStore.loadPasswords().catch((e) => console.error('[import] 刷新密码列表失败:', e))
+  }
+}
 
 /** F-89 扫描回执（全是计数/标记，无明文字段） */
 interface SourceReport {
@@ -93,6 +108,7 @@ async function doImportBookmarks() {
   importing.value = true
   try {
     bmResult.value = await invokeOk<ImportBookmarksResult>('import_bookmarks_from_browser')
+    refreshAfterImport('bookmarks')
     toastStore.show(`书签导入完成：写入 ${bmResult.value.imported} 条`, 'success')
   } catch (e) {
     toastStore.error(`书签导入失败：${errText(e)}`)
@@ -105,6 +121,7 @@ async function doImportPasswords() {
   importing.value = true
   try {
     pwResult.value = await invokeOk<ImportPasswordsResult>('import_passwords_from_browser')
+    refreshAfterImport('passwords')
     toastStore.show(`密码导入完成：写入 ${pwResult.value.imported} 条`, 'success')
   } catch (e) {
     toastStore.error(`密码导入失败：${errText(e)}`)

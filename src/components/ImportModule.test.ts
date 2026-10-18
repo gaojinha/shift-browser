@@ -81,6 +81,9 @@ beforeEach(() => {
   invokeMock.mockReset()
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === 'scan_browser_import') return Promise.resolve(SOURCES)
+    // store 刷新拉取（导入成功后 refreshAfterImport 触发）
+    if (cmd === 'get_bookmarks') return Promise.resolve([])
+    if (cmd === 'list_passwords') return Promise.resolve([])
     if (cmd === 'import_bookmarks_from_browser') return Promise.resolve(BM_RESULT)
     if (cmd === 'import_passwords_from_browser') return Promise.resolve(PW_RESULT)
     return Promise.resolve(undefined)
@@ -260,5 +263,22 @@ describe('两块互不耦合', () => {
     await flushPromises()
     expect(w.find('[data-testid="bm-result"]').exists()).toBe(false)
     expect(w.find('[data-testid="pw-result"]').exists()).toBe(false)
+  })
+})
+
+describe('导入成功后刷新 store（派单要求）', () => {
+  it('书签导入 → get_bookmarks；密码导入 → list_passwords，各自独立触发', async () => {
+    const w = await openDialog()
+    await w.find('button.import-run').trigger('click')
+    await flushPromises()
+    expect(invokeMock).toHaveBeenCalledWith('get_bookmarks')
+    expect(invokeMock).not.toHaveBeenCalledWith('list_passwords')
+
+    const tabs = w.findAll('button.import-tab')
+    await tabs[1].trigger('click')
+    await flushPromises()
+    await w.find('button.import-run').trigger('click')
+    await flushPromises()
+    expect(invokeMock).toHaveBeenCalledWith('list_passwords')
   })
 })
