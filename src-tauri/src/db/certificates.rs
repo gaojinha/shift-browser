@@ -418,4 +418,180 @@ mod tests {
                 .unwrap();
         assert_eq!(newest, "new.example.com");
     }
+
+    fn info(host: &str, port: u16, fp: &str, not_after: Option<&str>) -> CertInfo {
+        // Default 的 valid=false，这里显式置 true（"无变化"分支的默认路径）
+        CertInfo {
+            host: host.into(),
+            port,
+            fingerprint_sha256: fp.into(),
+            not_after: not_after.map(String::from),
+            valid: true,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn record_state_machine_first_unchanged_verify_error_changed() {
+        let (_dir, pool) = test_pool().await;
+        // 首见：first_seen
+        assert_eq!(
+            record(&pool, &info("a.com", 443, "fpA", Some("2026-12-01 00:00:00")))
+                .await,
+            Some("first_seen")
+        );
+        // 同指纹再校验：无变化 → None，change_count 保持 0
+        assert_eq!(
+            record(&pool, &info("a.com", 443, "fpA", Some("2026-12-01 00:00:00")))
+                .await,
+            None
+        );
+        // 同指纹但校验带错误位：verify_error，不算指纹变更
+        let bad = CertInfo {
+            valid: false,
+            ..info("a.com", 443, "fpA", Some("2026-12-01 00:00:00"))
+        };
+        assert_eq!(record(&pool, &bad).await, Some("verify_error"));
+        let cc: i64 = sqlx::query_scalar(
+            "SELECT change_count FROM certificates WHERE host='a.com' AND port=443",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cc, 0, "verify_error 不递增 change_count");
+        // 指纹变更：cert_changed，change_count+1，新指纹落库
+        assert_eq!(
+            record(&pool, &info("a.com", 443, "fpB", Some("2027-01-01 00:00:00")))
+                .await,
+            Some("cert_changed")
+        );
+        let (cc, fp): (i64, String) = sqlx::query_as(
+            "SELECT change_count, fingerprint_sha256 FROM certificates WHERE host='a.com' AND port=443",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cc, 1);
+        assert_eq!(fp, "fpB");
+        // 变更后稳定：回到 None
+        assert_eq!(
+            record(&pool, &info("a.com", 443, "fpB", Some("2027-01-01 00:00:00")))
+                .await,
+            None
+        );
+        // 同 host 不同 port：独立快照行（host:port 主键）
+        assert_eq!(
+            record(&pool, &info("a.com", 8443, "fpC", None)).await,
+            Some("first_seen")
+        );
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM certificates")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(n, 2);
+        assert!(get(&pool, "a.com", 443).await.unwrap().is_some());
+        assert!(get(&pool, "a.com", 8443).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn expiring_within_window_boundaries_and_null_last() {
+        let (_dir, pool) = test_pool().await;
+        // not_after 用 SQL 的 datetime('now', ...) 生成，与查询同钟源，避免外部时间漂移
+        for (host, delta) in [
+            ("expired.com", "-5 days"),
+            ("soon.com", "+20 days"),
+            ("edge.com", "+30 days"),
+            ("far.com", "+31 days"),
+        ] {
+            let na: String =
+                sqlx::query_scalar(&format!("SELECT datetime('now', '{delta}')"))
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            record(&pool, &info(host, 443, &format!("fp-{host}"), Some(&na))).await;
+        }
+        // 无到期信息：not_after = NULL
+        record(&pool, &info("forever.com", 443, "fp-f", None)).await;
+
+        // 30 天窗口：正好 +30 天的边界——查询的 'now' 不早于插入时刻，差值恒 ≤30 → 入窗；
+        // +31 天恒 >30 → 出窗；NULL 恒出窗
+        let got = expiring_within(&pool, 30).await.unwrap();
+        let hosts: Vec<String> = got.iter().map(|r| r.host.clone()).collect();
+        assert_eq!(
+            hosts,
+            vec![
+                "expired.com".to_string(),
+                "soon.com".to_string(),
+                "edge.com".to_string()
+            ],
+            "days_left 升序：已过期(-5) → 20 天 → 30 天边界；31 天与 NULL 不入窗"
+        );
+        // days_left 结构体字段：已知产品怪癖（回执已上报、待拍板立卡）——
+        // row_to_record 用 try_get::<Option<f64>> 解 INTEGER 列，sqlx 0.8.6 报
+        // "mismatched types (REAL vs INTEGER)" → 恒 None（SQL 侧窗口/排序不受影响）。
+        // 此处钉住现状；解码修复后（f64→i64 或 CAST AS REAL）本断言应改为
+        // Some(-5)/Some(19|20)/Some(29|30) 并删除本注释。
+        for r in &got {
+            assert!(
+                r.days_left.is_none(),
+                "已知怪癖：days_left 解码失败恒 None（{}）",
+                r.host
+            );
+        }
+        // 窄窗口（4 天）：只剩已过期
+        let got4 = expiring_within(&pool, 4).await.unwrap();
+        assert_eq!(got4.len(), 1);
+        assert_eq!(got4[0].host, "expired.com");
+
+        // list()：5 行全量、最临期在前、无到期信息恒排最后
+        let all = list(&pool).await.unwrap();
+        assert_eq!(all.len(), 5);
+        assert_eq!(all[0].host, "expired.com");
+        assert_eq!(all[4].host, "forever.com");
+        assert_eq!(all[4].days_left, None);
+    }
+
+    #[tokio::test]
+    async fn exception_add_replace_delete_idempotent_and_expiry() {
+        let (_dir, pool) = test_pool().await;
+        add_exception(&pool, "b.com", 443, "fp1", "自签").await.unwrap();
+        let ex = list_exceptions(&pool).await.unwrap();
+        assert_eq!(ex.len(), 1);
+        assert_eq!(ex[0].host, "b.com");
+        assert_eq!(ex[0].fingerprint_sha256, "fp1");
+        assert_eq!(ex[0].reason.as_deref(), Some("自签"));
+        assert!(ex[0].expires_at.is_some(), "例外默认 90 天有效期（防永久放行）");
+        assert!(has_exception(&pool, "b.com", 443, "fp1").await);
+        // 例外按指纹锁定：同 host:port 的其它指纹不受放行
+        assert!(!has_exception(&pool, "b.com", 443, "other-fp").await);
+        // 同三元组重复放行 = 覆盖：行数不变、reason 更新
+        add_exception(&pool, "b.com", 443, "fp1", "更新原因").await.unwrap();
+        let ex2 = list_exceptions(&pool).await.unwrap();
+        assert_eq!(ex2.len(), 1, "INSERT OR REPLACE 不产生重复行");
+        assert_eq!(ex2[0].reason.as_deref(), Some("更新原因"));
+        assert!(has_exception(&pool, "b.com", 443, "fp1").await);
+        // 删除 + 重复删除：幂等无错
+        delete_exception(&pool, "b.com", 443, "fp1").await.unwrap();
+        delete_exception(&pool, "b.com", 443, "fp1").await.unwrap();
+        assert!(!has_exception(&pool, "b.com", 443, "fp1").await);
+        assert_eq!(list_exceptions(&pool).await.unwrap().len(), 0);
+        // 已过期例外不再算有效放行，但列表仍展示
+        add_exception(&pool, "b.com", 443, "fp2", "过期测试").await.unwrap();
+        sqlx::query(
+            "UPDATE cert_exceptions SET expires_at = datetime('now', '-1 day')
+             WHERE fingerprint_sha256='fp2'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            !has_exception(&pool, "b.com", 443, "fp2").await,
+            "过期例外不再算有效放行"
+        );
+        assert_eq!(
+            list_exceptions(&pool).await.unwrap().len(),
+            1,
+            "list 不过滤过期（展示归 UI）"
+        );
+    }
 }
