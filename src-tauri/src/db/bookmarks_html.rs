@@ -372,4 +372,84 @@ mod tests {
         assert_eq!(items[1].url, "https://b.com");
         assert!(items[1].folder_name.is_none());
     }
+
+    #[test]
+    fn parse_nested_folders_and_empty_title_fallback() {
+        let html = "<!DOCTYPE NETSCAPE-Bookmark-file-1>\n\
+                    <DT><H3>Level 1</H3>\n<DL><p>\n\
+                    <DT><H3>Level 2</H3>\n<DL><p>\n\
+                    <DT><A HREF=\"https://sub.org\"><span>Sub Item</span></A>\n\
+                    <DT><A HREF=\"https://notitle.org\"></A>\n\
+                    </DL><p>\n\
+                    <DT><A HREF=\"https://level1.org\">Level 1 Item</A>\n\
+                    </DL><p>\n";
+        let items = parse_bookmarks_html(html);
+        assert_eq!(items.len(), 3);
+        // Level 2
+        assert_eq!(items[0].url, "https://sub.org");
+        assert_eq!(items[0].title, "Sub Item");
+        assert_eq!(items[0].folder_name.as_deref(), Some("Level 2"));
+        // 空标题应回退为 url
+        assert_eq!(items[1].url, "https://notitle.org");
+        assert_eq!(items[1].title, "https://notitle.org");
+        assert_eq!(items[1].folder_name.as_deref(), Some("Level 2"));
+        // 弹出 Level 2 后的 Level 1
+        assert_eq!(items[2].url, "https://level1.org");
+        assert_eq!(items[2].title, "Level 1 Item");
+        assert_eq!(items[2].folder_name.as_deref(), Some("Level 1"));
+    }
+
+    #[test]
+    fn render_folder_tree_nested_and_cycle_prevention() {
+        let folders = vec![
+            (1, "Folder A".to_string(), None, 0, "2026-01-01".to_string()),
+            (2, "Folder B".to_string(), Some(1), 0, "2026-01-01".to_string()),
+            (3, "Cycle Folder".to_string(), Some(3), 0, "2026-01-01".to_string()), // 自环
+        ];
+        let bookmarks = vec![
+            (10, "Title 1 & Special".to_string(), "https://a.com?x=1&y=2".to_string(), Some(1), 0, "2026-01-01".to_string()),
+            (11, "Title 2".to_string(), "https://b.com".to_string(), Some(2), 0, "2026-01-01".to_string()),
+        ];
+
+        let mut html = String::new();
+        let mut visited = Vec::new();
+
+        // 渲染 Folder A
+        render_folder_tree(&mut html, &folders, &bookmarks, 1, 1, &mut visited);
+        assert!(html.contains("<DT><H3>Folder B</H3>"));
+        assert!(html.contains("https://a.com?x=1&amp;y=2"));
+        assert!(html.contains("Title 1 &amp; Special"));
+        assert!(html.contains("https://b.com"));
+        assert!(visited.contains(&1));
+        assert!(visited.contains(&2));
+
+        // 循环引用防御测试
+        let mut cycle_html = String::new();
+        let mut cycle_visited = Vec::new();
+        // 传入自环文件夹，必须正常退出不栈溢出
+        render_folder_tree(&mut cycle_html, &folders, &bookmarks, 3, 1, &mut cycle_visited);
+        assert!(cycle_visited.contains(&3));
+    }
+
+    #[test]
+    fn render_and_parse_roundtrip_consistency() {
+        let folders = vec![
+            (1, "Work".to_string(), None, 0, "2026-01-01".to_string()),
+        ];
+        let bookmarks = vec![
+            (10, "Search Engine".to_string(), "https://google.com".to_string(), Some(1), 0, "2026-01-01".to_string()),
+        ];
+
+        let mut html = String::new();
+        html.push_str("    <DT><H3>Work</H3>\n    <DL><p>\n");
+        let mut visited = Vec::new();
+        render_folder_tree(&mut html, &folders, &bookmarks, 1, 1, &mut visited);
+        html.push_str("    </DL><p>\n");
+
+        let items = parse_bookmarks_html(&html);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].folder_name.as_deref(), Some("Work"));
+        assert_eq!(items[0].url, "https://google.com");
+        assert_eq!(items[0].title, "Search Engine");
+    }
 }
