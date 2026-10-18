@@ -163,3 +163,85 @@ pub async fn enabled_scripts(pool: &sqlx::SqlitePool) -> Vec<(String, Vec<String
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../migrations/20260921000001_userscripts.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn insert(pool: &sqlx::SqlitePool, matches: &str, code: &str, enabled: i64) {
+        sqlx::query("INSERT INTO userscripts (name, matches, code, enabled) VALUES ('n', ?, ?, ?)")
+            .bind(matches)
+            .bind(code)
+            .bind(enabled)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn enabled_scripts_filters_disabled_and_empty_code() {
+        let pool = pool().await;
+        insert(&pool, "*://a.com/*", "A", 1).await;
+        insert(&pool, "*://b.com/*", "B", 0).await;
+        insert(&pool, "*://c.com/*", "", 1).await;
+        insert(&pool, "*://d.com/*", "D", 1).await;
+        let got = enabled_scripts(&pool).await;
+        let codes: Vec<&str> = got.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(codes, ["A", "D"]);
+    }
+
+    #[tokio::test]
+    async fn enabled_scripts_parses_matches_lines() {
+        let pool = pool().await;
+        insert(&pool, " *://a.com/* \n\n\t\n*://b.com/*\r\n", "X", 1).await;
+        insert(&pool, "", "Y", 1).await;
+        let got = enabled_scripts(&pool).await;
+        assert_eq!(got[0].1, ["*://a.com/*", "*://b.com/*"]);
+        assert!(got[1].1.is_empty());
+    }
+
+    #[tokio::test]
+    async fn enabled_scripts_empty_table_and_missing_table() {
+        assert!(enabled_scripts(&pool().await).await.is_empty());
+        let bare = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        assert!(enabled_scripts(&bare).await.is_empty());
+    }
+
+    // 全局 CACHE 只在本用例内读写，避免并行测试互相污染
+    #[tokio::test]
+    async fn refresh_cache_replaces_cached_scripts() {
+        let pool = pool().await;
+        insert(&pool, "*://a.com/*", "A", 1).await;
+        refresh_cache(&pool).await;
+        assert_eq!(
+            cached_scripts(),
+            vec![("A".to_string(), vec!["*://a.com/*".to_string()])]
+        );
+        sqlx::query("UPDATE userscripts SET enabled = 0")
+            .execute(&pool)
+            .await
+            .unwrap();
+        refresh_cache(&pool).await;
+        assert!(cached_scripts().is_empty());
+    }
+}
