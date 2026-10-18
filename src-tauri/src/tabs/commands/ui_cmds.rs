@@ -46,16 +46,16 @@ pub async fn set_webview_visible(
         let label = format!("tab-{}", id);
         if let Some(wv) = window.get_webview(&label) {
             let wv2 = wv.clone();
-            let _ = wv.with_webview(move |pwv| {
+            crate::log_if_err!("webview", wv.with_webview(move |pwv| {
                 let gtk_wv = pwv.inner();
                 // 同时隐藏/显示 Fixed 容器：Fixed 覆盖内容区会拦截弹窗点击，必须一起隐藏
                 crate::engine::layout::set_fixed_visible(&gtk_wv, visible);
                 if visible {
-                    let _ = wv2.show();
+                    crate::log_if_err!("tabs", wv2.show());
                 } else {
-                    let _ = wv2.hide();
+                    crate::log_if_err!("tabs", wv2.hide());
                 }
-            });
+            }));
             count += 1;
         }
     }
@@ -113,12 +113,12 @@ pub async fn set_webview_ai_panel(
     // 关闭时把焦点还给当前活动标签的 webview。
     if let Some(main_wv) = window.get_webview("main") {
         if active {
-            let _ = main_wv.set_focus();
+            crate::log_if_err!("window", main_wv.set_focus());
         } else {
             let active_id = state.read_state().active_id.clone();
             if let Some(id) = active_id {
                 if let Some(wv) = window.get_webview(&format!("tab-{}", id)) {
-                    let _ = wv.set_focus();
+                    crate::log_if_err!("window", wv.set_focus());
                 }
             }
         }

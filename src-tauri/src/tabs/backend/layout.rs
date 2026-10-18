@@ -125,7 +125,7 @@ pub(crate) fn setup_gtk_layout(app: &tauri::App) -> Result<(), String> {
                 if let Some(state) = app_handle.try_state::<TabManager>() {
                     if state.split_tab().is_some() {
                         // 分屏中：两个窗格各自几何，统一走 apply_split_layout
-                        let _ = apply_split_layout(&app_handle, &state);
+                        crate::log_if_err!("layout", apply_split_layout(&app_handle, &state));
                     } else {
                         let ids: Vec<String> = state.read_state().tabs.keys().cloned().collect();
                         for id in ids {
@@ -283,9 +283,9 @@ pub(crate) fn open_devtools_for_active(app: &AppHandle) {
         };
         let label = format!("tab-{}", id);
         if let Some(wv) = window.get_webview(&label) {
-            let _ = wv.with_webview(move |pwv| {
+            crate::log_if_err!("webview", wv.with_webview(move |pwv| {
                 crate::engine::webview::open_inspector(&pwv.inner());
-            });
+            }));
             log::info!("[tabs] 已打开开发者工具: tab={}", id);
         }
     });

@@ -57,9 +57,9 @@ pub(super) fn handle_page_load(
 ) {
     // 开启页面 console 输出（诊断 JS 错误用）——任何加载事件都设置，
     // 不依赖 Finished（部分页面 Finished 不触发）
-    let _ = webview.with_webview(move |pwv| {
+    crate::log_if_err!("webview", webview.with_webview(move |pwv| {
         crate::engine::webview::enable_console_output(&pwv.inner());
-    });
+    }));
     // 任何加载事件（Started/Finished，含后退/前进缓存恢复）都安排延迟注入：
     // - UserScript 只对"之后导航"生效，已加载页面必须 evaluate 补注入；
     // - 后退/前进时 WebKit 从 back-forward 缓存恢复页面，UserScript 不会重新执行，
@@ -78,7 +78,7 @@ pub(super) fn handle_page_load(
     // Range 克隆存到 window 上，读取端回退使用。
     // 实测 `WebviewBuilder::initialization_script` 在这条构建路径下没生效，
     // 所以走 on_page_load 注入；脚本自带幂等（__sbSelWatch），重复注入无害。
-    let _ = webview.with_webview(move |pwv| {
+    crate::log_if_err!("webview", webview.with_webview(move |pwv| {
         crate::engine::webview::eval_js_with(
             &pwv.inner(),
             include_str!("../../../page_selwatch.js"),
@@ -88,7 +88,7 @@ pub(super) fn handle_page_load(
                 }
             },
         );
-    });
+    }));
 
     if payload.event() == tauri::webview::PageLoadEvent::Finished {
         let url = payload.url();
@@ -116,7 +116,7 @@ pub(super) fn handle_page_load(
         // 提取 favicon 并更新 tab（更新后 emit 通知前端同步）
         let app_fav = app.clone();
         let tab_id_fav = tab_id.to_string();
-        let _ = webview.with_webview(move |pwv| {
+        crate::log_if_err!("webview", webview.with_webview(move |pwv| {
             let gtk_wv = pwv.inner();
             crate::engine::webview::eval_js_with(
                 &gtk_wv,
@@ -148,7 +148,7 @@ pub(super) fn handle_page_load(
                     }
                 },
             );
-        });
+        }));
 
         // 按设置记录浏览历史（record_history 开关，默认关 · 隐私优先）——先 clone，避免 title 被 move
         let app3 = app.clone();

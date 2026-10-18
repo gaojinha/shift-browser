@@ -46,7 +46,7 @@ fn crash_reload_allowed(
 pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &str) {
     let app_for_title = app.clone();
     let id_for_title = id.to_string();
-    let _ = child.with_webview(move |pwv| {
+    crate::log_if_err!("webview", child.with_webview(move |pwv| {
         let wv = pwv.inner().clone();
         let app2 = app_for_title;
         let tab_id = id_for_title;
@@ -195,7 +195,7 @@ pub(super) fn wire_linux_signals(child: &tauri::Webview, app: &AppHandle, id: &s
                 let _ = app_for_uri.emit(crate::contracts::events::TABS_UPDATED, ());
             }
         });
-    });
+    }));
 }
 
 #[cfg(test)]

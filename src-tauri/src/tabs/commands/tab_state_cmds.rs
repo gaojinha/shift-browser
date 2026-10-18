@@ -119,9 +119,9 @@ pub async fn toggle_mute(
         };
         let label = format!("tab-{}", id2);
         if let Some(wv) = window.get_webview(&label) {
-            let _ = wv.with_webview(move |pwv| {
+            crate::log_if_err!("webview", wv.with_webview(move |pwv| {
                 crate::engine::webview::set_muted(&pwv.inner(), muted);
-            });
+            }));
         }
     });
 

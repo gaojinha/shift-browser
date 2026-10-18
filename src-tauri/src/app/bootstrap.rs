@@ -240,9 +240,9 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
             // 用 tokio 异步 sleep，不占用阻塞线程（std::thread::sleep 会占一个 worker）
             tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
             if let Some(w) = app_win.get_window("main") {
-                let _ = w.unminimize();
-                let _ = w.show();
-                let _ = w.set_focus();
+                crate::log_if_err!("window", w.unminimize());
+                crate::log_if_err!("window", w.show());
+                crate::log_if_err!("window", w.set_focus());
                 log::info!("[ShiftBrowser] 窗口已强制恢复/前置");
             }
         });

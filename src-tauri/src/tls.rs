@@ -219,11 +219,11 @@ pub async fn delete_cert_exception(
     #[cfg(target_os = "linux")]
     {
         let host2 = host.clone();
-        let _ = app.run_on_main_thread(move || {
+        crate::log_if_err!("tls", app.run_on_main_thread(move || {
             PENDING_TLS_CERTS.with(|m| {
                 m.borrow_mut().remove(&host2);
             });
-        });
+        }));
     }
     Ok(())
 }
@@ -318,7 +318,7 @@ pub async fn accept_cert_exception(
             let Some(wv) = window.get_webview(&label) else {
                 return;
             };
-            let _ = wv.with_webview(move |pwv| {
+            crate::log_if_err!("webview", wv.with_webview(move |pwv| {
                 let g = pwv.inner();
                 // 1) 把缓存的证书加入 WebKit 白名单
                 PENDING_TLS_CERTS.with(|m| {
@@ -333,7 +333,7 @@ pub async fn accept_cert_exception(
                 });
                 // 2) 重新加载
                 WebViewExt::reload(&g);
-            });
+            }));
         })
         .map_err(|e| AppError::internal(e.to_string()))?;
     }

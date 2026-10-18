@@ -174,9 +174,9 @@ pub fn run() {
                     }
                     // 窗口前置（可能最小化/缩托盘）
                     if let Some(w) = app_handle.get_window("main") {
-                        let _ = w.show();
-                        let _ = w.unminimize();
-                        let _ = w.set_focus();
+                        crate::log_if_err!("window", w.show());
+                        crate::log_if_err!("window", w.unminimize());
+                        crate::log_if_err!("window", w.set_focus());
                     }
                 });
             }

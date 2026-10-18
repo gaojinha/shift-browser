@@ -302,7 +302,7 @@ pub async fn switch_tab(
     // （原实现 hide→show 两次投递且顺序相反，中间白屏空窗 + 双跨线程往返导致切换迟钝）
     if state.split_tab().is_some() {
         // 分屏中：重排两个窗格（活动标签变了，右窗格保持），避免把分屏标签误隐藏
-        let _ = apply_split_layout(&app, &state);
+        crate::log_if_err!("layout", apply_split_layout(&app, &state));
     } else if old_active.as_deref() == Some(id.as_str()) {
         // 点的就是当前标签：仅确保可见
         let _ = TabManager::set_webview_visible(&app, &id, true);
@@ -326,7 +326,7 @@ pub async fn switch_tab(
             if let Some(wv) = window.get_webview(&format!("tab-{}", id)) {
                 match real_url.parse::<tauri::Url>() {
                     Ok(target) => {
-                        let _ = wv.navigate(target);
+                        crate::log_if_err!("tabs", wv.navigate(target));
                         log::info!("[tabs] 延迟加载已触发: id={}", id);
                     }
                     Err(e) => log::warn!("[tabs] 延迟地址非法 id={}: {}", id, e),
@@ -455,7 +455,7 @@ pub async fn hibernate_idle_tabs(
         let label = format!("tab-{}", id);
         if let Some(wv) = window.get_webview(&label) {
             // 先隐藏再销毁，避免销毁瞬间的残影
-            let _ = wv.hide();
+            crate::log_if_err!("tabs", wv.hide());
             if let Err(e) = wv.close() {
                 log::warn!("[perf] 标签休眠失败（close）: id={} err={}", id, e);
                 continue;

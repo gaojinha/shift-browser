@@ -22,7 +22,7 @@ pub(crate) fn ensure_token(app: &AppHandle) -> Option<String> {
         }
     }
     let t = generate_token();
-    let _ = atomic_write_token(&path, &t);
+    crate::log_if_err!("api", atomic_write_token(&path, &t));
     Some(t)
 }
 

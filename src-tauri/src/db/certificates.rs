@@ -98,7 +98,7 @@ pub async fn record(pool: &SqlitePool, info: &CertInfo) -> Option<&'static str> 
 
     match existing {
         None => {
-            let _ = sqlx::query(
+            if let Err(e) = sqlx::query(
                 "INSERT INTO certificates
                  (host, port, fingerprint_sha256, subject, issuer, not_before, not_after,
                   dns_names, ip_addresses, errors, chain_json, last_checked)
@@ -122,7 +122,10 @@ pub async fn record(pool: &SqlitePool, info: &CertInfo) -> Option<&'static str> 
             .bind(info.errors as i64)
             .bind(&chain)
             .execute(pool)
-            .await;
+            .await
+            {
+                log::debug!("[cert] 写入首见记录失败（best-effort）: {}", e);
+            }
             log::info!(
                 "[cert] 首次记录 {}:{} fp={}",
                 info.host,
@@ -132,7 +135,7 @@ pub async fn record(pool: &SqlitePool, info: &CertInfo) -> Option<&'static str> 
             Some("first_seen")
         }
         Some(old_fp) if old_fp != info.fingerprint_sha256 => {
-            let _ = sqlx::query(
+            if let Err(e) = sqlx::query(
                 "UPDATE certificates SET
                    fingerprint_sha256=?, subject=?, issuer=?, not_before=?, not_after=?,
                    dns_names=?, ip_addresses=?, errors=?, chain_json=?,
@@ -152,7 +155,10 @@ pub async fn record(pool: &SqlitePool, info: &CertInfo) -> Option<&'static str> 
             .bind(&info.host)
             .bind(info.port as i64)
             .execute(pool)
-            .await;
+            .await
+            {
+                log::debug!("[cert] 记录指纹变更失败（best-effort）: {}", e);
+            }
             log::warn!(
                 "[cert] 证书指纹变更 {}:{} {} → {}",
                 info.host,
@@ -163,7 +169,7 @@ pub async fn record(pool: &SqlitePool, info: &CertInfo) -> Option<&'static str> 
             Some("cert_changed")
         }
         Some(_) => {
-            let _ = sqlx::query(
+            if let Err(e) = sqlx::query(
                 "UPDATE certificates SET last_seen=datetime('now'), last_checked=datetime('now'),
                    errors=?, not_after=?, dns_names=?, ip_addresses=? WHERE host=? AND port=?",
             )
@@ -174,7 +180,10 @@ pub async fn record(pool: &SqlitePool, info: &CertInfo) -> Option<&'static str> 
             .bind(&info.host)
             .bind(info.port as i64)
             .execute(pool)
-            .await;
+            .await
+            {
+                log::debug!("[cert] 更新最近见到时间失败（best-effort）: {}", e);
+            }
             if !info.valid {
                 Some("verify_error")
             } else {
@@ -339,12 +348,15 @@ pub async fn add_event(
         return;
     }
     // 尽力裁剪：失败不影响主流程
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "DELETE FROM cert_events WHERE id NOT IN (SELECT id FROM cert_events ORDER BY id DESC LIMIT ?)",
     )
     .bind(EVENTS_KEEP)
     .execute(pool)
-    .await;
+    .await
+    {
+        log::debug!("[cert] 裁剪旧事件失败（best-effort）: {}", e);
+    }
 }
 
 pub async fn list_events(pool: &SqlitePool, limit: i64) -> Result<Vec<CertEvent>, sqlx::Error> {

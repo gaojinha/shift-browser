@@ -132,7 +132,7 @@ pub fn apply_to_webview(window: &tauri::Window, tab_id: &str, geo: ContentGeomet
         .map(|s| s.width as f64)
         .unwrap_or(1280.0);
     let w_logical = (w_physical / scale) as i32;
-    let _ = wv.with_webview(move |pwv| {
+    crate::log_if_err!("webview", wv.with_webview(move |pwv| {
         let gtk_wv = pwv.inner();
         if let Some(fixed) = gtk_wv
             .parent()
@@ -167,7 +167,7 @@ pub fn apply_to_webview(window: &tauri::Window, tab_id: &str, geo: ContentGeomet
         }
         gtk_wv.set_size_request(geo.width, geo.height);
         gtk_wv.queue_resize();
-    });
+    }));
 }
 
 /// 从 webview 向上找父级 GtkBox（vbox）。

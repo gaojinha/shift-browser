@@ -357,7 +357,10 @@ impl TabManager {
                       None => wait_download_id(&id_state3).await,
                     };
                     if let Some(id) = id {
-                      let _ = downloads::update_download_bytes(&pool3, id, received, Some(total_now)).await;
+                      crate::log_if_err!(
+                        "downloads",
+                        downloads::update_download_bytes(&pool3, id, received, Some(total_now)).await
+                      );
                       let _ = app3.emit(crate::contracts::events::DOWNLOADS_UPDATED, ());
                     }
                   });
@@ -379,7 +382,10 @@ impl TabManager {
                       None => wait_download_id(&id_state5).await,
                     };
                     if let Some(id) = id {
-                      let _ = downloads::update_download_state(&pool5, id, "completed", Some(received)).await;
+                      crate::log_if_err!(
+                        "downloads",
+                        downloads::update_download_state(&pool5, id, "completed", Some(received)).await
+                      );
                       let _ = app5.emit(crate::contracts::events::DOWNLOADS_UPDATED, ());
                     }
                   });
@@ -401,7 +407,10 @@ impl TabManager {
                       None => wait_download_id(&id_state7).await,
                     };
                     if let Some(id) = id {
-                      let _ = downloads::update_download_state(&pool7, id, "failed", None).await;
+                      crate::log_if_err!(
+                        "downloads",
+                        downloads::update_download_state(&pool7, id, "failed", None).await
+                      );
                       let _ = app7.emit(crate::contracts::events::DOWNLOADS_UPDATED, ());
                     }
                   });

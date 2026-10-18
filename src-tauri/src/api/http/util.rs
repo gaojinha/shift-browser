@@ -20,8 +20,12 @@ pub(crate) async fn write_http(
         "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n{extra_headers}Connection: close\r\n\r\n",
         body.len()
     );
-    let _ = stream.write_all(head.as_bytes()).await;
-    let _ = stream.write_all(body).await;
+    if let Err(e) = stream.write_all(head.as_bytes()).await {
+        log::debug!("[http] 写响应头失败（对端可能已断连）: {}", e);
+    }
+    if let Err(e) = stream.write_all(body).await {
+        log::debug!("[http] 写响应体失败（对端可能已断连）: {}", e);
+    }
 }
 
 /// 校验 Authorization 头是否为匹配的 Bearer token（常量时间比较）

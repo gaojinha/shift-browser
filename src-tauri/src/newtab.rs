@@ -35,7 +35,7 @@ pub async fn newtab_url(app: &AppHandle) -> Option<String> {
     let path = newtab_path(app)?;
     if !path.exists() {
         let db = app.state::<Db>();
-        let _ = generate(&db, &path).await;
+        crate::log_if_err!("newtab", generate(&db, &path).await);
     }
     Some(format!("file://{}", path.display()))
 }

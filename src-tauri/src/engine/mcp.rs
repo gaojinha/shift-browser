@@ -323,7 +323,7 @@ pub async fn call_tool(
         .chars()
         .take(AUDIT_ARGS_MAX_CHARS)
         .collect();
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
     "INSERT INTO tool_audit_log (server_id, server_name, tool_name, arguments, result_summary, success) VALUES (?, ?, ?, ?, ?, ?)",
   )
   .bind(row.id)
@@ -333,7 +333,10 @@ pub async fn call_tool(
   .bind(&summary)
   .bind(if success { 1 } else { 0 })
   .execute(pool)
-  .await;
+  .await
+  {
+      log::debug!("[mcp] 工具审计写入失败（best-effort）: {}", e);
+  }
 
     match result {
         Ok(v) => {

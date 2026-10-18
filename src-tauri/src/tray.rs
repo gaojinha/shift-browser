@@ -88,7 +88,7 @@ fn tray_icons() -> &'static [ksni::Icon] {
 pub(crate) fn minimize_to_tray(app: &tauri::AppHandle) {
     use tauri::{Emitter, Manager};
     if let Some(win) = app.get_window("main") {
-        let _ = win.hide();
+        crate::log_if_err!("window", win.hide());
     }
     log::info!("[tray] 窗口已缩到托盘（未退出）");
     // 首次缩托盘提示一次（标记文件落 app_data_dir）：用户常以为退出了。

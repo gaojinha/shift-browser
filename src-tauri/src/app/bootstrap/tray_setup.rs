@@ -50,10 +50,10 @@ pub(super) fn setup_tray(app: &tauri::App) {
                 crate::tray::TrayAction::ToggleWindow => {
                     if let Some(w) = app_tray.get_window("main") {
                         if w.is_visible().unwrap_or(false) {
-                            let _ = w.hide();
+                            crate::log_if_err!("window", w.hide());
                         } else {
-                            let _ = w.show();
-                            let _ = w.set_focus();
+                            crate::log_if_err!("window", w.show());
+                            crate::log_if_err!("window", w.set_focus());
                         }
                     }
                 }
@@ -66,7 +66,7 @@ pub(super) fn setup_tray(app: &tauri::App) {
                 crate::tray::TrayAction::Quit => {
                     crate::tray::REAL_QUIT.store(true, Ordering::SeqCst);
                     if let Some(w) = app_tray.get_window("main") {
-                        let _ = w.close();
+                        crate::log_if_err!("window", w.close());
                     }
                 }
             }

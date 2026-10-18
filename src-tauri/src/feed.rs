@@ -215,14 +215,17 @@ async fn fetch_one(db: &Db, source: &str, url: &str, category: &str) -> usize {
             }
         }
     }
-    // 每源只留最新 50 条
-    let _ = sqlx::query(
+    // 每源只留最新 50 条（best-effort：失败不影响主流程，但留痕便于排查）
+    if let Err(e) = sqlx::query(
         "DELETE FROM feed_items WHERE source = ? AND id NOT IN (SELECT id FROM feed_items WHERE source = ? ORDER BY id DESC LIMIT 50)",
     )
     .bind(source)
     .bind(source)
     .execute(&mut *tx)
-    .await;
+    .await
+    {
+        log::debug!("[feed] 裁剪旧条目失败（best-effort）: {}", e);
+    }
     // 提交失败要如实上报，不能把未落库的数据当成功（2026-09-19 修复）。
     // commit 失败时事务已结束、连接归还池自动回滚，无需（也无法）再显式 rollback
     if let Err(e) = tx.commit().await {
@@ -321,7 +324,7 @@ pub fn start_scheduler(app: &AppHandle) {
             // 重新生成新标签页（资讯面板数据更新）
             if let Some(path) = crate::newtab::newtab_path(&app) {
                 let db = app.state::<Db>();
-                let _ = crate::newtab::generate(&db, &path).await;
+                crate::log_if_err!("newtab", crate::newtab::generate(&db, &path).await);
             }
             tokio::time::sleep(std::time::Duration::from_secs(
                 crate::contracts::timeout::FEED_LOOP_SECS,

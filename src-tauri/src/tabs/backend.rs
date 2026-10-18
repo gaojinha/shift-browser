@@ -50,10 +50,10 @@ impl TabManager {
         let label = format!("tab-{}", id);
         if let Some(webview) = window.get_webview(&label) {
             if visible {
-                let _ = webview.show();
-                let _ = webview.set_focus();
+                crate::log_if_err!("tabs", webview.show());
+                crate::log_if_err!("tabs", webview.set_focus());
             } else {
-                let _ = webview.hide();
+                crate::log_if_err!("tabs", webview.hide());
             }
         }
         Ok(())
@@ -80,10 +80,10 @@ impl TabManager {
         let hide_wv = hide_id.and_then(|h| window.get_webview(&format!("tab-{}", h)));
         // 先隐藏旧标签（避免 z-order 盖住新标签），再显示新标签
         if let Some(wv) = &hide_wv {
-            let _ = wv.hide();
+            crate::log_if_err!("tabs", wv.hide());
         }
-        let _ = show_wv.show();
-        let _ = show_wv.set_focus();
+        crate::log_if_err!("tabs", show_wv.show());
+        crate::log_if_err!("tabs", show_wv.set_focus());
         // 修复：show 后重新设置尺寸。hide 期间 set_size_request 不触发 GTK 重新分配，
         // 窗口 resize 后切回该标签会停留在旧尺寸（小窗口大小不跟随放大）
         let top = if let Some(state) = app.try_state::<TabManager>() {
@@ -114,7 +114,7 @@ impl TabManager {
         };
         let label = format!("tab-{}", id);
         if let Some(webview) = window.get_webview(&label) {
-            let _ = webview.close();
+            crate::log_if_err!("tabs", webview.close());
         }
     }
 }

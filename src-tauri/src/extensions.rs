@@ -136,7 +136,7 @@ fn inject_extensions(
     let app_for_bridge_all = app.clone();
     // 单页过滤同样要 owned（main 线程闭包 'static，借用活不过函数）
     let only_owned: Option<String> = only_label.map(|s| s.to_string());
-    let _ = app.run_on_main_thread(move || {
+    crate::log_if_err!("extensions", app.run_on_main_thread(move || {
         // 引擎层内容过滤器：如有规则变更，在主线程编译（编译完成会回来触发一次重新注入）
         crate::engine::content_filter::compile_pending();
         // 只注入 child 标签页（已跳过主 webview），child 都是 http/https 外部网页。
@@ -160,7 +160,7 @@ fn inject_extensions(
             let user_scripts_clone = user_scripts.clone();
             let app_for_bridge = app_for_bridge_all.clone();
             let label_for_bridge = wv.label().to_string();
-            let _ = wv.with_webview(move |pwv| {
+            crate::log_if_err!("webview", wv.with_webview(move |pwv| {
                 let webview = pwv.inner();
                 let Some(manager) = webview.user_content_manager() else {
                     return;
@@ -282,10 +282,10 @@ fn inject_extensions(
                         manager.add_style_sheet(&sheet);
                     }
                 }
-            });
+            }));
         }
         log::info!("[extensions] 注入完成: {} 个扩展", items.len());
-    });
+    }));
 }
 
 /// 重新注入全部启用扩展 + 广告拦截（新标签创建后调用，确保新 webview 也有扩展）
@@ -353,7 +353,7 @@ fn evaluate_inject_retry(
     };
     let webviews = window.webviews();
     let items_owned = items.clone();
-    let _ = app.run_on_main_thread(move || {
+    crate::log_if_err!("extensions", app.run_on_main_thread(move || {
         for wv in &webviews {
             if wv.label() == "main" {
                 continue;
@@ -364,7 +364,7 @@ fn evaluate_inject_retry(
                 }
             }
             let items_clone = items_owned.clone();
-            let _ = wv.with_webview(move |pwv| {
+            crate::log_if_err!("webview", wv.with_webview(move |pwv| {
                 let webview = pwv.inner();
                 for (js, _css) in &items_clone {
                     if let Some(js) = js {
@@ -380,9 +380,9 @@ fn evaluate_inject_retry(
                         Err(e) => log::info!("[extensions] 延迟探针失败（页面未就绪）: {}", e),
                     },
                 );
-            });
+            }));
         }
-    });
+    }));
 }
 
 /// 页面加载完成后对单个 webview 即时注入（on_page_load Finished 时调用）
@@ -410,7 +410,7 @@ pub async fn inject_to_webview(app: &AppHandle, label: &str) {
     };
     // 指纹补齐开关先算好（闭包内不能 await，与 re_inject 同口径，默认开）
     let compat_on = compat_enabled(&db).await;
-    let _ = wv.with_webview(move |pwv| {
+    crate::log_if_err!("webview", wv.with_webview(move |pwv| {
         let webview = pwv.inner();
         for (js, _css) in &items {
             if let Some(js) = js {
@@ -442,7 +442,7 @@ pub async fn inject_to_webview(app: &AppHandle, label: &str) {
                 Err(e) => log::info!("[extensions] 注入探针失败: {}", e),
             },
         );
-    });
+    }));
 }
 
 #[cfg(test)]

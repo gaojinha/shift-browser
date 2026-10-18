@@ -184,14 +184,17 @@ pub(crate) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
     if ua_mobile {
         if let Some(wv) = app.get_webview(&format!("tab-{}", tab_id)) {
             let ua = MOBILE_UA.to_string();
-            let _ = wv.with_webview(move |pwv| {
+            crate::log_if_err!("webview", wv.with_webview(move |pwv| {
                 use webkit2gtk::{SettingsExt, WebViewExt};
                 if let Some(settings) = pwv.inner().settings() {
                     settings.set_user_agent(Some(&ua));
                 }
-            });
+            }));
             if let Some(st) = app.try_state::<crate::tabs::TabManager>() {
-                let _ = crate::tabs::commands::reload_tab(app.clone(), st, tab_id.clone()).await;
+                crate::log_if_err!(
+                    "tabs",
+                    crate::tabs::commands::reload_tab(app.clone(), st, tab_id.clone()).await
+                );
             }
         }
     }
@@ -265,7 +268,10 @@ pub(crate) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
             // 复核失败：回收刚开的标签（复用标签不关，避免误关用户标签）
             if !reused {
                 if let Some(st) = app.try_state::<crate::tabs::TabManager>() {
-                    let _ = crate::tabs::commands::close_tab(app.clone(), st, tab_id.clone()).await;
+                    crate::log_if_err!(
+                        "tabs",
+                        crate::tabs::commands::close_tab(app.clone(), st, tab_id.clone()).await
+                    );
                 }
             }
             let msg = resp
@@ -312,7 +318,10 @@ pub(crate) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
     // 4) 可选关闭
     if close_after {
         if let Some(st) = app.try_state::<crate::tabs::TabManager>() {
-            let _ = crate::tabs::commands::close_tab(app.clone(), st, tab_id.clone()).await;
+            crate::log_if_err!(
+                "tabs",
+                crate::tabs::commands::close_tab(app.clone(), st, tab_id.clone()).await
+            );
         }
     }
 
