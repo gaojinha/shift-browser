@@ -555,4 +555,62 @@ mod tests {
         let out = hibernate_candidates(it(), None, &last_active, threshold, false);
         assert_eq!(out, vec!["t-active".to_string(), "t-old".to_string(), "t-norec".to_string()]);
     }
+
+    #[test]
+    fn create_url_error_codes_distinguish_permission_and_validation() {
+        // 危险 scheme / 外部 file → 权限类错误；解析失败 → 校验类错误
+        for url in ["javascript:alert(1)", "file:///etc/passwd", "ftp://x"] {
+            let err = validate_create_url(url).unwrap_err();
+            assert_eq!(err.code(), crate::error::E_PERM, "{url}");
+        }
+        let err = validate_create_url("not a url at all").unwrap_err();
+        assert_eq!(err.code(), crate::error::E_VALIDATION);
+        // scheme 名出现在错误信息里便于排查；本地文件拒绝信息固定
+        assert!(validate_create_url("ftp://x").unwrap_err().to_string().contains("ftp"));
+        assert!(validate_create_url("file:///etc/passwd")
+            .unwrap_err()
+            .to_string()
+            .contains("本地文件"));
+    }
+
+    #[test]
+    fn hibernate_candidates_threshold_boundary_and_empty() {
+        let tabs = [
+            ("t-eq".to_string(), tab("t-eq", false)),
+            ("t-lt".to_string(), tab("t-lt", false)),
+        ];
+        let mut last_active = std::collections::HashMap::new();
+        last_active.insert("t-eq".to_string(), 5_000); // 恰等于阈值：不算过期（严格小于）
+        last_active.insert("t-lt".to_string(), 4_999);
+        let it = tabs.iter().map(|(id, t)| (id, t));
+        let out = hibernate_candidates(it, None, &last_active, 5_000, false);
+        assert_eq!(out, vec!["t-lt".to_string()]);
+
+        // 空标签集：无候选（有无数量压力均然）
+        let empty: Vec<(String, Tab)> = Vec::new();
+        for pressure in [false, true] {
+            let out = hibernate_candidates(
+                empty.iter().map(|(id, t)| (id, t)),
+                None,
+                &last_active,
+                5_000,
+                pressure,
+            );
+            assert!(out.is_empty());
+        }
+
+        // 数量压力下，活动与已休眠标签仍不入选
+        let tabs = [
+            ("a".to_string(), tab("a", false)),
+            ("h".to_string(), tab("h", true)),
+        ];
+        let out = hibernate_candidates(
+            tabs.iter().map(|(id, t)| (id, t)),
+            Some("a"),
+            &last_active,
+            5_000,
+            true,
+        );
+        assert!(out.is_empty());
+    }
 }
