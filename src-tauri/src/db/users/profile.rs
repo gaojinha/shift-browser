@@ -232,3 +232,157 @@ pub async fn user_update_prefs(
         None => Ok(UserResult::err("保存失败")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    /// 创建带 users、user_prefs、user_session 表的临时测试库
+    async fn temp_db() -> (tempfile::TempDir, Db) {
+        let dir = tempfile::tempdir().unwrap();
+        let options = SqliteConnectOptions::new()
+            .filename(dir.path().join("test_profile.db"))
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        sqlx::raw_sql(include_str!("../../../migrations/20260914000000_users.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let key_path = dir.path().join("master.key");
+        let vault_path = dir.path().join("vault.key");
+        let translate_key_path = dir.path().join("translate.key");
+        (
+            dir,
+            Db {
+                pool: pool.clone(),
+                feed_pool: pool,
+                key_path,
+                vault_path,
+                translate_key_path,
+                master_key: tokio::sync::Mutex::new(None),
+                translate_key: tokio::sync::Mutex::new(None),
+            },
+        )
+    }
+
+    #[test]
+    fn test_sanitize_avatar_clean_emoji_and_text() {
+        // 普通文本与 emoji：trim 且截断至 20 字符
+        assert_eq!(sanitize_avatar(" 🚀 ").unwrap(), "🚀");
+        let normal = sanitize_avatar("my_avatar_123").unwrap();
+        assert_eq!(normal, "my_avatar_123");
+
+        let long_text = "abcdefghijklmnopqrstuvwxyz1234567890";
+        let truncated = sanitize_avatar(long_text).unwrap();
+        assert_eq!(truncated.chars().count(), 20);
+        assert_eq!(truncated, &long_text[..20]);
+    }
+
+    #[test]
+    fn test_sanitize_avatar_rejects_html_injection() {
+        // 禁止包含 < 或 >，防 SVG onload / HTML 注入
+        assert!(sanitize_avatar("<svg onload=alert(1)>").is_err());
+        assert!(sanitize_avatar("<img src=x onerror=alert(1)>").is_err());
+        assert!(sanitize_avatar("user>name").is_err());
+        assert!(sanitize_avatar("<").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_avatar_data_url_types_and_size() {
+        // 支持合法 MIME 类型
+        assert!(sanitize_avatar("data:image/png;base64,iVBORw0KGgoAAA").is_ok());
+        assert!(sanitize_avatar("data:image/jpeg;base64,/9j/4AAQSkZJRg").is_ok());
+        assert!(sanitize_avatar("data:image/jpg;base64,/9j/4AAQSkZJRg").is_ok());
+        assert!(sanitize_avatar("data:image/gif;base64,R0lGODlh").is_ok());
+        assert!(sanitize_avatar("data:image/webp;base64,UklGR").is_ok());
+
+        // 拒绝非法类型，例如 svg+xml 或其它文件
+        let svg_res = sanitize_avatar("data:image/svg+xml;base64,PHN2Zz4=");
+        assert!(svg_res.is_err());
+
+        // 超过 300KB（300_000 字节）拒绝
+        let huge_png = format!("data:image/png;base64,{}", "A".repeat(300_001));
+        assert!(sanitize_avatar(&huge_png).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_user_prefs_db_persistence() {
+        let (_dir, db) = temp_db().await;
+
+        // 插入测试用户
+        let uid: i64 = sqlx::query_scalar(
+            "INSERT INTO users (username, password_hash, salt, hash_algo, nickname) VALUES (?, ?, ?, ?, ?) RETURNING id"
+        )
+        .bind("alice")
+        .bind("dummy_hash")
+        .bind("dummy_salt")
+        .bind("pbkdf2_sha256")
+        .bind("Alice")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+
+        // 插入偏好记录
+        let initial_prefs = UserPrefs {
+            show_lunar: false,
+            show_quote: true,
+            show_weather: false,
+            font_size: 14,
+            weather_city: "Beijing".into(),
+            theme_color: "#123456".into(),
+            wallpaper: "https://example.com/bg.png".into(),
+        };
+
+        sqlx::query(
+            "INSERT INTO user_prefs (user_id, show_lunar, show_quote, show_weather, font_size, weather_city, theme_color, wallpaper)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(uid)
+        .bind(initial_prefs.show_lunar)
+        .bind(initial_prefs.show_quote)
+        .bind(initial_prefs.show_weather)
+        .bind(initial_prefs.font_size)
+        .bind(&initial_prefs.weather_city)
+        .bind(&initial_prefs.theme_color)
+        .bind(&initial_prefs.wallpaper)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        // 校验读取
+        let loaded = load_user(&db, uid).await.expect("user should load");
+        assert_eq!(loaded.prefs.weather_city, "Beijing");
+        assert_eq!(loaded.prefs.theme_color, "#123456");
+        assert_eq!(loaded.prefs.font_size, 14);
+
+        // 冲突更新（ON CONFLICT update）
+        sqlx::query(
+            "INSERT INTO user_prefs (user_id, show_lunar, show_quote, show_weather, font_size, weather_city, theme_color, wallpaper)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(user_id) DO UPDATE SET
+               weather_city = excluded.weather_city,
+               font_size = excluded.font_size"
+        )
+        .bind(uid)
+        .bind(true)
+        .bind(true)
+        .bind(true)
+        .bind(18)
+        .bind("Shanghai")
+        .bind("#654321")
+        .bind("")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        let updated = load_user(&db, uid).await.expect("user should load");
+        assert_eq!(updated.prefs.weather_city, "Shanghai");
+        assert_eq!(updated.prefs.font_size, 18);
+    }
+}
+
