@@ -15,6 +15,49 @@ use super::{
     WHOLE_PAGE_TRANSLATE_JS,
 };
 
+// ---- 纯逻辑抽出（供单测；行为与 handle 内联版逐字一致，勿改语义）----
+
+/// host=="main"：请求路径 → dist 相对资源路径（"/" 与 "/index.html" 归一化为 index.html）
+fn main_rel(path: &str) -> String {
+    if path == "/" || path == "/index.html" {
+        "index.html".to_string()
+    } else {
+        path.trim_start_matches('/').to_string()
+    }
+}
+
+/// 解析 shift://__translate__ 的 query 串：键值各做 percent-decode（'+' → 空格）；
+/// 无 '=' 的段值为空串；值中首个 '=' 后的内容全部保留。
+fn parse_query(query: &str) -> std::collections::HashMap<String, String> {
+    query
+        .split('&')
+        .filter_map(|kv| {
+            let mut it = kv.splitn(2, '=');
+            let k = it.next()?;
+            let v = it.next().unwrap_or("");
+            Some((percent_decode(k), percent_decode(v)))
+        })
+        .collect()
+}
+
+/// 内部页路由：newtab/worldnav 的 (host, path) → app_data/newtab 落盘文件；
+/// 未知组合返回 None（调用方回 404）。
+fn resolve_internal_file(
+    host: &str,
+    path: &str,
+    newtab_dir: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    match (host, path) {
+        ("newtab", "/") | ("newtab", "/index.html") => Some(newtab_dir.join("index.html")),
+        // newtab 页内"世界导航"按钮用相对路径 world-nav.html 跳转，
+        // 落到 shift://newtab/world-nav.html，必须匹配到才能加载世界导航页
+        ("newtab", "/world-nav.html") => Some(newtab_dir.join("world-nav.html")),
+        ("worldnav", "/") | ("worldnav", "/index.html") => Some(newtab_dir.join("world-nav.html")),
+        ("worldnav", "/world-nav.html") => Some(newtab_dir.join("world-nav.html")),
+        _ => None,
+    }
+}
+
 // URI scheme handler 的签名强制返回具体 Response（无 Result 通道）；下面的 unwrap
 // 全部作用于"静态 CONTENT_TYPE + Vec<u8>/字节体"的 builder，header 为编译期常量、
 // body 为任意字节，http 类型上不可能构造失败，也无优雅降级路径，与 lib.rs/nav_cmds.rs
@@ -30,11 +73,7 @@ pub(crate) fn handle(
 
     // 主窗口：shift://main → dist（asset_resolver 读嵌入资源）
     if host == "main" {
-        let rel = if path == "/" || path == "/index.html" {
-            "index.html".to_string()
-        } else {
-            path.trim_start_matches('/').to_string()
-        };
+        let rel = main_rel(&path);
         if let Some(asset) = app.asset_resolver().get(rel.clone()) {
             let bytes = asset.bytes().to_vec();
             let mime = asset.mime_type();
@@ -104,15 +143,7 @@ pub(crate) fn handle(
                 .unwrap();
         }
         let query = request.uri().query().unwrap_or("");
-        let params: std::collections::HashMap<String, String> = query
-            .split('&')
-            .filter_map(|kv| {
-                let mut it = kv.splitn(2, '=');
-                let k = it.next()?;
-                let v = it.next().unwrap_or("");
-                Some((percent_decode(k), percent_decode(v)))
-            })
-            .collect();
+        let params = parse_query(query);
         let callback = params.get("callback").cloned().unwrap_or_default();
         // P2：callback 白名单——不合法直接拒绝，不 eval（防 JS 注入）
         // 例外：/progress 只做进度上报（emit 事件给界面），不写回调变量、不 eval，无需 callback
@@ -347,14 +378,9 @@ pub(crate) fn handle(
         .map_err(|e| e.to_string())
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
     let newtab_dir = app_data.join("newtab");
-    let file_path = match (host.as_str(), path.as_str()) {
-        ("newtab", "/") | ("newtab", "/index.html") => newtab_dir.join("index.html"),
-        // newtab 页内"世界导航"按钮用相对路径 world-nav.html 跳转，
-        // 落到 shift://newtab/world-nav.html，必须匹配到才能加载世界导航页
-        ("newtab", "/world-nav.html") => newtab_dir.join("world-nav.html"),
-        ("worldnav", "/") | ("worldnav", "/index.html") => newtab_dir.join("world-nav.html"),
-        ("worldnav", "/world-nav.html") => newtab_dir.join("world-nav.html"),
-        _ => {
+    let file_path = match resolve_internal_file(&host, &path, &newtab_dir) {
+        Some(p) => p,
+        None => {
             log::warn!("[shift://] 未知路径: {} {}", host, path);
             return tauri::http::Response::builder()
                 .status(404)
@@ -397,5 +423,131 @@ pub(crate) fn handle(
             .header(tauri::http::header::CONTENT_TYPE, "text/plain")
             .body("File not found".as_bytes().to_vec())
             .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- main_rel：shift://main 资源路径归一化 ----
+
+    #[test]
+    fn main_rel_root_and_index_normalize() {
+        assert_eq!(main_rel("/"), "index.html");
+        assert_eq!(main_rel("/index.html"), "index.html");
+    }
+
+    #[test]
+    fn main_rel_strips_leading_slash_keeps_rest() {
+        assert_eq!(main_rel("/assets/app.js"), "assets/app.js");
+        assert_eq!(main_rel("assets/app.css"), "assets/app.css");
+    }
+
+    #[test]
+    fn main_rel_edge_inputs() {
+        // 空串与裸斜杠变形不得 panic，按字面处理
+        assert_eq!(main_rel(""), "");
+        assert_eq!(main_rel("index.html"), "index.html");
+        // trim_start_matches 剥掉**所有**前导斜杠（不止一个）
+        assert_eq!(main_rel("//x"), "x");
+        assert_eq!(main_rel("///y"), "y");
+    }
+
+    // ---- parse_query：translate 通道 query 解析（含 percent-decode）----
+
+    #[test]
+    fn parse_query_basic_pairs_and_plus_as_space() {
+        let q = parse_query("callback=cb1&text=hello+world");
+        assert_eq!(q.get("callback").map(String::as_str), Some("cb1"));
+        assert_eq!(q.get("text").map(String::as_str), Some("hello world"));
+    }
+
+    #[test]
+    fn parse_query_percent_decode_utf8() {
+        // "中" UTF-8 = E4 B8 AD
+        let q = parse_query("text=%E4%B8%AD%E6%96%87");
+        assert_eq!(q.get("text").map(String::as_str), Some("中文"));
+    }
+
+    #[test]
+    fn parse_query_empty_value_and_flag_segment() {
+        // 无 '=' 的段：键存在、值为空（filter_map 不会丢键）
+        let q = parse_query("flag&x=1&empty=");
+        assert_eq!(q.get("flag").map(String::as_str), Some(""));
+        assert_eq!(q.get("empty").map(String::as_str), Some(""));
+        assert_eq!(q.get("x").map(String::as_str), Some("1"));
+    }
+
+    #[test]
+    fn parse_query_value_keeps_embedded_equals() {
+        // splitn(2,'=')：值中首个 '=' 之后原样保留
+        let q = parse_query("data=a=b=c");
+        assert_eq!(q.get("data").map(String::as_str), Some("a=b=c"));
+    }
+
+    #[test]
+    fn parse_query_malformed_percent_falls_back() {
+        // 半截 %X / 非十六进制：% 原样保留，不 panic
+        let q = parse_query("a=%4&b=%G1&c=%");
+        assert_eq!(q.get("a").map(String::as_str), Some("%4"));
+        assert_eq!(q.get("b").map(String::as_str), Some("%G1"));
+        assert_eq!(q.get("c").map(String::as_str), Some("%"));
+    }
+
+    #[test]
+    fn parse_query_empty_string_yields_empty_map() {
+        // 空 query 经 split 产出一段 ""：键 "" 值 ""（与原内联实现一致）
+        let q = parse_query("");
+        assert_eq!(q.len(), 1);
+        assert_eq!(q.get("").map(String::as_str), Some(""));
+    }
+
+    // ---- resolve_internal_file：newtab/worldnav 路由 ----
+
+    #[test]
+    fn resolve_internal_file_newtab_routes() {
+        let dir = std::path::Path::new("/data/newtab");
+        assert_eq!(
+            resolve_internal_file("newtab", "/", dir),
+            Some(dir.join("index.html"))
+        );
+        assert_eq!(
+            resolve_internal_file("newtab", "/index.html", dir),
+            Some(dir.join("index.html"))
+        );
+        assert_eq!(
+            resolve_internal_file("newtab", "/world-nav.html", dir),
+            Some(dir.join("world-nav.html"))
+        );
+    }
+
+    #[test]
+    fn resolve_internal_file_worldnav_routes() {
+        let dir = std::path::Path::new("/data/newtab");
+        assert_eq!(
+            resolve_internal_file("worldnav", "/", dir),
+            Some(dir.join("world-nav.html"))
+        );
+        assert_eq!(
+            resolve_internal_file("worldnav", "/index.html", dir),
+            Some(dir.join("world-nav.html"))
+        );
+        assert_eq!(
+            resolve_internal_file("worldnav", "/world-nav.html", dir),
+            Some(dir.join("world-nav.html"))
+        );
+    }
+
+    #[test]
+    fn resolve_internal_file_unknown_rejects() {
+        let dir = std::path::Path::new("/data/newtab");
+        // 未知 host / 未知 path / 路径穿越 / 空串 → None（调用方回 404）
+        assert_eq!(resolve_internal_file("main", "/", dir), None);
+        assert_eq!(resolve_internal_file("newtab", "/etc/passwd", dir), None);
+        assert_eq!(resolve_internal_file("newtab", "/../secret", dir), None);
+        assert_eq!(resolve_internal_file("", "", dir), None);
+        // host 大小写敏感
+        assert_eq!(resolve_internal_file("NewTab", "/", dir), None);
     }
 }
