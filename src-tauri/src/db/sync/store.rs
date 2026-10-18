@@ -168,12 +168,15 @@ pub(super) async fn now_str(db: &Db) -> String {
         .unwrap_or_default()
 }
 
-/// 脱敏主机名（只留 host:port）
+/// 脱敏主机名（只留 host:port，剥离 userinfo——其中可能含密码，展示前必须去掉）
 pub(super) fn host_of(url: &str) -> String {
     url.split("//")
         .nth(1)
         .unwrap_or(url)
         .split('/')
+        .next()
+        .unwrap_or(url)
+        .rsplit('@')
         .next()
         .unwrap_or(url)
         .to_string()
@@ -286,8 +289,10 @@ mod tests {
         assert_eq!(host_of("http://host"), "host");
         // 无 // 前缀：取到第一个 / 为止
         assert_eq!(host_of("bare-host:9000/x"), "bare-host:9000");
-        // 现状钉住：userinfo 不剥离（注释写"只留 host:port"与实际不一致，
-        // 是否剥 @ 前缀待拍板；当前 SyncStore 的 url 惯例不含 userinfo，无实际泄露面）
-        assert_eq!(host_of("https://u:p@h:8080/x"), "u:p@h:8080");
+        // F-68：userinfo 必须剥离（可能含密码，db/sync.rs:48 展示同步目标主机会直接显示）
+        assert_eq!(host_of("https://u:p@h:8080/x"), "h:8080");
+        assert_eq!(host_of("https://u@h:8080/"), "h:8080");
+        // IPv6 方括号地址不含 @，行为不变
+        assert_eq!(host_of("https://[::1]:8443/"), "[::1]:8443");
     }
 }
