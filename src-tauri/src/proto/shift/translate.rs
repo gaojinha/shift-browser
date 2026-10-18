@@ -314,3 +314,108 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
         _ => log::warn!("[translate-native] 未知路径: {}", path),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- percent_decode：shift:// query 参数解码（%XX / '+' / 畸形转义 / 多字节）----
+
+    #[test]
+    fn percent_decode_plain_ascii_unchanged() {
+        assert_eq!(percent_decode("abcXYZ019"), "abcXYZ019");
+        assert_eq!(percent_decode(""), "");
+    }
+
+    #[test]
+    fn percent_decode_plus_becomes_space() {
+        assert_eq!(percent_decode("hello+world"), "hello world");
+        assert_eq!(percent_decode("+"), " ");
+        assert_eq!(percent_decode("a++b"), "a  b");
+    }
+
+    #[test]
+    fn percent_decode_percent_escapes() {
+        assert_eq!(percent_decode("%41"), "A");
+        // %20 与 '+' 同效（都是空格）
+        assert_eq!(percent_decode("%20"), " ");
+        assert_eq!(percent_decode("a%2Fb"), "a/b");
+    }
+
+    #[test]
+    fn percent_decode_multibyte_utf8() {
+        // "中"=E4 B8 AD、"文"=E6 96 87、"你"=E4 BD A0、"好"=E5 A5 BD
+        assert_eq!(percent_decode("%E4%B8%AD%E6%96%87"), "中文");
+        assert_eq!(percent_decode("%E4%BD%A0+%E5%A5%BD"), "你 好");
+    }
+
+    #[test]
+    fn percent_decode_invalid_escapes_fall_back_to_literal() {
+        // 非十六进制：'%' 原样保留、后续字符照常输出
+        assert_eq!(percent_decode("%G1"), "%G1");
+        // 截断（'%' 后不足两位，含串尾）：不解码、按字面输出
+        assert_eq!(percent_decode("%4"), "%4");
+        assert_eq!(percent_decode("%"), "%");
+        assert_eq!(percent_decode("abc%4"), "abc%4");
+        // 中段截断不影响后续正常解码
+        assert_eq!(percent_decode("%4%41"), "%4A");
+    }
+
+    #[test]
+    fn percent_decode_invalid_utf8_replaced_not_panic() {
+        // %FF 不是合法 UTF-8：from_utf8_lossy → U+FFFD 替换符（不 panic）
+        assert_eq!(percent_decode("%FF"), "\u{FFFD}");
+    }
+
+    // ---- valid_callback：JS 变量名白名单（callback 会拼进 eval，防 JS 注入）----
+
+    #[test]
+    fn valid_callback_accepts_alnum_and_underscore() {
+        assert!(valid_callback("cb1"));
+        assert!(valid_callback("a"));
+        assert!(valid_callback("__sb_tr_x"));
+        assert!(valid_callback("CB_9x"));
+    }
+
+    #[test]
+    fn valid_callback_length_boundary_64() {
+        // 长度边界：恰好 64 放行，65 拒绝
+        assert!(valid_callback(&"a".repeat(64)));
+        assert!(!valid_callback(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn valid_callback_rejects_special_and_non_ascii() {
+        // 会被拼进 JS 变量名的危险字符一律拒绝
+        assert!(!valid_callback("cb-1")); // 连字符
+        assert!(!valid_callback("cb.1")); // 点（原型链形态）
+        assert!(!valid_callback("cb 1")); // 空格
+        assert!(!valid_callback("cb;1")); // 语句注入
+        assert!(!valid_callback("alert(1)")); // 括号
+        // 非 ASCII（含中文）按字节层面拒绝
+        assert!(!valid_callback("回调"));
+        assert!(!valid_callback("cbé"));
+    }
+
+    // ---- translate_rate_limited：每 webview 每分钟 30 次（按 label 隔离）----
+
+    #[test]
+    fn translate_rate_limited_caps_at_30_per_window() {
+        // 唯一 label：不与其它用例/真实 webview 串状态
+        let label = format!(
+            "rate-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        // 前 30 次放行，第 31 次超频拒绝
+        for _ in 0..30 {
+            assert!(!translate_rate_limited(&label));
+        }
+        assert!(translate_rate_limited(&label));
+        // 其它 label 不受影响（限流按 webview 隔离）
+        assert!(!translate_rate_limited(&format!("{label}-other")));
+    }
+}
