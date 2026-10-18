@@ -287,3 +287,102 @@ pub(crate) fn cidr_contains(peer: IpAddr, cidr: &str) -> Option<bool> {
     };
     Some((a & mask) == (n & mask))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::IpAddr;
+    use std::time::{Duration, Instant};
+
+    fn v4(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn login_guard_loopback_never_locks() {
+        let g = LoginGuard::default();
+        let now = Instant::now();
+        // loopback（v4/v6）：不计数、不锁定——本机工具配错 token 不应被自锁
+        assert_eq!(g.record_failure(&v4("127.0.0.1"), now), 0);
+        assert_eq!(g.record_failure(&v4("::1"), now), 0);
+        assert_eq!(g.check(&v4("127.0.0.1"), now), None);
+        assert_eq!(g.check(&v4("::1"), now), None);
+    }
+
+    #[test]
+    fn login_guard_check_none_when_not_locked() {
+        let g = LoginGuard::default();
+        let now = Instant::now();
+        // 无失败记录 → 未锁定
+        assert_eq!(g.check(&v4("192.168.1.5"), now), None);
+    }
+
+    #[test]
+    fn login_guard_check_reports_remaining_seconds() {
+        let g = LoginGuard::default();
+        let ip = v4("10.0.0.7");
+        // 同一 now 连续 5 次失败：退避 1,2,4,8,16，末次锁定 16 秒
+        let t = Instant::now();
+        let secs: Vec<u64> = (0..5).map(|_| g.record_failure(&ip, t)).collect();
+        assert_eq!(secs, vec![1, 2, 4, 8, 16]);
+        // locked_until = t + 16s：锁内各时刻的剩余秒数（now 参数化，无真实时钟漂移）
+        assert_eq!(g.check(&ip, t), Some(16));
+        assert_eq!(g.check(&ip, t + Duration::from_secs(10)), Some(6));
+        // max(1) 下限：剩 0.5s 时 as_secs 截断为 0 → 报 1
+        assert_eq!(
+            g.check(&ip, t + Duration::from_secs(15) + Duration::from_millis(500)),
+            Some(1)
+        );
+        // 到期边界：now == locked_until 即解封
+        assert_eq!(g.check(&ip, t + Duration::from_secs(16)), None);
+    }
+
+    #[test]
+    fn login_guard_failure_backoff_escalates_and_clamps() {
+        let g = LoginGuard::default();
+        let ip = v4("10.0.0.8");
+        let t = Instant::now();
+        let got: Vec<u64> = (0..12).map(|_| g.record_failure(&ip, t)).collect();
+        // 指数退避 1..256 后 2^9=512 起被 300s 上限钳住
+        assert_eq!(got, vec![1, 2, 4, 8, 16, 32, 64, 128, 256, 300, 300, 300]);
+    }
+
+    #[test]
+    fn login_guard_success_resets_counter() {
+        let g = LoginGuard::default();
+        let ip = v4("10.0.0.9");
+        let t = Instant::now();
+        assert_eq!(g.record_failure(&ip, t), 1);
+        assert_eq!(g.record_failure(&ip, t), 2);
+        // 认证成功清零：下一次失败从第 1 档重来（未清零会返回 4）
+        g.record_success(&ip);
+        assert_eq!(g.record_failure(&ip, t), 1);
+    }
+
+    #[test]
+    fn dashboard_tickets_issue_and_one_time_consume() {
+        let t = DashboardTickets::new();
+        let ticket = t.issue();
+        // 32 hex（128bit 随机）
+        assert_eq!(ticket.len(), 32);
+        assert!(ticket.chars().all(|c| c.is_ascii_hexdigit()));
+        // 首次兑换成功；一次性：同一 ticket 第二次必拒
+        assert!(t.consume(&ticket));
+        assert!(!t.consume(&ticket));
+    }
+
+    #[test]
+    fn dashboard_tickets_unknown_rejected_and_independent() {
+        let t = DashboardTickets::new();
+        // 未知 ticket 拒绝（短串与合法长度但从未签发的串）
+        assert!(!t.consume("no-such-ticket"));
+        assert!(!t.consume(&"0".repeat(32)));
+        // 多张票独立：兑换一张不影响其它
+        let a = t.issue();
+        let b = t.issue();
+        assert_ne!(a, b, "uuid v4 不得撞车");
+        assert!(t.consume(&a));
+        assert!(t.consume(&b));
+        assert!(!t.consume(&a), "a 已即焚");
+    }
+}
