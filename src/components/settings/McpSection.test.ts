@@ -137,7 +137,6 @@ describe('McpSection · 添加 server', () => {
     mountSection()
     await flushPromises()
     invokeOkMock.mockClear()
-    invokeOkMock.mockResolvedValue(undefined)
     const inputs = qa('.mcp-add-row input')
     await inputs[0]!.setValue(' fs ')
     await inputs[1]!.setValue(' npx ')
@@ -160,7 +159,9 @@ describe('McpSection · 添加 server', () => {
     mountSection()
     await flushPromises()
     invokeOkMock.mockClear()
-    invokeOkMock.mockRejectedValue(new Error('端口占用'))
+    // 仅让 add 拒绝一次（Once 用完回落 beforeEach 的列表实现）；
+    // 整体 mockRejectedValue/mockResolvedValue 会把重拉列表也变掉，炸渲染出 unhandled
+    invokeOkMock.mockImplementationOnce(() => Promise.reject(new Error('端口占用')))
     const inputs = qa('.mcp-add-row input')
     await inputs[0]!.setValue('fs')
     await inputs[1]!.setValue('npx')
@@ -175,7 +176,6 @@ describe('McpSection · 删除 / 启停 / 手动调用', () => {
     mountSection()
     await flushPromises()
     invokeOkMock.mockClear()
-    invokeOkMock.mockResolvedValue(undefined)
     await qa('.mcp-server-row .mini-btn.danger')[0]!.trigger('click')
     await flushPromises()
     expect(invokeOkMock).toHaveBeenCalledWith('mcp_remove_server', { id: 1 })
@@ -187,7 +187,6 @@ describe('McpSection · 删除 / 启停 / 手动调用', () => {
     mountSection()
     await flushPromises()
     invokeOkMock.mockClear()
-    invokeOkMock.mockResolvedValue(undefined)
     const toggles = qa('.mcp-server-row .mini-btn:not(.danger)')
     await toggles[1]!.trigger('click') // 第二个 enabled=false → 请求启用
     await flushPromises()
@@ -203,7 +202,8 @@ describe('McpSection · 删除 / 启停 / 手动调用', () => {
     await q('select').setValue('read_file')
     await qa('.mcp-add-row input').pop()!.setValue('{"path":"/tmp/a"}')
     invokeOkMock.mockClear()
-    invokeOkMock.mockResolvedValue('文件内容 xyz')
+    // 仅 call_tool 返回结果一次，重拉列表仍走 beforeEach 实现（否则 undefined 炸渲染）
+    invokeOkMock.mockImplementationOnce(() => Promise.resolve('文件内容 xyz'))
     await callBtn.trigger('click')
     await flushPromises()
     expect(invokeOkMock).toHaveBeenCalledWith('mcp_call_tool', {
@@ -230,7 +230,7 @@ describe('McpSection · 删除 / 启停 / 手动调用', () => {
     await flushPromises()
     await q('select').setValue('read_file')
     invokeOkMock.mockClear()
-    invokeOkMock.mockRejectedValue(new Error('工具超时'))
+    invokeOkMock.mockImplementationOnce(() => Promise.reject(new Error('工具超时')))
     await qa('.mini-btn.primary').pop()!.trigger('click')
     await flushPromises()
     expect(q('.mcp-result').text()).toContain('❌ 工具超时')
