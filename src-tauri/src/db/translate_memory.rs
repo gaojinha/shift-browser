@@ -30,6 +30,10 @@ const LOOKUP_CHUNK: usize = 400;
 ///
 /// 确定性：同一 key + 同一原文 → 同一 hash，等值查询/主键/裁剪语义与明文列一致；
 /// 不可逆：DB 单独泄露时拿不到原文（比加密强——连密文都不存在）。
+///
+/// `new_from_slice` 对 HMAC 实际不可失败（HMAC 接受任意长度密钥），故就地标注
+/// `expect_used`（与 clippy.toml 的生产护栏口径一致），不为不可达分支引入返回值。
+#[allow(clippy::expect_used)]
 fn source_hash_hex(key: &[u8; 32], source: &str) -> String {
     let mut mac = HmacSha256::new_from_slice(key).expect("HMAC 接受任意长度密钥");
     mac.update(source.as_bytes());

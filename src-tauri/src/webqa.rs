@@ -543,7 +543,6 @@ pub struct AskRequest {
 /// 确保 session → 记基线 → 开 SSE → `prompt_async` → 过滤本 session 的
 /// assistant 文本增量推给前端 → `session.idle` 收尾。
 #[tauri::command]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub async fn opencode_ask(
     db: tauri::State<'_, crate::db::Db>,
     req: AskRequest,
@@ -626,7 +625,7 @@ pub async fn opencode_ask(
     let cancel = Arc::new(AtomicBool::new(false));
     cancel_flags()
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .insert(request_id.clone(), cancel.clone());
 
     // Channel → 闭包：让 IO 核心与 Tauri 解耦
@@ -648,7 +647,7 @@ pub async fn opencode_ask(
     )
     .await;
 
-    cancel_flags().lock().unwrap().remove(&request_id);
+    cancel_flags().lock().unwrap_or_else(|e| e.into_inner()).remove(&request_id);
     result
 }
 

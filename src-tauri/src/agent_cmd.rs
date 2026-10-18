@@ -25,7 +25,6 @@ fn pending() -> &'static Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool
 
 /// 请求动作（AI 工具循环调用）：发确认事件给前端，等待用户确认（60s 超时）。
 /// 返回 Ok(true) 已允许 / Ok(false) 用户拒绝 / Err 超时或系统错误
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub async fn request_agent_action(
     app: &AppHandle,
     params: &crate::engine::agent::AgentActionParams,
@@ -34,7 +33,7 @@ pub async fn request_agent_action(
     let description = crate::engine::agent::describe_action(params);
     let (tx, rx) = tokio::sync::oneshot::channel();
 
-    pending().lock().unwrap().insert(request_id.clone(), tx);
+    pending().lock().unwrap_or_else(|e| e.into_inner()).insert(request_id.clone(), tx);
 
     // 通知前端弹确认卡片
     let _ = app.emit(
@@ -54,7 +53,7 @@ pub async fn request_agent_action(
         }
         Ok(Err(_)) => Err(AppError::internal("动作确认通道已关闭").into()),
         Err(_) => {
-            pending().lock().unwrap().remove(&request_id);
+            pending().lock().unwrap_or_else(|e| e.into_inner()).remove(&request_id);
             Err(AppError::timeout("动作确认超时（60 秒未响应）").into())
         }
     }
@@ -62,9 +61,8 @@ pub async fn request_agent_action(
 
 /// 前端确认回调：用户点"允许/拒绝"后调用
 #[tauri::command]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub fn agent_confirm_action(request_id: String, approved: bool) -> CommandResult<()> {
-    let mut map = pending().lock().unwrap();
+    let mut map = pending().lock().unwrap_or_else(|e| e.into_inner());
     let tx = map
         .remove(&request_id)
         .ok_or_else(|| AppError::validation("确认请求不存在或已过期"))?;
@@ -78,7 +76,6 @@ pub fn agent_confirm_action(request_id: String, approved: bool) -> CommandResult
 }
 
 /// 请求多步动作（AI 工具循环调用）：发确认事件给前端，等待用户一次性确认整个计划。
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub async fn request_multi_step_action(
     app: &AppHandle,
     plan: &crate::engine::agent::MultiStepPlan,
@@ -87,7 +84,7 @@ pub async fn request_multi_step_action(
     let description = crate::engine::agent::describe_multi_step(plan);
     let (tx, rx) = tokio::sync::oneshot::channel();
 
-    pending().lock().unwrap().insert(request_id.clone(), tx);
+    pending().lock().unwrap_or_else(|e| e.into_inner()).insert(request_id.clone(), tx);
 
     let _ = app.emit(
         crate::contracts::events::AGENT_MULTI_STEP_REQUEST,
@@ -116,7 +113,7 @@ pub async fn request_multi_step_action(
         }
         Ok(Err(_)) => Err(AppError::internal("多步确认通道已关闭").into()),
         Err(_) => {
-            pending().lock().unwrap().remove(&request_id);
+            pending().lock().unwrap_or_else(|e| e.into_inner()).remove(&request_id);
             Err(AppError::timeout("多步确认超时（120 秒未响应）").into())
         }
     }
@@ -124,9 +121,8 @@ pub async fn request_multi_step_action(
 
 /// 前端多步确认回调：用户点"允许全部/拒绝"后调用
 #[tauri::command]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
 pub fn agent_confirm_multi_step(request_id: String, approved: bool) -> CommandResult<()> {
-    let mut map = pending().lock().unwrap();
+    let mut map = pending().lock().unwrap_or_else(|e| e.into_inner());
     let tx = map
         .remove(&request_id)
         .ok_or_else(|| AppError::validation("多步确认请求不存在或已过期"))?;
