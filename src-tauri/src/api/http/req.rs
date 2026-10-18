@@ -11,7 +11,7 @@ pub(crate) const HTTP_MAX_BODY: usize = 8 * 1024 * 1024;
 /// HTTP 请求读取结果
 #[derive(Debug)]
 pub(crate) enum HttpReq {
-    /// (请求头文本[不含结尾 \r\n\r\n], body 文本)
+    /// (请求头文本[含结尾 \r\n\r\n；读侧均按行解析，不依赖此尾巴], body 文本)
     Complete(String, String),
     /// Content-Length 超过 [`HTTP_MAX_BODY`]
     TooLarge,
@@ -177,8 +177,8 @@ mod tests {
 
     #[tokio::test]
     async fn read_http_request_splits_head_and_body() {
-        // 基本分帧：body 按 Content-Length 读满。注意现状行为：head 含结尾
-        // \r\n\r\n（结构体文档写"不含"，与实现不一致，先按实际行为钉住）
+        // 基本分帧：body 按 Content-Length 读满。注意约定：head 含结尾
+        // \r\n\r\n（与 HttpReq::Complete 文档一致；读侧按行解析，不依赖此尾巴）
         let req = b"GET /a HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\nabc".to_vec();
         match read_http_request(&mut reader(&req)).await {
             HttpReq::Complete(head, body) => {
