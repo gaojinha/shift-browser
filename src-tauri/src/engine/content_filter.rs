@@ -251,7 +251,6 @@ fn remove_from_manager(manager: &UserContentManager) {
 }
 
 /// 内容过滤器状态（给前端/自检展示）
-#[allow(dead_code)] // 供后续「隐私/拦截自检面板」与自检命令接入
 pub fn status() -> serde_json::Value {
     let ready = cached().lock().unwrap_or_else(|e| e.into_inner()).is_some();
     serde_json::json!({

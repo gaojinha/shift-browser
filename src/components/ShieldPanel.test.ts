@@ -42,6 +42,7 @@ const UiSwitchStub = {
 }
 
 let pinia: Pinia
+let filterStatusMock: Record<string, unknown> = { ready: true, enabled: true, ruleCount: 120 }
 
 const STATS = { adblock_injections: 15, cleaned_params: 6, privacy_injections: 3 }
 
@@ -49,9 +50,12 @@ beforeEach(() => {
   pinia = createPinia()
   setActivePinia(pinia)
   invokeMock.mockReset()
+  filterStatusMock = { ready: true, enabled: true, ruleCount: 120 }
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === 'get_privacy_stats') return Promise.resolve({ ...STATS })
     if (cmd === 'get_privacy_whitelist') return Promise.resolve([])
+    if (cmd === 'get_content_filter_status')
+      return Promise.resolve(filterStatusMock)
     return Promise.resolve(undefined)
   })
 })
@@ -120,8 +124,23 @@ describe('ShieldPanel：本页计数（基线差值口径）', () => {
       baselineUrl: 'https://example.com/',
     })
     const wrapper = mountPanel()
-    await vi.waitFor(() => expect(wrapper.find('.stat-num').text()).toBe('5'))
-    expect(wrapper.find('.stat-sub').text()).toContain('本页清参 2 · 隐私注入 1')
+    await vi.waitFor(() => expect(wrapper.find('.stat-sub').text()).toContain('本页清参 2 · 隐私注入 1'))
+  })
+
+  it('网络层只显示规则数，不暗示拦截次数', async () => {
+    seedTab()
+    const wrapper = mountPanel()
+    await vi.waitFor(() => expect(wrapper.find('.stat-rules').text()).toContain('120'))
+    expect(wrapper.find('.stat-rules').text()).toContain('规则')
+    expect(wrapper.find('.stat-rules').text()).not.toContain('已拦截')
+  })
+
+  it('过滤器未就绪时显示编译中文案', async () => {
+    seedTab()
+    filterStatusMock = { ready: false, enabled: true, ruleCount: 0 }
+    const wrapper = mountPanel()
+    await vi.waitFor(() => expect(wrapper.find('.stat-rules').exists()).toBe(true))
+    expect(wrapper.find('.stat-rules').text()).not.toContain('已启用')
   })
 })
 

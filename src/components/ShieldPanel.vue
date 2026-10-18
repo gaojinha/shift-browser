@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 护盾面板（B-04 MVP，对齐 Brave Shields 面板形态 · 2026-10-15）
 // 位置：地址栏站点区（由 AddressBar 挂载展开）
-// 内容：本页近似计数 · 站点降盾（兼容白名单复用）· 三项快捷开关 · 详细设置入口
+// 内容：网络层规则数（无命中计数）+ 本页近似计数 · 站点降盾（兼容白名单复用）· 三项快捷开关 · 详细设置入口
 // 口径说明：计数数据源为 Rust 内存统计（get_privacy_stats，重启归零）；
 //          "本页" = 进入本页后的统计增量（近似，并发归属不逐一区分，UI 有提示）
 import { computed, onMounted, onUnmounted, ref } from 'vue'
@@ -53,6 +53,21 @@ const shieldLevel = computed(() => {
   return settingsStore.get('privacy_shield') === 'false' ? 'off' : 'standard'
 })
 
+// 网络层过滤器状态：WebKit 底层过滤无命中计数，只能显示规则数（诚实口径）
+interface FilterStatus {
+  ready: boolean
+  enabled: boolean
+  ruleCount: number
+}
+const filterStatus = ref<FilterStatus | null>(null)
+const filterText = computed(() => {
+  const s = filterStatus.value
+  if (!s) return ''
+  if (!s.enabled) return t('shield.filterOff')
+  if (!s.ready) return t('shield.filterCompiling')
+  return t('shield.filterRules', { n: s.ruleCount })
+})
+
 // 本页计数（近似增量）
 const delta = computed(() => shieldStore.pageDelta)
 
@@ -87,7 +102,17 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') emit('close')
 }
 
+async function loadFilterStatus() {
+  try {
+    filterStatus.value = await invokeOk<FilterStatus>('get_content_filter_status')
+  } catch (e) {
+    console.error('[shield] 读取网络层过滤器状态失败:', e)
+    filterStatus.value = null
+  }
+}
+
 async function refresh() {
+  await loadFilterStatus()
   await shieldStore.loadStats()
   shieldStore.ensureBaseline(tabsStore.activeTab?.url ?? '')
   if (host.value) {
@@ -177,9 +202,8 @@ async function onToggleShield() {
     <!-- 本页计数（近似口径） -->
     <div class="stat-block">
       <template v-if="shieldUp">
-        <div class="stat-main">
-          <span class="stat-num">{{ delta.adblock_injections }}</span>
-          <span class="stat-desc">{{ t('shield.blockedOnPage') }}</span>
+        <div v-if="filterText" class="stat-rules" :title="t('shield.filterTip')">
+          {{ filterText }}
         </div>
         <div class="stat-sub" :title="t('shield.approxTip')">
           {{ t('shield.pageExtra', { clean: delta.cleaned_params, inject: delta.privacy_injections }) }}
@@ -314,6 +338,11 @@ async function onToggleShield() {
   border-radius: var(--radius-md);
   background: var(--bg-hover);
   margin-bottom: 8px;
+}
+.stat-rules {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
 }
 .stat-main {
   display: flex;

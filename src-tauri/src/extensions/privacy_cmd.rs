@@ -321,6 +321,13 @@ pub async fn get_adblock_enabled(db: State<'_, Db>) -> CommandResult<bool> {
     Ok(row.map(|r| r.0 == "true").unwrap_or(true))
 }
 
+/// 网络层内容过滤器状态（ready/enabled/rulesBytes/ruleCount）。
+/// 注意：WebKitGTK 底层过滤无命中回调，这里只有规则数，没有拦截次数。
+#[tauri::command]
+pub fn get_content_filter_status() -> serde_json::Value {
+    crate::engine::content_filter::status()
+}
+
 /// 读取用户自定义广告关键词（不含内置）
 #[tauri::command]
 pub async fn get_adblock_keywords(db: State<'_, Db>) -> CommandResult<Vec<String>> {

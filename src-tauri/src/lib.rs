@@ -385,6 +385,7 @@ pub fn run() {
             // 广告拦截
             extensions::privacy_cmd::set_adblock_enabled,
             extensions::privacy_cmd::get_adblock_enabled,
+            extensions::privacy_cmd::get_content_filter_status,
             // 隐私防护（GPC + 反指纹 + WebRTC 防泄露）
             extensions::privacy_cmd::set_privacy_shield_enabled,
             extensions::privacy_cmd::get_privacy_shield_enabled,
