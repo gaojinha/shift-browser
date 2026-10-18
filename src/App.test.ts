@@ -29,12 +29,46 @@ vi.mock('./utils/webview', () => ({
 
 let pinia: Pinia
 
+// 列表类命令给空数组、建签给合法 Tab。
+// 注意：store/组件会把 invoke 返回值**直接**写进数组字段
+// （如 `this.bookmarks = await invoke('get_bookmarks')`），
+// 若默认实现返回 undefined，渲染/计算属性读 `.length/.map/.find` 会崩，
+// 表现为跑完后冒出的 unhandled rejection（F-95）。所以这里必须给匹配类型。
+const NEW_TAB = {
+  id: 'tab-1',
+  url: 'about:newtab',
+  title: '新标签页',
+  favicon: '',
+  is_active: true,
+  is_pinned: false,
+  is_muted: false,
+  hibernated: false,
+  private: false,
+  origin: 'user',
+}
+const ARRAY_CMDS = new Set([
+  'get_bookmarks',
+  'get_bookmark_folders',
+  'get_workspaces',
+  'get_tabs',
+  'get_all_settings',
+  'get_tab_groups',
+  'get_recent_history',
+])
+function baseInvoke(cmd: string): Promise<unknown> {
+  if (ARRAY_CMDS.has(cmd)) return Promise.resolve([])
+  if (cmd === 'create_tab') return Promise.resolve(NEW_TAB)
+  if (cmd === 'get_newtab_url') return Promise.resolve('about:newtab')
+  if (cmd === 'get_split_tab') return Promise.resolve(null)
+  if (cmd === 'load_last_session') return Promise.resolve(null)
+  return Promise.resolve(undefined)
+}
+
 beforeEach(() => {
   pinia = createPinia()
   setActivePinia(pinia)
   invokeMock.mockReset()
-  // 所有 invoke 默认快速成功：返回 undefined/[] 皆可（store 加载路径吞错）
-  invokeMock.mockImplementation(() => Promise.resolve(undefined as unknown))
+  invokeMock.mockImplementation(baseInvoke)
 })
 
 async function mountApp() {
@@ -72,7 +106,7 @@ describe('App：布局结构与常量注入', () => {
       if (cmd === 'get_all_settings') {
         return Promise.resolve([{ key: 'vertical_tabs', value: 'true' }] as unknown[])
       }
-      return Promise.resolve(undefined as unknown)
+      return baseInvoke(cmd)
     })
     const w = await mountApp()
     await flushPromises()
