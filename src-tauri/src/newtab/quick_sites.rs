@@ -3,10 +3,10 @@
 //! 新标签页是带 IPC 桥（invoke_key）的特权页面，javascript:/data: 等 scheme
 //! 一旦渲染成 <a href>，点击即在特权上下文执行任意命令，必须拒绝。
 
-/// 校验是否为可安全渲染的网页 URL（http/https）
-/// 新标签页是特权页面（带 IPC 桥），javascript:/data: 等 scheme 一旦渲染成
-/// <a href> 点击即可在特权上下文执行任意命令，必须拒绝
-pub(super) fn is_safe_web_url(url: &str) -> bool {
+/// 校验是否为可安全渲染的网页 URL（http/https 白名单）。
+/// 特权页（启动页带 IPC 桥）渲染成 <a href> 后，javascript:/data: 等 scheme
+/// 点击即在特权上下文执行任意命令，必须拒绝；浏览器导入（F-91）同用本判定。
+pub(crate) fn is_safe_web_url(url: &str) -> bool {
     let lower = url.trim().to_ascii_lowercase();
     lower.starts_with("http://") || lower.starts_with("https://")
 }

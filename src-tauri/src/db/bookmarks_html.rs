@@ -92,12 +92,21 @@ pub async fn import_bookmarks_from_file(db: tauri::State<'_, Db>) -> Result<usiz
 
 async fn do_import(db: &Db, html: &str) -> Result<usize, String> {
     let items = parse_bookmarks_html(html);
+    do_import_items(&db.pool, &items).await
+}
+
+/// 写入内核（HTML 文件导入与浏览器导入 F-91 共用）：单事务、同名文件夹
+/// 复用缓存、URL 去重，返回实写条数（DB 已有同 URL 的不计入）。
+pub(crate) async fn do_import_items(
+    pool: &sqlx::SqlitePool,
+    items: &[BookmarkItem],
+) -> Result<usize, String> {
     // P1-6：整个导入放一个事务——中途失败整体回滚，不留半截数据；
     // 文件夹名 → id 用 HashMap 缓存，避免同名文件夹重复查询（原实现 N+1）
-    let mut tx = db.pool.begin().await.map_err(|e| e.to_string())?;
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     let mut folder_cache: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
     let mut count = 0usize;
-    for item in &items {
+    for item in items {
         let mut folder_id: Option<i64> = None;
         if let Some(folder_name) = &item.folder_name {
             folder_id = match folder_cache.get(folder_name) {
@@ -228,7 +237,7 @@ pub(super) fn parse_bookmarks_html(html: &str) -> Vec<BookmarkItem> {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct BookmarkItem {
+pub(crate) struct BookmarkItem {
     pub url: String,
     pub title: String,
     pub folder_name: Option<String>,

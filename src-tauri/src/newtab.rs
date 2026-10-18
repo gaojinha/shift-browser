@@ -12,7 +12,7 @@ use crate::error::{AppError, CommandResult};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[path = "newtab/quick_sites.rs"]
-mod quick_sites;
+pub(crate) mod quick_sites;
 #[path = "newtab/render.rs"]
 mod render;
 #[path = "newtab/wallpaper.rs"]

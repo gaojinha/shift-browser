@@ -41,6 +41,8 @@ const CHROME_BOOKMARK_FILES: &[&str] = &[
 const CHROME_PASSWORD_FILES: &[&str] = &["Login Data For Account", "Login Data"];
 /// Brave 书签源
 const BRAVE_BOOKMARK_FILES: &[&str] = &["Bookmarks"];
+
+pub(crate) mod bookmarks;
 /// Brave 密码源
 const BRAVE_PASSWORD_FILES: &[&str] = &["Login Data"];
 
