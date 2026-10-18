@@ -637,7 +637,7 @@ onMounted(async () => {
   })
   onEvent(EVENTS.OPEN_IMPORT_FROM_NEWTAB, () => {
     showImport.value = true
-  }),
+  })
   // 启动页资讯点击 → 左窗格保持列表页，右窗格分屏打开资讯原文（占满右半区域）
   onEvent<string>(EVENTS.OPEN_URL_FROM_NEWTAB, async (e) => {
     if (!e.payload) return
