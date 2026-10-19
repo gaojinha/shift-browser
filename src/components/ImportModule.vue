@@ -54,11 +54,33 @@ interface ImportBookmarksResult {
 }
 interface ImportPasswordsResult {
   imported: number
+  skipped_existing: number
   skipped_empty: number
   failed: number
   skipped_sources: string[]
   used_sources: string[]
   degraded_reason: string | null
+}
+
+/** F-99 预览：站点/用户名 + 书签分组（后端保证无明文字段） */
+interface PasswordPreviewItem {
+  browser: string
+  profile: string
+  domain: string
+  username: string | null
+}
+interface BookmarkPreviewItem {
+  title: string
+  url: string
+}
+interface BookmarkPreviewGroup {
+  folder: string
+  items: BookmarkPreviewItem[]
+}
+interface ImportPreview {
+  passwords: PasswordPreviewItem[]
+  bookmark_groups: BookmarkPreviewGroup[]
+  skipped_sources: string[]
 }
 
 const tab = ref<'bookmarks' | 'passwords'>('bookmarks')
@@ -68,6 +90,8 @@ const loading = ref(false)
 const bmResult = ref<ImportBookmarksResult | null>(null)
 const pwResult = ref<ImportPasswordsResult | null>(null)
 const importing = ref(false)
+/** F-99 导入前预览（站点/用户名 + 书签分组） */
+const preview = ref<ImportPreview | null>(null)
 
 /** 打开时：隐藏 webview + 扫描源 */
 watch(
@@ -77,10 +101,11 @@ watch(
       sources.value = []
       bmResult.value = null
       pwResult.value = null
+      preview.value = null
       return
     }
     await setWebviewVisible(false, 'import-dialog')
-    await loadSources()
+    await Promise.all([loadSources(), loadPreview()])
   },
 )
 
@@ -95,6 +120,21 @@ async function loadSources() {
     loading.value = false
   }
 }
+
+/** F-99：加载导入预览（站点/用户名 + 书签分组）。失败不阻断页面，仅记日志。 */
+async function loadPreview() {
+  try {
+    preview.value = await invokeOk<ImportPreview>('preview_browser_import')
+  } catch (e) {
+    console.error('[import] 预览加载失败:', e)
+    preview.value = null
+  }
+}
+
+/** 书签预览总条数（分组求和） */
+const bmPreviewCount = computed(() =>
+  (preview.value?.bookmark_groups ?? []).reduce((n, g) => n + g.items.length, 0),
+)
 
 /** 某浏览器的书签源摘要（有记录 profile 数与可读条数） */
 function srcSummary(browser: 'chrome' | 'brave', kind: 'bookmarks' | 'passwords'): string {
@@ -164,6 +204,25 @@ async function doImportPasswords() {
             <span>Chrome：{{ srcSummary('chrome', 'bookmarks') }}</span>
             <span>Brave：{{ srcSummary('brave', 'bookmarks') }}</span>
           </div>
+          <div
+            v-if="preview && preview.bookmark_groups?.length"
+            class="import-preview"
+            data-testid="bm-preview"
+          >
+            <div class="preview-title">预览 {{ bmPreviewCount }} 条</div>
+            <div v-for="g in preview.bookmark_groups" :key="g.folder" class="preview-group">
+              <div class="preview-folder">{{ g.folder }}（{{ g.items.length }}）</div>
+              <div
+                v-for="(it, i) in g.items"
+                :key="g.folder + '-' + i"
+                class="preview-row"
+                :title="it.url"
+              >
+                <span class="preview-name">{{ it.title }}</span>
+                <span class="preview-sub">{{ it.url }}</span>
+              </div>
+            </div>
+          </div>
           <button class="import-run" :disabled="importing" @click="doImportBookmarks">
             {{ importing ? '导入中…' : '导入书签' }}
           </button>
@@ -184,11 +243,26 @@ async function doImportPasswords() {
             <span>Brave：{{ srcSummary('brave', 'passwords') }}</span>
           </div>
           <p class="import-warn">密码经系统钥匙串解密后写入本机密码库，明文不落盘。</p>
+          <div
+            v-if="preview && preview.passwords?.length"
+            class="import-preview"
+            data-testid="pw-preview"
+          >
+            <div class="preview-title">
+              预览 {{ preview.passwords.length }} 条（密码一律不显示）
+            </div>
+            <div v-for="(p, i) in preview.passwords" :key="i" class="preview-row">
+              <span class="preview-name">{{ p.domain }}</span>
+              <span class="preview-sub">{{ p.username || '（无用户名）' }}</span>
+              <span class="preview-pass">••••</span>
+            </div>
+          </div>
           <button class="import-run" :disabled="importing" @click="doImportPasswords">
             {{ importing ? '导入中…' : '导入密码' }}
           </button>
           <div v-if="pwResult" class="import-result" data-testid="pw-result">
             <div>写入 {{ pwResult.imported }} 条</div>
+            <div v-if="pwResult.skipped_existing">已存在跳过 {{ pwResult.skipped_existing }} 条</div>
             <div v-if="pwResult.skipped_empty">空密码跳过 {{ pwResult.skipped_empty }} 条</div>
             <div v-if="pwResult.failed">失败 {{ pwResult.failed }} 条</div>
             <div v-if="pwResult.degraded_reason" class="warn">{{ pwResult.degraded_reason }}</div>
@@ -222,4 +296,22 @@ async function doImportPasswords() {
   font-size: 13px; display: flex; flex-direction: column; gap: 4px;
 }
 .import-result .warn { color: var(--warn, #c8a04a); }
+.import-preview {
+  max-height: 200px; overflow-y: auto; padding: 8px 10px; border-radius: 8px;
+  background: var(--bg-soft, #1c1c1e); font-size: 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.preview-title { color: var(--text-dim, #888); }
+.preview-group { display: flex; flex-direction: column; gap: 2px; }
+.preview-folder { color: var(--accent, #4a7dff); font-weight: 600; }
+.preview-row { display: flex; gap: 8px; align-items: baseline; }
+.preview-name {
+  flex: 0 0 auto; max-width: 45%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.preview-sub {
+  flex: 1 1 auto; color: var(--text-dim, #888);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.preview-pass { flex: 0 0 auto; letter-spacing: 2px; color: var(--text-dim, #888); }
 </style>

@@ -96,13 +96,78 @@ pub struct SourceReport {
 /// 只读：源文件零改动（SQLite 只 copy 不打开，验收做 mtime/hash 校验）。
 #[tauri::command]
 pub async fn scan_browser_import() -> CommandResult<Vec<SourceReport>> {
+    Ok(scan_browser_import_inner().await)
+}
+
+/// 扫描内核（与命令同体；命令层只做签名包装，照 `db::passwords` 的 `*_inner` 约定）。
+/// F-100 真机 live 测试（`tests/import_browser_live.rs`）直接调本函数，不重抄逻辑。
+pub async fn scan_browser_import_inner() -> Vec<SourceReport> {
     let Some(base) = config_root() else {
         // 无 HOME（非常规环境）：空结果而非报错，前端按"未发现浏览器"展示
-        return Ok(Vec::new());
+        return Vec::new();
     };
     // F-90 已接线：加密书签源就地解密计数、密码源补 decryptable（keyring
     // 不可用时逐源降级，不影响扫描本身）。probe_keys=true 生产路径。
-    Ok(scan_from(&base, true).await)
+    scan_from(&base, true).await
+}
+
+/// 导入预览（F-99）：逐行站点/用户名 + 书签按文件夹分组。
+/// **结构体严禁任何密码/明文相关字段**——预览只到 domain / username 层。
+#[derive(Debug, Serialize)]
+pub struct ImportPreview {
+    pub passwords: Vec<PasswordPreviewItem>,
+    pub bookmark_groups: Vec<BookmarkPreviewGroup>,
+    /// 读取/解密失败被跳过的源（"profile/文件"）
+    pub skipped_sources: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PasswordPreviewItem {
+    /// "chrome" | "brave"
+    pub browser: String,
+    pub profile: String,
+    /// 站点 host（logins.origin_url 提取；提取失败退整串）
+    pub domain: String,
+    pub username: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BookmarkPreviewGroup {
+    /// 文件夹名；书签栏散书签归 "书签栏"
+    pub folder: String,
+    pub items: Vec<BookmarkPreviewItem>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BookmarkPreviewItem {
+    pub title: String,
+    pub url: String,
+}
+
+/// 导入前预览（只读、无副作用、不动源库、不解密密码值）：
+/// 供前端在导入按钮旁展示"将要导入什么"。
+#[tauri::command]
+pub async fn preview_browser_import() -> CommandResult<ImportPreview> {
+    Ok(preview_browser_import_inner().await)
+}
+
+/// 预览内核（与命令同体；命令层只做签名包装）。F-100 live 测试直接调本函数。
+pub async fn preview_browser_import_inner() -> ImportPreview {
+    let Some(base) = config_root() else {
+        return ImportPreview {
+            passwords: Vec::new(),
+            bookmark_groups: Vec::new(),
+            skipped_sources: Vec::new(),
+        };
+    };
+    let (passwords, mut skipped_sources) = passwords::collect_password_previews(&base).await;
+    let (bookmark_groups, bm_skipped) = bookmarks::collect_bookmark_previews(&base).await;
+    skipped_sources.extend(bm_skipped);
+    ImportPreview {
+        passwords,
+        bookmark_groups,
+        skipped_sources,
+    }
 }
 
 /// `~/.config`（本期仅 Linux；HOME 缺失返回 None → 空结果）
@@ -470,14 +535,22 @@ fn decrypt_os_crypt(blob: &[u8], v11_key: Option<&[u8]>) -> Result<String, Decry
 // 锁定条目不弹解锁、不硬试 → 直接降级。返回值是密钥本体：调用方用完必须
 // zeroize，绝不写日志/错误串。
 
-/// GetSecret 回执结构（D-Bus 结构体 (oaysay)，按字段序取 value）
+/// GetSecret 回执结构。**字段序按线上实测签名 `(oayays)` 定**：
+/// `(o session, ay parameters, ay value, s content_type)`。
+/// 注意：本机 gnome-keyring 的实际回包把 `value`(ay) 排在 `content_type`(s) **之前**，
+/// 与文档里常见的 (…, s content_type, ay value) 相反——2026-10-19 F-100 真机探针
+/// 实测钉死（原实现的 (o, ay, s, ay) 会 SignatureMismatch → 取钥匙恒失败）。
 #[derive(serde::Deserialize, zbus::zvariant::Type)]
-struct SecretPayload(
-    #[allow(dead_code)] zbus::zvariant::OwnedObjectPath, // session
-    #[allow(dead_code)] Vec<u8>, // parameters
-    #[allow(dead_code)] String,  // content_type
-    pub Vec<u8>,                 // 密钥本体（value）
-);
+struct SecretPayload {
+    #[allow(dead_code)]
+    session: zbus::zvariant::OwnedObjectPath,
+    #[allow(dead_code)]
+    parameters: Vec<u8>,
+    /// 密钥本体（value）
+    value: Vec<u8>,
+    #[allow(dead_code)]
+    content_type: String,
+}
 
 #[zbus::proxy(
     interface = "org.freedesktop.Secret.Service",
@@ -490,8 +563,11 @@ trait SecretService {
         algorithm: &str,
         input: zbus::zvariant::Value<'_>,
     ) -> zbus::Result<(
-        zbus::zvariant::OwnedObjectPath,
+        // 注意：gnome-keyring 声明的出参序是 `out v output, out o result`
+        //（与 freedesktop 文档的 (o, v) 相反）——按**线上实际签名**为准，
+        // 排错见 F-100 live（SignatureMismatch(expected (o,v), got (v,o))）。
         zbus::zvariant::OwnedValue,
+        zbus::zvariant::OwnedObjectPath,
     )>;
     fn search_items(
         &self,
@@ -526,8 +602,13 @@ async fn fetch_v11_key(browser: &str) -> Result<Vec<u8>, DecryptError> {
     let label = keyring_label(browser).ok_or(DecryptError::NoKeyringKey)?;
     let conn = zbus::Connection::session().await.map_err(nokey)?;
     let svc = SecretServiceProxy::new(&conn).await.map_err(nokey)?;
-    let (session, _) = svc
-        .open_session("plain", zbus::zvariant::Value::from(Vec::<u8>::new()))
+    let (_, session) = svc
+        // plain 会话的 input 必须是**空字符串**变体（`s`）。传字节数组（`ay`）会被
+        // gnome-keyring 判 InvalidArgs("The session algorithm input argument (plain)
+        // was invalid")，取钥匙第一步就失败 → 所有密码行降级 NoKeyringKey。
+        // 2026-10-19 真机实测钉死（F-100 live 抓起）：gnome-keyring 条目本身是好的
+        //（`SearchItems` 返回 22 条、label 命中且 Locked=false），错的是这个入参类型。
+        .open_session("plain", zbus::zvariant::Value::from(""))
         .await
         .map_err(nokey)?;
     let (unlocked, locked) = svc
@@ -551,10 +632,10 @@ async fn fetch_v11_key(browser: &str) -> Result<Vec<u8>, DecryptError> {
         let session_path: zbus::zvariant::ObjectPath<'_> =
             session.as_str().try_into().map_err(nokey)?;
         let secret = item.get_secret(session_path).await.map_err(nokey)?;
-        if secret.3.is_empty() {
+        if secret.value.is_empty() {
             return Err(DecryptError::NoKeyringKey);
         }
-        return Ok(secret.3);
+        return Ok(secret.value);
     }
     Err(DecryptError::NoKeyringKey)
 }
@@ -650,6 +731,54 @@ mod f90_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- F-99 预览：结构里绝不许出现密码/明文叶子字段 ----
+
+    fn collect_keys(v: &serde_json::Value, out: &mut Vec<String>) {
+        match v {
+            serde_json::Value::Object(m) => {
+                for (k, val) in m {
+                    out.push(k.clone());
+                    collect_keys(val, out);
+                }
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|x| collect_keys(x, out)),
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn preview_struct_never_carries_plaintext_leaf_fields() {
+        let pv = ImportPreview {
+            passwords: vec![PasswordPreviewItem {
+                browser: "chrome".into(),
+                profile: "Default".into(),
+                domain: "example.com".into(),
+                username: Some("alice".into()),
+            }],
+            bookmark_groups: vec![BookmarkPreviewGroup {
+                folder: "书签栏".into(),
+                items: vec![BookmarkPreviewItem {
+                    title: "A".into(),
+                    url: "https://a.com/".into(),
+                }],
+            }],
+            skipped_sources: vec!["Default/Login Data".into()],
+        };
+        let json = serde_json::to_value(&pv).unwrap();
+        let mut keys = Vec::new();
+        collect_keys(&json, &mut keys);
+        for banned in ["password", "password_value", "plain", "plaintext", "secret", "cipher"] {
+            assert!(
+                !keys.iter().any(|k| k == banned),
+                "预览结构不得含 `{banned}` 叶子字段（keys={keys:?}）"
+            );
+        }
+        // 正向锚：站点/用户名/书签分组都在
+        assert!(keys.iter().any(|k| k == "domain"));
+        assert!(keys.iter().any(|k| k == "username"));
+        assert!(keys.iter().any(|k| k == "bookmark_groups"));
+    }
 
     // ---- 造数：Chrome 书签 JSON ----
 
@@ -864,3 +993,4 @@ mod tests {
         assert_eq!(wal_before, std::fs::read(&wal_path).ok(), "-wal 源文件被改动");
     }
 }
+

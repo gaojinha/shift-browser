@@ -35,6 +35,12 @@ pub struct ImportBookmarksResult {
 pub async fn import_bookmarks_from_browser(
     db: tauri::State<'_, crate::db::Db>,
 ) -> CommandResult<ImportBookmarksResult> {
+    import_bookmarks_inner(&db).await
+}
+
+/// 导入内核（与命令同体；命令层只把 `State` 拆成 `&Db` 后转调本函数，
+/// 照 `db::passwords` 的 `*_inner` 约定）。F-100 live 测试直接调本函数。
+pub async fn import_bookmarks_inner(db: &crate::db::Db) -> CommandResult<ImportBookmarksResult> {
     let Some(base) = super::config_root() else {
         // 无 HOME：零导入（与扫描口径一致，不报错）
         return Ok(ImportBookmarksResult {
@@ -122,6 +128,39 @@ async fn collect_raw_bookmarks(
         }
     }
     (out, used, skipped)
+}
+
+/// 预览：书签按文件夹分组（`folder_name=None` → "书签栏"），保持源内出现顺序。
+/// 复用导入的源发现与解析；返回（分组, 读取失败的源）。
+pub(super) async fn collect_bookmark_previews(
+    base: &std::path::Path,
+) -> (Vec<super::BookmarkPreviewGroup>, Vec<String>) {
+    let (raw, _used, skipped) = collect_raw_bookmarks(base).await;
+    (group_previews(raw), skipped)
+}
+
+/// 把扁平书签按 `folder_name` 分组（None → "书签栏"），组顺序按源内首次出现。
+fn group_previews(raw: Vec<RawBookmark>) -> Vec<super::BookmarkPreviewGroup> {
+    let mut order: Vec<String> = Vec::new();
+    let mut map: std::collections::HashMap<String, Vec<super::BookmarkPreviewItem>> =
+        std::collections::HashMap::new();
+    for b in raw {
+        let folder = b.folder_name.unwrap_or_else(|| "书签栏".to_string());
+        if !map.contains_key(&folder) {
+            order.push(folder.clone());
+        }
+        map.entry(folder).or_default().push(super::BookmarkPreviewItem {
+            title: b.title,
+            url: b.url,
+        });
+    }
+    order
+        .into_iter()
+        .map(|folder| {
+            let items = map.remove(&folder).unwrap_or_default();
+            super::BookmarkPreviewGroup { folder, items }
+        })
+        .collect()
 }
 
 /// profile 子目录列表（含书签源文件才算 profile；排除名单同 F-89 扫描）
@@ -293,6 +332,42 @@ mod f91_tests {
     fn malformed_json_yields_empty() {
         assert!(parse_chrome_bookmark_json("not json{").is_empty());
         assert!(parse_chrome_bookmark_json(r#"{"no_roots":1}"#).is_empty());
+    }
+
+    // ---- F-99 预览分组：folder=None → 书签栏；组顺序按首次出现 ----
+
+    #[test]
+    fn preview_grouping_keeps_order_and_bar_bucket() {
+        let raw = vec![
+            RawBookmark {
+                url: "https://b.com".into(),
+                title: "B".into(),
+                folder_name: None,
+            },
+            RawBookmark {
+                url: "https://a.com".into(),
+                title: "A".into(),
+                folder_name: Some("开发".into()),
+            },
+            RawBookmark {
+                url: "https://b2.com".into(),
+                title: "B2".into(),
+                folder_name: None,
+            },
+            RawBookmark {
+                url: "https://a2.com".into(),
+                title: "A2".into(),
+                folder_name: Some("开发".into()),
+            },
+        ];
+        let groups = group_previews(raw);
+        assert_eq!(groups.len(), 2, "两个组：书签栏 + 开发");
+        assert_eq!(groups[0].folder, "书签栏", "首现顺序：书签栏在前");
+        assert_eq!(groups[0].items.len(), 2);
+        assert_eq!(groups[0].items[0].title, "B");
+        assert_eq!(groups[1].folder, "开发");
+        assert_eq!(groups[1].items.len(), 2);
+        assert_eq!(groups[1].items[1].url, "https://a2.com");
     }
 
     // ---- 危险 scheme 过滤：复用 is_safe_web_url（白名单口径） ----

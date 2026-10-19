@@ -59,6 +59,42 @@ pub(crate) async fn save_password_inner(
     Ok(0) // UPSERT 不返回可靠 rowid，调用方（前端）以 domain+username 查询为准
 }
 
+/// 保存密码（**insert-only**：同 (domain, username) 已存在则原样保留，返回 false）。
+/// F-98：浏览器导入专用——不从浏览器静默覆盖用户已有密码（覆盖会毁掉用户在
+/// 应用内改过的值）。与 `save_password_inner` 同做空域名/空密码守卫；
+/// username=NULL 沿用其语义（SQLite 不触发唯一冲突，照插）。
+pub(crate) async fn save_password_new_only_inner(
+    db: &Db,
+    domain: &str,
+    username: Option<String>,
+    password: &str,
+    notes: Option<String>,
+) -> DbResult<bool> {
+    if domain.trim().is_empty() {
+        return Err(crate::db::DbError::Other("域名不能为空".to_string()));
+    }
+    if password.is_empty() {
+        return Err(crate::db::DbError::Other("密码不能为空".to_string()));
+    }
+    let key = get_master_key(db).await?;
+    let encrypted = encrypt(&key, password)?;
+
+    // insert-only：冲突时 DO NOTHING。rows_affected()==1 → 新插入；
+    // ==0 → 已存在被跳过（靠迁移 7 的 (domain, username) 唯一索引原子判定）。
+    let res = sqlx::query(
+        "INSERT INTO passwords (domain, username, password, notes) VALUES (?, ?, ?, ?)
+         ON CONFLICT(domain, username) DO NOTHING",
+    )
+    .bind(domain)
+    .bind(&username)
+    .bind(&encrypted)
+    .bind(&notes)
+    .execute(&db.pool)
+    .await?;
+
+    Ok(res.rows_affected() > 0)
+}
+
 /// 列出所有密码记录（不含明文，前端展示列表用）
 pub(crate) async fn list_passwords_inner(db: &Db) -> DbResult<Vec<PasswordMeta>> {
     let rows = sqlx::query_as::<_, (i64, String, Option<String>, Option<String>, String, String)>(
@@ -428,6 +464,59 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(list_passwords_inner(&db).await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn save_new_only_skips_existing_without_overwrite() {
+        let (_dir, db) = temp_db().await;
+
+        // 首发：新插入返回 true
+        assert!(
+            save_password_new_only_inner(&db, "example.com", Some("alice".into()), "first", None)
+                .await
+                .unwrap()
+        );
+
+        // 同 (domain, username) 再来：跳过、返回 false、且**不覆盖**原值
+        assert!(
+            !save_password_new_only_inner(&db, "example.com", Some("alice".into()), "second", None)
+                .await
+                .unwrap()
+        );
+        let got = get_password_for_host_inner(&db, "example.com", "example.com")
+            .await
+            .unwrap()
+            .expect("应仍存在");
+        assert_eq!(got.password, "first", "insert-only 不得覆盖已存在密码");
+        assert_eq!(
+            list_passwords_inner(&db).await.unwrap().len(),
+            1,
+            "不得产生重复行"
+        );
+
+        // 不同 username：各自独立插入
+        assert!(
+            save_password_new_only_inner(&db, "example.com", Some("bob".into()), "bobpw", None)
+                .await
+                .unwrap()
+        );
+        assert_eq!(list_passwords_inner(&db).await.unwrap().len(), 2);
+
+        // username=NULL 不触发唯一冲突（与 save_password_inner 同语义，照插）
+        assert!(save_password_new_only_inner(&db, "null.com", None, "p1", None)
+            .await
+            .unwrap());
+        assert!(save_password_new_only_inner(&db, "null.com", None, "p2", None)
+            .await
+            .unwrap());
+
+        // 空域名/空密码仍拒收（与 save_password_inner 同守卫）
+        assert!(save_password_new_only_inner(&db, "  ", None, "pw", None)
+            .await
+            .is_err());
+        assert!(save_password_new_only_inner(&db, "x.com", None, "", None)
+            .await
+            .is_err());
     }
 
     #[tokio::test]

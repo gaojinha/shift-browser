@@ -1,20 +1,23 @@
 //! 浏览器密码导入（F-92）：源 WAL 快照逐行读 → v10/v11 就地解密 → 复用
 //! save_password 链路落库。安全铁律：明文零落盘（只驻内存、用完 drop）、
 //! 解密失败/空密码逐条如实计数回执、keyring 不可用整体降级不许猜。
+//! F-98 起改用 **insert-only** 落库：同 (domain, username) 已存在则跳过不覆盖。
 
 use serde::Serialize;
 use sqlx::Connection;
 use sqlx::Row;
 
-use crate::db::passwords::save_password_inner;
+use crate::db::passwords::save_password_new_only_inner;
 use crate::error::CommandResult;
 
 use super::{BRAVE_PASSWORD_FILES, BRAVE_ROOT, CHROME_PASSWORD_FILES, CHROME_ROOT};
 
 #[derive(Debug, Serialize)]
 pub struct ImportPasswordsResult {
-    /// 实际写入条数（UPSERT 覆盖同 (domain, username) 已有条目也计入）
+    /// 实际新写入条数（F-98 insert-only：同 (domain, username) 已存在不计入）
     pub imported: usize,
+    /// 同 (domain, username) 已存在、按 insert-only 跳过条数（F-98）
+    pub skipped_existing: usize,
     /// 解密成功但空密码被拒收条数（save_password_inner 守卫口径）
     pub skipped_empty: usize,
     /// 读取/解密/写库失败条数（失败明细进日志，回执只计数）
@@ -32,10 +35,17 @@ pub struct ImportPasswordsResult {
 pub async fn import_passwords_from_browser(
     db: tauri::State<'_, crate::db::Db>,
 ) -> CommandResult<ImportPasswordsResult> {
+    import_passwords_inner(&db).await
+}
+
+/// 导入内核（与命令同体；命令层只把 `State` 拆成 `&Db` 后转调本函数，
+/// 照 `db::passwords` 的 `*_inner` 约定）。F-100 live 测试直接调本函数。
+pub async fn import_passwords_inner(db: &crate::db::Db) -> CommandResult<ImportPasswordsResult> {
     let Some(base) = super::config_root() else {
         // 无 HOME：零导入（与扫描口径一致，不报错）
         return Ok(ImportPasswordsResult {
             imported: 0,
+            skipped_existing: 0,
             skipped_empty: 0,
             failed: 0,
             skipped_sources: Vec::new(),
@@ -45,6 +55,7 @@ pub async fn import_passwords_from_browser(
     };
     let mut result = ImportPasswordsResult {
         imported: 0,
+        skipped_existing: 0,
         skipped_empty: 0,
         failed: 0,
         skipped_sources: Vec::new(),
@@ -98,6 +109,12 @@ pub async fn import_passwords_from_browser(
                         result.failed += 1;
                         continue;
                     }
+                    // 空 blob（长度 0，Chrome 账号库空行实测存在）：无值可导，
+                    // 与"解密后空密码"同口径计 skipped_empty，不算 failed
+                    if blob.is_empty() {
+                        result.skipped_empty += 1;
+                        continue;
+                    }
                     // 解密：v10 peanuts / v11 keyring 原文派生（F-90 原语）
                     let plain = match decrypt_login_blob(&blob, browser_key) {
                         Ok(p) => p,
@@ -117,10 +134,12 @@ pub async fn import_passwords_from_browser(
                         result.skipped_empty += 1;
                         continue;
                     }
-                    match save_password_inner(&db, &domain, username.clone(), &plain, None).await {
-                        Ok(_) => {
-                            result.imported += 1;
-                        }
+                    match save_password_new_only_inner(db, &domain, username.clone(), &plain, None)
+                        .await
+                    {
+                        Ok(true) => result.imported += 1,
+                        // F-98：已存在同 (domain, username)，按跳过语义不覆盖
+                        Ok(false) => result.skipped_existing += 1,
                         Err(e) => {
                             // 失败明细进日志（不含明文），回执只计数
                             log::warn!("[import_browser] 密码写入失败 domain={domain}: {e}");
@@ -134,8 +153,9 @@ pub async fn import_passwords_from_browser(
     }
 
     log::info!(
-        "[import_browser] 密码导入完成：写入 {} / 空密码跳过 {} / 失败 {}（源 {}，跳过源 {}）",
+        "[import_browser] 密码导入完成：新写 {} / 已存在跳过 {} / 空密码跳过 {} / 失败 {}（源 {}，跳过源 {}）",
         result.imported,
+        result.skipped_existing,
         result.skipped_empty,
         result.failed,
         result.used_sources.len(),
@@ -216,6 +236,93 @@ async fn snapshot_login_rows(
                     r.try_get::<String, _>(0).unwrap_or_default(),
                     r.try_get::<Option<String>, _>(1).unwrap_or(None),
                     r.try_get::<Vec<u8>, _>(2).unwrap_or_default(),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// 预览：逐条 (browser, profile, domain, username)，**不取 password_value、不解密**。
+/// 与导入共用源发现逻辑；返回（预览条目, 读取失败的源）。
+pub(super) async fn collect_password_previews(
+    base: &std::path::Path,
+) -> (Vec<super::PasswordPreviewItem>, Vec<String>) {
+    let mut out = Vec::new();
+    let mut skipped = Vec::new();
+    for (root, browser, files) in [
+        (CHROME_ROOT, "chrome", CHROME_PASSWORD_FILES),
+        (BRAVE_ROOT, "brave", BRAVE_PASSWORD_FILES),
+    ] {
+        for prof_dir in super::profile_dirs(base, root, files) {
+            let prof_name = prof_dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            for file in files {
+                let path = prof_dir.join(file);
+                if !path.is_file() {
+                    continue;
+                }
+                let Some(rows) = snapshot_login_meta(&path).await else {
+                    skipped.push(format!("{prof_name}/{file}"));
+                    continue;
+                };
+                for (origin, username) in rows {
+                    let domain = host_of(&origin).unwrap_or(origin.clone());
+                    if domain.trim().is_empty() {
+                        continue;
+                    }
+                    out.push(super::PasswordPreviewItem {
+                        browser: browser.to_string(),
+                        profile: prof_name.clone(),
+                        domain,
+                        username,
+                    });
+                }
+            }
+        }
+    }
+    (out, skipped)
+}
+
+/// WAL 快照读 logins 的 (origin_url, username_value)——**不 SELECT password_value**，
+/// 预览专用（快照铁律同 [`snapshot_login_rows`]：0700 临时目录、db+wal+shm、读完即删）。
+async fn snapshot_login_meta(
+    db_path: &std::path::Path,
+) -> Option<Vec<(String, Option<String>)>> {
+    let tmp = tempfile::Builder::new()
+        .prefix("shift-import-pwpreview-")
+        .tempdir()
+        .ok()?;
+    #[cfg(unix)]
+    {
+        crate::harden::restrict_mode(tmp.path(), 0o700);
+    }
+    let base_name = db_path.file_name()?.to_string_lossy().into_owned();
+    let dst = tmp.path().join(&base_name);
+    std::fs::copy(db_path, &dst).ok()?;
+    for ext in ["-wal", "-shm"] {
+        let src_side = std::path::PathBuf::from(format!("{}{}", db_path.display(), ext));
+        if src_side.is_file() {
+            let _ = std::fs::copy(&src_side, tmp.path().join(format!("{base_name}{ext}")));
+        }
+    }
+    let mut conn = sqlx::sqlite::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new().filename(&dst),
+    )
+    .await
+    .ok()?;
+    let rows = sqlx::query("SELECT origin_url, username_value FROM logins")
+        .fetch_all(&mut conn)
+        .await
+        .ok()?;
+    Some(
+        rows.into_iter()
+            .map(|r| {
+                (
+                    r.try_get::<String, _>(0).unwrap_or_default(),
+                    r.try_get::<Option<String>, _>(1).unwrap_or(None),
                 )
             })
             .collect(),

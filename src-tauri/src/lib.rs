@@ -34,6 +34,18 @@ mod import_browser;
 pub mod fuzz_bridge {
     pub use crate::api::fuzz_helpers;
 }
+
+// F-100（2026-10-19）：真机 live 验收（tests/import_browser_live.rs）的窄门面。
+// 与 fuzz_bridge 同范式——只开测试需要的 `*_inner` 入口，不改变任何运行时行为；
+// 集成测试是独立 crate，`#[cfg(test)]` 对它不可见，故此处不加 cfg。
+pub mod import_live_bridge {
+    pub use crate::db::Db;
+    pub use crate::import_browser::bookmarks::{import_bookmarks_inner, ImportBookmarksResult};
+    pub use crate::import_browser::passwords::{import_passwords_inner, ImportPasswordsResult};
+    pub use crate::import_browser::{
+        preview_browser_import_inner, scan_browser_import_inner, ImportPreview, SourceReport,
+    };
+}
 mod mcp_cmd;
 mod net_guard;
 mod netmon;
@@ -437,6 +449,8 @@ pub fn run() {
             newtab::open_import_from_newtab,
             // 从浏览器导入（F-89 起的模块链：扫描 → 解密 → 书签/密码落库）
             import_browser::scan_browser_import,
+            // 导入前预览（F-99：站点/用户名 + 书签分组，无明文字段）
+            import_browser::preview_browser_import,
             import_browser::bookmarks::import_bookmarks_from_browser,
             import_browser::passwords::import_passwords_from_browser,
             // 用户账号（个人中心）

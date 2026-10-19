@@ -75,12 +75,29 @@ const PW_RESULT_DEGRADED = {
   degraded_reason: 'chrome: keyring 不可用（锁定或无条目），v11 密文无法解密',
 }
 
+/** F-99 预览回执（后端保证无明文字段） */
+const PREVIEW = {
+  passwords: [
+    { browser: 'chrome', profile: 'Default', domain: 'example.com', username: 'alice' },
+    { browser: 'brave', profile: 'Default', domain: 'github.com', username: null },
+  ],
+  bookmark_groups: [
+    { folder: '书签栏', items: [{ title: '示例', url: 'https://example.com/' }] },
+    {
+      folder: '开发与编程',
+      items: [{ title: 'MDN', url: 'https://developer.mozilla.org/' }],
+    },
+  ],
+  skipped_sources: [] as string[],
+}
+
 beforeEach(() => {
   pinia = createPinia()
   setActivePinia(pinia)
   invokeMock.mockReset()
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === 'scan_browser_import') return Promise.resolve(SOURCES)
+    if (cmd === 'preview_browser_import') return Promise.resolve(PREVIEW)
     // store 刷新拉取（导入成功后 refreshAfterImport 触发）
     if (cmd === 'get_bookmarks') return Promise.resolve([])
     if (cmd === 'list_passwords') return Promise.resolve([])
@@ -101,6 +118,42 @@ async function openDialog() {
   await flushPromises()
   return w
 }
+
+describe('导入预览（F-99）', () => {
+  it('打开时调 preview_browser_import 并按文件夹分组渲染书签预览', async () => {
+    const w = await openDialog()
+    expect(invokeMock).toHaveBeenCalledWith('preview_browser_import')
+    const bm = w.find('[data-testid="bm-preview"]')
+    expect(bm.exists()).toBe(true)
+    expect(bm.text()).toContain('预览 2 条')
+    expect(bm.text()).toContain('书签栏（1）')
+    expect(bm.text()).toContain('开发与编程（1）')
+    expect(bm.text()).toContain('MDN')
+  })
+
+  it('密码页签预览只给站点/用户名，密码列一律 ••••（无明文字段）', async () => {
+    const w = await openDialog()
+    const tabs = w.findAll('button.import-tab')
+    await tabs[1].trigger('click')
+    const pw = w.find('[data-testid="pw-preview"]')
+    expect(pw.exists()).toBe(true)
+    expect(pw.text()).toContain('example.com')
+    expect(pw.text()).toContain('alice')
+    expect(pw.text()).toContain('（无用户名）') // username=null 兜底
+    expect(pw.findAll('.preview-pass')).toHaveLength(2) // 每条一个 ••••
+  })
+
+  it('预览加载失败 → 不渲染预览区、不崩（记日志）', async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'scan_browser_import') return Promise.resolve(SOURCES)
+      if (cmd === 'preview_browser_import') return Promise.reject(new Error('no preview'))
+      return Promise.resolve(undefined)
+    })
+    const w = await openDialog()
+    expect(w.find('[data-testid="bm-preview"]').exists()).toBe(false)
+    expect(w.find('[data-testid="pw-preview"]').exists()).toBe(false)
+  })
+})
 
 describe('打开与扫描', () => {
   it('打开时隐藏 webview 并调 scan_browser_import', async () => {
