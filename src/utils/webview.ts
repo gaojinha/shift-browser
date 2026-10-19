@@ -4,6 +4,7 @@
 // 误放出来导致死锁。这里改全局引用计数：所有隐藏请求按来源登记，只有全部关闭才真正显示。
 // 后端仍用单调递增 seq 令牌丢弃乱序指令。
 import { invokeOk } from './invoke'
+import { perfLog } from './front-log'
 import { useBackdropStore } from '../stores/backdrop'
 import { useTabsStore } from '../stores/tabs'
 
@@ -19,6 +20,40 @@ const BACKDROP_CACHE_MS = 30000
 /** 两次后台预热最小间隔（毫秒）：同步事件频繁时不打爆截图 */
 const BACKDROP_WARM_GAP_MS = 15000
 let lastWarmAt = 0
+/** 显隐指令失败重试间隔（毫秒）：主线程繁忙/布局重排瞬间可能瞬时失败 */
+const VISIBLE_RETRY_MS = 150
+/** 显隐指令最多重试次数（1 次原发 + 2 次重试） */
+const VISIBLE_RETRIES = 2
+
+/**
+ * 下发显隐指令（带有限重试）。
+ *
+ * 复用同一个 seq：若上一次其实已生效、只是回包丢了，重试会被后端按"过期指令"丢弃（幂等）；
+ * 若期间已有新指令（seq 更大），重试同样被丢弃，由新指令接管——不会把状态改回去。
+ *
+ * 原实现失败一律静默：指令丢了、页面却一直藏着，用户只能看到"打不开"。
+ * 现在有限重试 + 最终失败留痕，既自愈又不丢证据。
+ */
+function sendVisible(
+  visible: boolean,
+  token: number,
+  source: string,
+  left: number = VISIBLE_RETRIES,
+): Promise<void> {
+  return invokeOk('set_webview_visible', { visible, seq: token, source }).then(
+    () => undefined,
+    (e: unknown) => {
+      if (left > 0) {
+        return new Promise<void>((r) => setTimeout(r, VISIBLE_RETRY_MS)).then(() =>
+          sendVisible(visible, token, source, left - 1),
+        )
+      }
+      // 最终失败：留痕（日志桥自身失败会静默，不影响业务）
+      console.error('[webview] 显隐指令失败:', e)
+      perfLog(`[perf][webview] failed visible=${visible} src=${source} err=${String(e)}`)
+    },
+  )
+}
 
 /** 当前活动标签的底垫键（id+url 对不上=页面变了，缓存作废） */
 function backdropKey(): string | null {
@@ -50,6 +85,12 @@ export function warmBackdrop() {
  */
 export function setWebviewVisible(visible: boolean, source: string = 'anonymous') {
   seq += 1
+  // 性能埋点（2026-10-19）：GTK 显隐+重排是手输导航的关键路径，记录往返耗时
+  const t0 = performance.now()
+  /** 有意静默：埋点失败不能影响显隐主流程 */
+  const perf = (v: boolean, t: number, src: string) => {
+    perfLog(`[perf][webview] set_visible=${v} ${(performance.now() - t).toFixed(1)}ms src=${src}`)
+  }
   if (!visible) {
     const wasVisible = hiders.size === 0
     hiders.add(source)
@@ -71,8 +112,11 @@ export function setWebviewVisible(visible: boolean, source: string = 'anonymous'
           .catch(() => {})
       }
     }
-    // 有意静默：显隐是高频可丢弃指令（有 seq 令牌保证最终一致），单次失败由后续指令覆盖自愈
-    return invokeOk('set_webview_visible', { visible: false, seq, source }).catch(() => {})
+    // 有意静默（失败会重试并留痕，见 sendVisible）：显隐是高频可丢弃指令（有 seq 令牌保证最终一致）
+    return sendVisible(false, seq, source).then((r) => {
+      perf(false, t0, source)
+      return r
+    })
   }
   hiders.delete(source)
   if (hiders.size > 0) {
@@ -82,7 +126,10 @@ export function setWebviewVisible(visible: boolean, source: string = 'anonymous'
   // 覆盖层清零：底垫即撤，令牌作废
   backdropToken += 1
   useBackdropStore().clear()
-  return invokeOk('set_webview_visible', { visible: true, seq, source }).catch(() => {})
+  return sendVisible(true, seq, source).then((r) => {
+    perf(true, t0, source)
+    return r
+  })
 }
 
 /** 调试用：当前还有几个覆盖层压着网页 */

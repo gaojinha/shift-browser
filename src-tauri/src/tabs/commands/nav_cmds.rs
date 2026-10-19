@@ -37,8 +37,11 @@ pub async fn navigate_tab(
     id: String,
     url: String,
 ) -> CommandResult<Option<Tab>> {
+    // 性能埋点（2026-10-19）：手输导航慢定位——clean/parse/GTK navigate 各段耗时
+    let t0 = std::time::Instant::now();
     // 隐私防护：导航前清洗跨站追踪参数（utm_*/fbclid/gclid/msclkid/spm 等）
     let url = clean_tracking_params(&url);
+    let t_clean = t0.elapsed();
     // 用户直驱导航不拦内网（路由器/NAS 后台要能开），但日志必须脱敏，
     // 防路径/query/token 落盘（与导航守卫、open_and_read 同脱敏口径）
     log::info!(
@@ -57,6 +60,7 @@ pub async fn navigate_tab(
     let parsed_url = url
         .parse::<tauri::Url>()
         .map_err(|e| AppError::validation(format!("URL 解析失败: {}", e)))?;
+    let t_parse = t0.elapsed();
     // P2：导航同样做 scheme 白名单（与 create_tab 一致），防止注入的脚本导航到 file://
     if let Some(msg) = nav_scheme_error(parsed_url.scheme(), &url) {
         return Err(AppError::permission(msg).into());
@@ -64,9 +68,23 @@ pub async fn navigate_tab(
     webview
         .navigate(parsed_url)
         .map_err(|e| AppError::internal(format!("导航失败: {}", e)))?;
+    let t_nav = t0.elapsed();
+    log::info!(
+        "[perf][nav] id={} clean={:?} parse={:?} navigate={:?} total={:?} url={}",
+        id,
+        t_clean,
+        t_parse.saturating_sub(t_clean),
+        t_nav.saturating_sub(t_parse),
+        t_nav,
+        crate::redact_url(&url)
+    );
 
     let mut tab = None;
     state.mutate(|s| {
+        // 用户手动导航优先：作废会话恢复的延迟加载账。
+        // 不清的话，之后切到该标签会加载旧地址，把刚点的书签覆盖掉
+        //（表现为"点了书签又跑回原来那页"）。
+        s.deferred_loads.remove(&id);
         if let Some(t) = s.tabs.get_mut(&id) {
             t.url = url.clone();
             t.title = url.clone();

@@ -76,6 +76,8 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
 
     // 注入 panic hook 的落盘目录（P0-4）：此后任何线程 panic 都会追加到 panic.log
     let _ = crate::PANIC_LOG_DIR.set(app_data_dir.clone());
+    // 原生崩溃信号兜底（2026-10-19）：crash.log 与本目录同级，信号处理器直接写 fd
+    crate::crash_signal::set_log_dir(&app_data_dir);
 
     // 数据库是全应用硬依赖（TabManager/API/AI/设置全部 state::<Db>()），
     // 初始化失败必须**立即终止启动**——旧实现只记日志后继续，

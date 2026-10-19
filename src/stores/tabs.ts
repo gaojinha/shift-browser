@@ -4,6 +4,7 @@ import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { invokeOk, errText } from '../utils/invoke'
+import { perfLog } from '../utils/front-log'
 import { warmBackdrop } from '../utils/webview'
 import type { Tab } from '../types/tab'
 import type { Session, SessionTab } from '../types/session'
@@ -389,14 +390,20 @@ export const useTabsStore = defineStore('tabs', {
       this._markLoading(id)
       this.canGoBack = true
       this.canGoForward = false
+      // 性能埋点（2026-10-19）：invoke 往返耗时（Rust 导航返回 vs WebKit 实际出帧分开看）
+      const t0 = performance.now()
       try {
         const tab = await invokeOk<Tab | null>('navigate_tab', { id, url })
+        const ms = performance.now() - t0
+        perfLog(`[perf][tabs] navigate_tab invoke=${ms.toFixed(1)}ms ok=1`)
         if (tab) {
           const idx = this.tabs.findIndex((t) => t.id === id)
           // 保留分组：Rust 返回的 Tab 无 groupId 字段，整体替换会掉组（与 pinTab/muteTab 对齐）
           if (idx !== -1) this.tabs[idx] = { ...tab, groupId: this.tabs[idx].groupId ?? null }
         }
       } catch (e) {
+        const ms = performance.now() - t0
+        perfLog(`[perf][tabs] navigate_tab invoke=${ms.toFixed(1)}ms ok=0 err=${errText(e)}`)
         console.error('[tabs] 导航失败:', e)
         useToastStore().error(`页面导航失败：${errText(e)}`)
         if (this.loadingTabId === id) this.loadingTabId = null

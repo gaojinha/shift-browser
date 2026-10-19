@@ -17,6 +17,8 @@ pub async fn set_webview_visible(
     seq: u64,
     source: Option<String>,
 ) -> CommandResult<()> {
+    // 性能埋点（2026-10-19）：GTK 显隐+重排在主线程，记录总耗时与标签数
+    let t0 = std::time::Instant::now();
     // 过期指令丢弃：并发乱序时只应用最大 seq
     // 读锁内判定，写锁内更新（过期直接返回，不推版本）
     let last = state.read_state().webview_visible_seq;
@@ -41,37 +43,42 @@ pub async fn set_webview_visible(
     // 注意：child webview 不在 window.webviews() 列表里（只有 main），
     // 必须从 TabManager 拿已知标签逐个 get_webview
     let ids: Vec<String> = state.read_state().tabs.keys().cloned().collect();
-    let mut count = 0usize;
-    for id in ids {
-        let label = format!("tab-{}", id);
-        if let Some(wv) = window.get_webview(&label) {
-            let wv2 = wv.clone();
-            crate::log_if_err!("webview", wv.with_webview(move |pwv| {
-                let gtk_wv = pwv.inner();
-                // 同时隐藏/显示 Fixed 容器：Fixed 覆盖内容区会拦截弹窗点击，必须一起隐藏
-                crate::engine::layout::set_fixed_visible(&gtk_wv, visible);
-                if visible {
-                    crate::log_if_err!("tabs", wv2.show());
-                } else {
+    let count = ids.len();
+    // 隐藏：仍遍历全部（防御性兜底，确保任何路径遗留的可见 webview 都收起来）。
+    // 显示：不再逐个 show 全部标签——原实现 N 个标签要做约 2N 次主线程往返
+    // （实测 5 个标签 178ms、端到端 353ms），改为只恢复活动/分屏标签。
+    if !visible {
+        for id in &ids {
+            let label = format!("tab-{}", id);
+            if let Some(wv) = window.get_webview(&label) {
+                let wv2 = wv.clone();
+                crate::log_if_err!("webview", wv.with_webview(move |pwv| {
+                    let gtk_wv = pwv.inner();
+                    // 同时隐藏/显示 Fixed 容器：Fixed 覆盖内容区会拦截弹窗点击，必须一起隐藏
+                    crate::engine::layout::set_fixed_visible(&gtk_wv, false);
                     crate::log_if_err!("tabs", wv2.hide());
-                }
-            }));
-            count += 1;
+                }));
+            }
+        }
+        // 焦点交还主 webview（HTML 层）：子 webview 一藏，GTK 焦点悬空，
+        // 下一次点击会先用来"抢焦点"而被吞掉——表现就是菜单弹出后
+        // 第一次点书签没反应、第二下才生效。主动交还，第一下就能点中。
+        if let Some(main_wv) = window.get_webview("main") {
+            crate::log_if_err!("window", main_wv.set_focus());
         }
     }
-    // 恢复显示后重新应用几何：隐藏期间（弹窗打开时）可能改过书签栏显隐/AI 分屏/窗口尺寸，
-    // 不重设会导致 webview 尺寸或位置滞后，WebKit 输入窗口不跟随 → 页面点不动。
-    // 注意：必须走 apply_split_layout（先全部隐藏、再只显示活动标签）——
-    // 若直接对全部 webview show+apply，非活动标签会叠在活动标签上面（z-order），
-    // 把点击事件吃掉 → 表现"设置弹窗关闭后页面按钮点不动"。
+    // 恢复显示：只重算活动/分屏标签的几何并显示（内部会恢复共享 Fixed 容器）。
+    // 隐藏期间若改过书签栏显隐/AI 分屏/窗口尺寸，对应命令已各自记下最新几何，
+    // 这里统一按当前状态重新应用，避免尺寸或位置滞后。
     if visible {
-        apply_split_layout(&app, &state)?;
+        apply_split_layout_show_only(&app, &state)?;
     }
     log::info!(
-        "[tabs] set_webview_visible: visible={} count={} source={:?}",
+        "[tabs] set_webview_visible: visible={} count={} source={:?} elapsed={:?}",
         visible,
         count,
-        source
+        source,
+        t0.elapsed()
     );
     Ok(())
 }

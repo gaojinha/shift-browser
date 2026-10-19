@@ -85,6 +85,9 @@ mod harden;
 mod misc_cmds;
 #[path = "app/panic_hook.rs"]
 mod panic_hook;
+// 原生崩溃信号兜底（2026-10-19）：panic hook 抓不到 GTK/WebKit 段错误
+#[path = "app/crash_signal.rs"]
+pub(crate) mod crash_signal;
 #[cfg(unix)]
 pub use harden::harden_sensitive_files;
 pub(crate) use panic_hook::PANIC_LOG_DIR;
@@ -126,6 +129,8 @@ pub fn redact_url(u: &str) -> String {
 pub fn run() {
     // 最早安装：任何后续初始化（含 GTK/WebKit）中 panic 都有证据
     panic_hook::install();
+    // 原生崩溃兜底：GTK/WebKit 段错误时 panic hook 轮不到，信号处理器留信号+调用栈
+    crash_signal::install();
 
     // 启动环境变量与平台初始化（DMA-BUF 兜底 / 视频解码降级 / Cookie 持久化），
     // 必须在任何 GTK/WebKit 初始化之前执行——实现见 app/env_setup.rs

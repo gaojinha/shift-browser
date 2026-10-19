@@ -16,6 +16,7 @@ const ShieldPanel = defineAsyncComponent(() => import('./ShieldPanel.vue'))
 // 认址纯函数（URL 识别 / 默认协议 / 搜索分流，单测见 utils/address.test.ts）
 import { resolveInputTarget } from '../utils/address'
 import { errText } from '../utils/invoke'
+import { perfLog } from '../utils/front-log'
 import { setWebviewVisible } from '../utils/webview'
 
 const tabsStore = useTabsStore()
@@ -204,12 +205,22 @@ function onAddressEnter() {
   const active = tabsStore.activeTab
   if (!active) return
 
+  // 性能埋点（2026-10-19）：手输导航慢定位——分三段计时写 Rust 日志
+  //   ① 关下拉（触发 GTK webview 恢复显示+重排）② invoke 导航 ③ 总计
+  const t0 = performance.now()
   // 先关下拉（下拉开着时网页层是隐藏的，不关的话导航了也看不见，跟没打开一样）
   closeSuggestions()
+  const tClose = performance.now()
   const engine = settingsStore.get('search_engine') || 'bing'
   const { url } = resolveInputTarget(input, engine)
   if (!url) return
-  tabsStore.navigateTab(active.id, url)
+  void tabsStore.navigateTab(active.id, url).finally(() => {
+    const t1 = performance.now()
+    // 有意静默：日志桥失败不能影响导航
+    perfLog(
+      `[perf][address] closeSuggest=${(tClose - t0).toFixed(1)}ms navigate=${(t1 - tClose).toFixed(1)}ms total=${(t1 - t0).toFixed(1)}ms url=${url.slice(0, 100)}`,
+    )
+  })
 }
 
 function onRefresh() {

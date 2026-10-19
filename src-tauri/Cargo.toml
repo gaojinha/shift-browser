@@ -35,6 +35,8 @@ async-trait = "0.1"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
+# 原生崩溃信号兜底（crash_signal.rs）：GTK/WebKit 段错误时写出信号与调用栈
+libc = "0.2"
 # ── tauri unstable 特性登记（HANDOFF P2-4）────────────────────────────
 # 仅使用两个不稳定 API（Linux/WebKitGTK 平台能力，稳定 API 无替代）：
 #   1. WebviewWindow::with_webview() —— 23 处：拿底层 webkit2gtk::WebView，

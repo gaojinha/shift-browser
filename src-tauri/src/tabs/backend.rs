@@ -126,7 +126,9 @@ mod create;
 #[path = "backend/layout.rs"]
 mod layout;
 
-pub(crate) use layout::{apply_split_layout, open_devtools_for_active, setup_gtk_layout};
+pub(crate) use layout::{
+    apply_split_layout, apply_split_layout_show_only, open_devtools_for_active, setup_gtk_layout,
+};
 
 /// 下载目标路径唯一化：同名文件已存在时加 (1)(2)... 后缀，避免覆盖
 pub(crate) fn unique_download_path(dir: &str, filename: &str) -> String {

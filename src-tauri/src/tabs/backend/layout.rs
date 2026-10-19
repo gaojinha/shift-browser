@@ -221,9 +221,45 @@ pub(crate) fn apply_tab_geometry(window: &tauri::Window, id: &str, top: f64, ai_
     crate::engine::layout::apply_to_webview(window, id, geo);
 }
 
+/// 显示承载标签 webview 的 GtkFixed 容器（多标签共享同一容器，调用一次即可）。
+/// 覆盖层打开时容器会跟 webview 一起被隐藏，恢复显示前必须先把它放出来，
+/// 否则 webview 虽 show 了，容器仍隐藏 → 页面白屏/点不动。
+fn show_fixed_container(app: &AppHandle, id: &str) {
+    let Some(window) = app.get_window("main") else {
+        return;
+    };
+    let Some(wv) = window.get_webview(&format!("tab-{}", id)) else {
+        return;
+    };
+    crate::log_if_err!("webview", wv.with_webview(|pwv| {
+        crate::engine::layout::set_fixed_visible(&pwv.inner(), true);
+    }));
+}
+
 /// 应用分屏布局：左窗格=活动标签，右窗格=分屏标签（如有）；隐藏其余标签。
 /// 未分屏时等价于"只显示活动标签"（但用统一的隐藏-再显示路径，避免 z-order 残留）。
 pub(crate) fn apply_split_layout(app: &AppHandle, state: &TabManager) -> Result<(), String> {
+    apply_split_layout_inner(app, state, true)
+}
+
+/// 覆盖层关闭后的恢复显示专用（性能修复 · 2026-10-19）：
+/// 调用方已保证所有网页处于隐藏态，这里不再逐个 hide（N 个标签 = N 次主线程往返），
+/// 只重算几何并显示活动标签/分屏标签。书签栏/AI 面板/窗口尺寸在隐藏期间的变更，
+/// 由对应命令先行调 apply_split_layout 记下几何；这里按最新状态重新应用即可。
+pub(crate) fn apply_split_layout_show_only(
+    app: &AppHandle,
+    state: &TabManager,
+) -> Result<(), String> {
+    apply_split_layout_inner(app, state, false)
+}
+
+/// @param hide_all true=先隐藏全部标签（常规重排，防 z-order 叠层）；
+///                 false=仅恢复显示（调用方已隐藏全部）
+fn apply_split_layout_inner(
+    app: &AppHandle,
+    state: &TabManager,
+    hide_all: bool,
+) -> Result<(), String> {
     let window = app
         .get_window("main")
         .ok_or_else(|| "主窗口不存在".to_string())?;
@@ -239,12 +275,21 @@ pub(crate) fn apply_split_layout(app: &AppHandle, state: &TabManager) -> Result<
     drop(s);
 
     // 先全部隐藏（避免 z-order/尺寸错位），再按窗格定位并显示
-    for id in &ids {
-        let _ = TabManager::set_webview_visible(app, id, false);
+    if hide_all {
+        for id in &ids {
+            let _ = TabManager::set_webview_visible(app, id, false);
+        }
     }
     // 覆盖层（证书警告等）激活时：只隐藏、不显示，避免盖住覆盖层
     if UI_OVERLAY_ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {
         return Ok(());
+    }
+    // 仅恢复路径：Fixed 容器在隐藏时被一起藏了，显示 webview 前必须先恢复容器
+    // （容器是共享的，恢复活动标签这一处即可；常规重排路径的 Fixed 一直是可见的）
+    if !hide_all {
+        if let Some(a) = &active {
+            show_fixed_container(app, a);
+        }
     }
     match (active, split) {
         (Some(a), Some(s)) if s != a => {

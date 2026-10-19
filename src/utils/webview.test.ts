@@ -62,6 +62,17 @@ describe("setWebviewVisible", () => {
     await expect(swv(true)).resolves.toBeUndefined();
   });
 
+  it("invoke 失败自动重试，且复用同一 seq（幂等，不会被后端重复应用）", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error("boom"));
+    const mod = await import("./webview");
+    mod.resetWebviewHiders();
+    await mod.setWebviewVisible(true, "retry-test");
+    const calls = visibleCalls();
+    expect(calls).toHaveLength(2);
+    expect(calls[0][1]).toMatchObject({ visible: true, seq: 1, source: "retry-test" });
+    expect(calls[1][1]).toMatchObject({ visible: true, seq: 1, source: "retry-test" });
+  });
+
   it("底垫：首个隐藏抓快照、清零即撤", async () => {
     vi.mocked(invoke).mockImplementation(((cmd: string) =>
       cmd === "page_backdrop_shot"
