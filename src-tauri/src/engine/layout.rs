@@ -132,42 +132,45 @@ pub fn apply_to_webview(window: &tauri::Window, tab_id: &str, geo: ContentGeomet
         .map(|s| s.width as f64)
         .unwrap_or(1280.0);
     let w_logical = (w_physical / scale) as i32;
-    crate::log_if_err!("webview", wv.with_webview(move |pwv| {
-        let gtk_wv = pwv.inner();
-        if let Some(fixed) = gtk_wv
-            .parent()
-            .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
-        {
-            // 顶部偏移用 Fixed 的 margin_top（水平模式已验证有效）；
-            // 左侧偏移用 GtkFixed 内部 move_（绝对定位）——不用 margin_start：
-            // GtkOverlay 的叠加子件上 margin_start 会把 Fixed 的分配压成 1×1（实测）。
-            fixed.set_margin_top(geo.top);
-            fixed.set_margin_start(0);
-            fixed.move_(&gtk_wv, geo.left, 0);
-            fixed.set_size_request(geo.left + geo.width, geo.height);
-            // 修复（2026-09-23）：GtkOverlay 对 halign=Start 的子件按 natural size
-            // 分配；而 Fixed 的 natural size 被 webview 的渲染宽度（WebKit 进程
-            // 滞后更新，实测 40 秒+）撑大，导致 AI 分屏时 Fixed 保持全宽、右侧
-            // 380px 覆盖并吞掉鼠标事件（表现为"AI 面板点不动/反应慢"）。
-            // 对策：改为 halign=Fill + margin_end 控制宽度——GtkOverlay 对 Fill
-            // 子件按"overlay 全宽减 margin"分配，不依赖 natural size。
-            // margin_end = 窗口宽 - 内容区左偏移 - 内容区宽（即右侧留白）。
-            fixed.set_halign(gtk::Align::Fill);
-            fixed.set_valign(gtk::Align::Start);
-            let margin_right = (w_logical - geo.left - geo.width).max(0);
-            fixed.set_margin_end(margin_right);
-            fixed.set_margin_bottom(0);
-            // 强制重新分配：Fixed 的 margin/size_request 变化后，GtkOverlay 需
-            // 重新分配子件；向上 queue_resize 至窗口确保下一帧布局循环执行。
-            let mut parent_opt = fixed.parent();
-            while let Some(p) = parent_opt {
-                p.queue_resize();
-                parent_opt = p.parent();
+    crate::log_if_err!(
+        "webview",
+        wv.with_webview(move |pwv| {
+            let gtk_wv = pwv.inner();
+            if let Some(fixed) = gtk_wv
+                .parent()
+                .and_then(|p| p.dynamic_cast::<gtk::Fixed>().ok())
+            {
+                // 顶部偏移用 Fixed 的 margin_top（水平模式已验证有效）；
+                // 左侧偏移用 GtkFixed 内部 move_（绝对定位）——不用 margin_start：
+                // GtkOverlay 的叠加子件上 margin_start 会把 Fixed 的分配压成 1×1（实测）。
+                fixed.set_margin_top(geo.top);
+                fixed.set_margin_start(0);
+                fixed.move_(&gtk_wv, geo.left, 0);
+                fixed.set_size_request(geo.left + geo.width, geo.height);
+                // 修复（2026-09-23）：GtkOverlay 对 halign=Start 的子件按 natural size
+                // 分配；而 Fixed 的 natural size 被 webview 的渲染宽度（WebKit 进程
+                // 滞后更新，实测 40 秒+）撑大，导致 AI 分屏时 Fixed 保持全宽、右侧
+                // 380px 覆盖并吞掉鼠标事件（表现为"AI 面板点不动/反应慢"）。
+                // 对策：改为 halign=Fill + margin_end 控制宽度——GtkOverlay 对 Fill
+                // 子件按"overlay 全宽减 margin"分配，不依赖 natural size。
+                // margin_end = 窗口宽 - 内容区左偏移 - 内容区宽（即右侧留白）。
+                fixed.set_halign(gtk::Align::Fill);
+                fixed.set_valign(gtk::Align::Start);
+                let margin_right = (w_logical - geo.left - geo.width).max(0);
+                fixed.set_margin_end(margin_right);
+                fixed.set_margin_bottom(0);
+                // 强制重新分配：Fixed 的 margin/size_request 变化后，GtkOverlay 需
+                // 重新分配子件；向上 queue_resize 至窗口确保下一帧布局循环执行。
+                let mut parent_opt = fixed.parent();
+                while let Some(p) = parent_opt {
+                    p.queue_resize();
+                    parent_opt = p.parent();
+                }
             }
-        }
-        gtk_wv.set_size_request(geo.width, geo.height);
-        gtk_wv.queue_resize();
-    }));
+            gtk_wv.set_size_request(geo.width, geo.height);
+            gtk_wv.queue_resize();
+        })
+    );
 }
 
 /// 从 webview 向上找父级 GtkBox（vbox）。

@@ -28,7 +28,9 @@ pub(super) fn resolve_webview_url(
         match file_internal_page(path, &app_data, private) {
             // 无痕：ephemeral context 无 shift:// 协议 → 直接 file:// 加载
             Some(_) if private => {
-                log::info!("[tabs] 无痕标签 file URL 保持 External（ephemeral context 无自定义协议）");
+                log::info!(
+                    "[tabs] 无痕标签 file URL 保持 External（ephemeral context 无自定义协议）"
+                );
                 WebviewUrl::External(parsed_url)
             }
             Some("newtab") => {
@@ -62,12 +64,15 @@ pub(super) fn resolve_webview_url(
 ///
 /// 纯函数可单测：同时接受「app_data 拼出的完整路径」与「任意目录下 ends_with」两种形态
 /// （后者兼容 app_data_dir 变更/打包路径差异的历史口径）。无痕例外由调用方处理。
-fn file_internal_page(path: &str, app_data: &std::path::Path, _private: bool) -> Option<&'static str> {
+fn file_internal_page(
+    path: &str,
+    app_data: &std::path::Path,
+    _private: bool,
+) -> Option<&'static str> {
     let newtab_index = app_data.join("newtab").join("index.html");
     let worldnav = app_data.join("newtab").join("world-nav.html");
     let is_newtab = path == newtab_index.to_string_lossy() || path.ends_with("newtab/index.html");
-    let is_worldnav =
-        path == worldnav.to_string_lossy() || path.ends_with("newtab/world-nav.html");
+    let is_worldnav = path == worldnav.to_string_lossy() || path.ends_with("newtab/world-nav.html");
     if is_newtab {
         Some("newtab")
     } else if is_worldnav {
@@ -84,7 +89,11 @@ mod tests {
     #[test]
     fn 内部页判定命中newtab与worldnav两种形态() {
         let app_data = std::path::Path::new("/home/u/.local/share/com.shiftbrowser.app");
-        let full = app_data.join("newtab").join("index.html").to_string_lossy().to_string();
+        let full = app_data
+            .join("newtab")
+            .join("index.html")
+            .to_string_lossy()
+            .to_string();
         assert_eq!(file_internal_page(&full, app_data, false), Some("newtab"));
         // 任意目录下按文件名后缀命中（历史口径）
         assert_eq!(
@@ -96,7 +105,10 @@ mod tests {
             .join("world-nav.html")
             .to_string_lossy()
             .to_string();
-        assert_eq!(file_internal_page(&full_world, app_data, false), Some("worldnav"));
+        assert_eq!(
+            file_internal_page(&full_world, app_data, false),
+            Some("worldnav")
+        );
         assert_eq!(
             file_internal_page("/x/newtab/world-nav.html", app_data, false),
             Some("worldnav")
@@ -116,9 +128,15 @@ mod tests {
             None,
             "仅后缀相似不命中"
         );
-        assert_eq!(file_internal_page("/data/index.html", app_data, false), None);
+        assert_eq!(
+            file_internal_page("/data/index.html", app_data, false),
+            None
+        );
         // 空 app_data 时 ends_with 口径仍兜底
-        assert_eq!(file_internal_page("/a/newtab/index.html", std::path::Path::new(""), false), Some("newtab"));
+        assert_eq!(
+            file_internal_page("/a/newtab/index.html", std::path::Path::new(""), false),
+            Some("newtab")
+        );
     }
 
     #[test]

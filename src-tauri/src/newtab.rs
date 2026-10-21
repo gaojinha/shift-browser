@@ -371,10 +371,7 @@ mod tests {
         assert!(html.contains("https://bm.com"), "书签应嵌入");
         assert!(html.contains("https://example.com"), "快捷访问应嵌入");
         // P2 安全：危险 scheme 数据不得进入 HTML
-        assert!(
-            !html.contains("javascript:alert"),
-            "javascript: 必须被过滤"
-        );
+        assert!(!html.contains("javascript:alert"), "javascript: 必须被过滤");
         let _ = db;
     }
 
@@ -451,7 +448,8 @@ mod tests {
         let bad = vec![serde_json::json!({"icon": "🌐", "name": "无址站"})];
         assert!(save_quick_sites_inner(&db.pool, bad).await.is_err());
         // 危险 scheme
-        let bad = vec![serde_json::json!({"icon": "💥", "name": "注入", "url": "javascript:alert(1)"})];
+        let bad =
+            vec![serde_json::json!({"icon": "💥", "name": "注入", "url": "javascript:alert(1)"})];
         assert!(save_quick_sites_inner(&db.pool, bad).await.is_err());
         // 拒绝后库里无残值
         let row: Option<String> =

@@ -168,7 +168,10 @@ pub async fn remove_server(pool: &SqlitePool, id: i64) -> CommandResult<()> {
     let _guard = conn_lock.lock().await;
     // 先取出再判断：if let 会把 scrutinee 临时 guard 延长到块结束导致 !Send，
     // 存变量让 std guard 在语句结束即释放
-    let removed = connections().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+    let removed = connections()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
     if let Some(conn) = removed {
         if let Ok(mut c) = conn.try_lock() {
             c.kill().await;
@@ -188,7 +191,10 @@ pub async fn set_server_enabled(pool: &SqlitePool, id: i64, enabled: bool) -> Co
     if !enabled {
         let conn_lock = connect_lock(id);
         let _guard = conn_lock.lock().await;
-        let removed = connections().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        let removed = connections()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
         if let Some(conn) = removed {
             if let Ok(mut c) = conn.try_lock() {
                 c.kill().await;

@@ -191,7 +191,12 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                         Some(db) => {
                             let mem_key = crate::db::translate_memory::hmac_key(db.inner()).await;
                             crate::translate::translate_text_cached(
-                                &db.pool, &text, "zh-CN", &engine, &dual_mode, timeout,
+                                &db.pool,
+                                &text,
+                                "zh-CN",
+                                &engine,
+                                &dual_mode,
+                                timeout,
                                 mem_key.as_ref(),
                             )
                             .await
@@ -243,14 +248,24 @@ pub(crate) fn native_translate_handle(app: &tauri::AppHandle, webview_label: &st
                         crate::translate::current_dual_mode(db.inner()).await,
                         crate::translate::current_timeout(db.inner()).await,
                     ),
-                    None => ("google".to_string(), "zh-CN".to_string(), "single".to_string(), 15),
+                    None => (
+                        "google".to_string(),
+                        "zh-CN".to_string(),
+                        "single".to_string(),
+                        15,
+                    ),
                 };
                 // C-9：命中记忆的段落不发第三方，仅翻未命中
                 let out = match db.as_ref() {
                     Some(db) => {
                         let mem_key = crate::db::translate_memory::hmac_key(db.inner()).await;
                         crate::translate::translate_batch_cached(
-                            &db.pool, &texts, &target, &engine, &dual_mode, timeout,
+                            &db.pool,
+                            &texts,
+                            &target,
+                            &engine,
+                            &dual_mode,
+                            timeout,
                             mem_key.as_ref(),
                         )
                         .await
@@ -393,7 +408,7 @@ mod tests {
         assert!(!valid_callback("cb 1")); // 空格
         assert!(!valid_callback("cb;1")); // 语句注入
         assert!(!valid_callback("alert(1)")); // 括号
-        // 非 ASCII（含中文）按字节层面拒绝
+                                              // 非 ASCII（含中文）按字节层面拒绝
         assert!(!valid_callback("回调"));
         assert!(!valid_callback("cbé"));
     }

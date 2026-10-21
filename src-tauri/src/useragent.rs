@@ -202,7 +202,10 @@ mod tests {
     /// 复位全局静态到默认态（每个状态类测试开头调用，防用例间状态泄漏）
     fn reset_shared_state() {
         *global_ua().lock().unwrap_or_else(|e| e.into_inner()) = DEFAULT_UA.to_string();
-        overrides().lock().unwrap_or_else(|e| e.into_inner()).clear();
+        overrides()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     /// 建一个跑完整迁移的真实库（settings 表齐全），同 newtab.rs temp_db 模式
@@ -236,7 +239,10 @@ mod tests {
     #[test]
     fn chrome_major_falls_back_to_142_on_missing_or_malformed() {
         // 缺 Chrome 标记（WebKitGTK 真身）
-        assert_eq!(chrome_major("Mozilla/5.0 (X11) AppleWebKit/605.1.15 Safari/605"), 142);
+        assert_eq!(
+            chrome_major("Mozilla/5.0 (X11) AppleWebKit/605.1.15 Safari/605"),
+            142
+        );
         // 畸变输入：非数字 / 空串
         assert_eq!(chrome_major("Chrome/abc"), 142);
         assert_eq!(chrome_major(""), 142);
@@ -247,7 +253,8 @@ mod tests {
     #[test]
     fn brands_json_is_valid_and_aligned_with_chrome_major() {
         let json = brands_json("Chrome/131.0.0.0 Safari/537.36");
-        let parsed: serde_json::Value = serde_json::from_str(&json).expect("brands_json 必须是合法 JSON");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json).expect("brands_json 必须是合法 JSON");
         let brands = parsed.as_array().unwrap();
         assert_eq!(brands.len(), 3);
         // Chromium 与 Google Chrome 两项版本都要对齐 chrome_major
@@ -268,7 +275,7 @@ mod tests {
         let _g = STATE_LOCK.lock().await;
         reset_shared_state();
         assert_eq!(ua_for(""), DEFAULT_UA); // 空 host 回落全局
-        // 站点覆盖优先于全局
+                                            // 站点覆盖优先于全局
         overrides()
             .lock()
             .unwrap()
@@ -288,7 +295,8 @@ mod tests {
         let _g = STATE_LOCK.lock().await;
         reset_shared_state();
         let json = overrides_json();
-        let parsed: serde_json::Value = serde_json::from_str(&json).expect("overrides_json 必须是合法 JSON");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json).expect("overrides_json 必须是合法 JSON");
         assert!(parsed.as_object().unwrap().is_empty());
     }
 
@@ -327,11 +335,17 @@ mod tests {
         reset_shared_state();
         let (_dir, db) = temp_db().await;
         // 首次插入
-        persist_setting(&db.pool, "user_agent", "Chrome/100.0.0.0 persist").await.unwrap();
+        persist_setting(&db.pool, "user_agent", "Chrome/100.0.0.0 persist")
+            .await
+            .unwrap();
         // 冲突更新
-        persist_setting(&db.pool, "user_agent", "Chrome/101.0.0.0 persist").await.unwrap();
+        persist_setting(&db.pool, "user_agent", "Chrome/101.0.0.0 persist")
+            .await
+            .unwrap();
         // 命令层语义：全局 UA 空串落库为空串（命令写 trim 后的值）
-        persist_setting(&db.pool, "ua_site_overrides", r#"{"db.com":"DbUA/1"}"#).await.unwrap();
+        persist_setting(&db.pool, "ua_site_overrides", r#"{"db.com":"DbUA/1"}"#)
+            .await
+            .unwrap();
         // load 读回并生效到内存状态
         load(&db.pool).await;
         assert_eq!(ua_for(""), "Chrome/101.0.0.0 persist");

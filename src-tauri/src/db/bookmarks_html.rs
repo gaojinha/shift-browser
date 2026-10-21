@@ -413,12 +413,38 @@ mod tests {
     fn render_folder_tree_nested_and_cycle_prevention() {
         let folders = vec![
             (1, "Folder A".to_string(), None, 0, "2026-01-01".to_string()),
-            (2, "Folder B".to_string(), Some(1), 0, "2026-01-01".to_string()),
-            (3, "Cycle Folder".to_string(), Some(3), 0, "2026-01-01".to_string()), // 自环
+            (
+                2,
+                "Folder B".to_string(),
+                Some(1),
+                0,
+                "2026-01-01".to_string(),
+            ),
+            (
+                3,
+                "Cycle Folder".to_string(),
+                Some(3),
+                0,
+                "2026-01-01".to_string(),
+            ), // 自环
         ];
         let bookmarks = vec![
-            (10, "Title 1 & Special".to_string(), "https://a.com?x=1&y=2".to_string(), Some(1), 0, "2026-01-01".to_string()),
-            (11, "Title 2".to_string(), "https://b.com".to_string(), Some(2), 0, "2026-01-01".to_string()),
+            (
+                10,
+                "Title 1 & Special".to_string(),
+                "https://a.com?x=1&y=2".to_string(),
+                Some(1),
+                0,
+                "2026-01-01".to_string(),
+            ),
+            (
+                11,
+                "Title 2".to_string(),
+                "https://b.com".to_string(),
+                Some(2),
+                0,
+                "2026-01-01".to_string(),
+            ),
         ];
 
         let mut html = String::new();
@@ -437,18 +463,28 @@ mod tests {
         let mut cycle_html = String::new();
         let mut cycle_visited = Vec::new();
         // 传入自环文件夹，必须正常退出不栈溢出
-        render_folder_tree(&mut cycle_html, &folders, &bookmarks, 3, 1, &mut cycle_visited);
+        render_folder_tree(
+            &mut cycle_html,
+            &folders,
+            &bookmarks,
+            3,
+            1,
+            &mut cycle_visited,
+        );
         assert!(cycle_visited.contains(&3));
     }
 
     #[test]
     fn render_and_parse_roundtrip_consistency() {
-        let folders = vec![
-            (1, "Work".to_string(), None, 0, "2026-01-01".to_string()),
-        ];
-        let bookmarks = vec![
-            (10, "Search Engine".to_string(), "https://google.com".to_string(), Some(1), 0, "2026-01-01".to_string()),
-        ];
+        let folders = vec![(1, "Work".to_string(), None, 0, "2026-01-01".to_string())];
+        let bookmarks = vec![(
+            10,
+            "Search Engine".to_string(),
+            "https://google.com".to_string(),
+            Some(1),
+            0,
+            "2026-01-01".to_string(),
+        )];
 
         let mut html = String::new();
         html.push_str("    <DT><H3>Work</H3>\n    <DL><p>\n");

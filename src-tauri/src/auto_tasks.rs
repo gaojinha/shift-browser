@@ -135,9 +135,10 @@ mod tests {
         assert_eq!(n2, 0, "重复清理应 0 条");
 
         // 幸存者正确：近期两条在，古董条目没了
-        let remaining: Vec<String> =
-            sqlx::query_scalar("SELECT url FROM history ORDER BY url").fetch_all(&db.pool)
-                .await.unwrap();
+        let remaining: Vec<String> = sqlx::query_scalar("SELECT url FROM history ORDER BY url")
+            .fetch_all(&db.pool)
+            .await
+            .unwrap();
         assert_eq!(remaining, vec!["https://now.com", "https://yesterday.com"]);
     }
 

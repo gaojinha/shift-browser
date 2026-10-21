@@ -33,7 +33,10 @@ pub async fn request_agent_action(
     let description = crate::engine::agent::describe_action(params);
     let (tx, rx) = tokio::sync::oneshot::channel();
 
-    pending().lock().unwrap_or_else(|e| e.into_inner()).insert(request_id.clone(), tx);
+    pending()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(request_id.clone(), tx);
 
     // 通知前端弹确认卡片
     let _ = app.emit(
@@ -53,7 +56,10 @@ pub async fn request_agent_action(
         }
         Ok(Err(_)) => Err(AppError::internal("动作确认通道已关闭").into()),
         Err(_) => {
-            pending().lock().unwrap_or_else(|e| e.into_inner()).remove(&request_id);
+            pending()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&request_id);
             Err(AppError::timeout("动作确认超时（60 秒未响应）").into())
         }
     }
@@ -84,7 +90,10 @@ pub async fn request_multi_step_action(
     let description = crate::engine::agent::describe_multi_step(plan);
     let (tx, rx) = tokio::sync::oneshot::channel();
 
-    pending().lock().unwrap_or_else(|e| e.into_inner()).insert(request_id.clone(), tx);
+    pending()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(request_id.clone(), tx);
 
     let _ = app.emit(
         crate::contracts::events::AGENT_MULTI_STEP_REQUEST,
@@ -113,7 +122,10 @@ pub async fn request_multi_step_action(
         }
         Ok(Err(_)) => Err(AppError::internal("多步确认通道已关闭").into()),
         Err(_) => {
-            pending().lock().unwrap_or_else(|e| e.into_inner()).remove(&request_id);
+            pending()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&request_id);
             Err(AppError::timeout("多步确认超时（120 秒未响应）").into())
         }
     }
@@ -263,8 +275,8 @@ pub async fn agent_actions_batch_retry(
 /// - 严禁扩展商店域名（如 `chrome.google.com/webstore`, `chromewebstore.google.com`, `addons.mozilla.org`）；
 /// - 拒绝内网地址（与既有 net_guard 同口径）。
 pub fn validate_agent_nav_url(url_str: &str) -> CommandResult<url::Url> {
-    let parsed = url::Url::parse(url_str)
-        .map_err(|e| AppError::validation(format!("网址不合法: {e}")))?;
+    let parsed =
+        url::Url::parse(url_str).map_err(|e| AppError::validation(format!("网址不合法: {e}")))?;
 
     // 1. 严格 scheme 校验：仅允许 https（严禁 about/chrome/file/javascript 等）
     match parsed.scheme() {
@@ -295,11 +307,7 @@ pub fn validate_agent_nav_url(url_str: &str) -> CommandResult<url::Url> {
         || (host.ends_with("chrome.google.com") && parsed.path().starts_with("/webstore"))
         || host.ends_with("addons.mozilla.org")
     {
-        return Err(AppError::permission(format!(
-            "Agent 严禁访问浏览器扩展商店: {}",
-            host
-        ))
-        .into());
+        return Err(AppError::permission(format!("Agent 严禁访问浏览器扩展商店: {}", host)).into());
     }
 
     // 3. 内网守卫（net_guard host_permitted 校验）
@@ -507,7 +515,10 @@ mod tests {
 
         let res2 = agent_confirm_multi_step(req_id_deny, false);
         assert!(res2.is_ok());
-        assert!(!rx2.await.expect("channel failed"), "多步计划拒绝应为 false");
+        assert!(
+            !rx2.await.expect("channel failed"),
+            "多步计划拒绝应为 false"
+        );
     }
 
     /// U-1 验证：白名单外动作直接被白名单拒绝（E_PERM），不能执行

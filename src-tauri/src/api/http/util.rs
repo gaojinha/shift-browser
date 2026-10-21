@@ -101,7 +101,10 @@ mod tests {
         // 标准形态 / 小写头 + 小写 Bearer / 多行时第二行命中
         assert!(bearer_token_ok("Authorization: Bearer s3cret", "s3cret"));
         assert!(bearer_token_ok("authorization: bearer s3cret", "s3cret"));
-        assert!(bearer_token_ok("Host: x\r\nAuthorization: Bearer s3cret", "s3cret"));
+        assert!(bearer_token_ok(
+            "Host: x\r\nAuthorization: Bearer s3cret",
+            "s3cret"
+        ));
         // 无 Bearer 前缀的裸值也接受（现行口径：strip 失败用原值比较）
         assert!(bearer_token_ok("Authorization: s3cret", "s3cret"));
         // 否定路径：错 token / 无该头 / 空头

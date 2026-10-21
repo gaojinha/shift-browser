@@ -136,156 +136,162 @@ fn inject_extensions(
     let app_for_bridge_all = app.clone();
     // 单页过滤同样要 owned（main 线程闭包 'static，借用活不过函数）
     let only_owned: Option<String> = only_label.map(|s| s.to_string());
-    crate::log_if_err!("extensions", app.run_on_main_thread(move || {
-        // 引擎层内容过滤器：如有规则变更，在主线程编译（编译完成会回来触发一次重新注入）
-        crate::engine::content_filter::compile_pending();
-        // 只注入 child 标签页（已跳过主 webview），child 都是 http/https 外部网页。
-        // allow_list 必须用 ["*"]（匹配所有页面）：空数组 &[] 会被 WebKit 当作"空匹配列表"，
-        // 一个页面都不注入（UserScript 从此从未生效——2026-09-19 事故根因，广告拦截/隐私/翻译全失效）。
-        // 不能用 "http://*" 这类格式（WebKitGTK 通配符识别有坑，曾导致不注入）。
-        let allow_list: &[&str] = &["*"];
-        for wv in &webviews {
-            // 跳过主 webview（label="main"，是 Vue UI），只注入 child 标签页（label="tab-*"）
-            // 单页模式（唤醒/新建）：只碰目标标签，别家脚本不动，防闪断
-            // remove_all_scripts 会误删 Tauri 主 webview 的 UserScript（Vue UI 桥接），导致界面空白
-            if wv.label() == "main" {
-                continue;
-            }
-            if let Some(ref only) = only_owned {
-                if wv.label() != only.as_str() {
+    crate::log_if_err!(
+        "extensions",
+        app.run_on_main_thread(move || {
+            // 引擎层内容过滤器：如有规则变更，在主线程编译（编译完成会回来触发一次重新注入）
+            crate::engine::content_filter::compile_pending();
+            // 只注入 child 标签页（已跳过主 webview），child 都是 http/https 外部网页。
+            // allow_list 必须用 ["*"]（匹配所有页面）：空数组 &[] 会被 WebKit 当作"空匹配列表"，
+            // 一个页面都不注入（UserScript 从此从未生效——2026-09-19 事故根因，广告拦截/隐私/翻译全失效）。
+            // 不能用 "http://*" 这类格式（WebKitGTK 通配符识别有坑，曾导致不注入）。
+            let allow_list: &[&str] = &["*"];
+            for wv in &webviews {
+                // 跳过主 webview（label="main"，是 Vue UI），只注入 child 标签页（label="tab-*"）
+                // 单页模式（唤醒/新建）：只碰目标标签，别家脚本不动，防闪断
+                // remove_all_scripts 会误删 Tauri 主 webview 的 UserScript（Vue UI 桥接），导致界面空白
+                if wv.label() == "main" {
                     continue;
                 }
-            }
-            let items_clone = items_owned.clone();
-            let user_scripts_clone = user_scripts.clone();
-            let app_for_bridge = app_for_bridge_all.clone();
-            let label_for_bridge = wv.label().to_string();
-            crate::log_if_err!("webview", wv.with_webview(move |pwv| {
-                let webview = pwv.inner();
-                let Some(manager) = webview.user_content_manager() else {
-                    return;
-                };
-                crate::engine::content_filter::apply_to_manager(&manager);
-                // 翻译原生桥（CSP 免疫 · 2026-09-21）：注册脚本消息处理器。
-                // 站点 CSP 的 img-src 会拦 `img.src='shift://__translate__/…'`，故翻译脚本改走
-                // 原生消息（不受 CSP 约束）。去重靠 register 自身返回值（同 manager 重复
-                // 注册返回 false，不断连接；新 manager（休眠唤醒/会话恢复重建的 webview，
-                // label 会复用）返回 true，必须重新连接——此前按 label 常驻去重，
-                // 重建的 webview 永远没桥，整页翻译静默死亡（2026-09-29 高哥实锤）。
-                if manager.register_script_message_handler("shiftTranslate") {
-                    let app_msg = app_for_bridge.clone();
-                    let label_msg = label_for_bridge.clone();
-                    manager.connect_script_message_received(
-                        Some("shiftTranslate"),
-                        move |_mgr, res| {
-                            if let Some(v) = res.js_value() {
-                                let raw = v.to_string();
-                                crate::proto_shift::native_translate_handle(
-                                    &app_msg, &label_msg, &raw,
+                if let Some(ref only) = only_owned {
+                    if wv.label() != only.as_str() {
+                        continue;
+                    }
+                }
+                let items_clone = items_owned.clone();
+                let user_scripts_clone = user_scripts.clone();
+                let app_for_bridge = app_for_bridge_all.clone();
+                let label_for_bridge = wv.label().to_string();
+                crate::log_if_err!(
+                    "webview",
+                    wv.with_webview(move |pwv| {
+                        let webview = pwv.inner();
+                        let Some(manager) = webview.user_content_manager() else {
+                            return;
+                        };
+                        crate::engine::content_filter::apply_to_manager(&manager);
+                        // 翻译原生桥（CSP 免疫 · 2026-09-21）：注册脚本消息处理器。
+                        // 站点 CSP 的 img-src 会拦 `img.src='shift://__translate__/…'`，故翻译脚本改走
+                        // 原生消息（不受 CSP 约束）。去重靠 register 自身返回值（同 manager 重复
+                        // 注册返回 false，不断连接；新 manager（休眠唤醒/会话恢复重建的 webview，
+                        // label 会复用）返回 true，必须重新连接——此前按 label 常驻去重，
+                        // 重建的 webview 永远没桥，整页翻译静默死亡（2026-09-29 高哥实锤）。
+                        if manager.register_script_message_handler("shiftTranslate") {
+                            let app_msg = app_for_bridge.clone();
+                            let label_msg = label_for_bridge.clone();
+                            manager.connect_script_message_received(
+                                Some("shiftTranslate"),
+                                move |_mgr, res| {
+                                    if let Some(v) = res.js_value() {
+                                        let raw = v.to_string();
+                                        crate::proto_shift::native_translate_handle(
+                                            &app_msg, &label_msg, &raw,
+                                        );
+                                    }
+                                },
+                            );
+                            log::info!("[translate-native] 原生桥已注册: {}", label_for_bridge);
+                        }
+                        manager.remove_all_scripts();
+                        manager.remove_all_style_sheets();
+                        // 选区缓存监听：**常驻** document_start UserScript（所有 frame、
+                        // 所有页面）。必须紧跟 remove_all_scripts 重新登记，否则下一次
+                        // re_inject 又会把它清掉——这正是「翻译选中」首击读不到选区的根因。
+                        // 当前已加载的页面 UserScript 追不生效，下面立刻 eval 补一次（幂等）。
+                        let selwatch = UserScript::new(
+                            SELWATCH_JS,
+                            UserContentInjectedFrames::AllFrames,
+                            UserScriptInjectionTime::Start,
+                            allow_list,
+                            &[],
+                        );
+                        manager.add_script(&selwatch);
+                        crate::engine::webview::eval_js(&webview, SELWATCH_JS);
+                        // Chrome 指纹补齐（2026-09-29 Turnstile 确诊缺口）：userAgentData /
+                        // deviceMemory / scheduler 三件在 WebKitGTK 缺失，验证墙拿它们打分。
+                        // document_start + 全帧（含验证 iframe），网站 feature-detect 前到位。
+                        // 开关见设置 compat_chrome_fp（默认开），已加载标签即时 eval 生效。
+                        if compat_on {
+                            let compat = UserScript::new(
+                                COMPAT_CHROME_JS,
+                                UserContentInjectedFrames::AllFrames,
+                                UserScriptInjectionTime::Start,
+                                allow_list,
+                                &[],
+                            );
+                            manager.add_script(&compat);
+                            crate::engine::webview::eval_js(&webview, COMPAT_CHROME_JS);
+                        }
+                        // WebMCP polyfill 试验（阶段 1.5）：document_start 注入（网站脚本
+                        // feature-detect 前），捕获 registerTool 声明。可开关，默认关。
+                        if webmcp_on {
+                            let polyfill = UserScript::new(
+                                crate::engine::webmcp::WEBMCP_POLYFILL_JS,
+                                UserContentInjectedFrames::AllFrames,
+                                UserScriptInjectionTime::Start,
+                                allow_list,
+                                &[],
+                            );
+                            manager.add_script(&polyfill);
+                            // 即时注入：已加载的标签立即生效（幂等，重复无害）
+                            crate::engine::webview::eval_js(
+                                &webview,
+                                crate::engine::webmcp::WEBMCP_POLYFILL_JS,
+                            );
+                        }
+                        // 用户脚本（阶段3.2）：按各自 matches 限定页面（空则全站）；与扩展脚本同一套机制
+                        for (code, patterns) in &user_scripts_clone {
+                            let allow: Vec<&str> = if patterns.is_empty() {
+                                vec!["*"]
+                            } else {
+                                patterns.iter().map(|s| s.as_str()).collect()
+                            };
+                            let script = UserScript::new(
+                                code,
+                                UserContentInjectedFrames::AllFrames,
+                                UserScriptInjectionTime::End,
+                                &allow,
+                                &[],
+                            );
+                            manager.add_script(&script);
+                            // 即时注入：已加载的标签立即生效（脚本自带幂等保护）
+                            crate::engine::webview::eval_js(&webview, code);
+                        }
+                        for (js, css) in &items_clone {
+                            if let Some(js) = js {
+                                let script = UserScript::new(
+                                    js,
+                                    UserContentInjectedFrames::AllFrames,
+                                    UserScriptInjectionTime::End,
+                                    allow_list,
+                                    &[],
                                 );
+                                manager.add_script(&script);
+                                // 即时注入：UserScript 只对"之后导航"的页面生效，已加载的标签不会
+                                // 自动执行脚本（右键翻译菜单等注入因此对老标签无效）。这里对当前
+                                // 页面再 evaluate 一次，让已打开的标签也能立即生效。
+                                // 脚本自带幂等保护（__shiftPrivacyInstalled / __shiftTranslateMenu），
+                                // 页面加载时已执行过则直接 return，重复注入无害。
+                                // 引擎层统一封装（失败仅 debug：页面未就绪时属正常，UserScript 兜底）
+                                crate::engine::webview::eval_js(&webview, js);
                             }
-                        },
-                    );
-                    log::info!("[translate-native] 原生桥已注册: {}", label_for_bridge);
-                }
-                manager.remove_all_scripts();
-                manager.remove_all_style_sheets();
-                // 选区缓存监听：**常驻** document_start UserScript（所有 frame、
-                // 所有页面）。必须紧跟 remove_all_scripts 重新登记，否则下一次
-                // re_inject 又会把它清掉——这正是「翻译选中」首击读不到选区的根因。
-                // 当前已加载的页面 UserScript 追不生效，下面立刻 eval 补一次（幂等）。
-                let selwatch = UserScript::new(
-                    SELWATCH_JS,
-                    UserContentInjectedFrames::AllFrames,
-                    UserScriptInjectionTime::Start,
-                    allow_list,
-                    &[],
+                            if let Some(css) = css {
+                                let sheet = UserStyleSheet::new(
+                                    css,
+                                    UserContentInjectedFrames::AllFrames,
+                                    UserStyleLevel::User,
+                                    allow_list,
+                                    &[],
+                                );
+                                manager.add_style_sheet(&sheet);
+                            }
+                        }
+                    })
                 );
-                manager.add_script(&selwatch);
-                crate::engine::webview::eval_js(&webview, SELWATCH_JS);
-                // Chrome 指纹补齐（2026-09-29 Turnstile 确诊缺口）：userAgentData /
-                // deviceMemory / scheduler 三件在 WebKitGTK 缺失，验证墙拿它们打分。
-                // document_start + 全帧（含验证 iframe），网站 feature-detect 前到位。
-                // 开关见设置 compat_chrome_fp（默认开），已加载标签即时 eval 生效。
-                if compat_on {
-                    let compat = UserScript::new(
-                        COMPAT_CHROME_JS,
-                        UserContentInjectedFrames::AllFrames,
-                        UserScriptInjectionTime::Start,
-                        allow_list,
-                        &[],
-                    );
-                    manager.add_script(&compat);
-                    crate::engine::webview::eval_js(&webview, COMPAT_CHROME_JS);
-                }
-                // WebMCP polyfill 试验（阶段 1.5）：document_start 注入（网站脚本
-                // feature-detect 前），捕获 registerTool 声明。可开关，默认关。
-                if webmcp_on {
-                    let polyfill = UserScript::new(
-                        crate::engine::webmcp::WEBMCP_POLYFILL_JS,
-                        UserContentInjectedFrames::AllFrames,
-                        UserScriptInjectionTime::Start,
-                        allow_list,
-                        &[],
-                    );
-                    manager.add_script(&polyfill);
-                    // 即时注入：已加载的标签立即生效（幂等，重复无害）
-                    crate::engine::webview::eval_js(
-                        &webview,
-                        crate::engine::webmcp::WEBMCP_POLYFILL_JS,
-                    );
-                }
-                // 用户脚本（阶段3.2）：按各自 matches 限定页面（空则全站）；与扩展脚本同一套机制
-                for (code, patterns) in &user_scripts_clone {
-                    let allow: Vec<&str> = if patterns.is_empty() {
-                        vec!["*"]
-                    } else {
-                        patterns.iter().map(|s| s.as_str()).collect()
-                    };
-                    let script = UserScript::new(
-                        code,
-                        UserContentInjectedFrames::AllFrames,
-                        UserScriptInjectionTime::End,
-                        &allow,
-                        &[],
-                    );
-                    manager.add_script(&script);
-                    // 即时注入：已加载的标签立即生效（脚本自带幂等保护）
-                    crate::engine::webview::eval_js(&webview, code);
-                }
-                for (js, css) in &items_clone {
-                    if let Some(js) = js {
-                        let script = UserScript::new(
-                            js,
-                            UserContentInjectedFrames::AllFrames,
-                            UserScriptInjectionTime::End,
-                            allow_list,
-                            &[],
-                        );
-                        manager.add_script(&script);
-                        // 即时注入：UserScript 只对"之后导航"的页面生效，已加载的标签不会
-                        // 自动执行脚本（右键翻译菜单等注入因此对老标签无效）。这里对当前
-                        // 页面再 evaluate 一次，让已打开的标签也能立即生效。
-                        // 脚本自带幂等保护（__shiftPrivacyInstalled / __shiftTranslateMenu），
-                        // 页面加载时已执行过则直接 return，重复注入无害。
-                        // 引擎层统一封装（失败仅 debug：页面未就绪时属正常，UserScript 兜底）
-                        crate::engine::webview::eval_js(&webview, js);
-                    }
-                    if let Some(css) = css {
-                        let sheet = UserStyleSheet::new(
-                            css,
-                            UserContentInjectedFrames::AllFrames,
-                            UserStyleLevel::User,
-                            allow_list,
-                            &[],
-                        );
-                        manager.add_style_sheet(&sheet);
-                    }
-                }
-            }));
-        }
-        log::info!("[extensions] 注入完成: {} 个扩展", items.len());
-    }));
+            }
+            log::info!("[extensions] 注入完成: {} 个扩展", items.len());
+        })
+    );
 }
 
 /// 重新注入全部启用扩展 + 广告拦截（新标签创建后调用，确保新 webview 也有扩展）

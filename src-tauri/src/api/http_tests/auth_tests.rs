@@ -194,7 +194,9 @@ fn generate_token_shape_64_hex() {
     // 双 uuid simple 拼接：64 个小写 hex（无连字符）——token 轮换/日志校验的格式契约
     let t = crate::api::auth::generate_token();
     assert_eq!(t.len(), 64);
-    assert!(t.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+    assert!(t
+        .chars()
+        .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     assert!(!t.contains('-'));
     // 两次生成不重号
     assert_ne!(t, crate::api::auth::generate_token());
@@ -220,10 +222,7 @@ fn atomic_write_token_roundtrip_and_mode() {
 #[test]
 fn dashboard_login_html_escapes_error_and_banner() {
     // error 插值必须过 HTML 转义（XSS 面：error 来自内部格式化，但口径锁死防漂移）
-    let html = crate::api::dashboard::dashboard_login_html(
-        Some("<script>alert(1)</script>"),
-        0,
-    );
+    let html = crate::api::dashboard::dashboard_login_html(Some("<script>alert(1)</script>"), 0);
     assert!(html.contains("&lt;script&gt;"), "error 必须转义");
     assert!(!html.contains("<script>alert"), "不得出现未转义 script");
     // retry_after > 0 → 退避横幅出现并带秒数

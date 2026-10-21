@@ -141,9 +141,27 @@ mod tests {
         let (_dir, db) = temp_db().await;
         // 经 engine 层真实落库两条：一条启用（命令不存在 → fetch_tools 快速失败 → tool_count=0）
         // 一条落库后停用（直接 tool_count=0）
-        let id_a = crate::engine::mcp::add_server(&db.pool, "本地测试A".into(), "/nonexistent/mcp-bin".into(), vec!["--x".into()], vec![]).await.unwrap();
-        let id_b = crate::engine::mcp::add_server(&db.pool, "本地测试B".into(), "/nonexistent/mcp-bin".into(), vec![], vec![]).await.unwrap();
-        crate::engine::mcp::set_server_enabled(&db.pool, id_b, false).await.unwrap();
+        let id_a = crate::engine::mcp::add_server(
+            &db.pool,
+            "本地测试A".into(),
+            "/nonexistent/mcp-bin".into(),
+            vec!["--x".into()],
+            vec![],
+        )
+        .await
+        .unwrap();
+        let id_b = crate::engine::mcp::add_server(
+            &db.pool,
+            "本地测试B".into(),
+            "/nonexistent/mcp-bin".into(),
+            vec![],
+            vec![],
+        )
+        .await
+        .unwrap();
+        crate::engine::mcp::set_server_enabled(&db.pool, id_b, false)
+            .await
+            .unwrap();
 
         let views = server_views_inner(&db.pool).await.unwrap();
         assert_eq!(views.len(), 2);
@@ -163,8 +181,20 @@ mod tests {
     #[tokio::test]
     async fn add_server_rejects_blank_name_or_command() {
         let (_dir, db) = temp_db().await;
-        assert!(crate::engine::mcp::add_server(&db.pool, "  ".into(), "/bin/x".into(), vec![], vec![]).await.is_err());
-        assert!(crate::engine::mcp::add_server(&db.pool, "名".into(), "".into(), vec![], vec![]).await.is_err());
+        assert!(crate::engine::mcp::add_server(
+            &db.pool,
+            "  ".into(),
+            "/bin/x".into(),
+            vec![],
+            vec![]
+        )
+        .await
+        .is_err());
+        assert!(
+            crate::engine::mcp::add_server(&db.pool, "名".into(), "".into(), vec![], vec![])
+                .await
+                .is_err()
+        );
         // 拒绝后库里无残行
         assert!(server_views_inner(&db.pool).await.unwrap().is_empty());
     }

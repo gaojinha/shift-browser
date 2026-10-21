@@ -379,12 +379,24 @@ mod tests {
         });
 
         let all = m.all_tabs();
-        let user_tab_read = all.iter().find(|t| t.id == "user-tab-1").expect("user tab exists");
-        let ai_tab_read = all.iter().find(|t| t.id == "ai-tab-1").expect("ai tab exists");
+        let user_tab_read = all
+            .iter()
+            .find(|t| t.id == "user-tab-1")
+            .expect("user tab exists");
+        let ai_tab_read = all
+            .iter()
+            .find(|t| t.id == "ai-tab-1")
+            .expect("ai tab exists");
 
         // 验证用户标签不带无痕隔离，AI 标签必须带 private 隔离
-        assert!(!user_tab_read.private, "用户常规标签不应是 private 隔离模式");
-        assert!(ai_tab_read.private, "AI 标签必须标记为 private (ephemeral 隔离)");
+        assert!(
+            !user_tab_read.private,
+            "用户常规标签不应是 private 隔离模式"
+        );
+        assert!(
+            ai_tab_read.private,
+            "AI 标签必须标记为 private (ephemeral 隔离)"
+        );
         assert_eq!(ai_tab_read.origin, "ai");
         assert_eq!(m.ai_tab_count(), 1);
     }

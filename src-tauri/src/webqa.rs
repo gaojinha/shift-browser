@@ -647,7 +647,10 @@ pub async fn opencode_ask(
     )
     .await;
 
-    cancel_flags().lock().unwrap_or_else(|e| e.into_inner()).remove(&request_id);
+    cancel_flags()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&request_id);
     result
 }
 

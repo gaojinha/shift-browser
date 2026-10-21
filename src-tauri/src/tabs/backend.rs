@@ -207,7 +207,10 @@ mod tests {
         );
         // 首位点（隐藏文件）：点不视为扩展名分隔，整体加后缀
         std::fs::write(format!("{d}/.hidden"), "").unwrap();
-        assert_eq!(unique_download_path(&d, ".hidden"), format!("{d}/.hidden(1)"));
+        assert_eq!(
+            unique_download_path(&d, ".hidden"),
+            format!("{d}/.hidden(1)")
+        );
     }
 
     #[test]
@@ -226,7 +229,9 @@ mod tests {
         assert!(is_internal_newtab_url("file:///app/dist/newtab/index.html"));
         assert!(!is_internal_newtab_url("file:///app/dist/newtab"));
         assert!(is_internal_newtab_url("file:///app/dist/world-nav.html"));
-        assert!(!is_internal_newtab_url("file:///app/dist/reader/index.html"));
+        assert!(!is_internal_newtab_url(
+            "file:///app/dist/reader/index.html"
+        ));
     }
 
     #[test]

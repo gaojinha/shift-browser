@@ -148,8 +148,14 @@ mod tests {
     #[test]
     fn tracking_clean_passthrough_non_http() {
         // 非 http(s) 或无 query 不动（内部页/本地路径绝不改写）
-        assert_eq!(clean_tracking_params("shift://newtab?utm_source=1"), "shift://newtab?utm_source=1");
-        assert_eq!(clean_tracking_params("https://a.com/noquery"), "https://a.com/noquery");
+        assert_eq!(
+            clean_tracking_params("shift://newtab?utm_source=1"),
+            "shift://newtab?utm_source=1"
+        );
+        assert_eq!(
+            clean_tracking_params("https://a.com/noquery"),
+            "https://a.com/noquery"
+        );
         assert_eq!(clean_tracking_params(""), "");
     }
 

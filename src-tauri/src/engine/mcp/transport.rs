@@ -207,14 +207,22 @@ pub(super) async fn connect(
     pool: &SqlitePool,
     row: &McpServerRow,
 ) -> Result<Arc<tokio::sync::Mutex<McpConnection>>, String> {
-    if let Some(conn) = connections().lock().unwrap_or_else(|e| e.into_inner()).get(&row.id) {
+    if let Some(conn) = connections()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&row.id)
+    {
         return Ok(conn.clone());
     }
     // per-server 串行化首次连接：握手完成前其他并发请求在此排队，不重复 spawn
     let conn_lock = connect_lock(row.id);
     let _connect_guard = conn_lock.lock().await;
     // 双重检查：排队期间可能已有其他请求完成连接
-    if let Some(conn) = connections().lock().unwrap_or_else(|e| e.into_inner()).get(&row.id) {
+    if let Some(conn) = connections()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&row.id)
+    {
         return Ok(conn.clone());
     }
 
@@ -291,7 +299,10 @@ pub(super) async fn connect(
     }
 
     let conn = Arc::new(tokio::sync::Mutex::new(conn));
-    connections().lock().unwrap_or_else(|e| e.into_inner()).insert(row.id, conn.clone());
+    connections()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(row.id, conn.clone());
     Ok(conn)
 }
 

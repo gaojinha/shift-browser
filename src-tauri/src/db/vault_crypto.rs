@@ -259,7 +259,9 @@ mod tests {
         // 按照 v1 参数手动构造一个裸 base64 payload
         let dk = derive_with_rounds("v1-legacy-pass", &salt, PBKDF2_ROUNDS_V1);
         let cipher = Aes256Gcm::new_from_slice(&dk).unwrap();
-        let ct = cipher.encrypt(Nonce::from_slice(&nonce), master.as_ref()).unwrap();
+        let ct = cipher
+            .encrypt(Nonce::from_slice(&nonce), master.as_ref())
+            .unwrap();
 
         let mut blob = Vec::new();
         blob.extend_from_slice(&salt);
@@ -306,7 +308,11 @@ mod tests {
         let wrapped = wrap_key(&master, "test-pass");
         let mut tampered = wrapped.into_bytes();
         let len = tampered.len();
-        tampered[len - 2] = if tampered[len - 2] == b'A' { b'B' } else { b'A' };
+        tampered[len - 2] = if tampered[len - 2] == b'A' {
+            b'B'
+        } else {
+            b'A'
+        };
         let tampered_str = String::from_utf8(tampered).unwrap();
         let err_tamper = unwrap_key(&tampered_str, "test-pass").unwrap_err();
         assert_eq!(err_tamper, "主密码错误");

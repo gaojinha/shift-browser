@@ -365,7 +365,10 @@ pub(crate) fn validate_create_url(url: &str) -> Result<(), AppError> {
                 Err(AppError::permission("不允许打开本地文件"))
             }
         }
-        other => Err(AppError::permission(format!("不允许的 URL scheme: {}", other))),
+        other => Err(AppError::permission(format!(
+            "不允许的 URL scheme: {}",
+            other
+        ))),
     }
 }
 
@@ -380,17 +383,17 @@ pub(crate) fn hibernate_candidates<'a>(
     count_pressure: bool,
 ) -> Vec<String> {
     tabs.filter(|(id, t)| {
-            if t.hibernated || Some(id.as_str()) == active {
-                return false;
-            }
-            count_pressure
-                || last_active
-                    .get(*id)
-                    .map(|ts| *ts < threshold)
-                    .unwrap_or(true)
-        })
-        .map(|(id, _)| id.clone())
-        .collect()
+        if t.hibernated || Some(id.as_str()) == active {
+            return false;
+        }
+        count_pressure
+            || last_active
+                .get(*id)
+                .map(|ts| *ts < threshold)
+                .unwrap_or(true)
+    })
+    .map(|(id, _)| id.clone())
+    .collect()
 }
 
 /// 空闲标签休眠：销毁长时间未激活的标签 webview，回收其渲染进程内存
@@ -528,11 +531,11 @@ mod tests {
     #[test]
     fn hibernate_candidates_timeout_and_pressure() {
         let tabs = [
-            ("t-active".to_string(), tab("t-active", false)),   // 活动 → 永不候选
-            ("t-sleepy".to_string(), tab("t-sleepy", true)),    // 已休眠 → 不候选
-            ("t-old".to_string(), tab("t-old", false)),          // 早已空闲 → 候选
-            ("t-new".to_string(), tab("t-new", false)),          // 刚活跃 → 不候选
-            ("t-norec".to_string(), tab("t-norec", false)),      // 无激活记录 → 候选
+            ("t-active".to_string(), tab("t-active", false)), // 活动 → 永不候选
+            ("t-sleepy".to_string(), tab("t-sleepy", true)),  // 已休眠 → 不候选
+            ("t-old".to_string(), tab("t-old", false)),       // 早已空闲 → 候选
+            ("t-new".to_string(), tab("t-new", false)),       // 刚活跃 → 不候选
+            ("t-norec".to_string(), tab("t-norec", false)),   // 无激活记录 → 候选
         ];
         let mut last_active = std::collections::HashMap::new();
         last_active.insert("t-old".to_string(), 100);
@@ -547,13 +550,24 @@ mod tests {
         let out = hibernate_candidates(it(), Some("t-active"), &last_active, threshold, true);
         assert_eq!(
             out,
-            vec!["t-old".to_string(), "t-new".to_string(), "t-norec".to_string()]
+            vec![
+                "t-old".to_string(),
+                "t-new".to_string(),
+                "t-norec".to_string()
+            ]
         );
 
         // active=None（理论不发生，锁死函数语义：无人豁免——t-active 无激活记录
         // 按超时规则同样是候选）
         let out = hibernate_candidates(it(), None, &last_active, threshold, false);
-        assert_eq!(out, vec!["t-active".to_string(), "t-old".to_string(), "t-norec".to_string()]);
+        assert_eq!(
+            out,
+            vec![
+                "t-active".to_string(),
+                "t-old".to_string(),
+                "t-norec".to_string()
+            ]
+        );
     }
 
     #[test]
@@ -566,7 +580,10 @@ mod tests {
         let err = validate_create_url("not a url at all").unwrap_err();
         assert_eq!(err.code(), crate::error::E_VALIDATION);
         // scheme 名出现在错误信息里便于排查；本地文件拒绝信息固定
-        assert!(validate_create_url("ftp://x").unwrap_err().to_string().contains("ftp"));
+        assert!(validate_create_url("ftp://x")
+            .unwrap_err()
+            .to_string()
+            .contains("ftp"));
         assert!(validate_create_url("file:///etc/passwd")
             .unwrap_err()
             .to_string()

@@ -502,7 +502,11 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(bm.0, 3, "sort_order 保留");
-        assert_eq!(bm.1.as_deref(), Some("工作"), "文件夹 find-or-create 同名复用");
+        assert_eq!(
+            bm.1.as_deref(),
+            Some("工作"),
+            "文件夹 find-or-create 同名复用"
+        );
         let (vc, lv): (i64, String) = sqlx::query_as(
             "SELECT visit_count, last_visit_at FROM history WHERE url='https://x.com'",
         )
@@ -516,14 +520,22 @@ mod tests {
         // 书签/会话按 url/(name,created_at) 去重跳过不计数、历史 UPSERT 计次
         let n2 = import_payload(&local, &raw).await.unwrap();
         assert_eq!(n2, 3, "密码 2（计数不覆盖）+ 历史 1（UPSERT）");
-        let pc: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM passwords").fetch_one(&local.pool).await.unwrap();
-        let bc: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM bookmarks").fetch_one(&local.pool).await.unwrap();
-        let sc: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM sessions").fetch_one(&local.pool).await.unwrap();
-        let hc: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM history").fetch_one(&local.pool).await.unwrap();
+        let pc: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM passwords")
+            .fetch_one(&local.pool)
+            .await
+            .unwrap();
+        let bc: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM bookmarks")
+            .fetch_one(&local.pool)
+            .await
+            .unwrap();
+        let sc: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
+            .fetch_one(&local.pool)
+            .await
+            .unwrap();
+        let hc: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM history")
+            .fetch_one(&local.pool)
+            .await
+            .unwrap();
         assert_eq!((pc.0, bc.0, sc.0, hc.0), (2, 1, 1, 1));
     }
 
@@ -545,14 +557,15 @@ mod tests {
         // 空包导入空库：0 处理、零行
         let (_dir2, db2) = temp_db().await;
         assert_eq!(import_payload(&db2, &raw).await.unwrap(), 0);
-        let c: (i64,) =
-            sqlx::query_as("SELECT (SELECT COUNT(*) FROM passwords)
+        let c: (i64,) = sqlx::query_as(
+            "SELECT (SELECT COUNT(*) FROM passwords)
                 + (SELECT COUNT(*) FROM bookmarks)
                 + (SELECT COUNT(*) FROM sessions)
-                + (SELECT COUNT(*) FROM history)")
-            .fetch_one(&db2.pool)
-            .await
-            .unwrap();
+                + (SELECT COUNT(*) FROM history)",
+        )
+        .fetch_one(&db2.pool)
+        .await
+        .unwrap();
         assert_eq!(c.0, 0);
     }
 
@@ -611,13 +624,23 @@ mod tests {
             ]
         });
         let plain = serde_json::to_vec(&payload).unwrap();
-        assert_eq!(import_payload(&db, &plain).await.unwrap(), 2, "仅 ok.com 密码 + ok.com 历史");
-        let pc: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM passwords").fetch_one(&db.pool).await.unwrap();
-        let sc: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM sessions").fetch_one(&db.pool).await.unwrap();
-        let hc: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM history").fetch_one(&db.pool).await.unwrap();
+        assert_eq!(
+            import_payload(&db, &plain).await.unwrap(),
+            2,
+            "仅 ok.com 密码 + ok.com 历史"
+        );
+        let pc: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM passwords")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        let sc: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        let hc: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM history")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
         assert_eq!((pc.0, sc.0, hc.0), (1, 0, 1));
         // 空字段条目重复导入仍被跳过，无脏数据累积
         assert_eq!(

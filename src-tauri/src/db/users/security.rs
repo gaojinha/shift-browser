@@ -173,7 +173,10 @@ mod tests {
         // 未知或老格式 'pbkdf2' 均兜底为历史参数 100,000
         assert_eq!(iterations_for_algo("pbkdf2"), LEGACY_PBKDF2_ITER);
         assert_eq!(iterations_for_algo("unknown-algo"), LEGACY_PBKDF2_ITER);
-        assert_eq!(iterations_for_algo("pbkdf2-sha512-notanumber"), LEGACY_PBKDF2_ITER);
+        assert_eq!(
+            iterations_for_algo("pbkdf2-sha512-notanumber"),
+            LEGACY_PBKDF2_ITER
+        );
     }
 
     /// 校验密码哈希在相同/不同参数下的确定性与雪崩效应

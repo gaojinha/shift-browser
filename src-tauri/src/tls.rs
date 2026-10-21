@@ -219,11 +219,14 @@ pub async fn delete_cert_exception(
     #[cfg(target_os = "linux")]
     {
         let host2 = host.clone();
-        crate::log_if_err!("tls", app.run_on_main_thread(move || {
-            PENDING_TLS_CERTS.with(|m| {
-                m.borrow_mut().remove(&host2);
-            });
-        }));
+        crate::log_if_err!(
+            "tls",
+            app.run_on_main_thread(move || {
+                PENDING_TLS_CERTS.with(|m| {
+                    m.borrow_mut().remove(&host2);
+                });
+            })
+        );
     }
     Ok(())
 }
@@ -318,22 +321,25 @@ pub async fn accept_cert_exception(
             let Some(wv) = window.get_webview(&label) else {
                 return;
             };
-            crate::log_if_err!("webview", wv.with_webview(move |pwv| {
-                let g = pwv.inner();
-                // 1) 把缓存的证书加入 WebKit 白名单
-                PENDING_TLS_CERTS.with(|m| {
-                    if let Some(cert) = m.borrow().get(&host2) {
-                        if let Some(ctx) = WebViewExt::context(&g) {
-                            ctx.allow_tls_certificate_for_host(cert, &host2);
-                            log::info!("[cert] 已放行 {} 的证书例外", host2);
+            crate::log_if_err!(
+                "webview",
+                wv.with_webview(move |pwv| {
+                    let g = pwv.inner();
+                    // 1) 把缓存的证书加入 WebKit 白名单
+                    PENDING_TLS_CERTS.with(|m| {
+                        if let Some(cert) = m.borrow().get(&host2) {
+                            if let Some(ctx) = WebViewExt::context(&g) {
+                                ctx.allow_tls_certificate_for_host(cert, &host2);
+                                log::info!("[cert] 已放行 {} 的证书例外", host2);
+                            }
+                        } else {
+                            log::warn!("[cert] 放行失败：{} 无缓存的错误证书", host2);
                         }
-                    } else {
-                        log::warn!("[cert] 放行失败：{} 无缓存的错误证书", host2);
-                    }
-                });
-                // 2) 重新加载
-                WebViewExt::reload(&g);
-            }));
+                    });
+                    // 2) 重新加载
+                    WebViewExt::reload(&g);
+                })
+            );
         })
         .map_err(|e| AppError::internal(e.to_string()))?;
     }

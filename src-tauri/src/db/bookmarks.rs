@@ -86,13 +86,15 @@ pub(crate) async fn get_bookmark_folders_inner(pool: &SqlitePool) -> DbResult<Ve
 
     Ok(rows
         .into_iter()
-        .map(|(id, name, parent_id, sort_order, created_at)| BookmarkFolder {
-            id,
-            name,
-            parent_id,
-            sort_order,
-            created_at,
-        })
+        .map(
+            |(id, name, parent_id, sort_order, created_at)| BookmarkFolder {
+                id,
+                name,
+                parent_id,
+                sort_order,
+                created_at,
+            },
+        )
         .collect())
 }
 
@@ -521,7 +523,10 @@ mod tests {
 
         delete_bookmark_folder_inner(&db.pool, root).await.unwrap();
 
-        assert!(get_bookmark_folders_inner(&db.pool).await.unwrap().is_empty());
+        assert!(get_bookmark_folders_inner(&db.pool)
+            .await
+            .unwrap()
+            .is_empty());
         let ids: Vec<i64> = get_bookmarks_inner(&db.pool)
             .await
             .unwrap()

@@ -232,9 +232,12 @@ fn show_fixed_container(app: &AppHandle, id: &str) {
     let Some(wv) = window.get_webview(&format!("tab-{}", id)) else {
         return;
     };
-    crate::log_if_err!("webview", wv.with_webview(|pwv| {
-        crate::engine::layout::set_fixed_visible(&pwv.inner(), true);
-    }));
+    crate::log_if_err!(
+        "webview",
+        wv.with_webview(|pwv| {
+            crate::engine::layout::set_fixed_visible(&pwv.inner(), true);
+        })
+    );
 }
 
 /// 应用分屏布局：左窗格=活动标签，右窗格=分屏标签（如有）；隐藏其余标签。
@@ -329,9 +332,12 @@ pub(crate) fn open_devtools_for_active(app: &AppHandle) {
         };
         let label = format!("tab-{}", id);
         if let Some(wv) = window.get_webview(&label) {
-            crate::log_if_err!("webview", wv.with_webview(move |pwv| {
-                crate::engine::webview::open_inspector(&pwv.inner());
-            }));
+            crate::log_if_err!(
+                "webview",
+                wv.with_webview(move |pwv| {
+                    crate::engine::webview::open_inspector(&pwv.inner());
+                })
+            );
             log::info!("[tabs] 已打开开发者工具: tab={}", id);
         }
     });
@@ -350,7 +356,11 @@ enum GtkShortcutAction {
 }
 
 #[cfg(target_os = "linux")]
-fn match_shortcut(key: u32, ctrl: bool, shift: bool) -> Option<&'static crate::contracts::shortcuts::Shortcut> {
+fn match_shortcut(
+    key: u32,
+    ctrl: bool,
+    shift: bool,
+) -> Option<&'static crate::contracts::shortcuts::Shortcut> {
     use crate::contracts::shortcuts::SHORTCUTS;
     SHORTCUTS.iter().find(|s| {
         (key == s.gdk_keyval || key == s.gdk_keyval_shift) && ctrl == s.ctrl && shift == s.shift
@@ -358,7 +368,10 @@ fn match_shortcut(key: u32, ctrl: bool, shift: bool) -> Option<&'static crate::c
 }
 
 #[cfg(target_os = "linux")]
-fn shortcut_action(sc: &crate::contracts::shortcuts::Shortcut, ui_focused: bool) -> GtkShortcutAction {
+fn shortcut_action(
+    sc: &crate::contracts::shortcuts::Shortcut,
+    ui_focused: bool,
+) -> GtkShortcutAction {
     // ① 无条件响应（F12 / Ctrl+Shift+I：不论焦点在哪都开开发者工具）
     if sc.gtk_always {
         return GtkShortcutAction::OpenDevtools;
@@ -388,7 +401,10 @@ mod layout_tests {
         // 修饰键不匹配不命中（Ctrl+T 用错了 shift）
         let _ = GDK_TAB;
         let _ = SHORTCUTS.len();
-        assert!(match_shortcut(GDK_F12, true, false).is_none(), "F12 带 ctrl 不应命中");
+        assert!(
+            match_shortcut(GDK_F12, true, false).is_none(),
+            "F12 带 ctrl 不应命中"
+        );
     }
 
     #[test]

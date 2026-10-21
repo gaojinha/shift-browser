@@ -172,13 +172,13 @@ fn host_of(origin: &str) -> Option<String> {
     if !(lower.starts_with("http://") || lower.starts_with("https://")) {
         return None;
     }
-    let rest = origin
-        .split_once("://")
-        .map(|(_, r)| r)
-        .unwrap_or(origin);
+    let rest = origin.split_once("://").map(|(_, r)| r).unwrap_or(origin);
     let authority = rest.split(['/', '?', '#']).next()?;
     // 剥 userinfo（u:p@h:port → h:port，对齐 F-68 host_of 修复口径）
-    let host_port = authority.rsplit_once('@').map(|(_, h)| h).unwrap_or(authority);
+    let host_port = authority
+        .rsplit_once('@')
+        .map(|(_, h)| h)
+        .unwrap_or(authority);
     // 端口剥不剥：保留（与 P0 验证脚本展示一致，唯一性靠 (domain, username) UPSERT）
     if host_port.is_empty() {
         None
@@ -188,10 +188,7 @@ fn host_of(origin: &str) -> Option<String> {
 }
 
 /// 解一条 login blob：v10 peanuts / v11 keyring 原文（F-90 原语透传）
-fn decrypt_login_blob(
-    blob: &[u8],
-    v11_key: Option<&[u8]>,
-) -> Result<String, super::DecryptError> {
+fn decrypt_login_blob(blob: &[u8], v11_key: Option<&[u8]>) -> Result<String, super::DecryptError> {
     super::decrypt_os_crypt(blob, v11_key)
 }
 
@@ -223,12 +220,10 @@ async fn snapshot_login_rows(
     )
     .await
     .ok()?;
-    let rows = sqlx::query(
-        "SELECT origin_url, username_value, password_value FROM logins",
-    )
-    .fetch_all(&mut conn)
-    .await
-    .ok()?;
+    let rows = sqlx::query("SELECT origin_url, username_value, password_value FROM logins")
+        .fetch_all(&mut conn)
+        .await
+        .ok()?;
     Some(
         rows.into_iter()
             .map(|r| {
@@ -288,9 +283,7 @@ pub(super) async fn collect_password_previews(
 
 /// WAL 快照读 logins 的 (origin_url, username_value)——**不 SELECT password_value**，
 /// 预览专用（快照铁律同 [`snapshot_login_rows`]：0700 临时目录、db+wal+shm、读完即删）。
-async fn snapshot_login_meta(
-    db_path: &std::path::Path,
-) -> Option<Vec<(String, Option<String>)>> {
+async fn snapshot_login_meta(db_path: &std::path::Path) -> Option<Vec<(String, Option<String>)>> {
     let tmp = tempfile::Builder::new()
         .prefix("shift-import-pwpreview-")
         .tempdir()
@@ -337,9 +330,19 @@ mod f92_tests {
 
     #[test]
     fn host_of_extracts_host_and_strips_userinfo() {
-        assert_eq!(host_of("https://example.com/login").as_deref(), Some("example.com"));
-        assert_eq!(host_of("http://sub.example.com:8443/x?y=1").as_deref(), Some("sub.example.com:8443"));
-        assert_eq!(host_of("https://u:p@host.example.com/").as_deref(), Some("host.example.com"), "userinfo 剥离");
+        assert_eq!(
+            host_of("https://example.com/login").as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            host_of("http://sub.example.com:8443/x?y=1").as_deref(),
+            Some("sub.example.com:8443")
+        );
+        assert_eq!(
+            host_of("https://u:p@host.example.com/").as_deref(),
+            Some("host.example.com"),
+            "userinfo 剥离"
+        );
         // 非 http(s) origin 防御性拒收（logins 里不该有，防垃圾 domain）
         assert_eq!(host_of("chrome://settings"), None);
         assert_eq!(host_of("ftp://x.com"), None);
@@ -348,7 +351,8 @@ mod f92_tests {
 
     // ---- decrypt_login_blob：透传 F-90 原语（黄金向量语义在此再锁一层） ----
 
-    const GOLDEN_V10_CT_HEX: &str = "8a2f0711b2b584b62bd4f134bd2d425636de3c42f4b17b617ba3fa739ad827a7";
+    const GOLDEN_V10_CT_HEX: &str =
+        "8a2f0711b2b584b62bd4f134bd2d425636de3c42f4b17b617ba3fa739ad827a7";
     const GOLDEN_V11_SECRET: &str = "q7b7aG9hbm9yaXNlaGVpZGVp";
     const GOLDEN_V11_CT_HEX: &str = "035436fe29e7cbbcf01298db6336bf4f";
 

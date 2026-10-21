@@ -226,7 +226,9 @@ mod tests {
     fn internal_keys_must_be_declared_in_settings() {
         for k in crate::contracts::settings::INTERNAL_KEYS {
             assert!(
-                crate::contracts::settings::SETTINGS.iter().any(|d| d.key == *k),
+                crate::contracts::settings::SETTINGS
+                    .iter()
+                    .any(|d| d.key == *k),
                 "INTERNAL_KEYS 里的 {} 未在 SETTINGS 中声明（暗键：读不到、写被拒）",
                 k
             );
@@ -261,7 +263,9 @@ mod tests {
         ];
         for k in expected {
             assert!(
-                crate::contracts::settings::SETTINGS.iter().any(|d| d.key == k),
+                crate::contracts::settings::SETTINGS
+                    .iter()
+                    .any(|d| d.key == k),
                 "专用命令设置键 {} 未在 contracts::settings::SETTINGS 登记",
                 k
             );
@@ -466,7 +470,9 @@ fn contracts_urls_is_newtab() {
     // 协议版
     assert!(urls::is_newtab("shift://newtab"));
     // 旧 file:// 版（靠 /newtab/ marker contains 判定——既定口径）
-    assert!(urls::is_newtab("file:///home/gao/.local/share/shift/newtab/index.html"));
+    assert!(urls::is_newtab(
+        "file:///home/gao/.local/share/shift/newtab/index.html"
+    ));
     // 普通页面不误杀（marker 是内部路径约定，外部 https 页面按现状会 contains 命中，
     // 此处只锁内部 URL 判定为真；外部误杀问题由 webview 层不加载此类 URL 保证）
     assert!(urls::is_newtab("anything/newtab/whatever"));
@@ -474,7 +480,7 @@ fn contracts_urls_is_newtab() {
 
 #[test]
 fn contracts_skills_ids_and_kind_as_ts() {
-    use crate::contracts::{skills, settings::Kind};
+    use crate::contracts::{settings::Kind, skills};
     // ids() 与 SKILLS 一一对应
     let ids = skills::ids();
     assert_eq!(ids.len(), skills::SKILLS.len());
@@ -498,7 +504,10 @@ fn redact_url_keeps_only_scheme_and_host() {
         "https://example.com"
     );
     // 端口不保留（口径：只 scheme://host）
-    assert_eq!(redact_url("http://example.com:8443/p"), "http://example.com");
+    assert_eq!(
+        redact_url("http://example.com:8443/p"),
+        "http://example.com"
+    );
     // 无 host（file:// 内部路径）→ 占位，路径不落日志
     assert_eq!(redact_url("file:///home/gao/secret.txt"), "file://[内部]");
     // 非 URL / 空串 → 占位符
