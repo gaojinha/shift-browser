@@ -1,6 +1,6 @@
 {
   "name": "shift-browser-tauri",
-  "version": "5.8.3",
+  "version": "5.8.4",
   "private": true,
   "description": "AI 原生桌面浏览器：Tauri 2 + Rust + Vue 3，本地优先、可自托管、AI 操作网页全程可审计",
   "license": "GPL-3.0-only",
