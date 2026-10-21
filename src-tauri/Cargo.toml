@@ -46,8 +46,8 @@ libc = "0.2"
 #   tls.rs、engine/layout.rs、content_cmd.rs、agent_cmd.rs、api.rs、lib.rs
 # 每升级 tauri 版本必须复核：grep -rn "\.with_webview(\|\.gtk_window()" src
 # 若 API 稳定化则移除 unstable feature；签名变更则逐处适配。
-tauri = { version = "2.11.3", features = ["unstable", "custom-protocol"] }
-tauri-plugin-log = "2"
+tauri = { version = "2.11.6", features = ["unstable", "custom-protocol"] }
+tauri-plugin-log = "2.10"
 tauri-plugin-opener = "2"
 # 单实例（阶段 4 D3）：已有实例运行时，新实例退出并把命令行参数转发给已有实例
 tauri-plugin-single-instance = "2"
@@ -67,7 +67,7 @@ hex = "0.4"
 tokio = { version = "1", features = ["full"] }
 # 流式读取（feed.rs 响应体边读边计数，防内存炸弹）
 futures-util = "0.3"
-thiserror = "2"
+thiserror = "2.0.21"
 # 仅 async：HANDOFF P2-4 审计确认全仓无 reqwest::blocking 使用点，blocking feature 已移除
 # （blocking 会额外拉入同步 client 及其 hyper/tokio 依赖面，误用还会在异步运行时内阻塞线程）
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"] }
