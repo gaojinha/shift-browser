@@ -58,6 +58,12 @@ jobs:
         run: |
           mkdir -p src-tauri/resources
           touch src-tauri/resources/libshift_web_extension.so
+      # tauri.conf.json 的 frontendDist 指向 ../dist，tauri 宏在编译期校验该路径存在。
+      # 后端 job 不构建前端，占位目录即可（2026-10-21）
+      - name: 占位前端产物（tauri 宏要求 frontendDist 存在）
+        run: |
+          mkdir -p dist
+          [ -f dist/index.html ] || echo '<!doctype html><title>ci</title>' > dist/index.html
       - name: cargo fmt（格式不干净即失败）
         working-directory: src-tauri
         run: cargo fmt --check
