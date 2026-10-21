@@ -22,11 +22,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # libfuzzer-sys 需要 nightly；主仓 rust-toolchain.toml 固定 1.97.1，
       # 用 +nightly 显式覆盖。日期固定在本地验证可构建 tauri codegen 的版本，
       # 升级时同步 bump（最新 nightly 偶发 proc-macro/debug_assertions 不兼容）
-      - uses: dtolnay/rust-toolchain@nightly-2026-09-22
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-09-22
       - name: 安装 cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: 安装 Tauri 系统依赖
@@ -58,7 +60,7 @@ jobs:
           -- -max_total_time=${{ github.event.inputs.max_time || '180' }}
       - name: 上传崩溃样本
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-crash
           path: src-tauri/fuzz/artifacts
