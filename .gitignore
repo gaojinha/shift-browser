@@ -44,3 +44,6 @@ src-tauri/resources/libshift_web_extension.so
 release-artifacts/
 e2e/.last-report.json
 test-results/
+
+# 现场验收截图：含真实网络信息（公网 IP / 昵称），不随仓库公开
+docs/test-reports/e2e-2026-10-19/f102-closeout/03-新标签页侧栏-171649.png

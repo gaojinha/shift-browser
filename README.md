@@ -26,6 +26,8 @@
 - 🔌 **开放能力**：MCP Client + Server、本地 Open API（48 个工具）、Unix socket 与 HTTP 双形态
 - 🛡️ **默认安全**：SSRF / 内网拦截、动作白名单、审计日志、密码加密存储
 
+![世界导航：721 个站点按 20 个分类归档，支持搜索与收藏](docs/screenshots/world-nav.png)
+
 ### 快速上手
 
 ```bash
