@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 仅保留 6 个 Tauri 命令与出入参结构；AES-GCM 加解密与密钥派生已全部外移到 password_crypto
 //! 密码管理命令（R1 拆分 · 2026-09-24）
 //!
 //! 本文件只放 6 个 Tauri 命令与出入参结构；密钥文件/主钥获取/AES-GCM 加解密

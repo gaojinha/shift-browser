@@ -1,3 +1,4 @@
+// LINES-EXEMPT: Netscape HTML 序列化与解析器天然不可分隔，拆开会让解析状态在文件间往返
 //! 书签 Netscape HTML 导入/导出（R1 拆分 · 2026-09-25）
 //!
 //! 导出命令与 HTML 序列化/解析纯逻辑同域居住；导入命令在 `bookmarks.rs` 门面

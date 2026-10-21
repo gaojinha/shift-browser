@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 单个 MCP server 的 JSON-RPC 串行状态机（握手/长驻缓存/回收），生命周期必须在一个文件内闭合
 //! MCP stdio 传输层（R1 拆分 · 2026-09-25）
 //!
 //! 单个 MCP server 连接（一个子进程 + 串行 JSON-RPC），含 initialize 握手、

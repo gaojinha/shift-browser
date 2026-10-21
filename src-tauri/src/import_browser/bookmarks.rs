@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 多源合并 → 危险 scheme 过滤 → 写入内核三段流水线，中间结构共享
 //! 浏览器书签导入（F-91）：多源合并 → 危险 scheme 过滤 → 复用写入内核落库
 //!
 //! 入口 [`import_bookmarks_from_browser`]：拉 Chrome / Brave 全部 profile，

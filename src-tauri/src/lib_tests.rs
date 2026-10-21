@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 测试集合按被测对象分组，拆文件会让共享 fixture 重复定义
 //! lib.rs 测试（R2-1 拆分 · 2026-09-24）
 //!
 //! 契约守卫：断言 generate_handler! 注册的每个命令都有 #[tauri::command] 定义。

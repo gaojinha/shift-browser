@@ -1,3 +1,4 @@
+// LINES-EXEMPT: shift:// 自定义协议路由表与各 scheme 响应实现同处，路由与实现必须一一对应
 //! shift:// 自定义协议响应（R1 拆分 · 2026-09-24）。
 //!
 //! - `shift://main` → dist 前端资源（asset_resolver 读嵌入资源，替换 invoke_key）

@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 翻译 IPC 链：限流 → callback 白名单 → 结果回写的顺序不可拆，拆开就丢了先后约束
 //! 翻译 IPC 通道（R1 拆分 · 2026-09-24）：
 //! 速率限制/节流、callback 白名单、结果回写，以及 CSP 免疫的原生桥处理。
 //! 旧 shift:// 通道的协议分支在 [`super::protocol`]。

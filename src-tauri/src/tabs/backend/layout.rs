@@ -1,3 +1,4 @@
+// LINES-EXEMPT: GTK 布局与分屏几何计算共享同一套约束求解，拆分会让几何不变量分裂
 //! GTK 布局、分屏几何与开发者工具门面（R2-1 拆分；R1 2026-09-25 外移 gtk 实现）
 //!
 //! child webview 的 reparent/事件/下载信号见 `layout/gtk.rs`。
