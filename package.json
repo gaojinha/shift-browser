@@ -1,7 +1,31 @@
 {
   "name": "shift-browser-tauri",
-  "private": true,
   "version": "5.8.3",
+  "private": true,
+  "description": "AI 原生桌面浏览器：Tauri 2 + Rust + Vue 3，本地优先、可自托管、AI 操作网页全程可审计",
+  "license": "GPL-3.0-only",
+  "author": "gaojinha",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gaojinha/shift-browser.git"
+  },
+  "homepage": "https://github.com/gaojinha/shift-browser#readme",
+  "bugs": {
+    "url": "https://github.com/gaojinha/shift-browser/issues"
+  },
+  "keywords": [
+    "browser",
+    "tauri",
+    "tauri-v2",
+    "rust",
+    "vue3",
+    "webkitgtk",
+    "ai-agent",
+    "mcp",
+    "privacy",
+    "desktop-app",
+    "linux"
+  ],
   "type": "module",
   "scripts": {
     "dev": "vite",
