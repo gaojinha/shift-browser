@@ -309,6 +309,10 @@ wrap_client! {
             Some(ShellLifeSpan::new(self.tab_id.clone()))
         }
 
+        fn request_handler(&self) -> Option<RequestHandler> {
+            Some(ShellRequestHandler::new(self.tab_id.clone()))
+        }
+
         fn display_handler(&self) -> Option<DisplayHandler> {
             // 只有工具栏需要接收 JS 传上来的动作
             if self.toolbar {
@@ -513,5 +517,31 @@ mod tests {
     #[test]
     fn urlencode_other_bytes_percent_encoded() {
         assert_eq!(urlencode("中"), "%E4%B8%AD");
+    }
+}
+
+wrap_request_handler! {
+    struct ShellRequestHandler {
+        tab_id: String,
+    }
+
+    impl RequestHandler {
+        /// 单栈窗口的渲染进程终止取证（2026-10-25 实测：导航到 nodeseek 后
+        /// 整个窗口消失、浏览器进程存活、无 panic —— 先让原因可见）。
+        fn on_render_process_terminated(
+            &self,
+            _browser: Option<&mut Browser>,
+            status: TerminationStatus,
+            error_code: i32,
+            error_string: Option<&CefString>,
+        ) {
+            log::error!(
+                "[cef] 渲染进程终止（单栈）tab={} status={:?} code={} detail={}",
+                self.tab_id,
+                status,
+                error_code,
+                error_string.map(|s| s.to_string()).unwrap_or_default()
+            );
+        }
     }
 }

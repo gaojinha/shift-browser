@@ -123,13 +123,24 @@ CEF 构建若 UA 仍是应用层设置的 142，`user_agent` 与 `Sec-Ch-Ua` 行
 
 ### 4.4 CEF / WebKit 列
 
-| 站点 | 真 Chrome 默认 CDP | 真 Chrome 去自动化标记 | CEF 构建 | WebKit 构建 |
+| 站点 | 真 Chrome 默认 CDP | 真 Chrome 去自动化标记 | **CEF 构建（2026-10-25 22:05 实测）** | WebKit 构建 |
 |---|---|---|---|---|
-| linux.do | 1/6（间隔 3s 与 60s 合计） | 1/3 正常内容（另 1/3 过挑战但是反 AI 提示页） | 待测 | 待测 |
-| indeed.com | 2/3 | 2/3 | 待测 | 待测 |
-| nodeseek.com | 3/3 | — | 待测 | 待测 |
-| chatgpt.com | 3/3 | — | 待测 | 待测 |
-| nowsecure.nl | 3/3 | — | 待测 | 待测 |
+| linux.do | 1/6（间隔 3s 与 60s 合计） | 1/3 正常内容（另 1/3 过挑战但是反 AI 提示页） | **2/2 正常内容**（标题「LINUX DO - 新的理想型社区」，带未读数） | 待测 |
+| indeed.com | 2/3 | 2/3 | **2/2 正常内容**（Job Search \| Indeed） | 待测 |
+| nodeseek.com | 3/3 | — | **2/2 正常内容**（NodeSeek 论坛列表） | 待测 |
+| chatgpt.com | 3/3 | — | **2/2 正常内容**（ChatGPT 首页） | 待测 |
+| nowsecure.nl | 3/3 | — | **2/2 正常内容**（NOWSECURE BY NODRIVER） | 待测 |
+
+**CEF 侧结论：两轮 10/10 全部直接放行，无一次停在挑战页**，按 2026-10-25 高哥拍板的口径
+（「CEF ≥ 同口径真 Chrome」）**达成**。特别是 linux.do：真 Chrome 默认 CDP 驱动下仅 1/6，
+CEF 两次都直接拿到正常内容。
+
+**局限（诚实声明，别当统计结论）**：
+1. 每站仅 2 次采样，样本量不足以判断稳定性差异（真 Chrome 在 linux.do 本身波动 0/3~2/3）。
+2. **第二轮未清 cookie**（CEF 单栈模式清 cookie 需销毁缓存目录并重启），linux.do 这类站可能因会话复用而更容易过。
+3. 采集时刻与真 Chrome 基线（19:50）不同，出口同为代理 IP 但线路状态可能变化。
+4. 判据是「是否停在挑战页」，未做「Turnstile 勾选一次可过」的中档判定。
+5. WebKit 构建列仍空（需另起实例，且 WebKit 版无 CDP 通道，要用其它驱动方式）。
 
 ## 5. 指纹面板对比方案（CreepJS / Cover Your Tracks）
 

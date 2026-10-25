@@ -195,6 +195,10 @@ wrap_client! {
         fn display_handler(&self) -> Option<DisplayHandler> {
             Some(CefTabDisplayHandler::new(self.tab_id.clone(), self.tx.clone()))
         }
+
+        fn request_handler(&self) -> Option<RequestHandler> {
+            Some(CefTabRequestHandler::new(self.tab_id.clone(), self.tx.clone()))
+        }
     }
 }
 
@@ -314,6 +318,45 @@ wrap_display_handler! {
                 message: message.map(|s| s.to_string()).unwrap_or_default(),
             }));
             0
+        }
+    }
+}
+
+wrap_request_handler! {
+    struct CefTabRequestHandler {
+        tab_id: String,
+        tx: Sender<(String, CefEvent)>,
+    }
+
+    impl RequestHandler {
+        /// 渲染进程终止（崩溃 / OOM / 被系统杀掉）。
+        ///
+        /// CEF 不会自动重建渲染进程，用户侧表现是标签白屏或整个 BrowserView 消失。
+        /// 2026-10-25 实测：CDP 导航到 nodeseek.com 后单栈窗口整个消失、浏览器进程仍存活、
+        /// 日志无 panic —— 加这条回调是为了让"谁杀的、什么原因"留下证据（M2/M4 崩溃取证）。
+        fn on_render_process_terminated(
+            &self,
+            _browser: Option<&mut Browser>,
+            status: TerminationStatus,
+            error_code: i32,
+            error_string: Option<&CefString>,
+        ) {
+            let detail = error_string.map(|s| s.to_string()).unwrap_or_default();
+            log::error!(
+                "[cef] 渲染进程终止 tab={} status={:?} code={} detail={}",
+                self.tab_id,
+                status,
+                error_code,
+                detail
+            );
+            let _ = self.tx.send((
+                self.tab_id.clone(),
+                CefEvent::LoadError {
+                    url: String::new(),
+                    code: error_code,
+                    text: format!("渲染进程终止({status:?}): {detail}"),
+                },
+            ));
         }
     }
 }
