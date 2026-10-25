@@ -24,12 +24,14 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
   * { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0; height: 100%;
-    background: radial-gradient(circle at 50% 0%, #1e2532 0%, #12151b 60%);
+    background:
+      radial-gradient(circle at 50% -10%, rgba(91,141,239,.13) 0%, transparent 55%),
+      radial-gradient(circle at 50% 0%, #1a212d 0%, #101318 65%);
     color: #e6e8eb; font-family: -apple-system, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
     display: flex; align-items: center; justify-content: center;
     user-select: none;
   }
-  .wrap { width: 620px; max-width: 86vw; text-align: center; }
+  .wrap { width: 720px; max-width: 88vw; text-align: center; }
   .brand {
     font-size: 34px; font-weight: 600; letter-spacing: 2px;
     color: #8ab4f8; margin-bottom: 6px;

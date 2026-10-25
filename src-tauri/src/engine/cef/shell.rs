@@ -588,10 +588,20 @@ fn switch_tab(idx: usize) {
     SHELL_TABS.with(|t| {
         let mut tabs = t.borrow_mut();
         for (i, tab) in tabs.iter_mut().enumerate() {
-            tab.view.set_visible(if i == idx { 1 } else { 0 });
             if i == idx {
+                tab.view.set_visible(1);
                 let v = tab.view.clone();
                 v.request_focus();
+            } else {
+                tab.view.set_visible(0);
+                // 关键：BoxLayout 按 flex 分配，隐藏视图仍占一份宽度（实测活动标签
+                // 只剩半屏）。把非活动视图的 bounds 压成 0，逼它不占位。
+                tab.view.set_bounds(Some(&Rect {
+                    x: 0,
+                    y: 0,
+                    width: 0,
+                    height: 0,
+                }));
             }
         }
     });
