@@ -44,3 +44,4 @@ src-tauri/resources/libshift_web_extension.so
 release-artifacts/
 e2e/.last-report.json
 test-results/
+__pycache__/
