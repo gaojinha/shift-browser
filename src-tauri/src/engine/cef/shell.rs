@@ -24,8 +24,9 @@ use super::browser::BROWSERS;
 pub const CONTENT_ID: &str = "shell-content";
 /// 工具栏页的固定 tab id
 pub const TOOLBAR_ID: &str = "shell-toolbar";
-/// 工具栏高度（像素）
-pub const TOOLBAR_HEIGHT: i32 = 48;
+/// 工具栏高度（像素）：地址栏 48 + 标签栏 36（2026-10-26 起标签栏并入同一 WebUI，
+/// 省一层 BrowserView；标签栏 DOM 由 `window.__shiftTabs()` 刷新）
+pub const TOOLBAR_HEIGHT: i32 = 84;
 
 thread_local! {
     /// Client 保活：CEF 在浏览器存活期间会引用 client，提前释放会崩

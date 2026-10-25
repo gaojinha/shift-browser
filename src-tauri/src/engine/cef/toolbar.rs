@@ -27,7 +27,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 <style>
   * { box-sizing: border-box; }
   html, body {
-    margin: 0; padding: 0; height: 48px; overflow: hidden;
+    margin: 0; padding: 0; height: 84px; overflow: hidden;
     background: #20242c; color: #e6e8eb;
     font-family: -apple-system, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
     font-size: 13px;
@@ -52,6 +52,38 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   button:active { background: #3a4150; }
   button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2;
     stroke-linecap: round; stroke-linejoin: round; }
+  /* 标签栏（2026-10-26 新增，M2 独立开窗方向） */
+  .tabbar {
+    display: flex; align-items: center; gap: 4px;
+    height: 36px; padding: 0 8px;
+    background: #1b1f26; border-bottom: 1px solid #2b3038;
+    overflow-x: auto; overflow-y: hidden;
+  }
+  .tabbar::-webkit-scrollbar { height: 0; }
+  .tab {
+    display: flex; align-items: center; gap: 6px;
+    min-width: 90px; max-width: 200px; height: 28px;
+    padding: 0 4px 0 10px; border-radius: 8px;
+    background: transparent; color: #9aa2ad; cursor: default;
+    font-size: 12px; white-space: nowrap; flex: 0 0 auto;
+  }
+  .tab:hover { background: #242a33; }
+  .tab.active { background: #2f3742; color: #e6e8eb; }
+  .tab .t-title {
+    flex: 1; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tab .t-close {
+    width: 18px; height: 18px; border-radius: 6px; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; line-height: 1; color: #8b93a0;
+  }
+  .tab .t-close:hover { background: #3d4552; color: #e6e8eb; }
+  .tab-new {
+    width: 26px; height: 26px; border-radius: 8px; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    color: #cfd3da; font-size: 17px; line-height: 1;
+  }
+  .tab-new:hover { background: #2d3340; }
   .addr-wrap {
     flex: 1; display: flex; align-items: center; height: 32px;
     background: #151920; border: 1px solid #333844; border-radius: 16px;
@@ -88,6 +120,13 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       <input id="addr" type="text" spellcheck="false" placeholder="输入网址或搜索词，回车打开">
     </div>
   </div>
+  <div class="tabbar" id="tabbar">
+    <div class="tab active" data-idx="0">
+      <span class="t-title">新标签页</span>
+      <span class="t-close" title="关闭标签">×</span>
+    </div>
+    <div class="tab-new" id="tabnew" title="新建标签">+</div>
+  </div>
 
 <script>
   const addr = document.getElementById('addr');
@@ -107,6 +146,53 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   });
 
   addr.addEventListener('focus', () => addr.select());
+
+  // ---- 标签栏（M2 独立开窗）----
+  // Rust 侧通过 execute_java_script 调用 window.__shiftTabs(data) 刷新标签栏；
+  // 点击/关闭/新建通过 console.log SHIFT_ACT 回传，与地址栏同一套桥。
+  const tabbar = document.getElementById('tabbar');
+
+  window.__shiftTabs = function (tabs, active) {
+    if (!Array.isArray(tabs)) return;
+    tabbar.innerHTML = '';
+    tabs.forEach((t, i) => {
+      const el = document.createElement('div');
+      el.className = 'tab' + (i === active ? ' active' : '');
+      el.dataset.idx = String(i);
+      const title = document.createElement('span');
+      title.className = 't-title';
+      title.textContent = t.title || '新标签页';
+      const close = document.createElement('span');
+      close.className = 't-close';
+      close.title = '关闭标签';
+      close.textContent = '×';
+      el.appendChild(title);
+      el.appendChild(close);
+      tabbar.appendChild(el);
+    });
+    const add = document.createElement('div');
+    add.className = 'tab-new';
+    add.id = 'tabnew';
+    add.title = '新建标签';
+    add.textContent = '+';
+    tabbar.appendChild(add);
+  };
+
+  tabbar.addEventListener('click', (e) => {
+    const closeBtn = e.target.closest('.t-close');
+    if (closeBtn) {
+      const idx = closeBtn.closest('.tab').dataset.idx;
+      act('tabclose|' + idx);
+      e.stopPropagation();
+      return;
+    }
+    if (e.target.closest('.tab-new')) {
+      act('tabnew');
+      return;
+    }
+    const tab = e.target.closest('.tab');
+    if (tab) act('tab|' + tab.dataset.idx);
+  });
 
   // 防止工具栏页面拖动/选中
   document.addEventListener('dragstart', (e) => e.preventDefault());
