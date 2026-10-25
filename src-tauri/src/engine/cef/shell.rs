@@ -233,6 +233,24 @@ wrap_window_delegate! {
                 log::error!("[cef] set_to_box_layout 失败");
             }
 
+            // 点击穿透根因修复（2026-10-25 真机实测）：本回调里 BoxLayout 还没首跑，
+            // content 初始 bounds 覆盖整窗（0,0,1280x860），又因晚于 toolbar 添加而
+            // z 序更高——首帧布局前的窗口期内，点工具栏区域全部落进内容页。
+            // 这里强制同步布局，保证窗口 map 出可点击时 bounds 已就位
+            //（toolbar 0..48 / content 48..）。
+            window.layout();
+
+            // 布局后两视图实际 bounds 记录一次（windowless Views 无其它观测手段）
+            let tb = toolbar_view.bounds();
+            let ct = content_view.bounds();
+            let wn = window.bounds();
+            log::info!(
+                "[cef] bounds 实测: toolbar=({}, {}, {}x{}) content=({}, {}, {}x{}) window=({}, {}, {}x{})",
+                tb.x, tb.y, tb.width, tb.height,
+                ct.x, ct.y, ct.width, ct.height,
+                wn.x, wn.y, wn.width, wn.height
+            );
+
             window.set_title(Some(&CefString::from("Shift")));
             window.center_window(Some(&Size { width: 1280, height: 860 }));
 
