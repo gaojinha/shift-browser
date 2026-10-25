@@ -7,14 +7,15 @@
 
 环境：本机 `google-chrome` = `154.0.8037.57`，`--headless=new --no-sandbox`，访问 `https://tls.peet.ws/api/all` 与 `https://httpbin.org/headers`。
 
-| 项 | 真 Chrome 154（本次实测） | 2026-10-14 诊断报告所记 Chrome 154 | ShiftBrowser WebKit（诊断报告 10-14） | CEF 构建 |
+| 项 | 真 Chrome 154（本次实测） | 2026-10-14 诊断报告所记 Chrome 154 | ShiftBrowser WebKit（诊断报告 10-14） | **CEF 构建（2026-10-25 21:45 实测）** |
 |---|---|---|---|---|
-| JA4 | `t13d1517h2_8daaf6152771_cb7bf5808d99` | 同 | `t13d2913h2_723694b0fccc_5671b5df5029` | 待测 |
-| JA3 hash | `c1b4c3933042b9ef29473a406fbeac3b` | `ec6b4c18…`（不同） | `500acc5c…` | 待测 |
-| peetprint hash | `fc97c1cdfb1409c9a9326c1b726d1dee` | — | — | 待测 |
-| Akamai H2 | `1:65536;2:0;4:6291456;6:262144\|15663105\|0\|m,a,s,p` | 同 | `4:6291456;1:65536;2:0\|15663105\|0\|m,s,a,p` | 待测 |
-| 密码套件数（去 GREASE） | 15 | 15 | 29 | 待测 |
-| 扩展数 | 19 | 17（JA4 口径） | 13 | 待测 |
+| JA4 | `t13d1517h2_8daaf6152771_cb7bf5808d99` | 同 | `t13d2913h2_723694b0fccc_5671b5df5029` | **`t13d1517h2_8daaf6152771_cb7bf5808d99`** ✅ 一致 |
+| JA3 hash | `c1b4c3933042b9ef29473a406fbeac3b` | `ec6b4c18…`（不同） | `500acc5c…` | `544f339ecad4894c59d7767dd40ae19e`（每次采都变，不作判据） |
+| peetprint hash | `fc97c1cdfb1409c9a9326c1b726d1dee` | — | — | **`fc97c1cdfb1409c9a9326c1b726d1dee`** ✅ 一致 |
+| Akamai H2 | `1:65536;2:0;4:6291456;6:262144\|15663105\|0\|m,a,s,p` | 同 | `4:6291456;1:65536;2:0\|15663105\|0\|m,s,a,p` | **`1:65536;2:0;4:6291456;6:262144\|15663105\|0\|m,a,s,p`** ✅ 一致 |
+| 密码套件数（含 GREASE） | 16 | — | — | 16 ✅ 一致 |
+| 扩展数 | 19 | 17（JA4 口径） | 13 | 19 ✅ 一致 |
+| UA | `Chrome/154.0.8037.57`（headless 带 Headless 字样） | — | 应用层伪装 142 | **`Chrome/154.0.0.0`（内核原生，未覆盖）** ✅ 与 JA4 自洽 |
 
 **解读（对比口径）**：
 - JA3 hash 两次采集 Chrome 都不同，原因是 Chrome 自 110 起随机打乱扩展顺序；**JA3 不能作一致性判据，以 JA4（对扩展排序后哈希）+ Akamai H2 为准**。这里 JA4 与诊断报告完全一致，可作稳定基线。
@@ -22,6 +23,16 @@
 
 真 Chrome 实读请求头（httpbin，headless，去 `Host`/`X-Amzn-Trace-Id`）：
 `Accept`（长模板）· `Accept-Encoding: gzip, deflate, br, zstd` · `Accept-Language: zh-CN,zh;q=0.9` · `Priority: u=0, i` · `Sec-Ch-Ua: "Chromium";v="154", "Google Chrome";v="154", "Not A(Brand";v="99"` · `Sec-Ch-Ua-Mobile: ?0` · `Sec-Ch-Ua-Platform: "Linux"` · `Sec-Fetch-Dest/Mode/Site/User` · `Upgrade-Insecure-Requests: 1` · `User-Agent`。**无 `Dnt`**。
+
+### 1.2 CEF 构建首次实测（2026-10-25 21:45，提前于 M2）
+
+用 `SHIFT_CEF_DEBUG_PORT=9333` 起 CEF 实例（GNOME Wayland 经 XWayland），通过 CDP 驱动工具栏导航到 `https://tls.peet.ws/api/all` 取回显。
+
+**结论：TLS/H2 层指纹与真 Chrome 154 完全一致**——JA4、Akamai H2、peetprint、套件数、扩展数五项全同。这是换核立项目标的直接验证（`docs/兼容性诊断-Cloudflare检测与视频闪烁根因_2026-10-14.md` 指的 TLS/JA4 硬伤已被消除）。
+
+CEF 实读 UA 为 `Chrome/154.0.0.0`（内核原生未覆盖），与 JA4 的 154 自洽——反证了「CEF 下若把 UA 覆盖成 142 会自相矛盾」这条推论（见 §3）。
+
+**局限**：本次为单次采集、出口经代理 IP；Cloudflare 实站通过率与浏览器层指纹（CreepJS）仍未测，需 M2 交付后补。
 
 **基线局限（诚实声明）**：headless 的 UA 是 `HeadlessChrome/154.0.0.0`，且 headless 不一定完全等于有头 Chrome；正式对比前应补一份**有头** Chrome 154 采集（需 X11 会话）。TLS/H2 层 headless 与有头同一网络栈，预期一致，但这是预期不是实测。
 

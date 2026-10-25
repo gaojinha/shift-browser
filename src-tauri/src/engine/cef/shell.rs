@@ -240,6 +240,14 @@ wrap_window_delegate! {
             //（toolbar 0..48 / content 48..）。
             window.layout();
 
+            // 键盘焦点（2026-10-25 真机实测补充）：CEF 的 BrowserView 默认 **不可聚焦**，
+            // 只调 browser.set_focus(1) 不足以让网页收到键盘事件——View 层也要
+            // set_focusable + request_focus，否则鼠标点击停在 View 层、键盘进不去网页
+            // （表现：点地址栏有反应但打字无输入）。
+            toolbar_view.set_focusable(1);
+            toolbar_view.request_focus();
+            log::info!("[cef] 工具栏 View 已设为可聚焦并请求焦点");
+
             // 布局后两视图实际 bounds 记录一次（windowless Views 无其它观测手段）
             let tb = toolbar_view.bounds();
             let ct = content_view.bounds();
@@ -330,6 +338,14 @@ wrap_life_span_handler! {
             BROWSERS.with(|m| {
                 m.borrow_mut().insert(self.tab_id.clone(), b.clone());
             });
+
+            // 键盘焦点（2026-10-25 真机实测：点击不穿透后，地址栏仍收不到键盘输入）：
+            // CEF 的 BrowserView 只是视图容器，网页要接收键盘事件必须先 browser.set_focus(1)。
+            // 初始焦点给工具栏（地址栏），点内容页时 CEF 会按点击位置自行切换。
+            if self.tab_id == TOOLBAR_ID {
+                super::browser::focus(b);
+                log::info!("[cef] 工具栏已获得键盘焦点（地址栏可输入）");
+            }
         }
 
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
