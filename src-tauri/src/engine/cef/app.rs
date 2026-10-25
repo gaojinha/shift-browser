@@ -160,14 +160,33 @@ wrap_app! {
                 Some(&CefString::from("ozone-platform")),
                 Some(&CefString::from("x11")),
             );
-            cmd.append_switch(Some(&CefString::from("disable-gpu")));
+            // GPU：`--disable-gpu` 会让 WebGL 彻底不可用（2026-10-25 实测
+            // canvas.getContext('webgl') 返回 null），而真 Chrome 有 WebGL，
+            // 缺失既是可识别特征、也让地图/3D 站不可用。
+            // 改走 Vulkan 后端 + SwiftShader 软件光栅：CEF 预编译包自带
+            // libvk_swiftshader.so 与 libvulkan.so.1，不依赖系统 GL。
+            // （试过 `--use-gl=egl`：窗口正常但 WebGL 仍 null，缺 ANGLE 的 GL 前端库；
+            //   要拿到与真 Chrome 完全相同的 renderer 字符串，需补 libEGL.so/libGLESv2.so
+            //   后改 `--use-angle=gl`，见指纹报告 §8。）
+            cmd.append_switch_with_value(
+                Some(&CefString::from("use-angle")),
+                Some(&CefString::from("vulkan")),
+            );
+            cmd.append_switch_with_value(
+                Some(&CefString::from("use-vulkan")),
+                Some(&CefString::from("swiftshader")),
+            );
+            cmd.append_switch_with_value(
+                Some(&CefString::from("enable-features")),
+                Some(&CefString::from("Vulkan")),
+            );
             // 给 X11 窗口一个 WM_CLASS：Mutter 对没有 WM_CLASS 的窗口会当成
             // "待接管"状态（实测 WM_STATE=Iconic、永不映射）
             cmd.append_switch_with_value(
                 Some(&CefString::from("class")),
                 Some(&CefString::from("Shift")),
             );
-            log::info!("[cef] 命令行已追加 --ozone-platform=x11 --disable-gpu");
+            log::info!("[cef] 命令行已追加 --ozone-platform=x11 + Vulkan/SwiftShader（试修 WebGL）");
         }
     }
 }

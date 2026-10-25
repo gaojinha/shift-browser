@@ -222,6 +222,21 @@ CEF 两次都直接拿到正常内容。
 2. 改用系统 GL（`--use-gl=desktop` 或 `egl`）并解决窗口 0×0（可能是 `set_as_child` 与 GPU 初始化的时序问题）；
 3. 从 CEF 官方包补 `libEGL.so` / `libGLESv2.so`（若官方另有 GL 版发行包）。
 
-**当前状态**：代码维持 `--disable-gpu` 原状（回滚了未验证的 SwiftShader 改动），
-本条列为 M3 待办，修好前不对外宣称"指纹完全一致"——TLS/H2 层一致已实测，
-浏览器层（WebGL/Canvas）仍有已知差异。
+**修复结果（2026-10-25 22:55 实测通过）**：改用 **Vulkan 后端 + SwiftShader**：
+```
+--use-angle=vulkan --use-vulkan=swiftshader --enable-features=Vulkan
+```
+- WebGL 恢复：`ANGLE (Intel, Vulkan 1.4.318 (Intel(R) HD Graphics 630 (KBL GT2) (0x00005912)), Intel open-source Mesa driver)`
+- 窗口尺寸正常 1280×860（0×0 未回归）
+- Cloudflare 复测 nodeseek 仍直接放行
+
+**仍存在的差异（已知，待对齐）**：三方 renderer 字符串各不相同——
+| 环境 | renderer |
+|---|---|
+| 真 Chrome（有头，GL 后端） | `ANGLE (Intel, Mesa Intel(R) HD Graphics 630 (KBL GT2), OpenGL ES 3.2)` |
+| **CEF（当前，Vulkan 后端）** | `ANGLE (Intel, Vulkan 1.4.318 (Intel(R) HD Graphics 630 (KBL GT2) (0x00005912)), Intel open-source Mesa driver)` |
+| 真 Chrome（headless，SwiftShader） | `ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)` |
+
+要拿到与真 Chrome 完全相同的字符串，需补 `libEGL.so` / `libGLESv2.so` 后改
+`--use-angle=gl`（试过 `--use-gl=egl`：窗口正常但 WebGL 仍 null，缺库）。
+该项列为 M3 遗留，不阻断 M2。
