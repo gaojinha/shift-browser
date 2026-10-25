@@ -29,8 +29,22 @@ src-tauri/resources/libshift_web_extension.so
 .atomcode/.setup.lock
 .atomcode/setup-state.json
 
-# 三方 AI 协作目录（含会话配置/状态/日志，不进版本库）
-.ai/
+# 三方 AI 协作目录：状态/日志/pid/token/缓存一律不入库，
+# 但**看板·总线·台账·派单·回执必须可追溯**（否则哨兵核对只能靠文件 mtime，改过无痕）。
+# 逐层放行：先忽略 .ai 下各项，再单独重新包含目录与 *.md。
+.ai/*
+!.ai/WORKBOARD.md
+!.ai/MESSAGES.md
+!.ai/RECEIPTS.md
+!.ai/NOTIFY.md
+!.ai/inbox/
+!.ai/outbox/
+!.ai/evidence/
+.ai/inbox/*
+.ai/outbox/*
+!.ai/inbox/*/
+!.ai/outbox/*/
+!.ai/**/*.md
 
 # GitHub Copilot CLI 本地设置（机器特定，不入库）
 .github/copilot/settings.local.json
