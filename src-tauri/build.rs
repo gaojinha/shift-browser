@@ -14,6 +14,19 @@ include!("src/constants.rs");
 include!("src/contracts.rs");
 
 fn main() {
+    // CEF（Chromium）换核必需的链接参数（2026-10-20）：
+    //
+    // 本程序经 libsqlite3-sys 静态链入了一份 sqlite3，会导出 51 个全局
+    // `sqlite3_*` 符号。这些符号会优先于系统 libsqlite3.so.0 被动态链接器解析，
+    // 导致 NSS 的 PKCS#11 模块（libsoftokn3.so）调到不匹配的实现上，
+    // 在 CEF 初始化证书库时跳到空地址段错误（实测 backtrace 见 P0 报告）。
+    //
+    // `--exclude-libs,ALL` 让静态库符号不出现在可执行文件的动态符号表里，
+    // 动态库之间的解析互不污染。仅 cef-engine 构建需要。
+    if std::env::var("CARGO_FEATURE_CEF_ENGINE").is_ok() {
+        println!("cargo:rustc-link-arg=-Wl,--exclude-libs,ALL");
+    }
+
     generate_ts_constants();
     tauri_build::build();
 }

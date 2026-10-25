@@ -29,6 +29,8 @@ tauri-build = { version = "2.6.3", features = [] }
 # 模糊测试支撑（HANDOFF P2-5）：仅暴露手写解析器的跨 crate 驱动入口给 fuzz/ crate，
 # 生产构建不启用。解析器本体保持私有，见 api::fuzz_helpers
 fuzz = []
+# Linux 换核实验：CEF（Chromium）引擎后端，默认关闭，不影响现有 WebKitGTK 构建
+cef-engine = ["dep:cef", "dep:gdkx11", "dep:x11"]
 
 [dependencies]
 async-trait = "0.1"
@@ -105,6 +107,16 @@ gio = { version = "0.18", features = ["v2_70"] }
 # 网页截图（开放 API screenshot 命令）：webkit snapshot 返回 cairo::Surface；
 # 写 PNG 需 cairo-rs 的 png feature（gtk 默认没开）
 cairo-rs = { version = "0.18", features = ["png"] }
+# CEF 引擎（Chromium 154）：仅 cef-engine 特性开启时编译
+# 来源：crates.io 官方 cef crate（tauri-apps 出品，154.5.0+154.0.34 对齐 Chromium 154）。
+# 预编译二进制：cef-dll-sys 构建期经 download-cef 自动从 CEF 官方 CDN（cef-builds.spotifycdn.com）
+# 拉取 cef-client 包（含 libcef.so + locales，SHA 校验在 cef-dll-sys 内），缓存在
+# CARGO_HOME/.cef/；首次构建需外网，之后离线可复现。生产分发见 docs/CEF换核规划_2026-10-25.md M4。
+cef = { version = "154.5", optional = true, default-features = false, features = ["build-util"] }
+# 取 X11 窗口 ID（CEF 子窗口嵌入需要）
+gdkx11 = { version = "0.18", optional = true }
+# windowed 模式下 CEF 子窗口的 resize 必须自己调 XMoveResizeWindow
+x11 = { version = "2", optional = true, features = ["xlib"] }
 
 [dev-dependencies]
 tempfile = "3"
