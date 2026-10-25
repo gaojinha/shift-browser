@@ -28,6 +28,10 @@
 
 用 `SHIFT_CEF_DEBUG_PORT=9333` 起 CEF 实例（GNOME Wayland 经 XWayland），通过 CDP 驱动工具栏导航到 `https://tls.peet.ws/api/all` 取回显。
 
+> ⚠️ **协调器标注（2026-10-26 01:05）：本节为 n=1 单次采集、无原始证据落盘，且采集构建含 `--disable-gpu`（已于 `7496476` 换为 Vulkan+SwiftShader）。**
+> TLS/H2 层理论上不受 GPU 后端影响，但**理论不算实测**，且本节**完全没测浏览器层的 WebGL**（换核后最可能露馅的层面，见 §8）。
+> 定论以新构建重采为准，重测要求见 `.ai/inbox/copilot/20261026-0101-F-CEF-05重测派单.md`。
+
 **结论：TLS/H2 层指纹与真 Chrome 154 完全一致**——JA4、Akamai H2、peetprint、套件数、扩展数五项全同。这是换核立项目标的直接验证（`docs/兼容性诊断-Cloudflare检测与视频闪烁根因_2026-10-14.md` 指的 TLS/JA4 硬伤已被消除）。
 
 CEF 实读 UA 为 `Chrome/154.0.0.0`（内核原生未覆盖），与 JA4 的 154 自洽——反证了「CEF 下若把 UA 覆盖成 142 会自相矛盾」这条推论（见 §3）。
@@ -130,6 +134,8 @@ CEF 构建若 UA 仍是应用层设置的 142，`user_agent` 与 `Sec-Ch-Ua` 行
 | nodeseek.com | 3/3 | — | **2/2 正常内容**（NodeSeek 论坛列表） | 待测 |
 | chatgpt.com | 3/3 | — | **2/2 正常内容**（ChatGPT 首页） | 待测 |
 | nowsecure.nl | 3/3 | — | **2/2 正常内容**（NOWSECURE BY NODRIVER） | 待测 |
+
+> ⚠️ **协调器标注（2026-10-26 01:00）：本节 CEF 数据已打回，勿引用、勿据此勾 M3 关口。** 理由：① 采集所用构建含 `--disable-gpu`（WebGL 完全缺失），该配置已于 `7496476`（22:47）被 Vulkan+SwiftShader 取代，**结论对应的构建已不存在**；② CEF n=2 且第二轮未清 cookie，与真 Chrome n=3/n=6（清 cookie、3s/60s 交错）非同一口径，**证不出「≥ 同口径真 Chrome」**；③ 无原始证据落盘（`assets/` 下无任何 `cef-*` 文件）。重测要求见 `.ai/inbox/copilot/20261026-0101-F-CEF-05重测派单.md`，验收台账 `.ai/RECEIPTS.md` 01:00 行。
 
 **CEF 侧结论：两轮 10/10 全部直接放行，无一次停在挑战页**，按 2026-10-25 高哥拍板的口径
 （「CEF ≥ 同口径真 Chrome」）**达成**。特别是 linux.do：真 Chrome 默认 CDP 驱动下仅 1/6，
