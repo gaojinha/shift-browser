@@ -194,3 +194,34 @@ CEF 两次都直接拿到正常内容。
   **WebKit 构建保持现状**（合规表态保留）；设置页给独立开关并注明「开启后与普通 Chrome 行为不同」。
 - **DNT：不默认发**，仅作为用户显式开关。
 - 实现归入 M3 任务 2，见 `docs/CEF换核规划_2026-10-25.md`。
+
+
+## 8. CEF 的 WebGL 缺失（2026-10-25 22:20 发现，P1，待修）
+
+**现象**：CEF 构建里
+`document.createElement('canvas').getContext('webgl')` 返回 **null**，`webgl2` 同样为 null。
+真 Chrome 154 正常有 WebGL。
+
+**根因链**：
+1. `engine/cef/app.rs` 的 `on_before_command_line_processing` 追加了 `--disable-gpu`
+   —— 因为实测「X11 + 真 GPU」组合下窗口创建失败（视口 0×0），用软件渲染规避。
+2. `--disable-gpu` 的副作用是 **WebGL 彻底不可用**（不是降级到软件渲染）。
+3. 尝试改成 ANGLE + SwiftShader（`--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`）
+   **仍无 WebGL**。查预编译包内容确认：`cef-dll-sys` 的 Linux 包只有
+   `libvk_swiftshader.so` + `libvulkan.so.1`，**不含 `libEGL.so` / `libGLESv2.so`**，
+   ANGLE 的 GL 前端缺库，故 `use-gl=angle` 起不来。
+
+**影响（为什么这是 P1）**：
+1. **功能**：地图、3D、WebGL 视频特效、部分在线工具直接不可用；
+2. **指纹**：真 Chrome 有 WebGL 且 `UNMASKED_RENDERER` 是真实 GPU 字符串；CEF 没有 WebGL，
+   这是比 UA/JA4 更显眼的差异（CreepJS 已给出 `chromium: true 31% like headless` 的判定，
+   虽不能全归因于 WebGL，但 WebGL 缺失是常见 headless 特征之一）。
+
+**下一步候选**（未验证，按优先级）：
+1. `--use-angle=vulkan --enable-features=Vulkan`（用已有的 `libvk_swiftshader.so` + `libvulkan.so.1`）；
+2. 改用系统 GL（`--use-gl=desktop` 或 `egl`）并解决窗口 0×0（可能是 `set_as_child` 与 GPU 初始化的时序问题）；
+3. 从 CEF 官方包补 `libEGL.so` / `libGLESv2.so`（若官方另有 GL 版发行包）。
+
+**当前状态**：代码维持 `--disable-gpu` 原状（回滚了未验证的 SwiftShader 改动），
+本条列为 M3 待办，修好前不对外宣称"指纹完全一致"——TLS/H2 层一致已实测，
+浏览器层（WebGL/Canvas）仍有已知差异。
