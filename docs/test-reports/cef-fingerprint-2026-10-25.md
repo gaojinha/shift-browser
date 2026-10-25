@@ -240,3 +240,13 @@ CEF 两次都直接拿到正常内容。
 要拿到与真 Chrome 完全相同的字符串，需补 `libEGL.so` / `libGLESv2.so` 后改
 `--use-angle=gl`（试过 `--use-gl=egl`：窗口正常但 WebGL 仍 null，缺库）。
 该项列为 M3 遗留，不阻断 M2。
+
+**后续实验（2026-10-25 23:10，已回退）**：试 `--use-angle=gl`（用系统 Mesa GL，无需补库）——
+renderer 变成 `ANGLE (Intel, Mesa Intel(R) HD Graphics 630 (KBL GT2), OpenGL 4.6)`，
+**已非常接近真 Chrome 的 `..., OpenGL ES 3.2`**（差异仅 GL 版本表述：桌面 GL 4.6 vs GLES 3.2）。
+但该配置下实例**启动约 42 秒后自行退出**（无 panic、无渲染进程终止日志，日志有
+`vaInitialize failed` 与 `GetVSyncParametersIfAvailable() failed` 反复报错），
+稳定性未过关，**已回退到 Vulkan 方案**（Vulkan 方案复测：连续两次站点导航后进程仍 active）。
+
+结论：**GL 后端是更优方向（指纹更近），但需先解决 XWayland 下的稳定性**（VSync/vaapi 报错），
+下次尝试可加 `--disable-features=VaapiVideoDecoder` 或改 `--use-gl=angle` 组合验证。
