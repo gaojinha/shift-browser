@@ -13,5 +13,6 @@
 
 pub mod app;
 pub mod browser;
+pub mod newtab;
 pub mod shell;
 pub mod toolbar;

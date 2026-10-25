@@ -51,12 +51,22 @@ thread_local! {
 
     /// 新标签 id 自增序号
     static TAB_SEQ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+
+    /// 工具栏/启动页所在目录（open 时从 toolbar_url 反推，供新建标签取启动页）
+    static SHELL_CACHE_DIR: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 /// 打开单栈窗口。**必须在 CEF UI 线程调用。**
 ///
 /// `content_url`：初始网页；`toolbar_url`：本地工具栏页（file:// 或 data:）
 pub fn open(content_url: &str, toolbar_url: &str) -> Result<(), String> {
+    // 记下 shell 目录（启动页和工具栏同目录），供 Ctrl+T 新建标签时取
+    if let Some(p) = toolbar_url.strip_prefix("file://") {
+        if let Some(dir) = std::path::Path::new(p).parent() {
+            SHELL_CACHE_DIR.with(|d| *d.borrow_mut() = Some(dir.to_string_lossy().into_owned()));
+        }
+    }
+
     let content_client: Client = ShellClient::new(CONTENT_ID.to_string(), false);
     let toolbar_client: Client = ShellClient::new(TOOLBAR_ID.to_string(), true);
 
@@ -201,6 +211,9 @@ wrap_browser_view_delegate! {
 
     impl ViewDelegate {
         fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            // 注意：width 给 0 会让内容区渲染空白（2026-10-26 实测），
+            // 这里维持 100；多标签下隐藏标签仍参与宽度分配（活动标签被挤成半屏）
+            // 是已知问题，待用 set_bounds 手动布局解决，见 WORKBOARD。
             Size {
                 width: 100,
                 height: self.preferred_height,
@@ -487,6 +500,18 @@ wrap_display_handler! {
     }
 }
 
+/// 启动页 URL（CEF 自包含版本；拿不到目录时回退 about:blank）
+fn newtab_url() -> String {
+    SHELL_CACHE_DIR.with(|d| {
+        if let Some(dir) = d.borrow().as_ref() {
+            if let Ok(url) = super::newtab::ensure_newtab_html(std::path::Path::new(dir)) {
+                return url;
+            }
+        }
+        "about:blank".to_string()
+    })
+}
+
 /// 新建标签页（视图隐藏加入布局，随后切换过去）。
 fn new_tab(url: &str) -> Result<(), String> {
     let seq = TAB_SEQ.with(|c| {
@@ -526,6 +551,14 @@ fn new_tab(url: &str) -> Result<(), String> {
     SHELL_LAYOUT.with(|l| {
         if let Some(layout) = l.borrow().as_ref() {
             layout.set_flex_for_view(Some(&mut view), 1);
+        }
+    });
+    // 新视图加进来后必须让 BoxLayout 重算一次，否则它的 bounds 停在
+    // 创建时的默认尺寸（实测约 630px 宽，右侧一片空白）——同 on_window_created
+    // 里那次 window.layout() 的理由。
+    SHELL_WINDOW.with(|w| {
+        if let Some(window) = w.borrow().as_ref() {
+            window.layout();
         }
     });
 
@@ -653,7 +686,8 @@ fn handle_action(action: &str) {
     // 标签相关动作先处理（不需要当前 content 浏览器）
     match cmd {
         "tabnew" => {
-            if let Err(e) = new_tab("about:blank") {
+            let url = newtab_url();
+            if let Err(e) = new_tab(&url) {
                 log::error!("[cef] 新建标签失败: {e}");
             }
             return;
@@ -916,7 +950,8 @@ fn handle_shortcut(
     let consumed = match ev.windows_key_code {
         84 => {
             // Ctrl+T 新标签
-            if let Err(e) = new_tab("about:blank") {
+            let url = newtab_url();
+            if let Err(e) = new_tab(&url) {
                 log::error!("[cef] Ctrl+T 新建标签失败: {e}");
             }
             1
