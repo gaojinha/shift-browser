@@ -61,10 +61,16 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
     // GDK_BACKEND 已在 main() 最早期设置（必须早于任何 gtk_init）
     let _ = gtk::init();
 
-    // 2) 资源目录：开发期指向已解压的 CEF；生产期由打包流程注入 SHIFT_CEF_RESOURCES
+    // 2) 资源目录：生产期由打包流程注入 SHIFT_CEF_RESOURCES；
+    //    开发期取**可执行文件所在目录**——cef crate 构建时把 libcef.so / *.pak /
+    //    icudtl.dat / locales 全都放在 target/<profile>/ 下，与二进制同目录。
+    //    （原先写死 /tmp/cef-rs/... 是本地 path 依赖时代的路径，换 crates.io 后已不存在，
+    //      表现为启动 4 秒后 SIGTRAP：cef::initialize 拿不到资源目录。）
     let resources = std::env::var("SHIFT_CEF_RESOURCES").unwrap_or_else(|_| {
-        "/tmp/cef-rs/target/debug/build/cef-dll-sys-75d70c15d019ef94/out/cef_linux_x86_64"
-            .to_string()
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| ".".to_string())
     });
 
     let cache = app
