@@ -33,6 +33,8 @@ struct ShellTab {
     id: String,
     view: View,
     title: String,
+    /// 最近一次地址（on_address_change 维护），关闭时进恢复栈
+    url: String,
 }
 
 thread_local! {
@@ -54,6 +56,9 @@ thread_local! {
 
     /// 工具栏/启动页所在目录（open 时从 toolbar_url 反推，供新建标签取启动页）
     static SHELL_CACHE_DIR: RefCell<Option<String>> = const { RefCell::new(None) };
+
+    /// 最近关闭标签的 URL 栈（上限 20），供 Ctrl+Shift+T 恢复
+    static CLOSED_URLS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 /// 打开单栈窗口。**必须在 CEF UI 线程调用。**
@@ -118,6 +123,7 @@ pub fn open(content_url: &str, toolbar_url: &str) -> Result<(), String> {
             id: CONTENT_ID.to_string(),
             view: first_view,
             title: "新标签页".to_string(),
+            url: content_url.to_string(),
         });
     });
     ACTIVE_TAB.with(|a| a.set(0));
@@ -460,6 +466,12 @@ wrap_display_handler! {
                 return;
             }
             let text = u.to_string();
+            SHELL_TABS.with(|tabs| {
+                let mut tabs = tabs.borrow_mut();
+                if let Some(tab) = tabs.iter_mut().find(|x| x.id == self.tab_id) {
+                    tab.url = text.clone();
+                }
+            });
             run_toolbar_js(&format!(
                 "if (window.__shiftUrl) {{ window.__shiftUrl({}); }}",
                 serde_json::to_string(&text).unwrap_or_else(|_| "\"\"".to_string())
@@ -582,6 +594,7 @@ fn new_tab(url: &str) -> Result<(), String> {
             id: id.clone(),
             view,
             title: "新标签页".to_string(),
+            url: url.to_string(),
         });
         tabs.len() - 1
     });
@@ -634,6 +647,23 @@ fn close_tab(idx: usize) {
         log::info!("[cef] 只剩一个标签，忽略关闭");
         return;
     }
+    // 先记下这个标签的 URL（供 Ctrl+Shift+T 恢复），再摘表
+    let closing_url = SHELL_TABS.with(|t| {
+        t.borrow()
+            .get(idx)
+            .map(|x| x.url.clone())
+            .unwrap_or_default()
+    });
+    if !closing_url.is_empty() && closing_url != "about:blank" {
+        CLOSED_URLS.with(|v| {
+            let mut v = v.borrow_mut();
+            v.push(closing_url);
+            if v.len() > 20 {
+                v.remove(0);
+            }
+        });
+    }
+
     let (id, view) = SHELL_TABS.with(|t| {
         let mut tabs = t.borrow_mut();
         let tab = tabs.remove(idx);
@@ -960,10 +990,24 @@ fn handle_shortcut(
     if t != KeyEventType::RAWKEYDOWN.get_raw() && t != KeyEventType::KEYDOWN.get_raw() {
         return 0;
     }
-    // CEF EVENTFLAG_CONTROL_DOWN = 1 << 2
+    // CEF EVENTFLAG_CONTROL_DOWN = 1 << 2 / EVENTFLAG_SHIFT_DOWN = 1 << 1
     let ctrl = ev.modifiers & (1 << 2) != 0;
+    let shift = ev.modifiers & (1 << 1) != 0;
     if !ctrl {
         return 0;
+    }
+    // Ctrl+Shift+T 恢复最近关闭的标签
+    if shift && ev.windows_key_code == 84 {
+        let url = CLOSED_URLS.with(|v| v.borrow_mut().pop());
+        if let Some(u) = url {
+            if let Err(e) = new_tab(&u) {
+                log::error!("[cef] 恢复标签失败: {e}");
+            }
+        }
+        if let Some(flag) = is_shortcut {
+            *flag = 1;
+        }
+        return 1;
     }
     log::info!(
         "[cef] Ctrl 快捷键候选: key={} type={:?} mods={}",
