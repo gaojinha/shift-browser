@@ -1,0 +1,309 @@
+//! CEF 标签页的 Tauri 侧接入（实验阶段，`--features cef-engine` 才编译）
+//!
+//! 线程模型：
+//! - CEF 的 `Browser` 句柄**只能在 GTK 主线程**使用，全部存在 `thread_local` 里；
+//! - Tauri 命令跑在异步线程，对 CEF 的操作一律通过 `app.run_on_main_thread()`
+//!   投递，闭包里只捕获 `String`，绝不捕获 `Browser`；
+//! - CEF 回调产生的事件走全局 `mpsc` 通道，`tab_id` 随事件一起带出。
+//!
+//! 当前阶段目标：在 Tauri 应用里开出一个由 CEF 渲染的窗口，跑通整条链路。
+//! P2 再接入现有标签/分屏体系。
+
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Mutex, OnceLock};
+
+use tauri::{AppHandle, Manager};
+
+// gtk-rs 的窗口方法（add/show_all/window/allocation）都在 prelude trait 里
+use gtk::prelude::*;
+// CEF 的 Browser/Frame 方法在 Impl* trait 里
+use cef::{ImplBrowser, ImplCommandLine, ImplFrame};
+
+use crate::engine::cef::{
+    app as cef_app, browser as cef_browser, shell as cef_shell, toolbar as cef_toolbar,
+};
+use cef_browser::CefEvent;
+
+/// 全局事件发送端（CEF 回调线程 → Tauri 侧）
+static EVENT_TX: OnceLock<Sender<(String, CefEvent)>> = OnceLock::new();
+/// 全局事件接收端
+static EVENT_RX: Mutex<Option<Receiver<(String, CefEvent)>>> = Mutex::new(None);
+
+/// **子进程入口**：CEF 用 `/proc/self/exe` 拉起渲染/GPU/zygote 子进程，
+/// 子进程的命令行带 `--type=xxx`。命中时必须在这里跑完 CEF 子进程逻辑并**直接退出**，
+/// 绝不能再往下走 Tauri 初始化（否则就是无限套娃 + 单实例误判）。
+///
+/// 返回 `true` 表示当前进程是 CEF 子进程且已处理完毕，调用方应立即 return。
+pub fn try_run_subprocess() -> bool {
+    use cef::{args::Args, execute_process, CefString};
+
+    // 必须在任何 CEF 调用之前
+    let _ = cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
+
+    let args = Args::new();
+    let Some(cmd_line) = args.as_cmd_line() else {
+        return false;
+    };
+
+    let type_switch = CefString::from("type");
+    if cmd_line.has_switch(Some(&type_switch)) != 1 {
+        // 主进程
+        return false;
+    }
+
+    let ret = execute_process(Some(args.as_main_args()), None, std::ptr::null_mut());
+    // ret >= 0：子进程已跑完；< 0：类型未知，交给主流程
+    ret >= 0
+}
+
+/// 初始化 CEF（应用启动时调用一次）
+pub fn init(app: &AppHandle) -> Result<(), String> {
+    // GDK_BACKEND 已在 main() 最早期设置（必须早于任何 gtk_init）
+    let _ = gtk::init();
+
+    // 2) 资源目录：开发期指向已解压的 CEF；生产期由打包流程注入 SHIFT_CEF_RESOURCES
+    let resources = std::env::var("SHIFT_CEF_RESOURCES").unwrap_or_else(|_| {
+        "/tmp/cef-rs/target/debug/build/cef-dll-sys-75d70c15d019ef94/out/cef_linux_x86_64"
+            .to_string()
+    });
+
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map(|p| p.join("cef"))
+        .map_err(|e| format!("拿不到缓存目录: {e}"))?;
+    std::fs::create_dir_all(&cache).map_err(|e| format!("建缓存目录失败: {e}"))?;
+
+    cef_app::initialize(
+        &resources,
+        &format!("{resources}/locales"),
+        cache.to_string_lossy().as_ref(),
+    )?;
+
+    // 3) 事件通道
+    let (tx, rx) = channel::<(String, CefEvent)>();
+    let _ = EVENT_TX.set(tx);
+    *EVENT_RX.lock().unwrap_or_else(|e| e.into_inner()) = Some(rx);
+
+    // 4) 消息泵：挂到 GTK 主循环，10ms 一次
+    gtk::glib::timeout_add_local(std::time::Duration::from_millis(10), || {
+        cef_app::pump();
+        gtk::glib::ControlFlow::Continue
+    });
+
+    log::info!("[cef] 初始化完成，资源目录 {resources}");
+
+    // ---- 单栈外壳测试入口（新方案）----
+    // SHIFT_CEF_SHELL_URL=https://example.com 启动后等上下文就绪，开一个 CEF 自建窗口
+    if let Ok(url) = std::env::var("SHIFT_CEF_SHELL_URL") {
+        log::info!("[cef] 检测到单栈外壳 URL: {url}");
+        let app = app.clone();
+        gtk::glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
+            if !cef_app::is_context_ready() {
+                return gtk::glib::ControlFlow::Continue;
+            }
+            match open_shell_on_main(&app, &url) {
+                Ok(()) => log::info!("[cef] 单栈窗口已打开"),
+                Err(e) => log::error!("[cef] 单栈窗口打开失败: {e}"),
+            }
+            gtk::glib::ControlFlow::Break
+        });
+    }
+
+    // 实验用：设置 SHIFT_CEF_TEST_URL 后，启动 3 秒自动开一个 CEF 窗口做端到端验证
+    if let Ok(url) = std::env::var("SHIFT_CEF_TEST_URL") {
+        log::info!("[cef] 检测到测试 URL，3 秒后自动开窗: {url}");
+        let app = app.clone();
+        gtk::glib::timeout_add_seconds_local_once(3, move || match cef_open_window(app, url) {
+            Ok(id) => log::info!("[cef] 测试窗口已创建: {id}"),
+            Err(e) => log::error!("[cef] 测试窗口创建失败: {e}"),
+        });
+    }
+
+    Ok(())
+}
+
+/// 打开一个由 CEF 渲染的独立窗口，返回 tab id。
+///
+/// 用**纯 GTK 窗口**而不是 Tauri 的 Window：CEF 需要拿到一个已 realize 的
+/// GdkWindow 的 XID，Tauri 的窗口内部结构（tao 的 GtkBox）不可控，
+/// `GtkFixed` 挂上去拿不到 window。embed 实验已证明纯 GTK 路径可行。
+#[tauri::command]
+pub fn cef_open_window(app: AppHandle, url: String) -> Result<String, String> {
+    let tab_id = format!("cef-{}", uuid::Uuid::new_v4().simple());
+
+    // GTK 只能在主线程操作
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    let id = tab_id.clone();
+    app.run_on_main_thread(move || {
+        let r = create_gtk_cef_window(&id, &url);
+        let _ = tx.send(r);
+    })
+    .map_err(|e| format!("投递主线程失败: {e}"))?;
+
+    rx.recv().map_err(|e| format!("主线程无响应: {e}"))??;
+    Ok(tab_id)
+}
+
+/// 创建纯 GTK 窗口并在其中嵌入 CEF（必须在主线程调用）
+///
+/// **必须用 `GtkDrawingArea` 做容器，不能用 `GtkFixed`。**
+/// `GtkFixed` 是无窗口 widget，`window()` 返回的是顶层窗口的 GdkWindow，
+/// CEF 拿它当 parent 时不会创建 X11 子窗口（`window_handle()` 返回 1，
+/// 尺寸写死、无法 resize）。`GtkDrawingArea` 有独立的 GdkWindow，
+/// CEF 才会在其下建立真正的 X11 子窗口——embed 实验用的就是这个。
+fn create_gtk_cef_window(tab_id: &str, url: &str) -> Result<(), String> {
+    let window = gtk::Window::new(gtk::WindowType::Toplevel);
+    window.set_title("Shift · CEF");
+    window.set_default_size(1280, 860);
+
+    // DrawingArea 直接铺满窗口（Window 是 Bin，只能有一个子 widget）
+    let area = gtk::DrawingArea::new();
+    area.set_size_request(1280, 860);
+    window.add(&area);
+    window.show_all();
+
+    let gdk_window = area
+        .window()
+        .ok_or_else(|| "DrawingArea 没有 GdkWindow（未 realize）".to_string())?;
+
+    let xid = {
+        use gdkx11::X11Window;
+        let x11 = gdk_window
+            .clone()
+            .downcast::<X11Window>()
+            .map_err(|w| format!("不是 X11 窗口（实际 {:?}）", w.type_()))?;
+        x11.xid()
+    };
+
+    let alloc = area.allocation();
+    let (w, h) = (alloc.width(), alloc.height());
+
+    log::info!("[cef] 窗口={tab_id} XID=0x{xid:x} 尺寸={w}x{h}");
+
+    let tx = EVENT_TX
+        .get()
+        .ok_or_else(|| "CEF 未初始化（EVENT_TX 为空）".to_string())?
+        .clone();
+
+    // 异步创建：句柄稍后在 LifeSpanHandler::on_after_created 里登记进 BROWSERS
+    if !cef_browser::create_browser(tab_id.to_string(), url, xid, (0, 0, w, h), tx) {
+        return Err("browser_host_create_browser 返回失败".to_string());
+    }
+
+    // ---- 尺寸跟随：窗口 resize 时同步 DrawingArea 与 CEF 子窗口 ----
+    let id_resize = tab_id.to_string();
+    let area_for_resize = area.clone();
+    window.connect_size_allocate(move |_, alloc| {
+        let (w, h) = (alloc.width(), alloc.height());
+        // 让 DrawingArea 跟着窗口走（否则 CEF 子窗口会被裁剪）
+        area_for_resize.set_size_request(w, h);
+
+        cef_browser::BROWSERS.with(|tabs| {
+            if let Some(b) = tabs.borrow().get(&id_resize) {
+                cef_browser::resize(b, w, h);
+            }
+        });
+    });
+
+    // ---- 测试用：SHIFT_CEF_TEST_RESIZE=900x560，8 秒后主动调 GTK resize ----
+    if let Ok(spec) = std::env::var("SHIFT_CEF_TEST_RESIZE") {
+        if let Some((ws, hs)) = spec.split_once('x') {
+            if let (Ok(w), Ok(h)) = (ws.trim().parse::<i32>(), hs.trim().parse::<i32>()) {
+                let id = tab_id.to_string();
+                gtk::glib::timeout_add_seconds_local_once(8, move || {
+                    log::info!("[cef] 测试：直接 resize CEF 到 {w}x{h}");
+                    cef_browser::BROWSERS.with(|tabs| {
+                        if let Some(b) = tabs.borrow().get(&id) {
+                            cef_browser::resize(b, w, h);
+                        } else {
+                            log::warn!("[cef] 测试 resize：BROWSERS 里没有该标签");
+                        }
+                    });
+                });
+            }
+        }
+    }
+
+    // ---- 关闭清理：窗口关掉时销毁 CEF 浏览器，避免句柄残留 ----
+    let id_close = tab_id.to_string();
+    window.connect_delete_event(move |_, _| {
+        let browser = cef_browser::BROWSERS.with(|tabs| tabs.borrow_mut().remove(&id_close));
+        if let Some(b) = browser {
+            cef_browser::close(&b, true);
+        }
+        gtk::glib::Propagation::Proceed
+    });
+
+    log::info!("[cef] 浏览器已嵌入标签页 {tab_id}");
+    Ok(())
+}
+
+/// 打开单栈窗口（窗口、工具栏、内容页全在 CEF 内）。
+///
+/// 必须在主线程调用；`app` 只用来取缓存目录。
+fn open_shell_on_main(app: &AppHandle, url: &str) -> Result<(), String> {
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("拿不到缓存目录: {e}"))?;
+    let toolbar_url = cef_toolbar::ensure_toolbar_html(&cache)?;
+    cef_shell::open(url, &toolbar_url)?;
+
+    // 窗口创建回调里调 show() 会卡死；出回调后立刻用 X11 直接映射
+    cef_shell::force_show();
+    Ok(())
+}
+
+/// Tauri 命令：打开 CEF 单栈窗口
+#[tauri::command]
+pub fn cef_open_shell(app: AppHandle, url: String) -> Result<(), String> {
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    let app2 = app.clone();
+    app.run_on_main_thread(move || {
+        let r = open_shell_on_main(&app2, &url);
+        let _ = tx.send(r);
+    })
+    .map_err(|e| format!("投递主线程失败: {e}"))?;
+    rx.recv().map_err(|e| format!("主线程无响应: {e}"))?
+}
+
+/// 让指定 CEF 标签导航
+#[tauri::command]
+pub fn cef_navigate(app: AppHandle, tab_id: String, url: String) -> Result<(), String> {
+    app.run_on_main_thread(move || {
+        cef_browser::BROWSERS.with(|tabs| {
+            if let Some(browser) = tabs.borrow().get(&tab_id) {
+                if let Some(frame) = browser.main_frame() {
+                    let u = cef::CefString::from(url.as_str());
+                    frame.load_url(Some(&u));
+                }
+            }
+        });
+    })
+    .map_err(|e| format!("投递主线程失败: {e}"))
+}
+
+/// 关闭指定 CEF 标签
+#[tauri::command]
+pub fn cef_close_window(app: AppHandle, tab_id: String) -> Result<(), String> {
+    app.run_on_main_thread(move || {
+        let browser = cef_browser::BROWSERS.with(|tabs| tabs.borrow_mut().remove(&tab_id));
+        if let Some(b) = browser {
+            cef_browser::close(&b, false);
+        }
+    })
+    .map_err(|e| format!("投递主线程失败: {e}"))
+}
+
+/// 取走最近收到的 CEF 事件（调试用）
+#[tauri::command]
+pub fn cef_poll_events() -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(rx) = EVENT_RX.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        while let Ok((tab_id, ev)) = rx.try_recv() {
+            out.push(format!("{tab_id}: {ev:?}"));
+        }
+    }
+    out
+}

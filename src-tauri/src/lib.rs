@@ -24,6 +24,16 @@ mod api;
 mod auto_tasks;
 mod default_browser;
 mod engine;
+// CEF 引擎接入（--features cef-engine 才编译）
+#[cfg(feature = "cef-engine")]
+mod cef_cmd;
+
+/// CEF 子进程入口（供 main.rs 最早期调用）。
+/// 返回 true 表示本进程是 CEF 子进程且已处理完，主流程应直接退出。
+#[cfg(feature = "cef-engine")]
+pub fn cef_try_run_subprocess() -> bool {
+    cef_cmd::try_run_subprocess()
+}
 mod error;
 mod extensions;
 mod feed;
@@ -209,6 +219,17 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            // CEF 引擎（换核实验，--features cef-engine）
+            #[cfg(feature = "cef-engine")]
+            cef_cmd::cef_open_window,
+            #[cfg(feature = "cef-engine")]
+            cef_cmd::cef_open_shell,
+            #[cfg(feature = "cef-engine")]
+            cef_cmd::cef_navigate,
+            #[cfg(feature = "cef-engine")]
+            cef_cmd::cef_close_window,
+            #[cfg(feature = "cef-engine")]
+            cef_cmd::cef_poll_events,
             // 启动锁屏状态（前端初始化前查询，锁屏期间静默等待解锁）
             misc_cmds::is_locked,
             // 前端日志桥（排查前端执行链路）
@@ -481,7 +502,15 @@ pub fn run() {
         })
         .setup(|app| {
             // R2-1b（2026-09-24）：setup 启动装配已抽到 app/bootstrap.rs
-            crate::bootstrap::setup(app)
+            crate::bootstrap::setup(app)?;
+            // CEF 引擎（换核实验）：初始化失败不阻断主流程，只记录
+            #[cfg(feature = "cef-engine")]
+            {
+                if let Err(e) = cef_cmd::init(app.handle()) {
+                    log::error!("[cef] 初始化失败，回退 WebKitGTK: {e}");
+                }
+            }
+            Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

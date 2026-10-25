@@ -10,7 +10,10 @@
 //! 直接对接系统已安装的 `libwebkit2gtk-4.1`（2.52.3 实测符号齐全）。
 
 pub mod agent;
+// CEF（Chromium）引擎后端：仅 --features cef-engine 时编译
 pub mod ai_provider;
+#[cfg(feature = "cef-engine")]
+pub mod cef;
 pub mod content;
 pub mod content_filter;
 pub mod layout;
