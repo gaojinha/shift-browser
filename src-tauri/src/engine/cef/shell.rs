@@ -396,6 +396,10 @@ wrap_client! {
             }
         }
 
+        fn download_handler(&self) -> Option<DownloadHandler> {
+            Some(ShellDownloadHandler::new())
+        }
+
         fn keyboard_handler(&self) -> Option<KeyboardHandler> {
             // 快捷键在工具栏和内容页都要生效（Ctrl+T 在地址栏里按也该开新标签）
             Some(ShellKeyboardHandler::new())
@@ -1066,4 +1070,64 @@ fn handle_shortcut(
         }
     }
     consumed
+}
+
+wrap_download_handler! {
+    struct ShellDownloadHandler;
+
+    impl DownloadHandler {
+        /// 下载开始前决定落盘路径：直接存 `~/Downloads`，不弹保存对话框
+        /// （CEF 的 Views 模式没有系统保存对话框，不接管会静默失败）。
+        fn on_before_download(
+            &self,
+            _browser: Option<&mut Browser>,
+            _download_item: Option<&mut DownloadItem>,
+            suggested_name: Option<&CefString>,
+            callback: Option<&mut BeforeDownloadCallback>,
+        ) -> std::os::raw::c_int {
+            let name = suggested_name
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "download".to_string());
+            let safe = sanitize_filename(&name);
+            let path = download_dir().join(&safe);
+            log::info!("[cef] 下载开始: {name} -> {}", path.display());
+            if let Some(cb) = callback {
+                cb.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
+            }
+            1
+        }
+
+        fn on_download_updated(
+            &self,
+            _browser: Option<&mut Browser>,
+            download_item: Option<&mut DownloadItem>,
+            _callback: Option<&mut DownloadItemCallback>,
+        ) {
+            if let Some(it) = download_item {
+                if it.is_complete() != 0 {
+                    log::info!("[cef] 下载完成（进度 {}%）", it.percent_complete());
+                }
+            }
+        }
+    }
+}
+
+/// 默认下载目录：`$HOME/Downloads`（不存在则创建）
+fn download_dir() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let dir = std::path::PathBuf::from(home).join("Downloads");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// 只保留文件名本身：剥掉路径分隔、控制字符、首尾点（防 `../` 逃逸与隐藏文件）
+fn sanitize_filename(name: &str) -> String {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or("download");
+    let cleaned: String = base.chars().filter(|c| !c.is_control()).collect();
+    let trimmed = cleaned.trim().trim_matches('.').to_string();
+    if trimmed.is_empty() {
+        "download".to_string()
+    } else {
+        trimmed
+    }
 }
