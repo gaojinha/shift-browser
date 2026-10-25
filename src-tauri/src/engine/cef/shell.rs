@@ -353,6 +353,11 @@ wrap_client! {
             }
         }
 
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> {
+            // 快捷键在工具栏和内容页都要生效（Ctrl+T 在地址栏里按也该开新标签）
+            Some(ShellKeyboardHandler::new())
+        }
+
         fn display_handler(&self) -> Option<DisplayHandler> {
             // 工具栏：接收 JS 传上来的动作（console 桥）
             // 内容页：接收标题变化，回写标签栏（2026-10-26 多标签）
@@ -859,4 +864,84 @@ wrap_load_handler! {
             ));
         }
     }
+}
+
+wrap_keyboard_handler! {
+    struct ShellKeyboardHandler;
+
+    impl KeyboardHandler {
+        fn on_pre_key_event(
+            &self,
+            _browser: Option<&mut Browser>,
+            event: Option<&KeyEvent>,
+            _os_event: Option<&mut cef::sys::XEvent>,
+            is_keyboard_shortcut: Option<&mut std::os::raw::c_int>,
+        ) -> std::os::raw::c_int {
+            handle_shortcut(event, is_keyboard_shortcut)
+        }
+
+        fn on_key_event(
+            &self,
+            _browser: Option<&mut Browser>,
+            event: Option<&KeyEvent>,
+            _os_event: Option<&mut cef::sys::XEvent>,
+        ) -> std::os::raw::c_int {
+            handle_shortcut(event, None)
+        }
+    }
+}
+
+/// 处理 Ctrl 系快捷键。返回 1 = 已消费，不再传给页面。
+fn handle_shortcut(
+    event: Option<&KeyEvent>,
+    is_shortcut: Option<&mut std::os::raw::c_int>,
+) -> std::os::raw::c_int {
+    let Some(ev) = event else { return 0 };
+    let t = ev.type_.get_raw();
+    // 只处理按下，避免 keyup 重复触发
+    if t != KeyEventType::RAWKEYDOWN.get_raw() && t != KeyEventType::KEYDOWN.get_raw() {
+        return 0;
+    }
+    // CEF EVENTFLAG_CONTROL_DOWN = 1 << 2
+    let ctrl = ev.modifiers & (1 << 2) != 0;
+    if !ctrl {
+        return 0;
+    }
+    log::info!(
+        "[cef] Ctrl 快捷键候选: key={} type={:?} mods={}",
+        ev.windows_key_code,
+        ev.type_.get_raw(),
+        ev.modifiers
+    );
+    let consumed = match ev.windows_key_code {
+        84 => {
+            // Ctrl+T 新标签
+            if let Err(e) = new_tab("about:blank") {
+                log::error!("[cef] Ctrl+T 新建标签失败: {e}");
+            }
+            1
+        }
+        87 => {
+            // Ctrl+W 关标签
+            let idx = ACTIVE_TAB.with(|a| a.get());
+            close_tab(idx);
+            1
+        }
+        9 => {
+            // Ctrl+Tab 下一个标签
+            let len = SHELL_TABS.with(|t| t.borrow().len());
+            if len > 1 {
+                let cur = ACTIVE_TAB.with(|a| a.get());
+                switch_tab((cur + 1) % len);
+            }
+            1
+        }
+        _ => 0,
+    };
+    if consumed == 1 {
+        if let Some(flag) = is_shortcut {
+            *flag = 1;
+        }
+    }
+    consumed
 }
