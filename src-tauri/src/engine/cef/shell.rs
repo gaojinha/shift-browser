@@ -59,6 +59,9 @@ thread_local! {
 
     /// 最近关闭标签的 URL 栈（上限 20），供 Ctrl+Shift+T 恢复
     static CLOSED_URLS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+
+    /// 正在关闭某个标签：期间拦掉 CEF 顺带发起的窗口关闭请求
+    static TAB_CLOSING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// 打开单栈窗口。**必须在 CEF UI 线程调用。**
@@ -263,6 +266,7 @@ wrap_window_delegate! {
             1
         }
 
+
         fn on_window_created(&self, window: Option<&mut Window>) {
             let Some(window) = window else { return };
 
@@ -345,7 +349,13 @@ wrap_window_delegate! {
         }
 
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
-            1
+            // 关闭标签时 CEF 会顺带请求关窗（实测 close_browser 的 force 0/1 都一样，
+            // 表现为整个窗口消失）。这里拦下；用户真点窗口关闭按钮时标志为 false，正常放行。
+            if TAB_CLOSING.with(|f| f.get()) {
+                0
+            } else {
+                1
+            }
         }
 
         fn initial_show_state(&self, _window: Option<&mut Window>) -> ShowState {
@@ -669,11 +679,20 @@ fn close_tab(idx: usize) {
         let tab = tabs.remove(idx);
         (tab.id, tab.view)
     });
-    // 不调 close_browser：2026-10-26 两次实测（force=1，以及去掉 remove_child_view 后）
-    // 只要关闭 browser，整个 CEF 窗口就跟着消失（8 个进程还在、window_handle 失效）。
-    // 改为只把标签移出表 + 隐藏视图，browser 留着由 CEF 回收——
-    // 代价是关闭的标签仍占一点内存，先保证窗口不崩，M2 迭代再找安全销毁时机。
-    log::info!("[cef] 关闭标签 {id}（仅隐藏，browser 暂不销毁）");
+    // 关闭期间置标志，让 WindowDelegate::can_close 拦下 CEF 顺带的关窗请求；
+    // close_browser 是异步的，200ms 后（且它已经发完关窗请求）再复位。
+    TAB_CLOSING.with(|f| f.set(true));
+    gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(200), || {
+        TAB_CLOSING.with(|f| f.set(false));
+    });
+    BROWSERS.with(|m| {
+        if let Some(b) = m.borrow().get(&id) {
+            if let Some(h) = b.host() {
+                log::info!("[cef] 关闭标签 {id}：close_browser(0)");
+                h.close_browser(0);
+            }
+        }
+    });
     // 不调 remove_child_view：2026-10-26 实测它会把整个窗口一起销毁
     // （点 × 后 8 个进程还在但窗口消失）。改为只隐藏，视图随 browser 关闭由 CEF 回收；
     // 代价是短时间内留一个不可见视图，先保证不崩，M2 迭代里再找安全的移除时机。
