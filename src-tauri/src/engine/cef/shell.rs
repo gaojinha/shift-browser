@@ -28,12 +28,29 @@ pub const TOOLBAR_ID: &str = "shell-toolbar";
 /// 省一层 BrowserView；标签栏 DOM 由 `window.__shiftTabs()` 刷新）
 pub const TOOLBAR_HEIGHT: i32 = 84;
 
+/// 一个标签页：视图 + 标题（浏览器句柄另存在 `BROWSERS`，按 `id` 取）
+struct ShellTab {
+    id: String,
+    view: View,
+    title: String,
+}
+
 thread_local! {
     /// Client 保活：CEF 在浏览器存活期间会引用 client，提前释放会崩
     static SHELL_CLIENTS: RefCell<Vec<Client>> = const { RefCell::new(Vec::new()) };
 
     /// 当前单栈窗口句柄（窗口创建回调里登记，供延迟 show 用）
     static SHELL_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+
+    /// 窗口的 BoxLayout（新建标签时要往里 add_child_view + set_flex）
+    static SHELL_LAYOUT: RefCell<Option<BoxLayout>> = const { RefCell::new(None) };
+
+    /// 标签表（顺序即标签栏顺序）与当前活动索引
+    static SHELL_TABS: RefCell<Vec<ShellTab>> = const { RefCell::new(Vec::new()) };
+    static ACTIVE_TAB: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+
+    /// 新标签 id 自增序号
+    static TAB_SEQ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// 打开单栈窗口。**必须在 CEF UI 线程调用。**
@@ -83,6 +100,17 @@ pub fn open(content_url: &str, toolbar_url: &str) -> Result<(), String> {
     .ok_or_else(|| "工具栏 BrowserView 创建失败".to_string())?;
 
     // 工具栏高度由 ViewDelegate::preferred_size 固定（flex=0 时生效）
+
+    // 首个标签登记进标签表（视图所有权仍在 ShellWindowDelegate，这里持一份引用）
+    let first_view = View::from(&content_view);
+    SHELL_TABS.with(|t| {
+        t.borrow_mut().push(ShellTab {
+            id: CONTENT_ID.to_string(),
+            view: first_view,
+            title: "新标签页".to_string(),
+        });
+    });
+    ACTIVE_TAB.with(|a| a.set(0));
 
     let mut delegate = ShellWindowDelegate::new(
         RefCell::new(Some(content_view)),
@@ -230,6 +258,8 @@ wrap_window_delegate! {
                 // 工具栏不伸缩，内容吃满剩余空间
                 layout.set_flex_for_view(Some(&mut toolbar_view), 0);
                 layout.set_flex_for_view(Some(&mut content_view), 1);
+                // 存一份给新建标签用（add_child_view 后要补 flex）
+                SHELL_LAYOUT.with(|l| *l.borrow_mut() = Some(layout));
             } else {
                 log::error!("[cef] set_to_box_layout 失败");
             }
@@ -315,11 +345,12 @@ wrap_client! {
         }
 
         fn display_handler(&self) -> Option<DisplayHandler> {
-            // 只有工具栏需要接收 JS 传上来的动作
+            // 工具栏：接收 JS 传上来的动作（console 桥）
+            // 内容页：接收标题变化，回写标签栏（2026-10-26 多标签）
             if self.toolbar {
                 Some(ShellToolbarDisplay::new())
             } else {
-                None
+                Some(ShellContentDisplay::new(self.tab_id.clone()))
             }
         }
     }
@@ -361,6 +392,37 @@ wrap_life_span_handler! {
     }
 }
 
+// 内容页 → 标签栏：标题变化回写。
+//
+// CEF 的 on_title_change 每页只回调一次（首次拿到标题时），
+// 后续 SPA 内改标题需要 LoadEnd 后补一次读取（待 M2 完善）。
+wrap_display_handler! {
+    struct ShellContentDisplay {
+        tab_id: String,
+    }
+
+    impl DisplayHandler {
+        fn on_title_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            title: Option<&CefString>,
+        ) {
+            let Some(t) = title else { return };
+            let text = t.to_string();
+            if text.is_empty() {
+                return;
+            }
+            SHELL_TABS.with(|tabs| {
+                let mut tabs = tabs.borrow_mut();
+                if let Some(tab) = tabs.iter_mut().find(|x| x.id == self.tab_id) {
+                    tab.title = text;
+                }
+            });
+            refresh_tabbar();
+        }
+    }
+}
+
 // 工具栏 → 浏览器进程的动作通道。
 //
 // 临时用 console.log 桥（MVP）：工具栏 JS 打 `SHIFT_ACT:nav|<url>`，
@@ -388,6 +450,147 @@ wrap_display_handler! {
     }
 }
 
+/// 新建标签页（视图隐藏加入布局，随后切换过去）。
+fn new_tab(url: &str) -> Result<(), String> {
+    let seq = TAB_SEQ.with(|c| {
+        let v = c.get() + 1;
+        c.set(v);
+        v
+    });
+    let id = format!("shell-tab-{seq}");
+
+    let client: Client = ShellClient::new(id.clone(), false);
+    SHELL_CLIENTS.with(|v| v.borrow_mut().push(client.clone()));
+    let mut client = client;
+    let mut delegate = ShellViewDelegate::new(RuntimeStyle::ALLOY, 0);
+    let browser_view = browser_view_create(
+        Some(&mut client),
+        Some(&CefString::from(url)),
+        Some(&BrowserSettings::default()),
+        None,
+        None,
+        Some(&mut delegate),
+    )
+    .ok_or_else(|| "新标签 BrowserView 创建失败".to_string())?;
+
+    let mut view = View::from(&browser_view);
+    view.set_visible(0);
+
+    let mut attached = false;
+    SHELL_WINDOW.with(|w| {
+        if let Some(window) = w.borrow().as_ref() {
+            window.add_child_view(Some(&mut view));
+            attached = true;
+        }
+    });
+    if !attached {
+        return Err("窗口尚未创建，无法加视图".to_string());
+    }
+    SHELL_LAYOUT.with(|l| {
+        if let Some(layout) = l.borrow().as_ref() {
+            layout.set_flex_for_view(Some(&mut view), 1);
+        }
+    });
+
+    let idx = SHELL_TABS.with(|t| {
+        let mut tabs = t.borrow_mut();
+        tabs.push(ShellTab {
+            id: id.clone(),
+            view,
+            title: "新标签页".to_string(),
+        });
+        tabs.len() - 1
+    });
+
+    log::info!("[cef] 新标签已创建: {id} (idx={idx})");
+    switch_tab(idx);
+    refresh_tabbar();
+    Ok(())
+}
+
+/// 切换活动标签（只改可见性，不动布局）
+fn switch_tab(idx: usize) {
+    let len = SHELL_TABS.with(|t| t.borrow().len());
+    if idx >= len {
+        log::warn!("[cef] 切换标签越界: {idx} >= {len}");
+        return;
+    }
+    SHELL_TABS.with(|t| {
+        let mut tabs = t.borrow_mut();
+        for (i, tab) in tabs.iter_mut().enumerate() {
+            tab.view.set_visible(if i == idx { 1 } else { 0 });
+            if i == idx {
+                let v = tab.view.clone();
+                v.request_focus();
+            }
+        }
+    });
+    ACTIVE_TAB.with(|a| a.set(idx));
+    log::info!("[cef] 切换到标签 {idx}");
+    refresh_tabbar();
+}
+
+/// 关闭标签（至少保留一个；关闭后切到相邻标签）
+fn close_tab(idx: usize) {
+    let len = SHELL_TABS.with(|t| t.borrow().len());
+    if idx >= len {
+        return;
+    }
+    if len <= 1 {
+        log::info!("[cef] 只剩一个标签，忽略关闭");
+        return;
+    }
+    let (id, view) = SHELL_TABS.with(|t| {
+        let mut tabs = t.borrow_mut();
+        let tab = tabs.remove(idx);
+        (tab.id, tab.view)
+    });
+    // 不调 close_browser：2026-10-26 两次实测（force=1，以及去掉 remove_child_view 后）
+    // 只要关闭 browser，整个 CEF 窗口就跟着消失（8 个进程还在、window_handle 失效）。
+    // 改为只把标签移出表 + 隐藏视图，browser 留着由 CEF 回收——
+    // 代价是关闭的标签仍占一点内存，先保证窗口不崩，M2 迭代再找安全销毁时机。
+    log::info!("[cef] 关闭标签 {id}（仅隐藏，browser 暂不销毁）");
+    // 不调 remove_child_view：2026-10-26 实测它会把整个窗口一起销毁
+    // （点 × 后 8 个进程还在但窗口消失）。改为只隐藏，视图随 browser 关闭由 CEF 回收；
+    // 代价是短时间内留一个不可见视图，先保证不崩，M2 迭代里再找安全的移除时机。
+    view.set_visible(0);
+
+    let new_idx = idx.saturating_sub(1).min(len.saturating_sub(2));
+    ACTIVE_TAB.with(|a| a.set(new_idx));
+    switch_tab(new_idx);
+    log::info!("[cef] 标签已关闭: {id}，切到 {new_idx}");
+}
+
+/// 把标签表同步到工具栏页面的标签栏（调 `window.__shiftTabs(tabs, active)`）
+pub fn refresh_tabbar() {
+    let (list_json, active) = SHELL_TABS.with(|t| {
+        let tabs = t.borrow();
+        let list: Vec<serde_json::Value> = tabs
+            .iter()
+            .map(|tab| serde_json::json!({ "title": tab.title, "id": tab.id }))
+            .collect();
+        (
+            serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string()),
+            ACTIVE_TAB.with(|a| a.get()),
+        )
+    });
+    let code = format!(
+        "if (window.__shiftTabs) {{ window.__shiftTabs({}, {}); }}",
+        list_json, active
+    );
+    BROWSERS.with(|m| {
+        if let Some(b) = m.borrow().get(TOOLBAR_ID) {
+            if let Some(frame) = b.main_frame() {
+                frame.execute_java_script(
+                    Some(&CefString::from(code.as_str())),
+                    Some(&CefString::from("shift://tabs")),
+                    -1,
+                );
+            }
+        }
+    });
+}
+
 /// 执行工具栏动作
 fn handle_action(action: &str) {
     let (cmd, arg) = match action.split_once('|') {
@@ -395,9 +598,42 @@ fn handle_action(action: &str) {
         None => (action, ""),
     };
 
+    // 标签相关动作先处理（不需要当前 content 浏览器）
+    match cmd {
+        "tabnew" => {
+            if let Err(e) = new_tab("about:blank") {
+                log::error!("[cef] 新建标签失败: {e}");
+            }
+            return;
+        }
+        "tab" => {
+            if let Ok(idx) = arg.parse::<usize>() {
+                switch_tab(idx);
+            }
+            return;
+        }
+        "tabclose" => {
+            if let Ok(idx) = arg.parse::<usize>() {
+                close_tab(idx);
+            }
+            return;
+        }
+        _ => {}
+    }
+
+    let active_id = SHELL_TABS.with(|t| {
+        let tabs = t.borrow();
+        let idx = ACTIVE_TAB.with(|a| a.get());
+        tabs.get(idx).map(|tab| tab.id.clone())
+    });
+    let Some(active_id) = active_id else {
+        log::warn!("[cef] 无活动标签，忽略动作 {cmd}");
+        return;
+    };
+
     BROWSERS.with(|m| {
         let map = m.borrow();
-        let Some(browser) = map.get(CONTENT_ID) else {
+        let Some(browser) = map.get(&active_id) else {
             return;
         };
         match cmd {
