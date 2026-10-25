@@ -243,6 +243,20 @@ wrap_window_delegate! {
     impl PanelDelegate {}
 
     impl WindowDelegate {
+        // 窗口按钮（2026-10-26）：不显式声明时 CEF 的 Linux 顶层窗口只给
+        // 最小化 + 关闭，没有最大化。三个能力都返回 1，交给窗口管理器画齐。
+        fn can_maximize(&self, _window: Option<&mut Window>) -> std::os::raw::c_int {
+            1
+        }
+
+        fn can_minimize(&self, _window: Option<&mut Window>) -> std::os::raw::c_int {
+            1
+        }
+
+        fn can_resize(&self, _window: Option<&mut Window>) -> std::os::raw::c_int {
+            1
+        }
+
         fn on_window_created(&self, window: Option<&mut Window>) {
             let Some(window) = window else { return };
 
