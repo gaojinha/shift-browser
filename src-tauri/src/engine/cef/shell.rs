@@ -344,6 +344,15 @@ wrap_client! {
             Some(ShellRequestHandler::new(self.tab_id.clone()))
         }
 
+        fn load_handler(&self) -> Option<LoadHandler> {
+            // 内容页需要加载态（标签栏转圈）；工具栏页不需要
+            if self.toolbar {
+                None
+            } else {
+                Some(ShellContentLoadHandler::new(self.tab_id.clone()))
+            }
+        }
+
         fn display_handler(&self) -> Option<DisplayHandler> {
             // 工具栏：接收 JS 传上来的动作（console 桥）
             // 内容页：接收标题变化，回写标签栏（2026-10-26 多标签）
@@ -402,6 +411,29 @@ wrap_display_handler! {
     }
 
     impl DisplayHandler {
+        /// 地址变化（含重定向）→ 同步到地址栏输入框。
+        /// 2026-10-26：多标签下只有活动标签的地址才该显示在地址栏。
+        fn on_address_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            url: Option<&CefString>,
+        ) {
+            let Some(u) = url else { return };
+            let active_id = SHELL_TABS.with(|t| {
+                let tabs = t.borrow();
+                tabs.get(ACTIVE_TAB.with(|a| a.get())).map(|x| x.id.clone())
+            });
+            if active_id.as_deref() != Some(self.tab_id.as_str()) {
+                return;
+            }
+            let text = u.to_string();
+            run_toolbar_js(&format!(
+                "if (window.__shiftUrl) {{ window.__shiftUrl({}); }}",
+                serde_json::to_string(&text).unwrap_or_else(|_| "\"\"".to_string())
+            ));
+        }
+
         fn on_title_change(
             &self,
             _browser: Option<&mut Browser>,
@@ -559,6 +591,21 @@ fn close_tab(idx: usize) {
     ACTIVE_TAB.with(|a| a.set(new_idx));
     switch_tab(new_idx);
     log::info!("[cef] 标签已关闭: {id}，切到 {new_idx}");
+}
+
+/// 在工具栏页面里执行一段 JS（地址栏/加载态等 UI 更新统一走这里）
+fn run_toolbar_js(code: &str) {
+    BROWSERS.with(|m| {
+        if let Some(b) = m.borrow().get(TOOLBAR_ID) {
+            if let Some(frame) = b.main_frame() {
+                frame.execute_java_script(
+                    Some(&CefString::from(code)),
+                    Some(&CefString::from("shift://ui")),
+                    -1,
+                );
+            }
+        }
+    });
 }
 
 /// 把标签表同步到工具栏页面的标签栏（调 `window.__shiftTabs(tabs, active)`）
@@ -779,6 +826,37 @@ wrap_request_handler! {
                 error_code,
                 error_string.map(|s| s.to_string()).unwrap_or_default()
             );
+        }
+    }
+}
+
+wrap_load_handler! {
+    struct ShellContentLoadHandler {
+        tab_id: String,
+    }
+
+    impl LoadHandler {
+        // CEF 回调参数名跟随 C API 风格（camelCase），不改签名
+        #[allow(non_snake_case)]
+        fn on_loading_state_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            isLoading: i32,
+            _canGoBack: i32,
+            _canGoForward: i32,
+        ) {
+            // 多标签下只有活动标签影响 UI，否则后台标签加载会闪活动标签的图标
+            let active_id = SHELL_TABS.with(|t| {
+                let tabs = t.borrow();
+                tabs.get(ACTIVE_TAB.with(|a| a.get())).map(|x| x.id.clone())
+            });
+            if active_id.as_deref() != Some(self.tab_id.as_str()) {
+                return;
+            }
+            run_toolbar_js(&format!(
+                "if (window.__shiftLoading) {{ window.__shiftLoading({}); }}",
+                isLoading != 0
+            ));
         }
     }
 }

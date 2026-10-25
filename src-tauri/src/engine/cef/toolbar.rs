@@ -84,6 +84,10 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     color: #cfd3da; font-size: 17px; line-height: 1;
   }
   .tab-new:hover { background: #2d3340; }
+  /* 加载中：刷新按钮转圈（Rust 侧 data-loading 控制） */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  html[data-loading="1"] #reload svg { animation: spin .9s linear infinite; }
+  html[data-loading="1"] #reload { color: #8ab4f8; }
   .addr-wrap {
     flex: 1; display: flex; align-items: center; height: 32px;
     background: #151920; border: 1px solid #333844; border-radius: 16px;
@@ -146,6 +150,15 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   });
 
   addr.addEventListener('focus', () => addr.select());
+
+  // ---- 地址栏 / 加载态（Rust 侧 execute_java_script 调用）----
+  window.__shiftUrl = function (url) {
+    if (document.activeElement === addr) return; // 用户正在输入时不打断
+    addr.value = url || '';
+  };
+  window.__shiftLoading = function (on) {
+    document.documentElement.dataset.loading = on ? '1' : '';
+  };
 
   // ---- 标签栏（M2 独立开窗）----
   // Rust 侧通过 execute_java_script 调用 window.__shiftTabs(data) 刷新标签栏；
