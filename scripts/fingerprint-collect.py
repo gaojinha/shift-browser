@@ -56,9 +56,10 @@ def compare(base, cand):
     for k in sorted(set(bh) | set(ch)):
         a, b = bh.get(k, "（缺）"), ch.get(k, "（缺）")
         rows.append((f"header:{k}", a, b, "一致" if a == b else "差异"))
+    esc = lambda x: str(x).replace("|", "\\|")
     print("| 项 | 基线 | 候选 | 判定 |\n|---|---|---|---|")
     for k, a, b, v in rows:
-        print(f"| {k} | `{a}` | `{b}` | {v} |")
+        print(f"| {k} | `{esc(a)}` | `{esc(b)}` | {v} |")
 
 
 if __name__ == "__main__":

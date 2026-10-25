@@ -1,0 +1,584 @@
+[
+ {
+  "url": "https://linux.do",
+  "run": 1,
+  "elapsed_s": 20.3,
+  "docs": [
+   {
+    "url": "https://linux.do/",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a501044badceca79-LAX",
+    "cf_mitigated": null,
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   },
+   {
+    "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/h3jhb/0x4AAAAAAAc2BQjPEms9tKlM/auto/fbE/new/normal?lang=auto",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a501045de9af3ccc-LAX",
+    "cf_mitigated": null,
+    "frame": "5DA97C91C0A772CD0A819452CD2AE7AE"
+   },
+   {
+    "url": "https://js.stripe.com/v3/m-outer-3437aaddcdf6922d623e172c2d6f9278.html",
+    "status": 200,
+    "protocol": "h2",
+    "server": "Fastly",
+    "cf_ray": null,
+    "cf_mitigated": null,
+    "frame": "F840E14FCDF3F9FB51D6D2052D425617"
+   }
+  ],
+  "state_8s": {
+   "url": "https://linux.do/",
+   "title": "(1) LINUX DO - 新的理想型社区",
+   "body_head": "跳到主要内容\n登录\nZH\n话题\n近期活动\n更多\n资源\niOS App\nConnect\nChannel\nIDC Flare\nMore...\n类别\n开发调优\n国产替代\n资源荟萃\n网盘资源\n文档共建\n非我莫属\n读书成诗\n前沿快讯\n网络记忆\n福利羊毛\n搞七捻三\n虫洞广场\n运营反馈\n所有类别\n标签\n人工智能\n公告\n原创\n快问快答\n抽奖\n精华神帖\n集中帖\n所有标签\nDefault\n​\n真诚、友善、团结、专业，共建你我引以为荣之社区。《社区准则》\n所有最新话题\n类别\n标签\n最新\n热门\n排行榜\n类别\n查看 1 个新的或更新的话题\n话题列表，带有按钮的列标题可以排序。\n话题\t\n发帖人\n\t回复\t浏览量\t活动\n\n比快更快，社区官方 iOS App 更新至 1.0.2\n运营反馈\n公告\niOS-App\n\t\n\t701\t11.3k\t29 分钟\n\n《秘密花园园丁邀请函》\n运营反馈\n公告\n\t\n\t5.4k\t421k\t1 小时\n\n请不要把互联网上的戾气带来这里！\n运营反馈\n公告\n\t\n\t7.7k\t535k\t2 分钟\n\nGCP 赠金马上过期，拿出来给大家蹬。\n福利羊毛\n\t\n\t0\t0\t1 分钟\n\ndeepseek费用熬不住了\n搞七捻三\n纯水\n快问快答\n人工智能\n树洞\n\t\n\t69\t2.2k\t1 分钟\n\n云栖 Emby 站内开放\n福利羊毛\n公益推广\n\t\n\t19\t291\t1 分钟\n\n反重力使用方法收集\n搞七捻三\n纯水\n\t\n\t3\t6",
+   "has_turnstile": true,
+   "has_challenge_form": true,
+   "has_cf_iframe": false,
+   "title_is_jam": false,
+   "body_len": 5127
+  },
+  "state_20s": null,
+  "error": null
+ },
+ {
+  "url": "https://linux.do",
+  "run": 2,
+  "elapsed_s": 23.9,
+  "docs": [
+   {
+    "url": "https://linux.do/",
+    "status": 403,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a50104d66cf5be08-LAX",
+    "cf_mitigated": "challenge",
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   },
+   {
+    "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/ef3nc/0x4AAAAAAADnPIDROrmt1Wwj/light/fbE/new/normal?lang=auto",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a50104e588e83ccc-LAX",
+    "cf_mitigated": null,
+    "frame": "8A58A3ADCBC98E9652667FB9BC7B54B5"
+   }
+  ],
+  "state_8s": {
+   "url": "https://linux.do/",
+   "title": "请稍候…",
+   "body_head": "",
+   "has_turnstile": true,
+   "has_challenge_form": true,
+   "has_cf_iframe": false,
+   "title_is_jam": true,
+   "body_len": 0
+  },
+  "state_20s": {
+   "url": "https://linux.do/",
+   "title": "请稍候…",
+   "body_head": "",
+   "has_turnstile": true,
+   "has_challenge_form": true,
+   "has_cf_iframe": false,
+   "title_is_jam": true,
+   "body_len": 0
+  },
+  "error": null
+ },
+ {
+  "url": "https://linux.do",
+  "run": 3,
+  "elapsed_s": 23.7,
+  "docs": [
+   {
+    "url": "https://linux.do/",
+    "status": 403,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a501057ebacebe08-LAX",
+    "cf_mitigated": "challenge",
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   },
+   {
+    "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/29ldo/0x4AAAAAAADnPIDROrmt1Wwj/light/fbE/new/normal?lang=auto",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a501058cdfb33ccc-LAX",
+    "cf_mitigated": null,
+    "frame": "5976144FFCA77455591F805321F1164C"
+   }
+  ],
+  "state_8s": {
+   "url": "https://linux.do/",
+   "title": "请稍候…",
+   "body_head": "",
+   "has_turnstile": true,
+   "has_challenge_form": true,
+   "has_cf_iframe": false,
+   "title_is_jam": true,
+   "body_len": 0
+  },
+  "state_20s": {
+   "url": "https://linux.do/",
+   "title": "请稍候…",
+   "body_head": "",
+   "has_turnstile": true,
+   "has_challenge_form": true,
+   "has_cf_iframe": false,
+   "title_is_jam": true,
+   "body_len": 0
+  },
+  "error": null
+ },
+ {
+  "url": "https://nodeseek.com",
+  "run": 1,
+  "elapsed_s": 23.7,
+  "docs": [
+   {
+    "url": "https://www.nodeseek.com/",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a501062e490719b7-LAX",
+    "cf_mitigated": null,
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   }
+  ],
+  "state_8s": {
+   "url": "https://www.nodeseek.com/",
+   "title": "NodeSeek",
+   "body_head": " NodeSeekbeta\n日常\n技术\n情报\n测评\n交易\n拼车\n推广\nDeepFlood\n新评论\n新帖子\n 12345 ..100 \nnametra.de NS官方米表开启公测，欢迎大家试用体验！ \n lcy0828  323687  540  bzr 6days ago\nDev\niLatency公测，一个新的社区内Ping站，邀你共建 \n 酒神  344725  714  Joi-kok 2h 25min ago\nDev\n申诉通过 1\n jm  98  2  木北道 5s ago\n日常\nIOS 虚拟定位长久有效\n ryanc  89  2  zhiyu998 12s ago\n日常\n【抽奖】升六级了，给大伙抽一个HaloCloud HK Lite\n Victor66685  140  25  BiXiong 19s ago\n日常\n溢价150收一台VMISS US.LA.TRI.Basic/4.5CAD自用\n a4320  102  3  lyh36279 20s ago\n交易\nGoogle 学生8.99刀你们退款到账了吗\n FuClara  94  7  millionfor 22s ago\n日常\n［收］想收个 cloudsilk 白丝云 sjc 9929\n evolution  340  9  猛字阿良 22s ago\n交易\n关于谷歌账号注册提问 1\n sbj500  279  ",
+   "has_turnstile": false,
+   "has_challenge_form": true,
+   "has_cf_iframe": false,
+   "title_is_jam": false,
+   "body_len": 6815
+  },
+  "state_20s": null,
+  "error": null
+ },
+ {
+  "url": "https://nodeseek.com",
+  "run": 2,
+  "elapsed_s": 16.4,
+  "docs": [
+   {
+    "url": "https://www.nodeseek.com/",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a50106cde91519b7-LAX",
+    "cf_mitigated": null,
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   }
+  ],
+  "state_8s": {
+   "url": "https://www.nodeseek.com/",
+   "title": "NodeSeek",
+   "body_head": " NodeSeekbeta\n日常\n技术\n情报\n测评\n交易\n拼车\n推广\nDeepFlood\n新评论\n新帖子\n 12345 ..100 \n『新功能，PWA』把论坛安装到桌面，利好手机用户\n 酒神  70789  295  成长路上 3days ago\nDev\niLatency公测，一个新的社区内Ping站，邀你共建 \n 酒神  344728  714  Joi-kok 2h 25min ago\nDev\nIOS 虚拟定位长久有效\n ryanc  95  3  bitgaol 6s ago\n日常\n洛杉矶，CN2GIA / 9929 / CMI2，三网优化，月付5.2美元，年付52美元\n nylcdhj  92  2  millionfor 11s ago\n情报\n又是一年DMIT的优质用户\n misaka-kuka  641  14  hrssrh323 13s ago\n日常\n【抽奖】升六级了，给大伙抽一个HaloCloud HK Lite\n Victor66685  153  28  kuni 14s ago\n日常\nvmiss tri 服务器被别人登陆进root了\n miccy  930  20  VELAR 14s ago\n日常\n2027年会有ai模型暴雷吗\n lz  86  3  wensir 16s ago\n日常\nAWSB怎么做号有大佬懂的吗\n liu45252  68  3  ss",
+   "has_turnstile": false,
+   "has_challenge_form": true,
+   "has_cf_iframe": false,
+   "title_is_jam": false,
+   "body_len": 6815
+  },
+  "state_20s": null,
+  "error": null
+ },
+ {
+  "url": "https://nodeseek.com",
+  "run": 3,
+  "elapsed_s": 13.8,
+  "docs": [
+   {
+    "url": "https://www.nodeseek.com/",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a501074709bd19b7-LAX",
+    "cf_mitigated": null,
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   }
+  ],
+  "state_8s": {
+   "url": "https://www.nodeseek.com/",
+   "title": "NodeSeek",
+   "body_head": " NodeSeekbeta\n日常\n技术\n情报\n测评\n交易\n拼车\n推广\nDeepFlood\n新评论\n新帖子\n 12345 ..100 \nnametra.de NS官方米表开启公测，欢迎大家试用体验！ \n lcy0828  323688  540  bzr 6days ago\nDev\niLatency公测，一个新的社区内Ping站，邀你共建 \n 酒神  344729  714  Joi-kok 2h 25min ago\nDev\nclaude应该用的系统级推送\n wensir  125  6  wensir 2s ago\n日常\n寻找家宽，使用claude\n feibi  312  15  feibi 2s ago\n交易\n【抽奖】升六级了，给大伙抽一个HaloCloud HK Lite\n Victor66685  161  29  Aczz 9s ago\n日常\ngo money 恢复到 lv3 了\n 芒果千层  62  5  zhiyu998 12s ago\n日常\n洛杉矶，CN2GIA / 9929 / CMI2，三网优化，月付5.2美元，年付52美元\n nylcdhj  109  3  hardware 17s ago\n情报\n想收 5usdt，有没有好心人\n kinvin9710  218  6  lyh36279 19s ago\n交易\n【收】溢价80，收AKKO圣何塞KVM-CN2-A",
+   "has_turnstile": false,
+   "has_challenge_form": true,
+   "has_cf_iframe": false,
+   "title_is_jam": false,
+   "body_len": 6860
+  },
+  "state_20s": null,
+  "error": null
+ },
+ {
+  "url": "https://chatgpt.com",
+  "run": 1,
+  "elapsed_s": 14.6,
+  "docs": [
+   {
+    "url": "https://chatgpt.com/",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a50107b27faef50e-LAX",
+    "cf_mitigated": null,
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   }
+  ],
+  "state_8s": {
+   "url": "https://chatgpt.com/",
+   "title": "ChatGPT: Chat, Work, Create & Code with AI",
+   "body_head": "登录\n免费注册\nChatGPT\n新聊天\n图像\n插件\n查看套餐和定价\n帮助\n深度研究\n设置\n获取为你量身定制的回复\n\n登录以获取基于已保存聊天的回答，并可创建图片和上传文件。\n\n登录\n我们先从哪里开始呢？\n可以告诉我你能做些什么吗？\n与 ChatGPT 聊天\n\nChatGPT 是 AI。使用即表示你同意我们的条款和隐私政策。聊天内容可能会被审核，并用于改进我们的 AI 模型。了解更多",
+   "has_turnstile": false,
+   "has_challenge_form": false,
+   "has_cf_iframe": false,
+   "title_is_jam": false,
+   "body_len": 192
+  },
+  "state_20s": null,
+  "error": null
+ },
+ {
+  "url": "https://chatgpt.com",
+  "run": 2,
+  "elapsed_s": 13.8,
+  "docs": [
+   {
+    "url": "https://chatgpt.com/",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a501081d7db6f50e-LAX",
+    "cf_mitigated": null,
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   }
+  ],
+  "state_8s": {
+   "url": "https://chatgpt.com/",
+   "title": "ChatGPT: Chat, Work, Create & Code with AI",
+   "body_head": "登录\n免费注册\nChatGPT\n新聊天\n图像\n插件\n查看套餐和定价\n帮助\n深度研究\n设置\n获取为你量身定制的回复\n\n登录以获取基于已保存聊天的回答，并可创建图片和上传文件。\n\n登录\n我们先从哪里开始呢？\n可以告诉我你能做些什么吗？\n与 ChatGPT 聊天\n\nChatGPT 是 AI。使用即表示你同意我们的条款和隐私政策。聊天内容可能会被审核，并用于改进我们的 AI 模型。了解更多",
+   "has_turnstile": false,
+   "has_challenge_form": false,
+   "has_cf_iframe": false,
+   "title_is_jam": false,
+   "body_len": 192
+  },
+  "state_20s": null,
+  "error": null
+ },
+ {
+  "url": "https://chatgpt.com",
+  "run": 3,
+  "elapsed_s": 12.5,
+  "docs": [
+   {
+    "url": "https://chatgpt.com/",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a5010887bbd0f50e-LAX",
+    "cf_mitigated": null,
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   },
+   {
+    "url": "https://chatgpt.com/",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a501088e8a0ff50e-LAX",
+    "cf_mitigated": null,
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   }
+  ],
+  "state_8s": {
+   "url": "https://chatgpt.com/",
+   "title": "ChatGPT: Chat, Work, Create & Code with AI",
+   "body_head": "登录免费注册\nChatGPT\n新聊天图像插件查看套餐和定价帮助深度研究设置\n图像插件查看套餐和定价帮助深度研究\n获取为你量身定制的回复\n\n登录以获取基于已保存聊天的回答，并可创建图片和上传文件。\n\n登录\n获取为你量身定制的回复\n\n登录以获取基于已保存聊天的回答，并可创建图片和上传文件。\n\n登录\n聊天\n你想做点什么？我们先从哪里开始呢？\n可以告诉我你能做些什么吗？\n与 ChatGPT 聊天\n\nChatGPT 是 AI。使用即表示你同意我们的条款和隐私政策。聊天内容可能会被审核，并用于改进我们的 AI 模型。了解更多",
+   "has_turnstile": false,
+   "has_challenge_form": false,
+   "has_cf_iframe": false,
+   "title_is_jam": false,
+   "body_len": 259
+  },
+  "state_20s": null,
+  "error": null
+ },
+ {
+  "url": "https://www.indeed.com",
+  "run": 1,
+  "elapsed_s": 13.7,
+  "docs": [
+   {
+    "url": "https://www.indeed.com/",
+    "status": 403,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a50108ec5a833033-LAX",
+    "cf_mitigated": "challenge",
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   },
+   {
+    "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/8lzt5/0x4AAAAAAADnPIDROrmt1Wwj/light/fbE/new/normal?lang=auto",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a50108fcba453b32-LAX",
+    "cf_mitigated": null,
+    "frame": "850871CE4A76DBE96055520E1C0A036E"
+   }
+  ],
+  "state_8s": {
+   "url": "https://www.indeed.com/",
+   "title": "Job Search | Indeed",
+   "body_head": "",
+   "has_turnstile": false,
+   "has_challenge_form": false,
+   "has_cf_iframe": false,
+   "title_is_jam": false,
+   "body_len": 0
+  },
+  "state_20s": null,
+  "error": null
+ },
+ {
+  "url": "https://www.indeed.com",
+  "run": 2,
+  "elapsed_s": 22.7,
+  "docs": [
+   {
+    "url": "https://www.indeed.com/",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a5010951498d3033-LAX",
+    "cf_mitigated": null,
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   },
+   {
+    "url": "https://sgtm.indeed.com/_/service_worker/6al0/sw_iframe.html?origin=https%3A%2F%2Fwww.indeed.com&1p=1",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a50109672e7f2b61-LAX",
+    "cf_mitigated": null,
+    "frame": "13C7A0F2C7D051332DCF63BA69A5C141"
+   },
+   {
+    "url": "https://secure.indeed.com/auth?co=US&hl=en_US&jsContinue=https%3A%2F%2Fwww.indeed.com%2Fonboarding%3Fhl%3Den%26co%3DUS%26continue%3Dhttps%253A%252F%252Fwww.indeed.com%252F%253Fjson%253D1%2526passedCtk%253D1k5pem3ncgstn800%26from%3Dhp-accounted-focus",
+    "status": 403,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a5010999fe581d4d-LAX",
+    "cf_mitigated": "challenge",
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   },
+   {
+    "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/iy4kl/0x4AAAAAAADnPIDROrmt1Wwj/light/fbE/new/normal?lang=auto",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a50109a38d133b32-LAX",
+    "cf_mitigated": null,
+    "frame": "D70251B5167F003BF05BB7CA4EAEBAA5"
+   }
+  ],
+  "state_8s": {
+   "url": "https://secure.indeed.com/auth?co=US&hl=en_US&jsContinue=https%3A%2F%2Fwww.indeed.com%2Fonboarding%3Fhl%3Den%26co%3DUS%26continue%3Dhttps%253A%252F%252Fwww.indeed.com%252F%253Fjson%253D1%2526passedCtk%253D1k5pem3ncgstn800%26from%3Dhp-accounted-focus",
+   "title": "Sign In | Indeed Accounts",
+   "body_head": "Ready to take the next step?\nCreate an account or sign in.\nBy clicking any of the ‘Continue’ options below, you understand and agree to Indeed's Terms. You also acknowledge our Cookie and Privacy policies.\n通过 Google 继续操作\nContinue with Apple\nor\nAll fields marked with * are required.\nEmail address *\nContinue\nContinue\n© 2026 Indeed\nYour Privacy Choices \nAccessibility at Indeed\nPrivacy Center and Ad Choices\nTerms",
+   "has_turnstile": false,
+   "has_challenge_form": false,
+   "has_cf_iframe": false,
+   "title_is_jam": false,
+   "body_len": 412
+  },
+  "state_20s": null,
+  "error": null
+ },
+ {
+  "url": "https://www.indeed.com",
+  "run": 3,
+  "elapsed_s": 13.8,
+  "docs": [
+   {
+    "url": "https://www.indeed.com/",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a50109f43ccd3033-LAX",
+    "cf_mitigated": null,
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   },
+   {
+    "url": "https://sgtm.indeed.com/_/service_worker/6al0/sw_iframe.html?origin=https%3A%2F%2Fwww.indeed.com&1p=1",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a5010a080ac12b61-LAX",
+    "cf_mitigated": null,
+    "frame": "2354D6DBF2B9CDEA066612C17126E4EB"
+   }
+  ],
+  "state_8s": {
+   "url": "https://www.indeed.com/",
+   "title": "Job Search | Indeed",
+   "body_head": "Skip to main content\nHome\nCompany reviews\nFind salaries\nSign in\n🇺🇸\nEn\nEmployers / Post Job\nStart of main content\nKeyword : all jobs\n&nbsp;\nEdit location input box label\nSearch\nYour next job starts here\nCreate an account or sign in to see your personalized job recommendations.\nGet Started\n&nbsp;\nIndeed también está disponible en español\nWhat's trending on Indeed\nHiring Lab\nCareer advice\nBrowse jobs\nBrowse companies\nSalaries\nIndeed Events\nWork at Indeed\nCountries\nAbout\nHelp\nESG at Indeed\nPost a job\nDownload app\n© 2026 Indeed\nYour Privacy Choices \nAccessibility at Indeed\nPrivacy Center and Ad C",
+   "has_turnstile": false,
+   "has_challenge_form": true,
+   "has_cf_iframe": false,
+   "title_is_jam": false,
+   "body_len": 612
+  },
+  "state_20s": null,
+  "error": null
+ },
+ {
+  "url": "https://nowsecure.nl",
+  "run": 1,
+  "elapsed_s": 13.7,
+  "docs": [
+   {
+    "url": "https://nowsecure.nl/",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a5010a5d690cd2bd-LAX",
+    "cf_mitigated": null,
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   },
+   {
+    "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/lt273/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a5010a6cfc36fe59-LAX",
+    "cf_mitigated": null,
+    "frame": "0813D8EE0C5E71ACF967858397223845"
+   },
+   {
+    "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/o4psz/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a5010a6cfc42fe59-LAX",
+    "cf_mitigated": null,
+    "frame": "99AA96E2B7E9493B7F54B105267ADAA1"
+   }
+  ],
+  "state_8s": {
+   "url": "https://nowsecure.nl/",
+   "title": "nowsecure.nl",
+   "body_head": "NOWSECURE\nBY NODRIVER\nNOWSECURE\nBY NODRIVER",
+   "has_turnstile": true,
+   "has_challenge_form": true,
+   "has_cf_iframe": false,
+   "title_is_jam": false,
+   "body_len": 43
+  },
+  "state_20s": null,
+  "error": null
+ },
+ {
+  "url": "https://nowsecure.nl",
+  "run": 2,
+  "elapsed_s": 11.2,
+  "docs": [
+   {
+    "url": "https://nowsecure.nl/",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a5010ac2ed6cd2bd-LAX",
+    "cf_mitigated": null,
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   },
+   {
+    "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/2niz8/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a5010acabb4ffe59-LAX",
+    "cf_mitigated": null,
+    "frame": "B770423CD380A9156803F705C31DFB1C"
+   },
+   {
+    "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/p19kv/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a5010acacbcefe59-LAX",
+    "cf_mitigated": null,
+    "frame": "9AD72083D5A711D19066F583CF11E3B0"
+   }
+  ],
+  "state_8s": {
+   "url": "https://nowsecure.nl/",
+   "title": "nowsecure.nl",
+   "body_head": "NOWSECURE\nBY NODRIVER\nNOWSECURE\nBY NODRIVER",
+   "has_turnstile": true,
+   "has_challenge_form": true,
+   "has_cf_iframe": false,
+   "title_is_jam": false,
+   "body_len": 43
+  },
+  "state_20s": null,
+  "error": null
+ },
+ {
+  "url": "https://nowsecure.nl",
+  "run": 3,
+  "elapsed_s": 10.8,
+  "docs": [
+   {
+    "url": "https://nowsecure.nl/",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a5010b1bbbbcd2bd-LAX",
+    "cf_mitigated": null,
+    "frame": "BCFBC02EFC7E42A270768D2E498B80D1"
+   },
+   {
+    "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/2hien/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a5010b22f9ddfe59-LAX",
+    "cf_mitigated": null,
+    "frame": "9F72634F12BA8A17F9AD5C36E6BC68D3"
+   },
+   {
+    "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/cw9ln/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+    "status": 200,
+    "protocol": "h2",
+    "server": "cloudflare",
+    "cf_ray": "a5010b230a3afe59-LAX",
+    "cf_mitigated": null,
+    "frame": "77D1DFB3E152885F9F38A8303DB8B2FB"
+   }
+  ],
+  "state_8s": {
+   "url": "https://nowsecure.nl/",
+   "title": "nowsecure.nl",
+   "body_head": "NOWSECURE\nBY NODRIVER\nNOWSECURE\nBY NODRIVER",
+   "has_turnstile": true,
+   "has_challenge_form": true,
+   "has_cf_iframe": false,
+   "title_is_jam": false,
+   "body_len": 43
+  },
+  "state_20s": null,
+  "error": null
+ }
+]
