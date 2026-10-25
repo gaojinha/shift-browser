@@ -238,10 +238,19 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     // 启动 1 秒后强制 unminimize + show + focus 一次
     {
         let app_win = app.handle().clone();
+        // CEF 单栈窗口测试模式（2026-10-25）：设了 SHIFT_CEF_SHELL_URL 时，
+        // 被测对象是那个独立的 CEF 窗口，主窗口再弹出来会变成"一次测试两个窗口"、
+        // 还会抢焦点打扰用户。此时把主窗口隐藏掉，只留 CEF 窗口。
+        let cef_test_mode = std::env::var("SHIFT_CEF_SHELL_URL").is_ok();
         tauri::async_runtime::spawn(async move {
             // 用 tokio 异步 sleep，不占用阻塞线程（std::thread::sleep 会占一个 worker）
             tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
             if let Some(w) = app_win.get_window("main") {
+                if cef_test_mode {
+                    crate::log_if_err!("window", w.hide());
+                    log::info!("[ShiftBrowser] CEF 测试模式：主窗口已隐藏，只留 CEF 单栈窗口");
+                    return;
+                }
                 crate::log_if_err!("window", w.unminimize());
                 crate::log_if_err!("window", w.show());
                 crate::log_if_err!("window", w.set_focus());
