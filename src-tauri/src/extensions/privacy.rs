@@ -113,6 +113,9 @@ pub fn build_privacy_selftest(
     let installed = v["installed"].as_bool().unwrap_or(false);
     let feat = &v["features"];
     let has = |k: &str| feat[k].as_bool().unwrap_or(false);
+    // GPC 是否开启：字段缺失按「开」处理（向后兼容旧注入脚本/旧页面缓存），
+    // 只有显式 false 才标 skip（CEF 构建默认关，见指纹报告 §7）
+    let gpc_enabled = feat.get("gpc_on").and_then(|x| x.as_bool()).unwrap_or(true);
     // 非网页标签（如 tauri:// 新标签页）不会注入防护脚本，此时统一标 skip
     // 而非 fail——避免"新标签页自测一片红"的误导。
     let non_web = {
@@ -158,6 +161,15 @@ pub fn build_privacy_selftest(
             "GPC 隐私信号",
             "skip",
             "当前站点在白名单（兼容模式），整帧保持浏览器原生",
+        ));
+    } else if !gpc_enabled {
+        // 开关关闭（CEF 构建默认）：不发 Sec-GPC、不注入属性，与真 Chrome 一致，
+        // 这是预期行为而非缺陷（见 docs/test-reports/cef-fingerprint-2026-10-25.md §7）
+        checks.push(mk_check(
+            "gpc",
+            "GPC 隐私信号",
+            "skip",
+            "GPC 已关闭（与真 Chrome 默认行为一致）",
         ));
     } else if has("gpc") {
         checks.push(mk_check(

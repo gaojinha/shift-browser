@@ -288,12 +288,13 @@ pub async fn sync_ext_rules(db: tauri::State<'_, Db>) -> DbResult<()> {
         "# ShiftBrowser 自定义请求头（由主程序写入，勿手改）\n# 每行 `Name: Value`，注入到每个出网请求；# 开头为注释\n",
     );
     // 网络层 GPC（开关化）：gpc_header != 'false' 时注入 Sec-GPC: 1
+    // 默认值取 contracts 单一来源（CEF 构建默认关，见 GPC_HEADER_DEFAULT 注释）
     let gpc_on =
         sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'gpc_header'")
             .fetch_optional(&db.pool)
             .await?
             .map(|(v,)| v)
-            .unwrap_or_else(|| "true".to_string())
+            .unwrap_or_else(|| crate::contracts::settings::GPC_HEADER_DEFAULT.to_string())
             != "false";
     if gpc_on {
         hcontent.push_str("Sec-GPC: 1\n");
@@ -365,6 +366,34 @@ pub async fn reset_settings(db: tauri::State<'_, Db>) -> DbResult<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// F-CEF-07（2026-10-25 高哥拍板）：GPC 默认值按构建分流，
+    /// 且 SETTINGS 表里的 default 必须与常量同源，防两处写法漂移。
+    #[test]
+    fn gpc_default_follows_engine_feature() {
+        #[cfg(feature = "cef-engine")]
+        assert_eq!(
+            crate::contracts::settings::GPC_HEADER_DEFAULT,
+            "false",
+            "CEF 构建下 GPC 必须默认关（真 Chrome 无此信号，见指纹报告 §7）"
+        );
+        #[cfg(not(feature = "cef-engine"))]
+        assert_eq!(
+            crate::contracts::settings::GPC_HEADER_DEFAULT,
+            "true",
+            "WebKit 构建保持默认开（合规表态，勿改）"
+        );
+
+        let def = crate::contracts::settings::SETTINGS
+            .iter()
+            .find(|s| s.key == "gpc_header")
+            .expect("gpc_header 必须登记在 SETTINGS");
+        assert_eq!(
+            def.default,
+            crate::contracts::settings::GPC_HEADER_DEFAULT,
+            "SETTINGS 表的 default 必须等于 GPC_HEADER_DEFAULT（单一来源）"
+        );
+    }
 
     /// P3-3：删除设置的白名单/敏感键校验
     #[test]

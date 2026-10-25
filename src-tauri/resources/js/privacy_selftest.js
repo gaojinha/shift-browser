@@ -14,6 +14,9 @@
       noiseOn: !!window.__shiftNoiseOn,
       features: {
         gpc: gpc,
+        // GPC 是否被用户/构建默认关闭（CEF 构建默认关，见指纹报告 §7）：
+        // 关闭时 Rust 侧把该项标 skip，而不是 fail
+        gpc_on: window.__SHIFT_GPC_ON__ !== false,
         canvas: !!f.canvas,
         webgl: !!f.webgl,
         audio: !!f.audio,

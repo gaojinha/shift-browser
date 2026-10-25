@@ -248,11 +248,11 @@ onMounted(() => {
     <div class="card" data-anchor="tracking">
       <div class="card-title"><AppIcon name="globe" :size="14" /> 网络与追踪</div>
       <div class="field">
-        <label>GPC 请求头（Sec-GPC: 1）</label>
-        <span class="field-desc">W3C Global Privacy Control：网络层告诉站点「别卖我的数据」</span>
+        <label>GPC 隐私信号（Sec-GPC: 1 + navigator.globalPrivacyControl）</label>
+        <span class="field-desc">W3C Global Privacy Control：告诉站点「别卖我的数据」。⚠️ 开启后与普通 Chrome 行为不同——真 Chrome 默认不发此信号，部分风控站点可能因此更容易识别到你</span>
         <SettingSwitch
           :checked="settingsStore.get('gpc_header') !== 'false'"
-          label="GPC 请求头（Sec-GPC: 1）"
+          label="GPC 隐私信号（Sec-GPC: 1 + navigator.globalPrivacyControl）"
           @change="(v) => onSet('gpc_header', v ? 'true' : 'false')"
         />
       </div>

@@ -268,11 +268,11 @@ describe('自定义广告关键词', () => {
   })
 })
 
-describe('GPC 请求头', () => {
+describe('GPC 隐私信号', () => {
   it('默认开；关闭：写 store + sync_ext_rules', async () => {
     const { wrapper, settingsStore } = mountWith()
     await flushStats()
-    const switch_ = wrapper.find('[role="switch"][aria-label="GPC 请求头（Sec-GPC: 1）"]')
+    const switch_ = wrapper.find('[role="switch"][aria-label="GPC 隐私信号（Sec-GPC: 1 + navigator.globalPrivacyControl）"]')
     expect(switch_.attributes('aria-checked')).toBe('true')
     await switch_.trigger('click')
     await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledWith('sync_ext_rules'))
@@ -281,7 +281,7 @@ describe('GPC 请求头', () => {
 
   it('gpc_header=false 时渲染为关', () => {
     const { wrapper } = mountWith({ gpc_header: 'false' })
-    const switch_ = wrapper.find('[role="switch"][aria-label="GPC 请求头（Sec-GPC: 1）"]')
+    const switch_ = wrapper.find('[role="switch"][aria-label="GPC 隐私信号（Sec-GPC: 1 + navigator.globalPrivacyControl）"]')
     expect(switch_.attributes('aria-checked')).toBe('false')
   })
 })

@@ -65,7 +65,7 @@ export const SETTINGS_SCHEMA = {
   privacy_shield_level: { default: 'standard', kind: 'str', sensitive: false, desc: '隐私防护档位（off/standard/strict）' },
   privacy_fp_mode: { default: 'noise', kind: 'str', sensitive: false, desc: '反指纹模式（noise 加噪=默认 / uniform 统一化）；与 privacy_shield_level 同为「通用可读写 + 专用命令同步注入」的键' },
   privacy_whitelist: { default: '', kind: 'str', sensitive: false, desc: '隐私防护白名单域名' },
-  gpc_header: { default: 'true', kind: 'bool', sensitive: false, desc: '发送 GPC 请求头（Sec-GPC: 1）' },
+  gpc_header: { default: 'true', kind: 'bool', sensitive: false, desc: '发送 GPC 隐私信号（Sec-GPC: 1 请求头 + navigator.globalPrivacyControl）；CEF 版默认关（与真 Chrome 一致），开启后与普通 Chrome 行为不同，部分风控站点更易识别' },
   net_block_rules: { default: '', kind: 'str', sensitive: false, desc: '网络层拦截规则（每行一个 URL 子串）' },
   net_headers: { default: '', kind: 'str', sensitive: false, desc: '自定义请求头（每行 Name: Value）' },
   tab_hibernate_minutes: { default: '10', kind: 'int', sensitive: false, desc: '空闲标签休眠超时（分钟，0=关）' },

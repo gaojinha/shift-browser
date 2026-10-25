@@ -27,7 +27,13 @@ fn main() {
         println!("cargo:rustc-link-arg=-Wl,--exclude-libs,ALL");
     }
 
-    generate_ts_constants();
+    // 前端常量只在默认构建生成：CEF 构建的默认值差异（如 gpc_header 默认关）
+    // **只在后端生效**，前端 schema 的 default 仅作首屏占位，真实值以
+    // `get_all_settings` 返回为准。否则两种构建会来回覆盖 src/constants.ts，
+    // 导致 git 永远脏（2026-10-25 实测：跑一次 cef-engine 构建就把 default 写成 false）。
+    if std::env::var("CARGO_FEATURE_CEF_ENGINE").is_err() {
+        generate_ts_constants();
+    }
     tauri_build::build();
 }
 

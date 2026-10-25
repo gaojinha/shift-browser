@@ -47,6 +47,20 @@ pub mod settings {
     /// ai_api_key 沿用旧掩码契约；opencode_password 同理（用户名 opencode_username 非秘密，保持明文可读）
     pub const MASKED_KEYS: &[&str] = &["ai_api_key", "opencode_password"];
 
+    /// GPC（Global Privacy Control）默认值。
+    ///
+    /// - **CEF 构建默认关**：真 Chrome 154 实测既不发 `Sec-GPC`、也无
+    ///   `navigator.globalPrivacyControl`；默认发就是比真 Chrome 多出的指纹特征
+    ///   （见 `docs/test-reports/cef-fingerprint-2026-10-25.md` §7）。
+    /// - **WebKit 构建保持开**：合规表态（加州 2027-01 强制），且是现有用户预期行为。
+    ///
+    /// 高哥 2026-10-25 拍板；请求头与 JS 属性共用本值，别在别处再写一份判断。
+    pub const GPC_HEADER_DEFAULT: &str = if cfg!(feature = "cef-engine") {
+        "false"
+    } else {
+        "true"
+    };
+
     /// 全部设置键（**唯一来源**：后端白名单与前端默认值都从这里派生）
     pub const SETTINGS: &[SettingDef] = &[
         // ---- 基础 ----
@@ -86,7 +100,7 @@ pub mod settings {
         SettingDef { key: "privacy_shield_level", default: "standard", kind: Kind::Str, sensitive: false, desc: "隐私防护档位（off/standard/strict）" },
         SettingDef { key: "privacy_fp_mode", default: "noise", kind: Kind::Str, sensitive: false, desc: "反指纹模式（noise 加噪=默认 / uniform 统一化）；与 privacy_shield_level 同为「通用可读写 + 专用命令同步注入」的键" },
         SettingDef { key: "privacy_whitelist", default: "", kind: Kind::Str, sensitive: false, desc: "隐私防护白名单域名" },
-        SettingDef { key: "gpc_header", default: "true", kind: Kind::Bool, sensitive: false, desc: "发送 GPC 请求头（Sec-GPC: 1）" },
+        SettingDef { key: "gpc_header", default: GPC_HEADER_DEFAULT, kind: Kind::Bool, sensitive: false, desc: "发送 GPC 隐私信号（Sec-GPC: 1 请求头 + navigator.globalPrivacyControl）；CEF 版默认关（与真 Chrome 一致），开启后与普通 Chrome 行为不同，部分风控站点更易识别" },
         SettingDef { key: "net_block_rules", default: "", kind: Kind::Str, sensitive: false, desc: "网络层拦截规则（每行一个 URL 子串）" },
         SettingDef { key: "net_headers", default: "", kind: Kind::Str, sensitive: false, desc: "自定义请求头（每行 Name: Value）" },
         // ---- 性能 ----

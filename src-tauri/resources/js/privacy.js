@@ -47,12 +47,17 @@
   }
 
   // ---- 1) GPC：全球隐私控制（W3C 规范信号，2027 起加州强制）----
-  try {
-    Object.defineProperty(navigator, 'globalPrivacyControl', {
-      get: function () { return true; },
-      configurable: true
-    });
-  } catch (e) {}
+  // 开关由 Rust 侧 __SHIFT_GPC_ON__ 传入：CEF 构建默认 false —— 真 Chrome 154 实测
+  // 既无 Sec-GPC 也无 navigator.globalPrivacyControl，默认注入就是多出的指纹特征
+  // （见 docs/test-reports/cef-fingerprint-2026-10-25.md §7）。
+  if (window.__SHIFT_GPC_ON__ !== false) {
+    try {
+      Object.defineProperty(navigator, 'globalPrivacyControl', {
+        get: function () { return true; },
+        configurable: true
+      });
+    } catch (e) {}
+  }
 
   // ---- 2) per-session + per-origin 确定性种子（FNV-1a）----
   // 种子 = f(会话随机 key, origin)：同会话同源稳定（不破坏功能）、

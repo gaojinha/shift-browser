@@ -35,6 +35,32 @@ fn privacy_selftest_standard_all_pass() {
 }
 
 #[test]
+fn privacy_selftest_gpc_off_is_skip_not_fail() {
+    // F-CEF-07：CEF 构建默认关 GPC（真 Chrome 无此信号）→ 自测应标 skip 而非 fail，
+    // 否则用户会以为防护坏了。其余 8 项全过时直方图应是 8 pass / 1 skip。
+    let page = r#"{"installed":true,"features":{"gpc":false,"gpc_on":false,"canvas":true,"webgl":true,"audio":true,"hardware":true,"webrtc":true,"webgpu":true,"webgpu_engine":true,"misc":true}}"#;
+    let r = build_privacy_selftest("standard", "example.com", false, page);
+    assert_eq!(r.total, 9);
+    assert_eq!(r.passed, 8, "GPC 关闭时其余 8 项应全过");
+    let g = r.checks.iter().find(|c| c.id == "gpc").expect("应有 gpc 项");
+    assert_eq!(g.status, "skip", "GPC 关闭属预期行为，应标 skip");
+    assert!(
+        g.detail.contains("与真 Chrome"),
+        "应说明关闭是为了与真 Chrome 一致：{}",
+        g.detail
+    );
+}
+
+#[test]
+fn privacy_selftest_gpc_field_missing_treated_as_on() {
+    // 向后兼容：旧注入脚本不带 gpc_on 字段时按「开」处理，走原有 pass/fail 判定
+    let page = r#"{"installed":true,"features":{"gpc":true,"canvas":true,"webgl":true,"audio":true,"hardware":true,"webrtc":true,"webgpu":true,"webgpu_engine":true,"misc":true}}"#;
+    let r = build_privacy_selftest("standard", "example.com", false, page);
+    let g = r.checks.iter().find(|c| c.id == "gpc").expect("应有 gpc 项");
+    assert_eq!(g.status, "pass", "缺字段应按开处理");
+}
+
+#[test]
 fn privacy_selftest_webgpu_engine_unsupported_is_skip_not_fail() {
     // WebKitGTK 无 WebGPU 实现：引擎不支持≠防护失效，必须标 skip（➖）而非 fail（❌），
     // 否则用户会误以为防护坏了；其余 8 项不受影响。

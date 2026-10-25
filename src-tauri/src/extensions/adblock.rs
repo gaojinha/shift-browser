@@ -100,7 +100,7 @@ pub async fn collect_enabled_items(
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT key, value FROM settings WHERE key IN \
          ('adblock_enabled','privacy_shield_level','privacy_shield','privacy_whitelist',\
-          'adblock_keywords','translate_timeout','privacy_fp_mode')",
+          'adblock_keywords','translate_timeout','privacy_fp_mode','gpc_header')",
     )
     .fetch_all(&db.pool)
     .await
@@ -148,8 +148,13 @@ pub async fn collect_enabled_items(
         .unwrap_or(15);
     // 反指纹模式（阶段 2）：noise（加噪，默认）/ uniform（统一化）
     let fp_mode = normalize_fp_mode(take("privacy_fp_mode").as_deref());
+    // GPC 开关（2026-10-25 高哥拍板）：CEF 构建默认关（真 Chrome 无此信号，见指纹报告 §7），
+    // WebKit 构建默认开。请求头（db/settings.rs）与 JS 属性（privacy.js）共用这一个值。
+    let gpc_on = take("gpc_header")
+        .map(|v| v != "false")
+        .unwrap_or(crate::contracts::settings::GPC_HEADER_DEFAULT == "true");
     let wl_prefix = format!(
-        "window.__SHIFT_PRIVACY_WHITELIST__ = {};\nwindow.__SHIFT_TRANSLATE_TIMEOUT = {};\nwindow.__SHIFT_FP_MODE__ = {};\nwindow.__SHIFT_SESSION_KEY__ = {};\nwindow.__SHIFT_UA_BRANDS__ = {};\nwindow.__SHIFT_SITE_OVERRIDES__ = {};\n",
+        "window.__SHIFT_PRIVACY_WHITELIST__ = {};\nwindow.__SHIFT_TRANSLATE_TIMEOUT = {};\nwindow.__SHIFT_FP_MODE__ = {};\nwindow.__SHIFT_SESSION_KEY__ = {};\nwindow.__SHIFT_UA_BRANDS__ = {};\nwindow.__SHIFT_SITE_OVERRIDES__ = {};\nwindow.__SHIFT_GPC_ON__ = {};\n",
         serde_json::to_string(&whitelist).unwrap_or_else(|_| "[]".to_string()),
         timeout,
         serde_json::to_string(fp_mode).unwrap_or_else(|_| "\"noise\"".to_string()),
@@ -159,7 +164,9 @@ pub async fn collect_enabled_items(
         crate::useragent::brands_json(&crate::useragent::ua_for("")),
         // 站点覆盖表（2026-09-29）：注入全局不分站点，JS 按 location.host 查表
         // 动态对齐 platform/brands（privacy.js 与 compat 脚本消费）
-        crate::useragent::overrides_json()
+        crate::useragent::overrides_json(),
+        // GPC：CEF 构建默认 false → privacy.js 不注入 navigator.globalPrivacyControl
+        gpc_on
     );
     match level.as_str() {
         "off" => log::info!("[extensions] 隐私防护已关闭（off）"),
