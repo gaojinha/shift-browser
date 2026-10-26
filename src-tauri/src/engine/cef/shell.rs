@@ -48,6 +48,95 @@ fn toolbar_height() -> i32 {
         + BM_MANAGE_EXTRA_V.load(Ordering::Relaxed)
 }
 
+/// 8 个根类面板的注册表（F-CEF-21）：根 class 与撑高原子的唯一对应。
+/// 互斥只认这里：开任一面板 = 其余 7 个的撑高全部归零（`clear_all_extras_except`）。
+/// `BM_EXTRA`（书签文件夹下拉，360）不在此表：JS 侧是局部元素 `#bmfolders.open`，
+/// Rust 侧是根级撑高，两侧口径本就不对称，F-CEF-21 只如实标注、不硬统一；
+/// 它在 `clear_all_extras_except` 里始终被清（开任一根类面板都收下拉），
+/// `set_bm_popup` 自身只让位查找栏，保持原行为。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Panel {
+    Pw,
+    Dl,
+    Menu,
+    Hist,
+    Site,
+    Settings,
+    BmManage,
+    Find,
+}
+
+impl Panel {
+    pub(crate) const ALL: [Panel; 8] = [
+        Panel::Pw,
+        Panel::Dl,
+        Panel::Menu,
+        Panel::Hist,
+        Panel::Site,
+        Panel::Settings,
+        Panel::BmManage,
+        Panel::Find,
+    ];
+
+    /// 对应 `html.<class>` 根类名（须与 `toolbar::PANEL_CLASSES` 同序同值，有单测钉住）
+    pub(crate) const fn class(self) -> &'static str {
+        match self {
+            Panel::Pw => "pw-open",
+            Panel::Dl => "dl-open",
+            Panel::Menu => "menu-open",
+            Panel::Hist => "hist-open",
+            Panel::Site => "site-open",
+            Panel::Settings => "settings-open",
+            Panel::BmManage => "bmmanage-open",
+            Panel::Find => "find-open",
+        }
+    }
+
+    pub(crate) const fn extra_px(self) -> i32 {
+        match self {
+            Panel::Pw => PW_PANEL_EXTRA,
+            Panel::Dl => DL_PANEL_EXTRA,
+            Panel::Menu => MENU_PANEL_EXTRA,
+            Panel::Hist => HIST_PANEL_EXTRA,
+            Panel::Site => SITE_PANEL_EXTRA,
+            Panel::Settings => SETTINGS_PANEL_EXTRA,
+            Panel::BmManage => BM_MANAGE_PANEL_EXTRA,
+            Panel::Find => FIND_BAR_EXTRA,
+        }
+    }
+
+    fn atom(self) -> &'static AtomicI32 {
+        match self {
+            Panel::Pw => &PW_EXTRA,
+            Panel::Dl => &DL_EXTRA,
+            Panel::Menu => &MENU_EXTRA,
+            Panel::Hist => &HIST_EXTRA,
+            Panel::Site => &SITE_EXTRA,
+            Panel::Settings => &SETTINGS_EXTRA,
+            Panel::BmManage => &BM_MANAGE_EXTRA_V,
+            Panel::Find => &FIND_EXTRA,
+        }
+    }
+}
+
+/// 把除 `keep` 外的 7 个面板撑高和书签下拉撑高全部归零
+fn clear_all_extras_except(keep: Panel) {
+    for p in Panel::ALL {
+        if p != keep {
+            p.atom().store(0, Ordering::Relaxed);
+        }
+    }
+    BM_EXTRA.store(0, Ordering::Relaxed);
+}
+
+/// 面板开合的撑高部分（不触发重排，便于单测）：开 = 自己置位且其余清零，关 = 自己归零
+fn set_panel_extra(panel: Panel, open: bool) {
+    panel.atom().store(if open { panel.extra_px() } else { 0 }, Ordering::Relaxed);
+    if open {
+        clear_all_extras_except(panel);
+    }
+}
+
 /// 密码面板（F-CEF-12）展开时工具栏视图额外加高的像素，收起为 0
 const PW_PANEL_EXTRA: i32 = 260;
 static PW_EXTRA: AtomicI32 = AtomicI32::new(0);
@@ -64,17 +153,7 @@ static DL_EXTRA: AtomicI32 = AtomicI32::new(0);
 
 /// 下载面板开合：与密码面板、书签下拉互斥，同一时刻只留一个撑高来源
 pub fn set_dl_panel(open: bool) {
-    DL_EXTRA.store(if open { DL_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
-    if open {
-        PW_EXTRA.store(0, Ordering::Relaxed);
-        BM_EXTRA.store(0, Ordering::Relaxed);
-        MENU_EXTRA.store(0, Ordering::Relaxed);
-        FIND_EXTRA.store(0, Ordering::Relaxed);
-        HIST_EXTRA.store(0, Ordering::Relaxed);
-        SITE_EXTRA.store(0, Ordering::Relaxed);
-        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
-        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
-    }
+    set_panel_extra(Panel::Dl, open);
     apply_toolbar_height();
 }
 
@@ -84,17 +163,7 @@ static MENU_EXTRA: AtomicI32 = AtomicI32::new(0);
 
 /// 主菜单开合：同样与其它面板互斥
 pub fn set_menu_panel(open: bool) {
-    MENU_EXTRA.store(if open { MENU_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
-    if open {
-        PW_EXTRA.store(0, Ordering::Relaxed);
-        BM_EXTRA.store(0, Ordering::Relaxed);
-        DL_EXTRA.store(0, Ordering::Relaxed);
-        FIND_EXTRA.store(0, Ordering::Relaxed);
-        HIST_EXTRA.store(0, Ordering::Relaxed);
-        SITE_EXTRA.store(0, Ordering::Relaxed);
-        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
-        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
-    }
+    set_panel_extra(Panel::Menu, open);
     apply_toolbar_height();
 }
 
@@ -104,17 +173,7 @@ static HIST_EXTRA: AtomicI32 = AtomicI32::new(0);
 
 /// 历史面板开合：与其它面板互斥
 pub fn set_hist_panel(open: bool) {
-    HIST_EXTRA.store(if open { HIST_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
-    if open {
-        PW_EXTRA.store(0, Ordering::Relaxed);
-        BM_EXTRA.store(0, Ordering::Relaxed);
-        DL_EXTRA.store(0, Ordering::Relaxed);
-        MENU_EXTRA.store(0, Ordering::Relaxed);
-        FIND_EXTRA.store(0, Ordering::Relaxed);
-        SITE_EXTRA.store(0, Ordering::Relaxed);
-        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
-        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
-    }
+    set_panel_extra(Panel::Hist, open);
     apply_toolbar_height();
 }
 
@@ -124,15 +183,7 @@ static SITE_EXTRA: AtomicI32 = AtomicI32::new(0);
 
 /// 站点信息面板开合：与其它面板互斥
 pub fn set_site_panel(open: bool) {
-    SITE_EXTRA.store(if open { SITE_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
-    if open {
-        PW_EXTRA.store(0, Ordering::Relaxed);
-        BM_EXTRA.store(0, Ordering::Relaxed);
-        DL_EXTRA.store(0, Ordering::Relaxed);
-        MENU_EXTRA.store(0, Ordering::Relaxed);
-        FIND_EXTRA.store(0, Ordering::Relaxed);
-        HIST_EXTRA.store(0, Ordering::Relaxed);
-    }
+    set_panel_extra(Panel::Site, open);
     apply_toolbar_height();
 }
 
@@ -142,16 +193,7 @@ static SETTINGS_EXTRA: AtomicI32 = AtomicI32::new(0);
 
 /// 设置面板开合：与其它面板互斥
 pub fn set_settings_panel(open: bool) {
-    SETTINGS_EXTRA.store(if open { SETTINGS_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
-    if open {
-        PW_EXTRA.store(0, Ordering::Relaxed);
-        BM_EXTRA.store(0, Ordering::Relaxed);
-        DL_EXTRA.store(0, Ordering::Relaxed);
-        MENU_EXTRA.store(0, Ordering::Relaxed);
-        FIND_EXTRA.store(0, Ordering::Relaxed);
-        HIST_EXTRA.store(0, Ordering::Relaxed);
-        SITE_EXTRA.store(0, Ordering::Relaxed);
-    }
+    set_panel_extra(Panel::Settings, open);
     apply_toolbar_height();
 }
 
@@ -161,33 +203,13 @@ static BM_MANAGE_EXTRA_V: AtomicI32 = AtomicI32::new(0);
 
 /// 书签管理面板开合：与其它面板互斥
 pub fn set_bm_manage_panel(open: bool) {
-    BM_MANAGE_EXTRA_V.store(if open { BM_MANAGE_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
-    if open {
-        PW_EXTRA.store(0, Ordering::Relaxed);
-        BM_EXTRA.store(0, Ordering::Relaxed);
-        DL_EXTRA.store(0, Ordering::Relaxed);
-        MENU_EXTRA.store(0, Ordering::Relaxed);
-        FIND_EXTRA.store(0, Ordering::Relaxed);
-        HIST_EXTRA.store(0, Ordering::Relaxed);
-        SITE_EXTRA.store(0, Ordering::Relaxed);
-        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
-    }
+    set_panel_extra(Panel::BmManage, open);
     apply_toolbar_height();
 }
 
 /// 密码面板开合：加/减工具栏视图高度并重排（只动 PW_EXTRA，不碰书签栏态）
 pub fn set_pw_panel(open: bool) {
-    PW_EXTRA.store(if open { PW_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
-    if open {
-        BM_EXTRA.store(0, Ordering::Relaxed);
-        DL_EXTRA.store(0, Ordering::Relaxed);
-        MENU_EXTRA.store(0, Ordering::Relaxed);
-        FIND_EXTRA.store(0, Ordering::Relaxed);
-        HIST_EXTRA.store(0, Ordering::Relaxed);
-        SITE_EXTRA.store(0, Ordering::Relaxed);
-        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
-        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
-    }
+    set_panel_extra(Panel::Pw, open);
     apply_toolbar_height();
 }
 
@@ -214,17 +236,7 @@ static FIND_EXTRA: AtomicI32 = AtomicI32::new(0);
 
 /// 查找栏开合：与其它面板互斥，同一时刻只留一个撑高来源
 fn set_find_bar(open: bool) {
-    FIND_EXTRA.store(if open { FIND_BAR_EXTRA } else { 0 }, Ordering::Relaxed);
-    if open {
-        PW_EXTRA.store(0, Ordering::Relaxed);
-        BM_EXTRA.store(0, Ordering::Relaxed);
-        DL_EXTRA.store(0, Ordering::Relaxed);
-        MENU_EXTRA.store(0, Ordering::Relaxed);
-        HIST_EXTRA.store(0, Ordering::Relaxed);
-        SITE_EXTRA.store(0, Ordering::Relaxed);
-        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
-        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
-    }
+    set_panel_extra(Panel::Find, open);
     apply_toolbar_height();
 }
 
@@ -2338,6 +2350,55 @@ mod tests {
         escape_like, is_attachment_disposition, nearest_zoom_idx, normalize_url, urlencode,
         zoom_pct_for_level, zoom_step, CONTEXT_MENU_JS,
     };
+
+    // ---- 面板互斥矩阵（F-CEF-21）：撑高原子是进程级全局，全部断言放同一个测试里串行跑 ----
+
+    #[test]
+    fn panel_registry_values_match_contract() {
+        use super::Panel;
+        let want = [
+            (Panel::Pw, "pw-open", 260),
+            (Panel::Dl, "dl-open", 300),
+            (Panel::Menu, "menu-open", 340),
+            (Panel::Hist, "hist-open", 340),
+            (Panel::Site, "site-open", 150),
+            (Panel::Settings, "settings-open", 320),
+            (Panel::BmManage, "bmmanage-open", 380),
+            (Panel::Find, "find-open", 44),
+        ];
+        assert_eq!(Panel::ALL.len(), want.len());
+        for (p, c, px) in want {
+            assert_eq!((p.class(), p.extra_px()), (c, px), "{p:?}");
+        }
+    }
+
+    #[test]
+    fn opening_any_panel_zeroes_all_other_extras_56_pairs() {
+        use super::{set_panel_extra, toolbar_height, Panel, BM_EXTRA, TOOLBAR_H};
+        use std::sync::atomic::Ordering;
+        let base = TOOLBAR_H.load(Ordering::Relaxed);
+        let mut pairs = 0;
+        for a in Panel::ALL {
+            for b in Panel::ALL {
+                if a == b {
+                    continue;
+                }
+                set_panel_extra(a, true);
+                BM_EXTRA.store(360, Ordering::Relaxed);
+                set_panel_extra(b, true);
+                for p in Panel::ALL {
+                    let v = p.atom().load(Ordering::Relaxed);
+                    assert_eq!(v, if p == b { b.extra_px() } else { 0 }, "{a:?}->{b:?} 残留 {p:?}");
+                }
+                assert_eq!(BM_EXTRA.load(Ordering::Relaxed), 0, "{a:?}->{b:?} 书签下拉未清");
+                assert_eq!(toolbar_height(), base + b.extra_px(), "{a:?}->{b:?}");
+                set_panel_extra(b, false);
+                assert_eq!(toolbar_height(), base);
+                pairs += 1;
+            }
+        }
+        assert_eq!(pairs, 56);
+    }
 
     // ---- normalize_url：地址栏补全规则（P0 实测逻辑，防改坏）----
 

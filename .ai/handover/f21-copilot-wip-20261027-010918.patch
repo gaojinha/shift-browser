@@ -1,0 +1,460 @@
+diff --git a/src-tauri/src/engine/cef/shell.rs b/src-tauri/src/engine/cef/shell.rs
+index c9f44e2..416c7fb 100644
+--- a/src-tauri/src/engine/cef/shell.rs
++++ b/src-tauri/src/engine/cef/shell.rs
+@@ -48,6 +48,95 @@ fn toolbar_height() -> i32 {
+         + BM_MANAGE_EXTRA_V.load(Ordering::Relaxed)
+ }
+ 
++/// 8 个根类面板的注册表（F-CEF-21）：根 class 与撑高原子的唯一对应。
++/// 互斥只认这里：开任一面板 = 其余 7 个的撑高全部归零（`clear_all_extras_except`）。
++/// `BM_EXTRA`（书签文件夹下拉，360）不在此表：JS 侧是局部元素 `#bmfolders.open`，
++/// Rust 侧是根级撑高，两侧口径本就不对称，F-CEF-21 只如实标注、不硬统一；
++/// 它在 `clear_all_extras_except` 里始终被清（开任一根类面板都收下拉），
++/// `set_bm_popup` 自身只让位查找栏，保持原行为。
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub(crate) enum Panel {
++    Pw,
++    Dl,
++    Menu,
++    Hist,
++    Site,
++    Settings,
++    BmManage,
++    Find,
++}
++
++impl Panel {
++    pub(crate) const ALL: [Panel; 8] = [
++        Panel::Pw,
++        Panel::Dl,
++        Panel::Menu,
++        Panel::Hist,
++        Panel::Site,
++        Panel::Settings,
++        Panel::BmManage,
++        Panel::Find,
++    ];
++
++    /// 对应 `html.<class>` 根类名（须与 `toolbar::PANEL_CLASSES` 同序同值，有单测钉住）
++    pub(crate) const fn class(self) -> &'static str {
++        match self {
++            Panel::Pw => "pw-open",
++            Panel::Dl => "dl-open",
++            Panel::Menu => "menu-open",
++            Panel::Hist => "hist-open",
++            Panel::Site => "site-open",
++            Panel::Settings => "settings-open",
++            Panel::BmManage => "bmmanage-open",
++            Panel::Find => "find-open",
++        }
++    }
++
++    pub(crate) const fn extra_px(self) -> i32 {
++        match self {
++            Panel::Pw => PW_PANEL_EXTRA,
++            Panel::Dl => DL_PANEL_EXTRA,
++            Panel::Menu => MENU_PANEL_EXTRA,
++            Panel::Hist => HIST_PANEL_EXTRA,
++            Panel::Site => SITE_PANEL_EXTRA,
++            Panel::Settings => SETTINGS_PANEL_EXTRA,
++            Panel::BmManage => BM_MANAGE_PANEL_EXTRA,
++            Panel::Find => FIND_BAR_EXTRA,
++        }
++    }
++
++    fn atom(self) -> &'static AtomicI32 {
++        match self {
++            Panel::Pw => &PW_EXTRA,
++            Panel::Dl => &DL_EXTRA,
++            Panel::Menu => &MENU_EXTRA,
++            Panel::Hist => &HIST_EXTRA,
++            Panel::Site => &SITE_EXTRA,
++            Panel::Settings => &SETTINGS_EXTRA,
++            Panel::BmManage => &BM_MANAGE_EXTRA_V,
++            Panel::Find => &FIND_EXTRA,
++        }
++    }
++}
++
++/// 把除 `keep` 外的 7 个面板撑高和书签下拉撑高全部归零
++fn clear_all_extras_except(keep: Panel) {
++    for p in Panel::ALL {
++        if p != keep {
++            p.atom().store(0, Ordering::Relaxed);
++        }
++    }
++    BM_EXTRA.store(0, Ordering::Relaxed);
++}
++
++/// 面板开合的撑高部分（不触发重排，便于单测）：开 = 自己置位且其余清零，关 = 自己归零
++fn set_panel_extra(panel: Panel, open: bool) {
++    panel.atom().store(if open { panel.extra_px() } else { 0 }, Ordering::Relaxed);
++    if open {
++        clear_all_extras_except(panel);
++    }
++}
++
+ /// 密码面板（F-CEF-12）展开时工具栏视图额外加高的像素，收起为 0
+ const PW_PANEL_EXTRA: i32 = 260;
+ static PW_EXTRA: AtomicI32 = AtomicI32::new(0);
+@@ -64,17 +153,7 @@ static DL_EXTRA: AtomicI32 = AtomicI32::new(0);
+ 
+ /// 下载面板开合：与密码面板、书签下拉互斥，同一时刻只留一个撑高来源
+ pub fn set_dl_panel(open: bool) {
+-    DL_EXTRA.store(if open { DL_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+-    if open {
+-        PW_EXTRA.store(0, Ordering::Relaxed);
+-        BM_EXTRA.store(0, Ordering::Relaxed);
+-        MENU_EXTRA.store(0, Ordering::Relaxed);
+-        FIND_EXTRA.store(0, Ordering::Relaxed);
+-        HIST_EXTRA.store(0, Ordering::Relaxed);
+-        SITE_EXTRA.store(0, Ordering::Relaxed);
+-        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
+-        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
+-    }
++    set_panel_extra(Panel::Dl, open);
+     apply_toolbar_height();
+ }
+ 
+@@ -84,17 +163,7 @@ static MENU_EXTRA: AtomicI32 = AtomicI32::new(0);
+ 
+ /// 主菜单开合：同样与其它面板互斥
+ pub fn set_menu_panel(open: bool) {
+-    MENU_EXTRA.store(if open { MENU_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+-    if open {
+-        PW_EXTRA.store(0, Ordering::Relaxed);
+-        BM_EXTRA.store(0, Ordering::Relaxed);
+-        DL_EXTRA.store(0, Ordering::Relaxed);
+-        FIND_EXTRA.store(0, Ordering::Relaxed);
+-        HIST_EXTRA.store(0, Ordering::Relaxed);
+-        SITE_EXTRA.store(0, Ordering::Relaxed);
+-        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
+-        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
+-    }
++    set_panel_extra(Panel::Menu, open);
+     apply_toolbar_height();
+ }
+ 
+@@ -104,17 +173,7 @@ static HIST_EXTRA: AtomicI32 = AtomicI32::new(0);
+ 
+ /// 历史面板开合：与其它面板互斥
+ pub fn set_hist_panel(open: bool) {
+-    HIST_EXTRA.store(if open { HIST_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+-    if open {
+-        PW_EXTRA.store(0, Ordering::Relaxed);
+-        BM_EXTRA.store(0, Ordering::Relaxed);
+-        DL_EXTRA.store(0, Ordering::Relaxed);
+-        MENU_EXTRA.store(0, Ordering::Relaxed);
+-        FIND_EXTRA.store(0, Ordering::Relaxed);
+-        SITE_EXTRA.store(0, Ordering::Relaxed);
+-        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
+-        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
+-    }
++    set_panel_extra(Panel::Hist, open);
+     apply_toolbar_height();
+ }
+ 
+@@ -124,15 +183,7 @@ static SITE_EXTRA: AtomicI32 = AtomicI32::new(0);
+ 
+ /// 站点信息面板开合：与其它面板互斥
+ pub fn set_site_panel(open: bool) {
+-    SITE_EXTRA.store(if open { SITE_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+-    if open {
+-        PW_EXTRA.store(0, Ordering::Relaxed);
+-        BM_EXTRA.store(0, Ordering::Relaxed);
+-        DL_EXTRA.store(0, Ordering::Relaxed);
+-        MENU_EXTRA.store(0, Ordering::Relaxed);
+-        FIND_EXTRA.store(0, Ordering::Relaxed);
+-        HIST_EXTRA.store(0, Ordering::Relaxed);
+-    }
++    set_panel_extra(Panel::Site, open);
+     apply_toolbar_height();
+ }
+ 
+@@ -142,16 +193,7 @@ static SETTINGS_EXTRA: AtomicI32 = AtomicI32::new(0);
+ 
+ /// 设置面板开合：与其它面板互斥
+ pub fn set_settings_panel(open: bool) {
+-    SETTINGS_EXTRA.store(if open { SETTINGS_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+-    if open {
+-        PW_EXTRA.store(0, Ordering::Relaxed);
+-        BM_EXTRA.store(0, Ordering::Relaxed);
+-        DL_EXTRA.store(0, Ordering::Relaxed);
+-        MENU_EXTRA.store(0, Ordering::Relaxed);
+-        FIND_EXTRA.store(0, Ordering::Relaxed);
+-        HIST_EXTRA.store(0, Ordering::Relaxed);
+-        SITE_EXTRA.store(0, Ordering::Relaxed);
+-    }
++    set_panel_extra(Panel::Settings, open);
+     apply_toolbar_height();
+ }
+ 
+@@ -161,33 +203,13 @@ static BM_MANAGE_EXTRA_V: AtomicI32 = AtomicI32::new(0);
+ 
+ /// 书签管理面板开合：与其它面板互斥
+ pub fn set_bm_manage_panel(open: bool) {
+-    BM_MANAGE_EXTRA_V.store(if open { BM_MANAGE_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+-    if open {
+-        PW_EXTRA.store(0, Ordering::Relaxed);
+-        BM_EXTRA.store(0, Ordering::Relaxed);
+-        DL_EXTRA.store(0, Ordering::Relaxed);
+-        MENU_EXTRA.store(0, Ordering::Relaxed);
+-        FIND_EXTRA.store(0, Ordering::Relaxed);
+-        HIST_EXTRA.store(0, Ordering::Relaxed);
+-        SITE_EXTRA.store(0, Ordering::Relaxed);
+-        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
+-    }
++    set_panel_extra(Panel::BmManage, open);
+     apply_toolbar_height();
+ }
+ 
+ /// 密码面板开合：加/减工具栏视图高度并重排（只动 PW_EXTRA，不碰书签栏态）
+ pub fn set_pw_panel(open: bool) {
+-    PW_EXTRA.store(if open { PW_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+-    if open {
+-        BM_EXTRA.store(0, Ordering::Relaxed);
+-        DL_EXTRA.store(0, Ordering::Relaxed);
+-        MENU_EXTRA.store(0, Ordering::Relaxed);
+-        FIND_EXTRA.store(0, Ordering::Relaxed);
+-        HIST_EXTRA.store(0, Ordering::Relaxed);
+-        SITE_EXTRA.store(0, Ordering::Relaxed);
+-        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
+-        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
+-    }
++    set_panel_extra(Panel::Pw, open);
+     apply_toolbar_height();
+ }
+ 
+@@ -214,17 +236,7 @@ static FIND_EXTRA: AtomicI32 = AtomicI32::new(0);
+ 
+ /// 查找栏开合：与其它面板互斥，同一时刻只留一个撑高来源
+ fn set_find_bar(open: bool) {
+-    FIND_EXTRA.store(if open { FIND_BAR_EXTRA } else { 0 }, Ordering::Relaxed);
+-    if open {
+-        PW_EXTRA.store(0, Ordering::Relaxed);
+-        BM_EXTRA.store(0, Ordering::Relaxed);
+-        DL_EXTRA.store(0, Ordering::Relaxed);
+-        MENU_EXTRA.store(0, Ordering::Relaxed);
+-        HIST_EXTRA.store(0, Ordering::Relaxed);
+-        SITE_EXTRA.store(0, Ordering::Relaxed);
+-        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
+-        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
+-    }
++    set_panel_extra(Panel::Find, open);
+     apply_toolbar_height();
+ }
+ 
+@@ -2339,6 +2351,55 @@ mod tests {
+         zoom_pct_for_level, zoom_step, CONTEXT_MENU_JS,
+     };
+ 
++    // ---- 面板互斥矩阵（F-CEF-21）：撑高原子是进程级全局，全部断言放同一个测试里串行跑 ----
++
++    #[test]
++    fn panel_registry_values_match_contract() {
++        use super::Panel;
++        let want = [
++            (Panel::Pw, "pw-open", 260),
++            (Panel::Dl, "dl-open", 300),
++            (Panel::Menu, "menu-open", 340),
++            (Panel::Hist, "hist-open", 340),
++            (Panel::Site, "site-open", 150),
++            (Panel::Settings, "settings-open", 320),
++            (Panel::BmManage, "bmmanage-open", 380),
++            (Panel::Find, "find-open", 44),
++        ];
++        assert_eq!(Panel::ALL.len(), want.len());
++        for (p, c, px) in want {
++            assert_eq!((p.class(), p.extra_px()), (c, px), "{p:?}");
++        }
++    }
++
++    #[test]
++    fn opening_any_panel_zeroes_all_other_extras_56_pairs() {
++        use super::{set_panel_extra, toolbar_height, Panel, BM_EXTRA, TOOLBAR_H};
++        use std::sync::atomic::Ordering;
++        let base = TOOLBAR_H.load(Ordering::Relaxed);
++        let mut pairs = 0;
++        for a in Panel::ALL {
++            for b in Panel::ALL {
++                if a == b {
++                    continue;
++                }
++                set_panel_extra(a, true);
++                BM_EXTRA.store(360, Ordering::Relaxed);
++                set_panel_extra(b, true);
++                for p in Panel::ALL {
++                    let v = p.atom().load(Ordering::Relaxed);
++                    assert_eq!(v, if p == b { b.extra_px() } else { 0 }, "{a:?}->{b:?} 残留 {p:?}");
++                }
++                assert_eq!(BM_EXTRA.load(Ordering::Relaxed), 0, "{a:?}->{b:?} 书签下拉未清");
++                assert_eq!(toolbar_height(), base + b.extra_px(), "{a:?}->{b:?}");
++                set_panel_extra(b, false);
++                assert_eq!(toolbar_height(), base);
++                pairs += 1;
++            }
++        }
++        assert_eq!(pairs, 56);
++    }
++
+     // ---- normalize_url：地址栏补全规则（P0 实测逻辑，防改坏）----
+ 
+     // ---- 缩放档位（F-CEF-18）----
+diff --git a/src-tauri/src/engine/cef/toolbar.rs b/src-tauri/src/engine/cef/toolbar.rs
+index 4e19ac5..3eb30d6 100644
+--- a/src-tauri/src/engine/cef/toolbar.rs
++++ b/src-tauri/src/engine/cef/toolbar.rs
+@@ -4,8 +4,15 @@
+ //! 渲染/输入栈。里面用 `console.log("SHIFT_ACT:...")` 把动作传回浏览器进程
+ //! （MVP 桥，后续换 MessageRouter）。
+ 
++use super::shell::Panel;
+ use std::path::Path;
+ 
++/// 根类面板 class 清单（JSON 数组），来自 Rust 注册表 `shell::Panel`，注入 JS 侧
++fn panel_classes_json() -> String {
++    let items: Vec<String> = Panel::ALL.iter().map(|p| format!("\"{}\"", p.class())).collect();
++    format!("[{}]", items.join(","))
++}
++
+ /// 生成（覆盖写）工具栏 HTML，返回可直接加载的 `file://` URL
+ pub fn ensure_toolbar_html(
+     cache_dir: &Path,
+@@ -20,6 +27,7 @@ pub fn ensure_toolbar_html(
+     // console 桥的单向请求也实测没到），生成页面时写死最稳。
+     // 密码 JSON 只含 id/站点/用户名；"</" 转义防止数据提前闭合 <script>
+     let html = TOOLBAR_HTML
++        .replace("__SHIFT_PANEL_CLASSES__", &panel_classes_json())
+         .replace("__SHIFT_BOOKMARKS_JSON__", bookmarks_json)
+         .replace("__SHIFT_PASSWORDS_JSON__", &passwords_json.replace("</", "<\\/"))
+         .replace("__SHIFT_DOWNLOADS_JSON__", &downloads_json.replace("</", "<\\/"));
+@@ -615,6 +623,12 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
+ <script>
+   const addr = document.getElementById('addr');
+ 
++  // 8 个根类面板的 class 清单由 Rust 注册表（shell::Panel）注入；开任一面板 = 清掉其余 7 个
++  const PANEL_CLASSES = __SHIFT_PANEL_CLASSES__;
++  function removePanelClasses(except) {
++    document.documentElement.classList.remove(...PANEL_CLASSES.filter((c) => c !== except));
++  }
++
+   function act(cmd) {
+     console.log('SHIFT_ACT:' + cmd);
+   }
+@@ -1167,7 +1181,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
+ 
+   function setPwPanel(open) {
+     document.documentElement.classList.toggle('pw-open', open);
+-    if (open) document.documentElement.classList.remove('dl-open', 'find-open', 'hist-open');
++    if (open) removePanelClasses('pw-open');
+     act('pwpanel|' + (open ? '1' : '0'));
+     if (open) { pwSearch.value = ''; renderPasswords(); pwSearch.focus(); }
+   }
+@@ -1269,7 +1283,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
+ 
+   function setDlPanel(open) {
+     document.documentElement.classList.toggle('dl-open', open);
+-    if (open) document.documentElement.classList.remove('pw-open', 'find-open', 'hist-open');
++    if (open) removePanelClasses('dl-open');
+     act('dlpanel|' + (open ? '1' : '0'));
+     if (open) renderDownloads();
+   }
+@@ -1346,7 +1360,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
+ 
+   function setHistPanel(open) {
+     document.documentElement.classList.toggle('hist-open', open);
+-    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'find-open');
++    if (open) removePanelClasses('hist-open');
+     act('histpanel|' + (open ? '1' : '0'));
+     if (open) {
+       histSearch.value = '';
+@@ -1505,7 +1519,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
+   }
+   function setBmManage(open) {
+     document.documentElement.classList.toggle('bmmanage-open', open);
+-    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'hist-open', 'find-open', 'site-open', 'settings-open');
++    if (open) removePanelClasses('bmmanage-open');
+     act('bmmanage|' + (open ? '1' : '0'));
+     if (open) { bmmFilter = 'all'; document.getElementById('bmmsearch').value = ''; renderBmmTree(); renderBmmList(); }
+   }
+@@ -1591,7 +1605,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
+   const settingsPanel = document.getElementById('settingspanel');
+   function setSettingsPanel(open) {
+     document.documentElement.classList.toggle('settings-open', open);
+-    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'hist-open', 'find-open', 'site-open');
++    if (open) removePanelClasses('settings-open');
+     act('settingspanel|' + (open ? '1' : '0'));
+   }
+   window.__shiftSettings = function (d) {
+@@ -1623,7 +1637,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
+ 
+   function setSitePanel(open) {
+     document.documentElement.classList.toggle('site-open', open);
+-    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'hist-open', 'find-open');
++    if (open) removePanelClasses('site-open');
+     act('sitepanel|' + (open ? '1' : '0'));
+   }
+   window.__shiftSiteInfo = function (data) {
+@@ -1648,7 +1662,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
+   // ---- 主菜单（F-CEF-16）----
+   function setMenuPanel(open) {
+     document.documentElement.classList.toggle('menu-open', open);
+-    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'find-open', 'hist-open');
++    if (open) removePanelClasses('menu-open');
+     act('menupanel|' + (open ? '1' : '0'));
+   }
+   document.getElementById('menubtn').addEventListener('click', (e) => {
+@@ -1688,8 +1702,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
+   window.__shiftFind = renderFindCount;
+ 
+   window.__shiftFindOpen = function () {
++    removePanelClasses('find-open');
+     document.documentElement.classList.add('find-open');
+-    document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'hist-open');
+     closeOmni();
+     findinput.focus();
+     findinput.select();
+@@ -1738,9 +1752,41 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
+ 
+ #[cfg(test)]
+ mod tests {
+-    use super::ensure_toolbar_html;
++    use super::super::shell::Panel;
++    use super::{ensure_toolbar_html, panel_classes_json, TOOLBAR_HTML};
+     use std::path::Path;
+ 
++    #[test]
++    fn panel_registry_has_eight_unique_classes_and_matches_css() {
++        assert_eq!(Panel::ALL.len(), 8);
++        let json = panel_classes_json();
++        for p in Panel::ALL {
++            assert_eq!(json.matches(&format!("\"{}\"", p.class())).count(), 1, "{:?}", p);
++            let css = format!("html.{}", p.class());
++            assert!(TOOLBAR_HTML.contains(&css), "CSS 缺根类 {css}");
++        }
++    }
++
++    #[test]
++    fn every_js_setter_uses_registry_not_hand_lists() {
++        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 8);
++        for line in TOOLBAR_HTML.lines().filter(|l| l.contains("classList.remove(")) {
++            assert!(line.matches("-open").count() <= 1, "残留手写互斥清单: {line}");
++        }
++    }
++
++    #[test]
++    fn injected_html_has_no_placeholder_and_lists_all_classes() {
++        let dir = std::env::temp_dir().join(format!("cef-toolbar-pc-{}", std::process::id()));
++        let _ = std::fs::create_dir_all(&dir);
++        let url = ensure_toolbar_html(&dir, "[]", "[]", "[]").unwrap();
++        let body = std::fs::read_to_string(url.strip_prefix("file://").unwrap()).unwrap();
++        assert!(!body.contains("__SHIFT_PANEL_CLASSES__"));
++        let want = format!("const PANEL_CLASSES = {};", panel_classes_json());
++        assert!(body.contains(&want));
++        let _ = std::fs::remove_dir_all(&dir);
++    }
++
+     #[test]
+     fn ensure_toolbar_html_writes_file_and_content_bridge() {
+         let dir = std::env::temp_dir().join(format!("cef-toolbar-test-{}", std::process::id()));

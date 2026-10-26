@@ -4,7 +4,14 @@
 //! 渲染/输入栈。里面用 `console.log("SHIFT_ACT:...")` 把动作传回浏览器进程
 //! （MVP 桥，后续换 MessageRouter）。
 
+use super::shell::Panel;
 use std::path::Path;
+
+/// 根类面板 class 清单（JSON 数组），来自 Rust 注册表 `shell::Panel`，注入 JS 侧
+fn panel_classes_json() -> String {
+    let items: Vec<String> = Panel::ALL.iter().map(|p| format!("\"{}\"", p.class())).collect();
+    format!("[{}]", items.join(","))
+}
 
 /// 生成（覆盖写）工具栏 HTML，返回可直接加载的 `file://` URL
 pub fn ensure_toolbar_html(
@@ -20,6 +27,7 @@ pub fn ensure_toolbar_html(
     // console 桥的单向请求也实测没到），生成页面时写死最稳。
     // 密码 JSON 只含 id/站点/用户名；"</" 转义防止数据提前闭合 <script>
     let html = TOOLBAR_HTML
+        .replace("__SHIFT_PANEL_CLASSES__", &panel_classes_json())
         .replace("__SHIFT_BOOKMARKS_JSON__", bookmarks_json)
         .replace("__SHIFT_PASSWORDS_JSON__", &passwords_json.replace("</", "<\\/"))
         .replace("__SHIFT_DOWNLOADS_JSON__", &downloads_json.replace("</", "<\\/"));
@@ -615,6 +623,12 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 <script>
   const addr = document.getElementById('addr');
 
+  // 8 个根类面板的 class 清单由 Rust 注册表（shell::Panel）注入；开任一面板 = 清掉其余 7 个
+  const PANEL_CLASSES = __SHIFT_PANEL_CLASSES__;
+  function removePanelClasses(except) {
+    document.documentElement.classList.remove(...PANEL_CLASSES.filter((c) => c !== except));
+  }
+
   function act(cmd) {
     console.log('SHIFT_ACT:' + cmd);
   }
@@ -1167,7 +1181,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 
   function setPwPanel(open) {
     document.documentElement.classList.toggle('pw-open', open);
-    if (open) document.documentElement.classList.remove('dl-open', 'find-open', 'hist-open');
+    if (open) removePanelClasses('pw-open');
     act('pwpanel|' + (open ? '1' : '0'));
     if (open) { pwSearch.value = ''; renderPasswords(); pwSearch.focus(); }
   }
@@ -1269,7 +1283,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 
   function setDlPanel(open) {
     document.documentElement.classList.toggle('dl-open', open);
-    if (open) document.documentElement.classList.remove('pw-open', 'find-open', 'hist-open');
+    if (open) removePanelClasses('dl-open');
     act('dlpanel|' + (open ? '1' : '0'));
     if (open) renderDownloads();
   }
@@ -1346,7 +1360,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 
   function setHistPanel(open) {
     document.documentElement.classList.toggle('hist-open', open);
-    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'find-open');
+    if (open) removePanelClasses('hist-open');
     act('histpanel|' + (open ? '1' : '0'));
     if (open) {
       histSearch.value = '';
@@ -1505,7 +1519,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   }
   function setBmManage(open) {
     document.documentElement.classList.toggle('bmmanage-open', open);
-    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'hist-open', 'find-open', 'site-open', 'settings-open');
+    if (open) removePanelClasses('bmmanage-open');
     act('bmmanage|' + (open ? '1' : '0'));
     if (open) { bmmFilter = 'all'; document.getElementById('bmmsearch').value = ''; renderBmmTree(); renderBmmList(); }
   }
@@ -1591,7 +1605,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   const settingsPanel = document.getElementById('settingspanel');
   function setSettingsPanel(open) {
     document.documentElement.classList.toggle('settings-open', open);
-    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'hist-open', 'find-open', 'site-open');
+    if (open) removePanelClasses('settings-open');
     act('settingspanel|' + (open ? '1' : '0'));
   }
   window.__shiftSettings = function (d) {
@@ -1623,7 +1637,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 
   function setSitePanel(open) {
     document.documentElement.classList.toggle('site-open', open);
-    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'hist-open', 'find-open');
+    if (open) removePanelClasses('site-open');
     act('sitepanel|' + (open ? '1' : '0'));
   }
   window.__shiftSiteInfo = function (data) {
@@ -1648,7 +1662,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   // ---- 主菜单（F-CEF-16）----
   function setMenuPanel(open) {
     document.documentElement.classList.toggle('menu-open', open);
-    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'find-open', 'hist-open');
+    if (open) removePanelClasses('menu-open');
     act('menupanel|' + (open ? '1' : '0'));
   }
   document.getElementById('menubtn').addEventListener('click', (e) => {
@@ -1688,8 +1702,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   window.__shiftFind = renderFindCount;
 
   window.__shiftFindOpen = function () {
+    removePanelClasses('find-open');
     document.documentElement.classList.add('find-open');
-    document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'hist-open');
     closeOmni();
     findinput.focus();
     findinput.select();
@@ -1738,8 +1752,40 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 
 #[cfg(test)]
 mod tests {
-    use super::ensure_toolbar_html;
+    use super::super::shell::Panel;
+    use super::{ensure_toolbar_html, panel_classes_json, TOOLBAR_HTML};
     use std::path::Path;
+
+    #[test]
+    fn panel_registry_has_eight_unique_classes_and_matches_css() {
+        assert_eq!(Panel::ALL.len(), 8);
+        let json = panel_classes_json();
+        for p in Panel::ALL {
+            assert_eq!(json.matches(&format!("\"{}\"", p.class())).count(), 1, "{:?}", p);
+            let css = format!("html.{}", p.class());
+            assert!(TOOLBAR_HTML.contains(&css), "CSS 缺根类 {css}");
+        }
+    }
+
+    #[test]
+    fn every_js_setter_uses_registry_not_hand_lists() {
+        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 8);
+        for line in TOOLBAR_HTML.lines().filter(|l| l.contains("classList.remove(")) {
+            assert!(line.matches("-open").count() <= 1, "残留手写互斥清单: {line}");
+        }
+    }
+
+    #[test]
+    fn injected_html_has_no_placeholder_and_lists_all_classes() {
+        let dir = std::env::temp_dir().join(format!("cef-toolbar-pc-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let url = ensure_toolbar_html(&dir, "[]", "[]", "[]").unwrap();
+        let body = std::fs::read_to_string(url.strip_prefix("file://").unwrap()).unwrap();
+        assert!(!body.contains("__SHIFT_PANEL_CLASSES__"));
+        let want = format!("const PANEL_CLASSES = {};", panel_classes_json());
+        assert!(body.contains(&want));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn ensure_toolbar_html_writes_file_and_content_bridge() {
