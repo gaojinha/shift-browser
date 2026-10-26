@@ -771,6 +771,158 @@ fn with_active_frame(f: impl FnOnce(&mut Frame)) {
     });
 }
 
+/// 当前活动标签的 (url, title)，取不到给空串。
+fn active_tab_url_title() -> (String, String) {
+    SHELL_TABS.with(|t| {
+        let tabs = t.borrow();
+        tabs.get(ACTIVE_TAB.with(|a| a.get()))
+            .map(|t| (t.url.clone(), t.title.clone()))
+            .unwrap_or_default()
+    })
+}
+
+/// LIKE 通配符转义：用户输入的 `%` / `_` / `\` 不能当通配符用。
+fn escape_like(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+/// 地址栏下拉建议（F-CEF-17）：历史 + 书签各取 8 条，按 URL 去重（书签优先）。
+///
+/// 查询在 tokio 线程，结果切回主线程推给工具栏页面。
+fn suggest_omni(query: &str) {
+    let q = query.trim();
+    if q.is_empty() {
+        run_toolbar_js("window.__shiftOmni && window.__shiftOmni([])");
+        return;
+    }
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
+    let like = format!("%{}%", escape_like(q));
+    tauri::async_runtime::spawn(async move {
+        let hist = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT url, title FROM history \
+             WHERE url LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' \
+             ORDER BY last_visit_at DESC LIMIT 8",
+        )
+        .bind(&like)
+        .bind(&like)
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default();
+        let bms = sqlx::query_as::<_, (String, String)>(
+            "SELECT url, title FROM bookmarks \
+             WHERE url LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' \
+             ORDER BY sort_order, id LIMIT 8",
+        )
+        .bind(&like)
+        .bind(&like)
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default();
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for (url, title) in bms {
+            if seen.insert(url.clone()) {
+                out.push(serde_json::json!({"type":"bookmark","url":url,"title":title}));
+            }
+        }
+        for (url, title) in hist {
+            if seen.insert(url.clone()) {
+                out.push(serde_json::json!({
+                    "type":"history","url":url,"title":title.unwrap_or_default()
+                }));
+            }
+        }
+        let json = serde_json::to_string(&out).unwrap_or_else(|_| "[]".to_string());
+        let _ = app.run_on_main_thread(move || {
+            run_toolbar_js(&format!(
+                "window.__shiftOmni && window.__shiftOmni({json})"
+            ));
+        });
+    });
+}
+
+/// 星标（F-CEF-17）：已收藏则删除，未收藏则加入书签，然后刷新书签栏与星标。
+fn toggle_star() {
+    let (url, title) = active_tab_url_title();
+    if url.is_empty() {
+        return;
+    }
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
+    let title = if title.trim().is_empty() {
+        url.clone()
+    } else {
+        title
+    };
+    tauri::async_runtime::spawn(async move {
+        let existing: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM bookmarks WHERE url = ? LIMIT 1")
+                .bind(&url)
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten();
+        let res = if let Some(id) = existing {
+            sqlx::query("DELETE FROM bookmarks WHERE id = ?")
+                .bind(id)
+                .execute(&pool)
+                .await
+        } else {
+            sqlx::query(
+                "INSERT INTO bookmarks (title, url, folder_id, sort_order) \
+                 VALUES (?, ?, NULL, COALESCE((SELECT MAX(sort_order) + 1 FROM bookmarks WHERE folder_id IS NULL), 0))",
+            )
+            .bind(&title)
+            .bind(&url)
+            .execute(&pool)
+            .await
+        };
+        match res {
+            Ok(_) => {
+                log::info!("[cef] 星标切换: {url}");
+                let _ = app.run_on_main_thread(reload_bookmarks_from_db);
+                refresh_star_state(&url);
+            }
+            Err(e) => log::warn!("[cef] 星标切换失败: {e}"),
+        }
+    });
+}
+
+/// 查当前 URL 是否已收藏，推给工具栏星标。
+fn refresh_star_state(url: &str) {
+    let url = url.to_string();
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let on = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM bookmarks WHERE url = ?")
+            .bind(&url)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(0)
+            > 0;
+        let _ = app.run_on_main_thread(move || {
+            run_toolbar_js(&format!(
+                "window.__shiftStar && window.__shiftStar({on})"
+            ));
+        });
+    });
+}
+
 wrap_display_handler! {
     struct ShellContentDisplay {
         tab_id: String,
@@ -804,6 +956,8 @@ wrap_display_handler! {
                 "if (window.__shiftUrl) {{ window.__shiftUrl({}); }}",
                 serde_json::to_string(&text).unwrap_or_else(|_| "\"\"".to_string())
             ));
+            // 星标状态跟着地址走（F-CEF-17）
+            refresh_star_state(&text);
         }
 
         fn on_title_change(
@@ -1404,6 +1558,14 @@ fn handle_action(action: &str) {
             toggle_bookmarks();
             return;
         }
+        "omni" => {
+            suggest_omni(arg);
+            return;
+        }
+        "startoggle" => {
+            toggle_star();
+            return;
+        }
         "dlpanel" => {
             set_dl_panel(arg == "1");
             return;
@@ -1616,7 +1778,9 @@ fn urlencode(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_attachment_disposition, normalize_url, urlencode, CONTEXT_MENU_JS};
+    use super::{
+        escape_like, is_attachment_disposition, normalize_url, urlencode, CONTEXT_MENU_JS,
+    };
 
     // ---- normalize_url：地址栏补全规则（P0 实测逻辑，防改坏）----
 
@@ -1695,6 +1859,13 @@ mod tests {
         assert!(!is_attachment_disposition(""));
         assert!(!is_attachment_disposition("x-attachment-foo"));
         assert!(!is_attachment_disposition("inline; filename=\"a.zip\""));
+    }
+
+    #[test]
+    fn escape_like_escapes_wildcards() {
+        assert_eq!(escape_like("a%b_c\\d"), "a\\%b\\_c\\\\d");
+        assert_eq!(escape_like("正常"), "正常");
+        assert_eq!(escape_like("100%"), "100\\%");
     }
 
     /// 右键菜单只许发白名单动作，页面脚本伪造 `SHIFT_ACT:` 也不能越权。

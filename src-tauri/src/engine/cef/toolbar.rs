@@ -268,7 +268,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   .addr-wrap {
     flex: 1; display: flex; align-items: center; height: 32px;
     background: #202124; border: 1px solid transparent; border-radius: 16px;
-    padding: 0 12px; min-width: 0; margin: 0 4px;
+    padding: 0 12px; min-width: 0; margin: 0 4px; position: relative;
   }
   .addr-wrap:hover { background: #292a2d; }
   .addr-wrap:focus-within { background: #202124; border-color: #8ab4f8; }
@@ -282,6 +282,32 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     color: #e6e8eb; font-size: 13px;
   }
   #addr::placeholder { color: #6b7280; }
+  /* 星标 + 地址栏下拉建议（F-CEF-17） */
+  #starbtn {
+    flex: 0 0 auto; width: 24px; height: 24px; border: 0; background: transparent;
+    color: #9aa0a6; font-size: 16px; line-height: 24px; padding: 0; cursor: default;
+  }
+  #starbtn.on { color: #fdd663; }
+  #omni {
+    display: none; position: absolute; left: 0; right: 0; top: 38px;
+    background: #292a2d; border: 1px solid #3c4043; border-radius: 8px;
+    max-height: 300px; overflow-y: auto; z-index: 30; padding: 4px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  }
+  #omni.open { display: block; }
+  .omni-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    border-radius: 4px; font-size: 12px; cursor: default;
+  }
+  .omni-item.active, .omni-item:hover { background: #3c4043; }
+  .omni-item .omni-type { flex: 0 0 auto; color: #9aa0a6; }
+  .omni-item .omni-title {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .omni-item .omni-url {
+    max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: #9aa0a6;
+  }
   .lock { width: 14px; height: 14px; margin-right: 8px; color: #8b93a1; flex: none; }
 </style>
 </head>
@@ -319,6 +345,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
         <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
       </svg>
       <input id="addr" type="text" spellcheck="false" placeholder="输入网址或搜索词，回车打开">
+      <button class="star" id="starbtn" title="收藏此页">☆</button>
+      <div id="omni"></div>
     </div>
     <button title="密码" id="pwbtn">
       <svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/></svg>
@@ -369,15 +397,99 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     console.log('SHIFT_ACT:' + cmd);
   }
 
+  // 地址栏下拉建议 + 星标（F-CEF-17）
+  const omniEl = document.getElementById('omni');
+  const starBtn = document.getElementById('starbtn');
+  let omniList = [];
+  let omniIdx = -1;
+  let omniTimer = null;
+
+  function closeOmni() {
+    omniEl.classList.remove('open');
+    omniEl.innerHTML = '';
+    omniList = [];
+    omniIdx = -1;
+  }
+
+  function renderOmni(list) {
+    omniList = Array.isArray(list) ? list : [];
+    omniIdx = -1;
+    omniEl.innerHTML = '';
+    if (omniList.length === 0) { closeOmni(); return; }
+    omniList.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'omni-item';
+      row.dataset.i = String(i);
+      const type = document.createElement('span');
+      type.className = 'omni-type';
+      type.textContent = it.type === 'bookmark' ? '★' : '🕘';
+      const title = document.createElement('span');
+      title.className = 'omni-title';
+      title.textContent = it.title || it.url || '';
+      const url = document.createElement('span');
+      url.className = 'omni-url';
+      url.textContent = it.url || '';
+      row.append(type, title, url);
+      omniEl.appendChild(row);
+    });
+    omniEl.classList.add('open');
+  }
+
+  window.__shiftOmni = renderOmni;
+  window.__shiftStar = function (on) {
+    starBtn.classList.toggle('on', !!on);
+    starBtn.textContent = on ? '★' : '☆';
+    starBtn.title = on ? '已收藏（点击取消）' : '收藏此页';
+  };
+
+  function openOmniItem(it) {
+    if (!it) return;
+    act('nav|' + it.url);
+    addr.value = it.url;
+    closeOmni();
+    addr.blur();
+  }
+
+  addr.addEventListener('input', () => {
+    clearTimeout(omniTimer);
+    const q = addr.value.trim();
+    if (!q) { closeOmni(); return; }
+    omniTimer = setTimeout(() => act('omni|' + q), 150);
+  });
+
   addr.addEventListener('keydown', (e) => {
+    const omniOpen = omniEl.classList.contains('open');
+    if (omniOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault();
+      const n = omniList.length;
+      if (n === 0) return;
+      omniIdx = e.key === 'ArrowDown' ? (omniIdx + 1) % n : (omniIdx - 1 + n) % n;
+      Array.from(omniEl.children).forEach((el, i) => el.classList.toggle('active', i === omniIdx));
+      return;
+    }
     if (e.key === 'Enter') {
+      if (omniOpen && omniIdx >= 0) {
+        e.preventDefault();
+        openOmniItem(omniList[omniIdx]);
+        return;
+      }
       const v = addr.value.trim();
       if (v) act('nav|' + v);
       addr.blur();
     } else if (e.key === 'Escape') {
+      if (omniOpen) { closeOmni(); return; }
       addr.blur();
     }
   });
+
+  omniEl.addEventListener('mousedown', (e) => {
+    const row = e.target.closest('.omni-item');
+    if (!row) return;
+    openOmniItem(omniList[Number(row.dataset.i)]);
+  });
+
+  addr.addEventListener('blur', () => setTimeout(closeOmni, 150));
+  starBtn.addEventListener('click', () => act('startoggle'));
 
   addr.addEventListener('focus', () => addr.select());
 
