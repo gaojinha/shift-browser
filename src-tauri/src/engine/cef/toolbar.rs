@@ -288,6 +288,21 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   }
   .hist-row .h-del:hover { background: #4a4d51; }
   .hist-empty { color: #9aa0a6; padding: 12px 6px; font-size: 12px; }
+  /* 站点信息（F-CEF-19）：点地址栏锁图标弹出 */
+  html.site-open, html.site-open body { height: 100vh; }
+  #sitepanel {
+    display: none; position: absolute; left: 8px; top: 88px; width: 320px;
+    background: #292a2d; border: 1px solid #3c4043; border-radius: 8px;
+    padding: 10px 12px; z-index: 20; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    font-size: 12px;
+  }
+  html.site-open #sitepanel { display: block; }
+  html:not(.bookmarks-hidden) #sitepanel { top: 122px; }
+  .site-host { font-size: 14px; color: #e8eaed; margin-bottom: 4px; }
+  .site-state { color: #81c995; margin-bottom: 4px; }
+  .site-state.insecure { color: #f28b82; }
+  .site-url { color: #9aa0a6; word-break: break-all; margin-bottom: 8px; }
+  .site-close { color: #8ab4f8; cursor: default; }
   /* 主菜单（F-CEF-16）：右上角下拉，样式对齐 Chrome 深色菜单 */
   html.menu-open, html.menu-open body { height: 100vh; }
   #menupanel {
@@ -312,6 +327,10 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   }
   .addr-wrap:hover { background: #292a2d; }
   .addr-wrap:focus-within { background: #202124; border-color: #8ab4f8; }
+  .lockbtn {
+    flex: 0 0 auto; display: flex; align-items: center;
+    border: 0; background: transparent; padding: 0; margin: 0;
+  }
   .addr-wrap svg { width: 16px; height: 16px; stroke: #9aa0a6; fill: none;
     stroke-width: 2; stroke-linecap: round; margin-right: 8px; flex: 0 0 auto; }
   #addr { flex: 1; height: 100%; border: 0; outline: 0; background: transparent;
@@ -412,10 +431,12 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     </button>
 
     <div class="addr-wrap">
-      <svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="4" y="10" width="16" height="10" rx="2"/>
-        <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
-      </svg>
+      <button class="lockbtn" id="lockbtn" title="站点信息">
+        <svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="4" y="10" width="16" height="10" rx="2"/>
+          <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+        </svg>
+      </button>
       <input id="addr" type="text" spellcheck="false" placeholder="输入网址或搜索词，回车打开">
       <button class="star" id="starbtn" title="收藏此页">☆</button>
       <div id="omni"></div>
@@ -475,6 +496,12 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       <span id="histclose" class="hist-close">关闭</span>
     </div>
     <div id="histlist"></div>
+  </div>
+  <div id="sitepanel">
+    <div class="site-host" id="sitehost"></div>
+    <div class="site-state" id="sitestate"></div>
+    <div class="site-url" id="siteurl"></div>
+    <span id="siteclose" class="site-close">关闭</span>
   </div>
   <script id="bm-data" type="application/json">__SHIFT_BOOKMARKS_JSON__</script>
   <script id="pw-data" type="application/json">__SHIFT_PASSWORDS_JSON__</script>
@@ -1269,6 +1296,37 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
         histClearBtn.classList.remove('danger');
       }, 3000);
     }
+  });
+
+  // ---- 站点信息（F-CEF-19）----
+  const lockBtn = document.getElementById('lockbtn');
+  const sitePanel = document.getElementById('sitepanel');
+  const siteHost = document.getElementById('sitehost');
+  const siteState = document.getElementById('sitestate');
+  const siteUrl = document.getElementById('siteurl');
+
+  function setSitePanel(open) {
+    document.documentElement.classList.toggle('site-open', open);
+    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'hist-open', 'find-open');
+    act('sitepanel|' + (open ? '1' : '0'));
+  }
+  window.__shiftSiteInfo = function (data) {
+    if (!data) return;
+    siteHost.textContent = data.host || data.url || '本地页面';
+    siteState.textContent = data.secure
+      ? '连接安全（HTTPS）'
+      : (data.scheme === 'http' ? '连接不安全（HTTP）' : '本地页面');
+    siteState.classList.toggle('insecure', !!data.scheme && !data.secure);
+    siteUrl.textContent = data.url || '';
+  };
+  lockBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setSitePanel(true);
+    act('siteinfo');
+  });
+  document.getElementById('siteclose').addEventListener('click', () => setSitePanel(false));
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#sitepanel') && !e.target.closest('#lockbtn')) setSitePanel(false);
   });
 
   // ---- 主菜单（F-CEF-16）----

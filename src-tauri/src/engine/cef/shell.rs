@@ -43,6 +43,7 @@ fn toolbar_height() -> i32 {
         + MENU_EXTRA.load(Ordering::Relaxed)
         + FIND_EXTRA.load(Ordering::Relaxed)
         + HIST_EXTRA.load(Ordering::Relaxed)
+        + SITE_EXTRA.load(Ordering::Relaxed)
 }
 
 /// 密码面板（F-CEF-12）展开时工具栏视图额外加高的像素，收起为 0
@@ -68,6 +69,7 @@ pub fn set_dl_panel(open: bool) {
         MENU_EXTRA.store(0, Ordering::Relaxed);
         FIND_EXTRA.store(0, Ordering::Relaxed);
         HIST_EXTRA.store(0, Ordering::Relaxed);
+        SITE_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -85,6 +87,7 @@ pub fn set_menu_panel(open: bool) {
         DL_EXTRA.store(0, Ordering::Relaxed);
         FIND_EXTRA.store(0, Ordering::Relaxed);
         HIST_EXTRA.store(0, Ordering::Relaxed);
+        SITE_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -102,6 +105,25 @@ pub fn set_hist_panel(open: bool) {
         DL_EXTRA.store(0, Ordering::Relaxed);
         MENU_EXTRA.store(0, Ordering::Relaxed);
         FIND_EXTRA.store(0, Ordering::Relaxed);
+        SITE_EXTRA.store(0, Ordering::Relaxed);
+    }
+    apply_toolbar_height();
+}
+
+/// 站点信息面板（F-CEF-19）展开时工具栏视图额外加高的像素
+const SITE_PANEL_EXTRA: i32 = 150;
+static SITE_EXTRA: AtomicI32 = AtomicI32::new(0);
+
+/// 站点信息面板开合：与其它面板互斥
+pub fn set_site_panel(open: bool) {
+    SITE_EXTRA.store(if open { SITE_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+    if open {
+        PW_EXTRA.store(0, Ordering::Relaxed);
+        BM_EXTRA.store(0, Ordering::Relaxed);
+        DL_EXTRA.store(0, Ordering::Relaxed);
+        MENU_EXTRA.store(0, Ordering::Relaxed);
+        FIND_EXTRA.store(0, Ordering::Relaxed);
+        HIST_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -115,6 +137,7 @@ pub fn set_pw_panel(open: bool) {
         MENU_EXTRA.store(0, Ordering::Relaxed);
         FIND_EXTRA.store(0, Ordering::Relaxed);
         HIST_EXTRA.store(0, Ordering::Relaxed);
+        SITE_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -149,6 +172,7 @@ fn set_find_bar(open: bool) {
         DL_EXTRA.store(0, Ordering::Relaxed);
         MENU_EXTRA.store(0, Ordering::Relaxed);
         HIST_EXTRA.store(0, Ordering::Relaxed);
+        SITE_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -983,6 +1007,32 @@ fn refresh_star_state(url: &str) {
             ));
         });
     });
+}
+
+/// 站点信息（F-CEF-19）：当前标签的 host / 协议 / 是否 HTTPS。
+fn send_site_info() {
+    let (url, _) = active_tab_url_title();
+    let data = match url::Url::parse(&url) {
+        Ok(u) => {
+            let scheme = u.scheme().to_string();
+            let secure = scheme == "https";
+            serde_json::json!({
+                "url": url,
+                "host": u.host_str().unwrap_or(""),
+                "scheme": scheme,
+                "secure": secure,
+            })
+        }
+        Err(_) => serde_json::json!({
+            "url": url,
+            "host": "",
+            "scheme": "",
+            "secure": false,
+        }),
+    };
+    run_toolbar_js(&format!(
+        "window.__shiftSiteInfo && window.__shiftSiteInfo({data})"
+    ));
 }
 
 /// 历史面板数据（F-CEF-19）：空查询取最近 100 条，否则搜索 50 条。
@@ -1847,6 +1897,14 @@ fn handle_action(action: &str) {
         }
         "startoggle" => {
             toggle_star();
+            return;
+        }
+        "siteinfo" => {
+            send_site_info();
+            return;
+        }
+        "sitepanel" => {
+            set_site_panel(arg == "1");
             return;
         }
         "histpanel" => {
