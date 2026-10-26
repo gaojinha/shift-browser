@@ -335,6 +335,14 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   .bmm-item .m-op:hover { background: #4a4d51; }
   .bmm-item .m-op.danger { color: #f28b82; }
   .bmm-empty { color: #9aa0a6; padding: 12px 6px; }
+  .bmm-item .m-edit {
+    flex: 1; height: 24px; background: #202124; border: 1px solid #8ab4f8;
+    border-radius: 4px; color: #e8eaed; padding: 0 8px; font-size: 12px;
+  }
+  .bmm-item .m-move {
+    height: 24px; background: #202124; border: 1px solid #3c4043; border-radius: 4px;
+    color: #e8eaed; font-size: 12px; max-width: 180px;
+  }
   /* 设置面板（F-CEF-19） */
   html.settings-open, html.settings-open body { height: 100vh; }
   #settingspanel {
@@ -576,6 +584,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   <div id="bmmanage">
     <div class="bmm-head">
       <input id="bmmsearch" type="text" spellcheck="false" placeholder="搜索书签">
+      <span id="bmmnew" class="bmm-btn">新建文件夹</span>
       <span id="bmmclose" class="bmm-btn">关闭</span>
     </div>
     <div class="bmm-body">
@@ -1451,11 +1460,19 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       open.className = 'm-op';
       open.dataset.op = 'open';
       open.textContent = '打开';
+      const edit = document.createElement('span');
+      edit.className = 'm-op';
+      edit.dataset.op = 'edit';
+      edit.textContent = '编辑';
+      const move = document.createElement('span');
+      move.className = 'm-op';
+      move.dataset.op = 'move';
+      move.textContent = '移动';
       const del = document.createElement('span');
       del.className = 'm-op danger';
       del.dataset.op = 'del';
       del.textContent = '删除';
-      row.append(t, u, open, del);
+      row.append(t, u, open, edit, move, del);
       list.appendChild(row);
     });
   }
@@ -1466,6 +1483,25 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (open) { bmmFilter = 'all'; document.getElementById('bmmsearch').value = ''; renderBmmTree(); renderBmmList(); }
   }
   document.getElementById('bmmclose')?.addEventListener('click', () => setBmManage(false));
+  document.getElementById('bmmnew')?.addEventListener('click', () => {
+    const head = document.querySelector('.bmm-head');
+    if (!head || head.querySelector('.m-newfolder')) return;
+    const input = document.createElement('input');
+    input.className = 'm-newfolder';
+    input.placeholder = '文件夹名称，回车创建';
+    input.style.cssText = 'flex:1;height:26px;background:#202124;border:1px solid #8ab4f8;border-radius:6px;color:#e8eaed;padding:0 8px;font-size:12px;';
+    head.insertBefore(input, document.getElementById('bmmnew'));
+    input.focus();
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        const name = input.value.trim();
+        if (name) act('bmnewfolder|' + name);
+        input.remove();
+      } else if (ev.key === 'Escape') {
+        input.remove();
+      }
+    });
+  });
   document.getElementById('bmmsearch')?.addEventListener('input', renderBmmList);
   document.getElementById('bmmlist')?.addEventListener('click', (e) => {
     const op = e.target.closest('.m-op');
@@ -1475,6 +1511,49 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (op.dataset.op === 'open') {
       const b = (bmData.bookmarks || []).find((x) => String(x.id) === id);
       if (b) { act('nav|' + b.url); setBmManage(false); }
+    } else if (op.dataset.op === 'edit') {
+      const b = (bmData.bookmarks || []).find((x) => String(x.id) === id);
+      if (!b || row.querySelector('.m-edit')) return;
+      const input = document.createElement('input');
+      input.className = 'm-edit';
+      input.value = b.title || '';
+      const titleEl = row.querySelector('.m-title');
+      titleEl.replaceWith(input);
+      input.focus();
+      input.select();
+      const commit = () => { act('bmedit|' + JSON.stringify({ id: id, title: input.value.trim() })); };
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { commit(); }
+        else if (ev.key === 'Escape') { renderBmmList(); }
+      });
+      input.addEventListener('blur', () => setTimeout(commit, 150));
+    } else if (op.dataset.op === 'move') {
+      if (row.querySelector('.m-move')) return;
+      const sel = document.createElement('select');
+      sel.className = 'm-move';
+      const add = (label, value, depth) => {
+        const o = document.createElement('option');
+        o.value = value;
+        o.textContent = '\u00a0'.repeat(depth * 2) + label;
+        sel.appendChild(o);
+      };
+      add('未分类（根目录）', '');
+      const walk = (parent, depth) => {
+        bmmFoldersOf(parent).forEach((f) => {
+          add(f.name, String(f.id), depth + 1);
+          walk(f.id, depth + 1);
+        });
+      };
+      walk(null, 0);
+      const cur = (bmData.bookmarks || []).find((x) => String(x.id) === id);
+      sel.value = cur && cur.folderId != null ? String(cur.folderId) : '';
+      const opEl = op;
+      opEl.replaceWith(sel);
+      sel.focus();
+      sel.addEventListener('change', () => {
+        act('bmmove|' + JSON.stringify({ id: id, folderId: sel.value === '' ? null : Number(sel.value) }));
+      });
+      sel.addEventListener('blur', () => setTimeout(renderBmmList, 200));
     } else if (op.dataset.op === 'del') {
       if (op.dataset.armed === '1') { act('bmdel|' + id); }
       else { op.dataset.armed = '1'; op.textContent = '确认'; setTimeout(() => { op.dataset.armed = ''; op.textContent = '删除'; }, 3000); }
