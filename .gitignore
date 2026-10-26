@@ -40,6 +40,7 @@ src-tauri/resources/libshift_web_extension.so
 !.ai/inbox/
 !.ai/outbox/
 !.ai/evidence/
+!.ai/handover/
 .ai/inbox/*
 .ai/outbox/*
 !.ai/inbox/*/

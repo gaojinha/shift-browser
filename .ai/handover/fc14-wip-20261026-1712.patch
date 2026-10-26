@@ -1,0 +1,180 @@
+diff --git a/src-tauri/src/engine/cef/shell.rs b/src-tauri/src/engine/cef/shell.rs
+index 4a06da8..8754577 100644
+--- a/src-tauri/src/engine/cef/shell.rs
++++ b/src-tauri/src/engine/cef/shell.rs
+@@ -583,7 +583,10 @@ wrap_client! {
+         }
+ 
+         fn request_handler(&self) -> Option<RequestHandler> {
+-            Some(ShellRequestHandler::new(self.tab_id.clone()))
++            Some(ShellRequestHandler::new(
++                self.tab_id.clone(),
++                !self.toolbar,
++            ))
+         }
+ 
+         fn load_handler(&self) -> Option<LoadHandler> {
+@@ -1251,6 +1254,7 @@ fn handle_action(action: &str) {
+         None => (action, ""),
+     };
+ 
++    log::info!("[cef] act 入参: {cmd}");
+     // 密码面板动作（F-CEF-12）
+     if super::passwords_ui::handle(cmd, arg) {
+         return;
+@@ -1382,6 +1386,10 @@ fn handle_action(action: &str) {
+     BROWSERS.with(|m| {
+         let map = m.borrow();
+         let Some(browser) = map.get(&active_id) else {
++            log::warn!(
++                "[cef] BROWSERS 查不到 active_id={active_id}，现有 key={:?}",
++                map.keys().collect::<Vec<_>>()
++            );
+             return;
+         };
+         match cmd {
+@@ -1396,6 +1404,18 @@ fn handle_action(action: &str) {
+                 };
+                 frame.load_url(Some(&CefString::from(url.as_str())));
+             }
++            // 临时诊断：手动触发下载，验证 DownloadHandler 链路是否通
++            "dltest" => {
++                // 诊断：把结果回写到工具栏标题，绕开日志（该路径 log 不出现在 journal）
++                dl_debug(&format!("dltest 收到 arg={arg}"));
++                match browser.host() {
++                    Some(host) => {
++                        host.start_download(Some(&CefString::from(arg)));
++                        run_toolbar_js("document.title='DLTEST-CALLED'");
++                    }
++                    None => run_toolbar_js("document.title='DLTEST-NOHOST'"),
++                }
++            }
+             "back" => browser.go_back(),
+             "forward" => browser.go_forward(),
+             "reload" => browser.reload(),
+@@ -1508,9 +1528,30 @@ mod tests {
+ wrap_request_handler! {
+     struct ShellRequestHandler {
+         tab_id: String,
++        content: bool,
+     }
+ 
+     impl RequestHandler {
++        /// 主框架导航挂一个资源请求处理器：只为在 `on_resource_response` 里看
++        /// 响应头（`Content-Disposition: attachment`）决定是否转下载。
++        /// 子资源（图片/JS）不挂，避免每个请求都过一次回调。
++        fn resource_request_handler(
++            &self,
++            _browser: Option<&mut Browser>,
++            _frame: Option<&mut Frame>,
++            _request: Option<&mut Request>,
++            is_navigation: std::os::raw::c_int,
++            _is_download: std::os::raw::c_int,
++            _request_initiator: Option<&CefString>,
++            _disable_default_handling: Option<&mut std::os::raw::c_int>,
++        ) -> Option<ResourceRequestHandler> {
++            if self.content && is_navigation != 0 {
++                Some(ShellResourceRequestHandler::new())
++            } else {
++                None
++            }
++        }
++
+         /// 单栈窗口的渲染进程终止取证（2026-10-25 实测：导航到 nodeseek 后
+         /// 整个窗口消失、浏览器进程存活、无 panic —— 先让原因可见）。
+         fn on_render_process_terminated(
+@@ -1531,6 +1572,49 @@ wrap_request_handler! {
+     }
+ }
+ 
++wrap_resource_request_handler! {
++    struct ShellResourceRequestHandler;
++
++    impl ResourceRequestHandler {
++        /// 响应头到手、正文还没读：发现 `Content-Disposition: attachment` 就
++        /// 取消本次导航并改走下载。
++        ///
++        /// 为什么不在 `on_before_resource_load` 做：那里只有请求头，看不到
++        /// `Content-Disposition`（2026-10-26 实测：attach 响应会当二进制页面渲染，
++        /// `Content-Type: application/octet-stream` 页面上白屏、标题为空）。
++        fn on_resource_response(
++            &self,
++            browser: Option<&mut Browser>,
++            _frame: Option<&mut Frame>,
++            request: Option<&mut Request>,
++            response: Option<&mut Response>,
++        ) -> std::os::raw::c_int {
++            let (Some(req), Some(resp)) = (request, response) else {
++                return 0;
++            };
++            let disp = CefStringUtf16::from(&resp.header_by_name(Some(&CefString::from(
++                "Content-Disposition",
++            ))))
++            .to_string();
++            if !disp.to_ascii_lowercase().contains("attachment") {
++                return 0;
++            }
++            let url = CefStringUtf16::from(&req.url()).to_string();
++            if url.is_empty() {
++                return 0;
++            }
++            dl_debug(&format!("拦截 attachment 导航 -> 转下载: {url}（{disp}）"));
++            log::info!("[cef] attachment 转下载: {url}");
++            if let Some(b) = browser {
++                if let Some(host) = b.host() {
++                    host.start_download(Some(&CefString::from(url.as_str())));
++                }
++            }
++            1 // 取消本次导航（正文不再加载）
++        }
++    }
++}
++
+ wrap_load_handler! {
+     struct ShellContentLoadHandler {
+         tab_id: String,
+@@ -1700,6 +1784,7 @@ wrap_download_handler! {
+                 .unwrap_or_else(|| "download".to_string());
+             let safe = sanitize_filename(&name);
+             let path = download_dir().join(&safe);
++            dl_debug(&format!("on_before_download name={name} safe={safe} path={}", path.display()));
+             log::info!("[cef] 下载开始: {name} -> {}", path.display());
+             if let Some(cb) = callback {
+                 cb.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
+@@ -1714,6 +1799,17 @@ wrap_download_handler! {
+             _callback: Option<&mut DownloadItemCallback>,
+         ) {
+             if let Some(it) = download_item {
++                dl_debug(&format!(
++                    "on_download_updated complete={} pct={} inprog={} canceled={} interrupted={} reason={} bytes={}/{}",
++                    it.is_complete(),
++                    it.percent_complete(),
++                    it.is_in_progress(),
++                    it.is_canceled(),
++                    it.is_interrupted(),
++                    it.interrupt_reason().get_raw(),
++                    it.received_bytes(),
++                    it.total_bytes(),
++                ));
+                 if it.is_complete() != 0 {
+                     log::info!("[cef] 下载完成（进度 {}%）", it.percent_complete());
+                 }
+@@ -1722,6 +1818,18 @@ wrap_download_handler! {
+     }
+ }
+ 
++/// 临时调试：直接追加到 /tmp（CEF 回调线程里的 log 有时进不了 journal）
++fn dl_debug(msg: &str) {
++    use std::io::Write;
++    if let Ok(mut f) = std::fs::OpenOptions::new()
++        .create(true)
++        .append(true)
++        .open("/tmp/shift-dl-debug.log")
++    {
++        let _ = writeln!(f, "[{:?}] {msg}", std::time::SystemTime::now());
++    }
++}
++
+ /// 默认下载目录：`$HOME/Downloads`（不存在则创建）
+ fn download_dir() -> std::path::PathBuf {
+     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
