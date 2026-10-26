@@ -2720,10 +2720,11 @@ wrap_find_handler! {
             if active_id.as_deref() != Some(self.tab_id.as_str()) {
                 return;
             }
-            // C API 的 ordinal 是 0 基（-1 = 无匹配）；工具栏显示 1 基「第几条」
-            let active = active_match_ordinal.saturating_add(1);
+            // C API 的 ordinal 是 0 基（-1 = 无匹配），原样透传给工具栏；
+            // 1 基「第几条」由工具栏侧转（renderFindCount 已 +1 并钳制到 count），
+            // Rust 侧再加 1 会把首条显示成 2/N（2026-10-26 真机发现）
             run_toolbar_js(&format!(
-                "window.__shiftFind && window.__shiftFind({count}, {active})"
+                "window.__shiftFind && window.__shiftFind({count}, {active_match_ordinal})"
             ));
         }
     }
@@ -2769,6 +2770,14 @@ fn handle_shortcut(
     let ctrl = ev.modifiers & (1 << 2) != 0;
     let shift = ev.modifiers & (1 << 1) != 0;
     if !ctrl {
+        // F5 刷新（无 Ctrl；VK_F5 = 116）
+        if ev.windows_key_code == 116 {
+            handle_action("reload");
+            if let Some(flag) = is_shortcut {
+                *flag = 1;
+            }
+            return 1;
+        }
         return 0;
     }
     // Ctrl+Shift+T 恢复最近关闭的标签
@@ -2820,6 +2829,28 @@ fn handle_shortcut(
                 let cur = ACTIVE_TAB.with(|a| a.get());
                 switch_tab((cur + 1) % len);
             }
+            1
+        }
+        // Ctrl+R 刷新（F-CEF-19 快捷键补齐）
+        82 => {
+            handle_action("reload");
+            1
+        }
+        // Ctrl+L 聚焦地址栏
+        76 => {
+            run_toolbar_js(
+                "const a=document.getElementById('addr'); if(a){a.focus();a.select();}",
+            );
+            1
+        }
+        // Ctrl+H 历史面板
+        72 => {
+            run_toolbar_js("setHistPanel(true)");
+            1
+        }
+        // Ctrl+J 下载面板
+        74 => {
+            run_toolbar_js("setDlPanel(true)");
             1
         }
         // Ctrl+F 页内查找（F-CEF-18）
