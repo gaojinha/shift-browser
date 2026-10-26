@@ -11,6 +11,7 @@ pub fn ensure_toolbar_html(
     cache_dir: &Path,
     bookmarks_json: &str,
     passwords_json: &str,
+    downloads_json: &str,
 ) -> Result<String, String> {
     let dir = cache_dir.join("shell");
     std::fs::create_dir_all(&dir).map_err(|e| format!("建工具栏目录失败: {e}"))?;
@@ -20,7 +21,8 @@ pub fn ensure_toolbar_html(
     // 密码 JSON 只含 id/站点/用户名；"</" 转义防止数据提前闭合 <script>
     let html = TOOLBAR_HTML
         .replace("__SHIFT_BOOKMARKS_JSON__", bookmarks_json)
-        .replace("__SHIFT_PASSWORDS_JSON__", &passwords_json.replace("</", "<\\/"));
+        .replace("__SHIFT_PASSWORDS_JSON__", &passwords_json.replace("</", "<\\/"))
+        .replace("__SHIFT_DOWNLOADS_JSON__", &downloads_json.replace("</", "<\\/"));
     let path = dir.join("toolbar.html");
     std::fs::write(&path, html).map_err(|e| format!("写工具栏页失败: {e}"))?;
 
@@ -216,6 +218,36 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   .pw-row .pw-btn:hover { background: #4a4d51; }
   .pw-row .pw-btn.danger { color: #f28b82; }
   .pw-empty { color: #9aa0a6; padding: 12px 6px; font-size: 12px; }
+  /* 下载面板（F-CEF-15）：与密码面板同一套撑高机制，两个面板互斥 */
+  html.dl-open, html.dl-open body { height: 100vh; }
+  #dlpanel {
+    display: none; position: absolute; left: 0; right: 0; top: 88px; bottom: 0;
+    background: #292a2d; border-top: 1px solid #3c4043; padding: 8px 12px;
+    flex-direction: column; gap: 6px; z-index: 10;
+  }
+  html.dl-open #dlpanel { display: flex; }
+  html:not(.bookmarks-hidden) #dlpanel { top: 122px; }
+  #dllist { flex: 1; overflow-y: auto; }
+  .dl-row {
+    display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 6px;
+    border-radius: 6px; font-size: 12px;
+  }
+  .dl-row:hover { background: #3c4043; }
+  .dl-row .dl-name {
+    flex: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .dl-row .dl-state { flex: 0 0 92px; color: #9aa0a6; }
+  .dl-row .dl-bar {
+    flex: 1; height: 4px; background: #3c4043; border-radius: 2px; overflow: hidden;
+  }
+  .dl-row .dl-bar > i { display: block; height: 100%; width: 0; background: #8ab4f8; }
+  .dl-row .dl-btn {
+    flex: 0 0 auto; padding: 0 8px; height: 22px; border-radius: 11px; line-height: 22px;
+    color: #8ab4f8; font-size: 12px; cursor: pointer;
+  }
+  .dl-row .dl-btn:hover { background: #4a4d51; }
+  .dl-row .dl-btn.danger { color: #f28b82; }
+  .dl-empty { color: #9aa0a6; padding: 12px 6px; font-size: 12px; }
   .addr-wrap {
     flex: 1; display: flex; align-items: center; height: 32px;
     background: #202124; border: 1px solid transparent; border-radius: 16px;
@@ -274,6 +306,9 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <button title="密码" id="pwbtn">
       <svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/></svg>
     </button>
+    <button title="下载" id="dlbtn">
+      <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>
+    </button>
   </div>
   <div class="bookmarks" id="bookmarks"></div>
   <div id="bmfolders"></div>
@@ -282,8 +317,12 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <input id="pwsearch" type="text" spellcheck="false" placeholder="搜索站点或用户名">
     <div id="pwlist"></div>
   </div>
+  <div id="dlpanel">
+    <div id="dllist"></div>
+  </div>
   <script id="bm-data" type="application/json">__SHIFT_BOOKMARKS_JSON__</script>
   <script id="pw-data" type="application/json">__SHIFT_PASSWORDS_JSON__</script>
+  <script id="dl-data" type="application/json">__SHIFT_DOWNLOADS_JSON__</script>
 
 
 <script>
@@ -750,6 +789,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 
   function setPwPanel(open) {
     document.documentElement.classList.toggle('pw-open', open);
+    if (open) document.documentElement.classList.remove('dl-open');
     act('pwpanel|' + (open ? '1' : '0'));
     if (open) { pwSearch.value = ''; renderPasswords(); pwSearch.focus(); }
   }
@@ -783,6 +823,109 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     }
   });
 
+  // ---- 下载面板（F-CEF-15）----
+  // 数据只含 id/文件名/状态/字节数；打开目录/重下/删记录都回 Rust 执行，
+  // 页面拿不到真实路径（减少一个可被页面脚本滥用的面）。
+  let dlList = [];
+  try { dlList = JSON.parse(document.getElementById('dl-data').textContent || '[]'); } catch (e) { dlList = []; }
+  if (!Array.isArray(dlList)) dlList = [];
+  const dlListEl = document.getElementById('dllist');
+
+  function dlPct(d) {
+    if (!d || !d.total || d.total <= 0) return 0;
+    return Math.min(100, Math.round((d.received || 0) * 100 / d.total));
+  }
+
+  function dlStateText(d) {
+    switch (d.state) {
+      case 'in_progress': return '下载中 ' + dlPct(d) + '%';
+      case 'completed': return '已完成';
+      case 'failed': return '失败';
+      case 'cancelled': return '已取消';
+      case 'interrupted': return '已中断';
+      default: return d.state || '';
+    }
+  }
+
+  function renderDownloads() {
+    dlListEl.innerHTML = '';
+    if (dlList.length === 0) {
+      const e = document.createElement('div');
+      e.className = 'dl-empty';
+      e.textContent = '还没有下载记录';
+      dlListEl.appendChild(e);
+      return;
+    }
+    dlList.forEach((d) => {
+      const row = document.createElement('div');
+      row.className = 'dl-row';
+      row.dataset.id = String(d.id);
+      const name = document.createElement('span');
+      name.className = 'dl-name';
+      name.textContent = d.filename || '(未命名)';
+      const st = document.createElement('span');
+      st.className = 'dl-state';
+      st.textContent = dlStateText(d);
+      const bar = document.createElement('div');
+      bar.className = 'dl-bar';
+      const fill = document.createElement('i');
+      fill.style.width = dlPct(d) + '%';
+      bar.appendChild(fill);
+      const open = document.createElement('span');
+      open.className = 'dl-btn';
+      open.dataset.op = 'open';
+      open.textContent = '打开目录';
+      const retry = document.createElement('span');
+      retry.className = 'dl-btn';
+      retry.dataset.op = 'retry';
+      retry.textContent = '重下';
+      const del = document.createElement('span');
+      del.className = 'dl-btn danger';
+      del.dataset.op = 'del';
+      del.textContent = '删除记录';
+      if (d.state === 'in_progress') retry.style.display = 'none';
+      row.append(name, st, bar, open, retry, del);
+      dlListEl.appendChild(row);
+    });
+  }
+
+  function setDlPanel(open) {
+    document.documentElement.classList.toggle('dl-open', open);
+    if (open) document.documentElement.classList.remove('pw-open');
+    act('dlpanel|' + (open ? '1' : '0'));
+    if (open) renderDownloads();
+  }
+  document.getElementById('dlbtn').addEventListener('click', () => {
+    setDlPanel(!document.documentElement.classList.contains('dl-open'));
+  });
+  dlListEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.dl-btn');
+    const row = e.target.closest('.dl-row');
+    if (!btn || !row) return;
+    const id = row.dataset.id;
+    if (btn.dataset.op === 'open') {
+      act('dlopen|' + id);
+    } else if (btn.dataset.op === 'retry') {
+      act('dlretry|' + id);
+    } else if (btn.dataset.op === 'del') {
+      if (btn.dataset.armed === '1') {
+        act('dldel|' + id);
+        dlList = dlList.filter((d) => String(d.id) !== id);
+        renderDownloads();
+      } else {
+        btn.dataset.armed = '1';
+        btn.textContent = '确认删除';
+        setTimeout(() => { btn.dataset.armed = ''; btn.textContent = '删除记录'; }, 3000);
+      }
+    }
+  });
+  // Rust 推送最新列表（下载登记/进度/终态时调用）
+  window.__shiftDownloads = (list) => {
+    if (!Array.isArray(list)) return;
+    dlList = list;
+    if (document.documentElement.classList.contains('dl-open')) renderDownloads();
+  };
+
   // 防止工具栏页面拖动/选中
   document.addEventListener('dragstart', (e) => e.preventDefault());
 </script>
@@ -803,6 +946,7 @@ mod tests {
             &dir,
             r#"[{"title":"测试书签","url":"https://a.com"}]"#,
             r#"[{"id":1,"domain":"a.com</script>","username":"u"}]"#,
+            r#"[{"id":7,"filename":"a.zip","state":"completed","total":10,"received":10}]"#,
         )
         .unwrap();
         assert!(out.starts_with("file://"), "须返回 file:// URL，实得 {out}");
@@ -817,6 +961,11 @@ mod tests {
         );
         assert!(body.contains("addr"), "工具栏 HTML 必须含地址栏");
         assert!(body.contains("pwpanel"), "工具栏 HTML 必须含密码面板");
+        assert!(body.contains("dlpanel"), "工具栏 HTML 必须含下载面板");
+        assert!(
+            body.contains(r#""filename":"a.zip""#),
+            "下载记录 JSON 必须嵌进页面"
+        );
         assert!(
             body.contains(r#""domain":"a.com<\/script>""#),
             "密码 JSON 里的 </ 必须转义，防提前闭合 script"

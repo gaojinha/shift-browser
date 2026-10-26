@@ -10,7 +10,6 @@ use tauri::{AppHandle, Emitter};
 use crate::db::downloads;
 use crate::engine::layout::CONTENT_TOP_OFFSET;
 use crate::tabs::model::TabManager;
-use crate::tabs::util::sanitize_filename;
 
 use crate::engine::webview::WebViewBackend;
 use gtk::glib::translate::ToGlibPtr;
@@ -22,20 +21,9 @@ use super::super::{unique_download_path, UI_FOCUSED};
 
 // ---- 下载/滚动判定纯函数（便于单测；F-36 从 fix_gtk_layout 闭包抽出，行为等价）----
 
-/// 从下载 URL 推导下载文件名：
-/// 用 url 解析取解码后的 path（%2e%2e/%2f 点段按 URL 规范被规范化掉），
-/// 取最后一段，再经 sanitize_filename 剥路径分隔符/点段/控制字符，防路径穿越；
-/// 解析不了的 URL 退回按 '?' 取首段；空段兜底 "download"。
-fn download_filename_from_url(url: Option<&str>) -> String {
-    url.map(|u| {
-        let path = url::Url::parse(u)
-            .map(|p| p.path().to_string())
-            .unwrap_or_else(|_| u.split('?').next().unwrap_or(u).to_string());
-        let name = path.rsplit('/').next().unwrap_or("download").to_string();
-        sanitize_filename(&name)
-    })
-    .unwrap_or_else(|| "download".to_string())
-}
+/// 从下载 URL 推导下载文件名（单一来源在 `tabs::util`，此处只做转引）。
+use crate::tabs::util::download_filename_from_url;
+
 
 /// 构造下载目的地的 file URI：路径含中文/空格时手拼 "file://…" 是非法 URI，
 /// WebKit 会取消下载（表现为"下载不能开始"），必须走 from_file_path（percent-编码）；

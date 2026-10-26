@@ -192,16 +192,13 @@ pub async fn sweep_interrupted_downloads(pool: &SqlitePool) -> Result<u64, sqlx:
     Ok(res.rows_affected())
 }
 
-/// 获取所有下载记录
-#[tauri::command]
-pub async fn get_downloads(db: tauri::State<'_, Db>) -> DbResult<Vec<Download>> {
+/// 获取所有下载记录（内部共用：Tauri 命令与 CEF 工具栏面板走同一入口）
+pub async fn list_downloads(pool: &SqlitePool) -> Result<Vec<Download>, sqlx::Error> {
     let rows = sqlx::query_as::<_, (i64, String, Option<String>, Option<String>, i64, i64, String, String)>(
         "SELECT id, filename, url, path, total_bytes, received_bytes, state, created_at FROM downloads ORDER BY id DESC LIMIT 200",
     )
-    .fetch_all(&db.pool)
+    .fetch_all(pool)
     .await?;
-
-    log::info!("[downloads] get_downloads: {} 条", rows.len());
 
     Ok(rows
         .into_iter()
@@ -218,6 +215,14 @@ pub async fn get_downloads(db: tauri::State<'_, Db>) -> DbResult<Vec<Download>> 
             },
         )
         .collect())
+}
+
+/// 获取所有下载记录
+#[tauri::command]
+pub async fn get_downloads(db: tauri::State<'_, Db>) -> DbResult<Vec<Download>> {
+    let list = list_downloads(&db.pool).await?;
+    log::info!("[downloads] get_downloads: {} 条", list.len());
+    Ok(list)
 }
 
 /// 删除下载记录

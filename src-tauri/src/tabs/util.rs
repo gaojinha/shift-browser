@@ -3,6 +3,24 @@
 
 // P2-1：本模块现有 unwrap/expect 均为安全用法（Mutex 毒化 / Response::builder 硬编码 header）
 
+/// 从下载 URL 推导下载文件名：
+/// 用 url 解析取解码后的 path（%2e%2e/%2f 点段按 URL 规范被规范化掉），
+/// 取最后一段，再经 sanitize_filename 剥路径分隔符/点段/控制字符，防路径穿越；
+/// 解析不了的 URL 退回按 '?' 取首段；空段兜底 "download"。
+///
+/// **单一来源**：WebKit 下载信号（`tabs/backend/layout/gtk.rs`）与 CEF 下载
+/// （`engine/cef/shell.rs`）都必须调这一份，不许各写各的。
+pub fn download_filename_from_url(url: Option<&str>) -> String {
+    url.map(|u| {
+        let path = url::Url::parse(u)
+            .map(|p| p.path().to_string())
+            .unwrap_or_else(|_| u.split('?').next().unwrap_or(u).to_string());
+        let name = path.rsplit('/').next().unwrap_or("download").to_string();
+        sanitize_filename(&name)
+    })
+    .unwrap_or_else(|| "download".to_string())
+}
+
 /// 清洗 URL 中的跨站追踪参数（隐私防护 P0）
 /// 覆盖 utm_* 系列 + 主流平台点击 ID（fbclid/gclid/msclkid/spm 等）
 pub fn clean_tracking_params(url: &str) -> String {

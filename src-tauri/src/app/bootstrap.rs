@@ -238,23 +238,39 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     // 启动 1 秒后强制 unminimize + show + focus 一次
     {
         let app_win = app.handle().clone();
-        // CEF 单栈窗口测试模式（2026-10-25）：设了 SHIFT_CEF_SHELL_URL 时，
-        // 被测对象是那个独立的 CEF 窗口，主窗口再弹出来会变成"一次测试两个窗口"、
-        // 还会抢焦点打扰用户。此时把主窗口隐藏掉，只留 CEF 窗口。
-        let cef_test_mode = std::env::var("SHIFT_CEF_SHELL_URL").is_ok();
+        // 窗口形态（2026-10-26 高哥拍板）：CEF 构建默认**只开 CEF 单栈窗口**，
+        // 旧的 WebKit 主界面准备弃用，不再弹出来。需要主界面做对比/回退时设
+        // SHIFT_WEBKIT_UI=1。主窗口在 tauri.conf.json 里默认 visible:false，
+        // 非 CEF 构建在这里显示回来（延迟 1 秒是 XWayland 的既有兜底）。
+        let webkit_ui = !cfg!(feature = "cef-engine") || std::env::var("SHIFT_WEBKIT_UI").is_ok();
         tauri::async_runtime::spawn(async move {
             // 用 tokio 异步 sleep，不占用阻塞线程（std::thread::sleep 会占一个 worker）
             tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
             if let Some(w) = app_win.get_window("main") {
-                if cef_test_mode {
+                if !webkit_ui {
                     crate::log_if_err!("window", w.hide());
-                    log::info!("[ShiftBrowser] CEF 测试模式：主窗口已隐藏，只留 CEF 单栈窗口");
+                    log::info!(
+                        "[ShiftBrowser] CEF 模式：主窗口 hide 后 visible={:?}",
+                        w.is_visible()
+                    );
+                    let w2 = w.clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                        log::info!(
+                            "[ShiftBrowser] CEF 模式：800ms 后 visible={:?}",
+                            w2.is_visible()
+                        );
+                        if w2.is_visible().unwrap_or(false) {
+                            crate::log_if_err!("window", w2.hide());
+                        }
+                    });
+                    log::info!("[ShiftBrowser] CEF 模式：主窗口不启动，只留 CEF 单栈窗口");
                     return;
                 }
                 crate::log_if_err!("window", w.unminimize());
                 crate::log_if_err!("window", w.show());
                 crate::log_if_err!("window", w.set_focus());
-                log::info!("[ShiftBrowser] 窗口已强制恢复/前置");
+                log::info!("[ShiftBrowser] 主窗口已恢复/前置");
             }
         });
     }

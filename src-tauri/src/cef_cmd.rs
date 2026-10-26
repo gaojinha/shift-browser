@@ -29,6 +29,17 @@ static EVENT_TX: OnceLock<Sender<(String, CefEvent)>> = OnceLock::new();
 /// 全局事件接收端
 static EVENT_RX: Mutex<Option<Receiver<(String, CefEvent)>>> = Mutex::new(None);
 
+/// 主进程的 AppHandle（CEF 回调线程发 Tauri 事件用）。
+///
+/// CEF 回调拿不到 `AppHandle`（`extern "C"` 边界），但下载完成/进度要发
+/// `DOWNLOADS_UPDATED` 让主界面弹窗与状态栏角标刷新，所以在 `init` 里存一份。
+static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+
+/// 取全局 AppHandle（未初始化时返回 None，调用方按"无人监听"降级，不 panic）。
+pub(crate) fn app_handle() -> Option<&'static AppHandle> {
+    APP_HANDLE.get()
+}
+
 /// **子进程入口**：CEF 用 `/proc/self/exe` 拉起渲染/GPU/zygote 子进程，
 /// 子进程的命令行带 `--type=xxx`。命中时必须在这里跑完 CEF 子进程逻辑并**直接退出**，
 /// 绝不能再往下走 Tauri 初始化（否则就是无限套娃 + 单实例误判）。
@@ -56,10 +67,34 @@ pub fn try_run_subprocess() -> bool {
     ret >= 0
 }
 
+/// CEF profile / 缓存根目录（**单一来源**）。
+///
+/// 优先级：`SHIFT_CEF_CACHE_DIR`（非空）→ 应用缓存目录下的 `cef/`。
+///
+/// 为什么必须是单一来源：CEF 的 Cookies/LocalStorage 落在这个目录里；工具栏页
+/// 与启动页也写在它的 `shell/` 子目录。2026-10-26 实测踩坑——`init` 读了 env、
+/// `open_shell_on_main` 自己又算了一次 `app_cache_dir()`，结果 profile 用了临时目录、
+/// 工具栏页仍读 `~/.cache/com.shiftbrowser.app/shell/toolbar.html`（旧页面/旧会话），
+/// 真机验证直接不可信。两个调用点从此只许调本函数。
+fn resolve_cef_cache_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = match std::env::var("SHIFT_CEF_CACHE_DIR") {
+        Ok(d) if !d.trim().is_empty() => std::path::PathBuf::from(d),
+        _ => app
+            .path()
+            .app_cache_dir()
+            .map(|p| p.join("cef"))
+            .map_err(|e| format!("拿不到缓存目录: {e}"))?,
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| format!("建缓存目录失败: {e}"))?;
+    Ok(dir)
+}
+
 /// 初始化 CEF（应用启动时调用一次）
 pub fn init(app: &AppHandle) -> Result<(), String> {
     // GDK_BACKEND 已在 main() 最早期设置（必须早于任何 gtk_init）
     let _ = gtk::init();
+    // CEF 回调线程发事件（下载进度/完成）要用的全局句柄
+    let _ = APP_HANDLE.set(app.clone());
 
     // 2) 资源目录：生产期由打包流程注入 SHIFT_CEF_RESOURCES；
     //    开发期取**可执行文件所在目录**——cef crate 构建时把 libcef.so / *.pak /
@@ -74,19 +109,9 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
     });
 
     // 缓存/profile 目录：默认用应用缓存目录，可用 SHIFT_CEF_CACHE_DIR 覆盖。
-    // 为什么需要覆盖：CEF 的 Cookies/LocalStorage 落在这个目录里，
-    // 测试时若复用应用真实 profile，上一轮的 cf_clearance 等历史信誉会带进下一轮，
-    // 造成「看起来是引擎能力、其实是旧 cookie」的污染（2026-10-26 已踩到）。
-    // 干净复测必须每轮一个临时目录。
-    let cache = match std::env::var("SHIFT_CEF_CACHE_DIR") {
-        Ok(dir) if !dir.trim().is_empty() => std::path::PathBuf::from(dir),
-        _ => app
-            .path()
-            .app_cache_dir()
-            .map(|p| p.join("cef"))
-            .map_err(|e| format!("拿不到缓存目录: {e}"))?,
-    };
-    std::fs::create_dir_all(&cache).map_err(|e| format!("建缓存目录失败: {e}"))?;
+    // 单一来源见 `resolve_cef_cache_dir`——工具栏页/启动页也必须走同一份，
+    // 否则会出现「profile 隔离了、工具栏页还读真实 ~/.cache」的半隔离（2026-10-26 实测）。
+    let cache = resolve_cef_cache_dir(app)?;
 
     cef_app::initialize(
         &resources,
@@ -147,16 +172,20 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
         });
     }
 
-    // ---- 单栈外壳测试入口（新方案）----
-    // SHIFT_CEF_SHELL_URL=https://example.com 启动后等上下文就绪，开一个 CEF 自建窗口
-    if let Ok(url) = std::env::var("SHIFT_CEF_SHELL_URL") {
-        log::info!("[cef] 检测到单栈外壳 URL: {url}");
+    // ---- CEF 单栈窗口（唯一入口）----
+    // 2026-10-26 高哥拍板：旧的 WebKit 主界面准备弃用，CEF 构建启动后只开这一个窗口。
+    // SHIFT_CEF_SHELL_URL 指定初始页；没设就用内置启动页（newtab）。
+    // 需要主界面做对比/回退时设 SHIFT_WEBKIT_UI=1（bootstrap 侧据此显示主窗口）。
+    // 本文件只在 `--features cef-engine` 下编译，这里无需再判 feature。
+    {
+        let url = std::env::var("SHIFT_CEF_SHELL_URL").ok();
+        log::info!("[cef] 单栈窗口准备启动，初始页={url:?}");
         let app = app.clone();
         gtk::glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
             if !cef_app::is_context_ready() {
                 return gtk::glib::ControlFlow::Continue;
             }
-            match open_shell_on_main(&app, &url) {
+            match open_shell_on_main(&app, url.as_deref()) {
                 Ok(()) => log::info!("[cef] 单栈窗口已打开"),
                 Err(e) => log::error!("[cef] 单栈窗口打开失败: {e}"),
             }
@@ -345,16 +374,46 @@ fn cef_bookmarks_json(app: &AppHandle) -> String {
     }
 }
 
-fn open_shell_on_main(app: &AppHandle, url: &str) -> Result<(), String> {
-    let cache = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| format!("拿不到缓存目录: {e}"))?;
+/// 读下载记录给工具栏下载面板（启动时嵌进页面；后续由 shell 侧推送刷新）。
+///
+/// 与书签同理：CEF 的推送时机不可靠，生成页面时同步查一次最稳。
+/// 阻塞几十毫秒可接受（只在开窗时执行一次）。
+fn cef_downloads_json(app: &AppHandle) -> String {
+    use tauri::Manager;
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return "[]".to_string();
+    };
+    let pool = db.pool.clone();
+    match tauri::async_runtime::block_on(async move {
+        crate::db::downloads::list_downloads(&pool).await
+    }) {
+        Ok(list) => crate::engine::cef::shell::downloads_panel_json(&list),
+        Err(e) => {
+            log::warn!("[cef] 读下载列表失败: {e}");
+            "[]".to_string()
+        }
+    }
+}
+
+fn open_shell_on_main(app: &AppHandle, url: Option<&str>) -> Result<(), String> {
+    // 必须与 `init` 共用同一份解析：工具栏页/启动页要和 profile 同住一个隔离目录。
+    let cache = resolve_cef_cache_dir(app)?;
     let bookmarks_json = cef_bookmarks_json(app);
     crate::engine::cef::passwords_ui::init(app);
     let passwords_json = crate::engine::cef::passwords_ui::passwords_json(app);
-    let toolbar_url = cef_toolbar::ensure_toolbar_html(&cache, &bookmarks_json, &passwords_json)?;
-    cef_shell::open(url, &toolbar_url)?;
+    let downloads_json = cef_downloads_json(app);
+    let toolbar_url = cef_toolbar::ensure_toolbar_html(
+        &cache,
+        &bookmarks_json,
+        &passwords_json,
+        &downloads_json,
+    )?;
+    // 初始页：显式 URL 优先；没给就用 CEF 内置启动页（本地文件，不依赖网络）。
+    let content_url = match url {
+        Some(u) if !u.trim().is_empty() => u.to_string(),
+        _ => crate::engine::cef::newtab::ensure_newtab_html(&cache.join("shell"))?,
+    };
+    cef_shell::open(&content_url, &toolbar_url)?;
 
     // 窗口创建回调里调 show() 会卡死；出回调后立刻用 X11 直接映射
     cef_shell::force_show();
@@ -376,7 +435,7 @@ pub fn cef_open_shell(app: AppHandle, url: String) -> Result<(), String> {
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     let app2 = app.clone();
     app.run_on_main_thread(move || {
-        let r = open_shell_on_main(&app2, &url);
+        let r = open_shell_on_main(&app2, Some(&url));
         let _ = tx.send(r);
     })
     .map_err(|e| format!("投递主线程失败: {e}"))?;

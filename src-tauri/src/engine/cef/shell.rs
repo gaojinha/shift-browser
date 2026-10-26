@@ -36,7 +36,10 @@ static TOOLBAR_H: AtomicI32 = AtomicI32::new(122);
 
 /// 当前应使用的工具栏高度（书签栏展开或收起，F-CEF-09）。
 fn toolbar_height() -> i32 {
-    TOOLBAR_H.load(Ordering::Relaxed) + PW_EXTRA.load(Ordering::Relaxed) + BM_EXTRA.load(Ordering::Relaxed)
+    TOOLBAR_H.load(Ordering::Relaxed)
+        + PW_EXTRA.load(Ordering::Relaxed)
+        + BM_EXTRA.load(Ordering::Relaxed)
+        + DL_EXTRA.load(Ordering::Relaxed)
 }
 
 /// 密码面板（F-CEF-12）展开时工具栏视图额外加高的像素，收起为 0
@@ -49,11 +52,26 @@ static PW_EXTRA: AtomicI32 = AtomicI32::new(0);
 const BM_POPUP_EXTRA: i32 = 360;
 static BM_EXTRA: AtomicI32 = AtomicI32::new(0);
 
+/// 下载面板（F-CEF-15）展开时工具栏视图额外加高的像素，收起为 0
+const DL_PANEL_EXTRA: i32 = 300;
+static DL_EXTRA: AtomicI32 = AtomicI32::new(0);
+
+/// 下载面板开合：与密码面板、书签下拉互斥，同一时刻只留一个撑高来源
+pub fn set_dl_panel(open: bool) {
+    DL_EXTRA.store(if open { DL_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+    if open {
+        PW_EXTRA.store(0, Ordering::Relaxed);
+        BM_EXTRA.store(0, Ordering::Relaxed);
+    }
+    apply_toolbar_height();
+}
+
 /// 密码面板开合：加/减工具栏视图高度并重排（只动 PW_EXTRA，不碰书签栏态）
 pub fn set_pw_panel(open: bool) {
     PW_EXTRA.store(if open { PW_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
     if open {
         BM_EXTRA.store(0, Ordering::Relaxed);
+        DL_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -583,7 +601,10 @@ wrap_client! {
         }
 
         fn request_handler(&self) -> Option<RequestHandler> {
-            Some(ShellRequestHandler::new(self.tab_id.clone()))
+            Some(ShellRequestHandler::new(
+                self.tab_id.clone(),
+                !self.toolbar,
+            ))
         }
 
         fn load_handler(&self) -> Option<LoadHandler> {
@@ -1256,6 +1277,33 @@ fn handle_action(action: &str) {
         return;
     }
 
+    // 下载面板动作（F-CEF-15）：面板开合 / 打开目录 / 重新下载 / 删记录
+    match cmd {
+        "dlpanel" => {
+            set_dl_panel(arg == "1");
+            return;
+        }
+        "dlopen" => {
+            if let Ok(id) = arg.parse::<i64>() {
+                open_download_location(id);
+            }
+            return;
+        }
+        "dlretry" => {
+            if let Ok(id) = arg.parse::<i64>() {
+                retry_download(id);
+            }
+            return;
+        }
+        "dldel" => {
+            if let Ok(id) = arg.parse::<i64>() {
+                delete_download_record(id);
+            }
+            return;
+        }
+        _ => {}
+    }
+
     // 标签相关动作先处理（不需要 current content 浏览器）
     match cmd {
         "tabnew" => {
@@ -1382,6 +1430,10 @@ fn handle_action(action: &str) {
     BROWSERS.with(|m| {
         let map = m.borrow();
         let Some(browser) = map.get(&active_id) else {
+            log::warn!(
+                "[cef] BROWSERS 查不到 active_id={active_id}，现有 key={:?}",
+                map.keys().collect::<Vec<_>>()
+            );
             return;
         };
         match cmd {
@@ -1439,7 +1491,7 @@ fn urlencode(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_url, urlencode};
+    use super::{is_attachment_disposition, normalize_url, urlencode};
 
     // ---- normalize_url：地址栏补全规则（P0 实测逻辑，防改坏）----
 
@@ -1503,14 +1555,51 @@ mod tests {
     fn urlencode_other_bytes_percent_encoded() {
         assert_eq!(urlencode("中"), "%E4%B8%AD");
     }
+
+    // ---- 下载：Content-Disposition 判定（F-CEF-14/15）----
+
+    #[test]
+    fn attachment_disposition_matches_attachment_only() {
+        assert!(is_attachment_disposition("attachment"));
+        assert!(is_attachment_disposition("ATTACHMENT"));
+        assert!(is_attachment_disposition("Attachment; filename=\"a.zip\""));
+        assert!(is_attachment_disposition(
+            "attachment;filename*=UTF-8''%E6%B5%8B.zip"
+        ));
+        assert!(!is_attachment_disposition("inline"));
+        assert!(!is_attachment_disposition(""));
+        assert!(!is_attachment_disposition("x-attachment-foo"));
+        assert!(!is_attachment_disposition("inline; filename=\"a.zip\""));
+    }
 }
 
 wrap_request_handler! {
     struct ShellRequestHandler {
         tab_id: String,
+        content: bool,
     }
 
     impl RequestHandler {
+        /// 主框架导航挂一个资源请求处理器：只为在 `on_resource_response` 里看
+        /// 响应头（`Content-Disposition: attachment`）决定是否转下载。
+        /// 子资源（图片/JS）不挂，避免每个请求都过一次回调。
+        fn resource_request_handler(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _request: Option<&mut Request>,
+            is_navigation: std::os::raw::c_int,
+            _is_download: std::os::raw::c_int,
+            _request_initiator: Option<&CefString>,
+            _disable_default_handling: Option<&mut std::os::raw::c_int>,
+        ) -> Option<ResourceRequestHandler> {
+            if self.content && is_navigation != 0 {
+                Some(ShellResourceRequestHandler::new())
+            } else {
+                None
+            }
+        }
+
         /// 单栈窗口的渲染进程终止取证（2026-10-25 实测：导航到 nodeseek 后
         /// 整个窗口消失、浏览器进程存活、无 panic —— 先让原因可见）。
         fn on_render_process_terminated(
@@ -1527,6 +1616,76 @@ wrap_request_handler! {
                 error_code,
                 error_string.map(|s| s.to_string()).unwrap_or_default()
             );
+        }
+    }
+}
+
+wrap_resource_request_handler! {
+    struct ShellResourceRequestHandler;
+
+    impl ResourceRequestHandler {
+        /// CEF 请求继续开关。
+        ///
+        /// **必须显式返回 `ReturnValue::CONTINUE`**：cef crate 里
+        /// `ReturnValue::default()` 实现为 `RV_CANCEL`，用它会把所有导航请求
+        /// 直接取消（2026-10-26 实测：zip 导航变 about:blank、响应回调永不触发）。
+        fn on_before_resource_load(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _request: Option<&mut Request>,
+            _callback: Option<&mut Callback>,
+        ) -> ReturnValue {
+            ReturnValue::CONTINUE
+        }
+
+        /// 响应头到手、正文还没读：发现 `Content-Disposition: attachment` 就
+        /// 取消本次导航并改走下载。
+        ///
+        /// 为什么不在 `on_before_resource_load` 做：那里只有请求头，看不到
+        /// `Content-Disposition`（2026-10-26 实测：attach 响应会当二进制页面渲染，
+        /// `Content-Type: application/octet-stream` 页面上白屏、标题为空）。
+        fn on_resource_response(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            response: Option<&mut Response>,
+        ) -> std::os::raw::c_int {
+            let (Some(req), Some(resp)) = (request, response) else {
+                return 0;
+            };
+            let disp = CefStringUtf16::from(&resp.header_by_name(Some(&CefString::from(
+                "Content-Disposition",
+            ))))
+            .to_string();
+            let url = CefStringUtf16::from(&req.url()).to_string();
+            if !is_attachment_disposition(&disp) || url.is_empty() {
+                return 0;
+            }
+            log::info!("[cef] attachment 转下载: {url}");
+            // CEF 的 ResourceRequestHandler 跑在 IO 线程，`BrowserHost::start_download`
+            // 必须在 UI 线程调用，所以投递回主线程再执行（2026-10-26 实测：直接调无效）。
+            let Some(app) = crate::cef_cmd::app_handle() else {
+                log::warn!("[cef] attachment 转下载失败：AppHandle 未初始化");
+                return 1;
+            };
+            let url_for_ui = url.clone();
+            let _ = app.run_on_main_thread(move || {
+                BROWSERS.with(|m| {
+                    let map = m.borrow();
+                    let Some(b) = map.get(CONTENT_ID) else {
+                        log::warn!("[cef] attachment 转下载失败：BROWSERS 里没有 {CONTENT_ID}");
+                        return;
+                    };
+                    let Some(host) = b.host() else {
+                        log::warn!("[cef] attachment 转下载失败：内容页无 host");
+                        return;
+                    };
+                    host.start_download(Some(&CefString::from(url_for_ui.as_str())));
+                });
+            });
+            1 // 取消本次导航（正文不再加载）
         }
     }
 }
@@ -1682,27 +1841,321 @@ fn handle_shortcut(
     consumed
 }
 
+/// 判断 `Content-Disposition` 响应头是否要求下载。
+///
+/// 只认首段指令 `attachment`（大小写不敏感）；`inline`、空串、其它值都不算。
+/// **单一来源**：`ShellResourceRequestHandler::on_resource_response` 只调这一份。
+fn is_attachment_disposition(value: &str) -> bool {
+    value
+        .split(';')
+        .next()
+        .map(|v| v.trim().eq_ignore_ascii_case("attachment"))
+        .unwrap_or(false)
+}
+
+// ---- 下载记账（F-CEF-15）----
+// CEF 的 `DownloadItem` 没有 user data，`on_before_download` 与 `on_download_updated`
+// 只能靠 `item.id()` 关联。运行期维护一张映射表；进程退出即丢，库里的记录才是持久事实。
+// 所有写库/发事件都走异步任务，**不得在 CEF 回调线程 block_on**（会卡死 UI）。
+
+use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
+
+struct DlTrack {
+    db_id: Arc<Mutex<Option<i64>>>,
+    last_progress: Arc<Mutex<Instant>>,
+    finished: Arc<AtomicBool>,
+}
+
+fn dl_tracks() -> &'static Mutex<HashMap<u32, DlTrack>> {
+    static TRACKS: OnceLock<Mutex<HashMap<u32, DlTrack>>> = OnceLock::new();
+    TRACKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 发 `downloads-updated`（主界面弹窗/状态栏角标据此刷新）。
+fn emit_downloads_updated() {
+    use tauri::Emitter;
+    if let Some(app) = crate::cef_cmd::app_handle() {
+        let _ = app.emit(crate::contracts::events::DOWNLOADS_UPDATED, ());
+    }
+}
+
+/// 工具栏下载面板的数据（只给页面必要字段，路径不出 Rust 层）。
+pub(crate) fn downloads_panel_json(list: &[crate::db::downloads::Download]) -> String {
+    let rows: Vec<serde_json::Value> = list
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "id": d.id,
+                "filename": d.filename,
+                "state": d.state,
+                "total": d.total_bytes,
+                "received": d.received_bytes,
+                "createdAt": d.created_at,
+            })
+        })
+        .collect();
+    serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// 通知工具栏面板重拉列表：库查询在 tokio 线程，JS 执行切回主线程。
+fn request_downloads_refresh() {
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
+    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    tauri::async_runtime::spawn(async move {
+        let Ok(list) = crate::db::downloads::list_downloads(&pool).await else { return };
+        let json = downloads_panel_json(&list);
+        let _ = app.run_on_main_thread(move || {
+            run_toolbar_js(&format!(
+                "if (window.__shiftDownloads) {{ window.__shiftDownloads({json}); }}"
+            ));
+        });
+    });
+}
+
+/// 登记一次下载：先建运行期槽，再异步写库（路径已去过重）。
+fn register_download(item_id: u32, filename: String, url: Option<String>, path: std::path::PathBuf) {
+    let track = DlTrack {
+        db_id: Arc::new(Mutex::new(None)),
+        last_progress: Arc::new(Mutex::new(Instant::now())),
+        finished: Arc::new(AtomicBool::new(false)),
+    };
+    let slot = track.db_id.clone();
+    dl_tracks()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(item_id, track);
+
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        log::warn!("[cef] 下载记账跳过：全局连接池未注册");
+        return;
+    };
+    let path_str = path.to_string_lossy().to_string();
+    tauri::async_runtime::spawn(async move {
+        match crate::db::downloads::insert_download(
+            &pool,
+            &filename,
+            url.as_deref(),
+            Some(&path_str),
+            0,
+        )
+        .await
+        {
+            Ok(id) => {
+                *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(id);
+                log::info!("[cef] 下载记录已入库 id={id} file={filename}");
+                emit_downloads_updated();
+                request_downloads_refresh();
+            }
+            Err(e) => log::warn!("[cef] 下载记录入库失败: {e}"),
+        }
+    });
+}
+
+/// 等 db id 就绪（写入是异步的，进度/完成回调可能先到；最多等 5 秒）。
+async fn wait_dl_id(slot: &Arc<Mutex<Option<i64>>>) -> Option<i64> {
+    for _ in 0..100 {
+        if let Some(id) = *slot.lock().unwrap_or_else(|e| e.into_inner()) {
+            return Some(id);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    None
+}
+
+/// 下载进度/终态跟进：非终态 500ms 节流写字节数；终态写状态并摘表。
+fn track_download(it: &mut DownloadItem) {
+    let item_id = it.id();
+    let (db_id, last_progress, finished) = {
+        let tracks = dl_tracks().lock().unwrap_or_else(|e| e.into_inner());
+        let Some(t) = tracks.get(&item_id) else {
+            return;
+        };
+        (t.db_id.clone(), t.last_progress.clone(), t.finished.clone())
+    };
+    if finished.load(Ordering::Relaxed) {
+        return;
+    }
+
+    let completed = it.is_complete() != 0;
+    let canceled = it.is_canceled() != 0;
+    let interrupted = it.is_interrupted() != 0;
+    let is_final = completed || canceled || interrupted;
+    let received = it.received_bytes();
+    let total = it.total_bytes();
+
+    if !is_final {
+        let mut last = last_progress.lock().unwrap_or_else(|e| e.into_inner());
+        if last.elapsed() < std::time::Duration::from_millis(500) {
+            return;
+        }
+        *last = Instant::now();
+    }
+
+    let state = if completed {
+        "completed"
+    } else if canceled {
+        "cancelled"
+    } else if interrupted {
+        "failed"
+    } else {
+        ""
+    };
+
+    if let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() {
+        let state = state.to_string();
+        tauri::async_runtime::spawn(async move {
+            let Some(db_id) = wait_dl_id(&db_id).await else { return };
+            if state.is_empty() {
+                if let Err(e) = crate::db::downloads::update_download_bytes(
+                    &pool,
+                    db_id,
+                    received,
+                    Some(total),
+                )
+                .await
+                {
+                    log::warn!("[cef] 下载进度写库失败 id={db_id}: {e}");
+                }
+            } else if let Err(e) = crate::db::downloads::update_download_state(
+                &pool, db_id, &state, Some(received),
+            )
+            .await
+            {
+                log::warn!("[cef] 下载状态写库失败 id={db_id}: {e}");
+            }
+            emit_downloads_updated();
+            request_downloads_refresh();
+        });
+    }
+
+    if is_final {
+        finished.store(true, Ordering::Relaxed);
+        dl_tracks()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&item_id);
+        log::info!("[cef] 下载终态: item={item_id} state={state} bytes={received}/{total}");
+    }
+}
+
+/// 打开下载文件所在目录（只允许下载目录内的路径，防任意路径打开）。
+fn open_download_location(download_id: i64) {
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
+    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    tauri::async_runtime::spawn(async move {
+        let path = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT path FROM downloads WHERE id = ?",
+        )
+        .bind(download_id)
+        .fetch_one(&pool)
+        .await
+        .ok()
+        .flatten();
+        let Some(path) = path else {
+            log::warn!("[cef] 打开下载目录失败：记录 {download_id} 无路径");
+            return;
+        };
+        let file = std::path::PathBuf::from(&path);
+        let dir = crate::engine::platform::resolve_download_dir();
+        let dir_path = std::path::PathBuf::from(&dir);
+        if !file.starts_with(&dir_path) {
+            log::warn!("[cef] 拒绝打开下载目录外路径: {path}");
+            return;
+        }
+        let target = file.parent().map(|p| p.to_path_buf()).unwrap_or(dir_path);
+        let _ = app.run_on_main_thread(move || {
+            if let Err(e) = std::process::Command::new("xdg-open").arg(&target).spawn() {
+                log::warn!("[cef] 打开目录失败 {}: {e}", target.display());
+            }
+        });
+    });
+}
+
+/// 重新下载：按记录里的 URL 再走一次 `start_download`。
+fn retry_download(download_id: i64) {
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
+    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    tauri::async_runtime::spawn(async move {
+        let url = sqlx::query_scalar::<_, Option<String>>("SELECT url FROM downloads WHERE id = ?")
+            .bind(download_id)
+            .fetch_one(&pool)
+            .await
+            .ok()
+            .flatten();
+        let Some(url) = url else {
+            log::warn!("[cef] 重新下载失败：记录 {download_id} 无 URL");
+            return;
+        };
+        let _ = app.run_on_main_thread(move || {
+            BROWSERS.with(|m| {
+                if let Some(b) = m.borrow().get(CONTENT_ID) {
+                    if let Some(host) = b.host() {
+                        host.start_download(Some(&CefString::from(url.as_str())));
+                    }
+                }
+            });
+        });
+    });
+}
+
+/// 删除下载记录（不删磁盘文件，与主应用 `delete_download` 语义一致）。
+fn delete_download_record(download_id: i64) {
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
+    tauri::async_runtime::spawn(async move {
+        match sqlx::query("DELETE FROM downloads WHERE id = ?")
+            .bind(download_id)
+            .execute(&pool)
+            .await
+        {
+            Ok(r) if r.rows_affected() > 0 => {
+                log::info!("[cef] 下载记录已删除 id={download_id}");
+                emit_downloads_updated();
+                request_downloads_refresh();
+            }
+            Ok(_) => log::warn!("[cef] 下载记录不存在 id={download_id}"),
+            Err(e) => log::warn!("[cef] 删除下载记录失败 id={download_id}: {e}"),
+        }
+    });
+}
+
 wrap_download_handler! {
     struct ShellDownloadHandler;
 
     impl DownloadHandler {
-        /// 下载开始前决定落盘路径：直接存 `~/Downloads`，不弹保存对话框
+        /// 下载开始前决定落盘路径：直接存下载目录，不弹保存对话框
         /// （CEF 的 Views 模式没有系统保存对话框，不接管会静默失败）。
+        ///
+        /// 与原 WebKit 设计对齐（`tabs/backend/layout/gtk.rs`）：目录走用户设置、
+        /// 同名文件加 (1)(2) 后缀、写 downloads 表并发 `downloads-updated`。
         fn on_before_download(
             &self,
             _browser: Option<&mut Browser>,
-            _download_item: Option<&mut DownloadItem>,
+            download_item: Option<&mut DownloadItem>,
             suggested_name: Option<&CefString>,
             callback: Option<&mut BeforeDownloadCallback>,
         ) -> std::os::raw::c_int {
+            let item_id = download_item.as_ref().map(|it| it.id()).unwrap_or(0);
+            let url = download_item
+                .as_ref()
+                .map(|it| CefStringUtf16::from(&it.url()).to_string())
+                .filter(|s| !s.is_empty());
             let name = suggested_name
                 .map(|s| s.to_string())
-                .unwrap_or_else(|| "download".to_string());
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| {
+                    crate::tabs::util::download_filename_from_url(url.as_deref())
+                });
             let safe = sanitize_filename(&name);
-            let path = download_dir().join(&safe);
-            log::info!("[cef] 下载开始: {name} -> {}", path.display());
+            let dir = crate::engine::platform::resolve_download_dir();
+            let _ = std::fs::create_dir_all(&dir);
+            let path = crate::tabs::backend::unique_download_path(&dir, &safe);
+            log::info!("[cef] 下载开始: {name} -> {path}");
+            register_download(item_id, name, url, std::path::PathBuf::from(&path));
             if let Some(cb) = callback {
-                cb.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
+                cb.cont(Some(&CefString::from(path.as_str())), 0);
             }
             1
         }
@@ -1714,20 +2167,10 @@ wrap_download_handler! {
             _callback: Option<&mut DownloadItemCallback>,
         ) {
             if let Some(it) = download_item {
-                if it.is_complete() != 0 {
-                    log::info!("[cef] 下载完成（进度 {}%）", it.percent_complete());
-                }
+                track_download(it);
             }
         }
     }
-}
-
-/// 默认下载目录：`$HOME/Downloads`（不存在则创建）
-fn download_dir() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let dir = std::path::PathBuf::from(home).join("Downloads");
-    let _ = std::fs::create_dir_all(&dir);
-    dir
 }
 
 /// 只保留文件名本身：剥掉路径分隔、控制字符、首尾点（防 `../` 逃逸与隐藏文件）
