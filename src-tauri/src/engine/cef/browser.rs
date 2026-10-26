@@ -198,6 +198,12 @@ window.__SHIFT_UA_BRANDS__ = {brands};
 }})();
 "#
     );
+    // F-CEF-11：同一次执行里带上预计算的扩展/隐私/广告拦截脚本（不注入两遍）。
+    // 放在品牌表之后：privacy.js 会读 __SHIFT_UA_BRANDS__（wl_prefix 里也会再赋同值）。
+    let script = match crate::extensions::cef_inject::cached_inject_js() {
+        Some(extra) => format!("{script}\n{extra}"),
+        None => script,
+    };
     frame.execute_java_script(
         Some(&CefString::from(script.as_str())),
         Some(&CefString::from("shift://inject")),

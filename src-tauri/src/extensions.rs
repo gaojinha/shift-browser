@@ -6,6 +6,8 @@
 // P1-3 拆分（2026-09-22）：广告拦截独立成子模块
 #[path = "extensions/adblock.rs"]
 pub mod adblock;
+#[cfg(feature = "cef-engine")]
+pub mod cef_inject;
 #[path = "extensions/manager.rs"]
 pub mod manager;
 pub use manager::*;

@@ -107,6 +107,23 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
 
     log::info!("[cef] 初始化完成，资源目录 {resources}");
 
+    // F-CEF-11：预计算页面注入脚本（on_load_start 是同步回调，不能 await）。
+    // init 跑在 setup 的主线程而非 tokio worker，block_on 安全；改设置需重开窗口才生效。
+    {
+        use tauri::Manager;
+        if let Some(db) = app.try_state::<crate::db::Db>() {
+            tauri::async_runtime::block_on(async {
+                // 站点 UA 覆盖表要先载入，否则 __SHIFT_SITE_OVERRIDES__ 为空
+                crate::useragent::load(&db.pool).await;
+                if let Err(e) = crate::extensions::cef_inject::build_and_cache(&db).await {
+                    log::warn!("[cef-inject] 预计算失败，页面仅有基础标记: {e}");
+                }
+            });
+        } else {
+            log::warn!("[cef-inject] 拿不到数据库状态，跳过扩展注入");
+        }
+    }
+
     // 书签：从主应用数据库读真实书签，推给 CEF 工具栏页面。
     // 为什么异步：sqlx 只有 async API，而 init 在 CEF/GTK 主线程；
     // 查完用 glib idle 派回主线程再动 UI（execute_java_script 必须在主线程）。
