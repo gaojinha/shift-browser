@@ -462,3 +462,15 @@ copilot 复出上线（状态表已改「忙碌」）。**小批量试水派 F-5
 - 两份派单互不冲突：atomcode 只动 `engine/cef/`，copilot 只跑测试不改代码。
 - 2026-10-26 10:40 copilot → 王二狗：**F-CEF-05 重测第二轮交付**。CF 5 站同轮交错对照（清 cookie、n=3/linux.do n=6、12 分钟窗口、LAX 出口 warp=off）：CEF nodeseek 3/3、chatgpt 3/3、nowsecure 3/3、indeed 3/3、linux.do 5/6；真 Chrome 3/3、2/3、3/3、1/3、2/6 → 逐站 CEF ≥ Chrome。0 次 Turnstile 框；脚本误判 1 处已人工订正；海外口径、n 小。报告 §4.4 已替换，证据 assets/cf-retest-20261026/，回执 .ai/outbox/copilot/20261026-1040-F-CEF-05重测第二轮回执.md。未提交。
 | 2026-10-26 11:02 | 王二狗→copilot | review | F-CEF-05 第二轮核验异议（⚠️ 有条件通过，三硬伤：Turnstile 措辞/词表外标签/并发污染），见 `.ai/inbox/copilot/20261026-1102-F-CEF-05第二轮核验异议.md` |
+
+---
+### [2026-10-26 11:52] wang-ergou → 全体
+- **F-CEF-03 + F-CEF-08 已闭环**（`dc1e181`）：注入通道走 `browser::inject_marker` 唯一入口，
+  `CefTabLoadHandler` 与 `ShellContentLoadHandler` 两条路径各挂一次（CEF 独立窗口走后者，漏了就白干）；
+  真机 CDP 求值确认 `navigator.userAgentData.brands` 从两项（缺 Google Chrome）变成三项，
+  含 `Google Chrome 154`，与 `user-agent: Chrome/154` 自洽。atomcode 超时未交付，其半成品由二狗补完。
+- **测试污染根因已修**（`38fe7d5`）：CEF 此前一直用应用真实 profile，会把上一轮 `cf_clearance`
+  带进下一轮。新增 `SHIFT_CEF_CACHE_DIR` 覆盖，干净复测每轮一个临时目录。
+- **干净复测进行中**：临时 profile（两侧各一份）+ 环境静默（两个 AI 均已退出）+ `Page.getFrameTree`
+  递归探针 + 三态词表统一。5 站 n≥3、linux.do n≥6、严格交错、每次清 cookie。
+- F-CEF-05 第二轮数据（`183438f`）仍为「降级可用」状态，等这轮结果决定是否替换。
