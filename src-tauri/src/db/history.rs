@@ -126,19 +126,66 @@ pub async fn backfill_history_titles_inner(pool: &sqlx::SqlitePool) -> DbResult<
     Ok(total)
 }
 
+/// 最近历史（内部共用：Tauri 命令与 CEF 历史面板走同一入口）。
+pub async fn list_recent(
+    pool: &sqlx::SqlitePool,
+    limit: i64,
+) -> Result<Vec<HistoryEntry>, sqlx::Error> {
+    let limit = limit.clamp(1, 1000);
+    let rows = sqlx::query_as::<_, (i64, String, Option<String>, i64, String)>(
+        "SELECT id, url, title, visit_count, last_visit_at FROM history
+     ORDER BY last_visit_at DESC LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, url, title, visit_count, last_visit_at)| HistoryEntry {
+                id,
+                url,
+                title,
+                visit_count,
+                last_visit_at,
+            },
+        )
+        .collect())
+}
+
 /// 获取最近历史
 #[tauri::command]
 pub async fn get_recent_history(
     db: tauri::State<'_, Db>,
     limit: Option<i64>,
 ) -> DbResult<Vec<HistoryEntry>> {
-    let limit = limit.unwrap_or(100).min(1000);
+    Ok(list_recent(&db.pool, limit.unwrap_or(100)).await?)
+}
+
+/// 搜索历史（内部共用：Tauri 命令与 CEF 历史面板走同一入口）。
+pub async fn search(
+    pool: &sqlx::SqlitePool,
+    query: &str,
+    limit: i64,
+) -> Result<Vec<HistoryEntry>, sqlx::Error> {
+    let limit = limit.clamp(1, 500);
+    // LIKE 通配符转义：% 和 _ 是 SQL LIKE 的通配符，用户输入含这些字符时按字面量匹配
+    // （先转义反斜杠本身，再转义 % 和 _，配合 ESCAPE '\' 使用）
+    let escaped = query
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let like = format!("%{}%", escaped);
     let rows = sqlx::query_as::<_, (i64, String, Option<String>, i64, String)>(
         "SELECT id, url, title, visit_count, last_visit_at FROM history
+     WHERE url LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'
      ORDER BY last_visit_at DESC LIMIT ?",
     )
+    .bind(&like)
+    .bind(&like)
     .bind(limit)
-    .fetch_all(&db.pool)
+    .fetch_all(pool)
     .await?;
 
     Ok(rows
@@ -162,37 +209,7 @@ pub async fn search_history(
     query: String,
     limit: Option<i64>,
 ) -> DbResult<Vec<HistoryEntry>> {
-    let limit = limit.unwrap_or(50).min(500);
-    // LIKE 通配符转义：% 和 _ 是 SQL LIKE 的通配符，用户输入含这些字符时按字面量匹配
-    // （先转义反斜杠本身，再转义 % 和 _，配合 ESCAPE '\' 使用）
-    let escaped = query
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_");
-    let like = format!("%{}%", escaped);
-    let rows = sqlx::query_as::<_, (i64, String, Option<String>, i64, String)>(
-        "SELECT id, url, title, visit_count, last_visit_at FROM history
-     WHERE url LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'
-     ORDER BY last_visit_at DESC LIMIT ?",
-    )
-    .bind(&like)
-    .bind(&like)
-    .bind(limit)
-    .fetch_all(&db.pool)
-    .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(
-            |(id, url, title, visit_count, last_visit_at)| HistoryEntry {
-                id,
-                url,
-                title,
-                visit_count,
-                last_visit_at,
-            },
-        )
-        .collect())
+    Ok(search(&db.pool, &query, limit.unwrap_or(50)).await?)
 }
 
 /// 获取访问最多的网站（新标签页快速访问用）

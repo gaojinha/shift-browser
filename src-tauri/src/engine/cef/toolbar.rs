@@ -248,6 +248,46 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   .dl-row .dl-btn:hover { background: #4a4d51; }
   .dl-row .dl-btn.danger { color: #f28b82; }
   .dl-empty { color: #9aa0a6; padding: 12px 6px; font-size: 12px; }
+  /* 历史面板（F-CEF-19）：与密码/下载/菜单同一套撑高机制 */
+  html.hist-open, html.hist-open body { height: 100vh; }
+  #histpanel {
+    display: none; position: absolute; left: 0; right: 0; top: 88px; bottom: 0;
+    background: #292a2d; border-top: 1px solid #3c4043; padding: 8px 12px;
+    flex-direction: column; gap: 6px; z-index: 10;
+  }
+  html.hist-open #histpanel { display: flex; }
+  html:not(.bookmarks-hidden) #histpanel { top: 122px; }
+  .hist-head { display: flex; align-items: center; gap: 8px; }
+  #histsearch {
+    flex: 1; height: 28px; border: 1px solid #3c4043; border-radius: 14px; outline: 0;
+    background: #202124; color: #e8eaed; padding: 0 12px; font-size: 12px; user-select: text;
+  }
+  .hist-clear, .hist-close {
+    flex: 0 0 auto; padding: 0 10px; height: 24px; line-height: 24px; border-radius: 12px;
+    color: #8ab4f8; font-size: 12px; cursor: default;
+  }
+  .hist-clear:hover, .hist-close:hover { background: #4a4d51; }
+  .hist-clear.danger { color: #f28b82; }
+  #histlist { flex: 1; overflow-y: auto; }
+  .hist-row {
+    display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 6px;
+    border-radius: 6px; font-size: 12px;
+  }
+  .hist-row:hover { background: #3c4043; }
+  .hist-row .h-title {
+    flex: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .hist-row .h-url {
+    flex: 3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: #9aa0a6;
+  }
+  .hist-row .h-time { flex: 0 0 130px; color: #5f6368; }
+  .hist-row .h-del {
+    flex: 0 0 auto; padding: 0 8px; height: 22px; line-height: 22px;
+    border-radius: 11px; color: #f28b82;
+  }
+  .hist-row .h-del:hover { background: #4a4d51; }
+  .hist-empty { color: #9aa0a6; padding: 12px 6px; font-size: 12px; }
   /* 主菜单（F-CEF-16）：右上角下拉，样式对齐 Chrome 深色菜单 */
   html.menu-open, html.menu-open body { height: 100vh; }
   #menupanel {
@@ -415,7 +455,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   <div id="menupanel">
     <div class="menu-item" data-act="tabnew">新标签页<span class="menu-key">Ctrl+T</span></div>
     <div class="menu-sep"></div>
-    <div class="menu-item disabled">历史记录<span class="menu-key">待补</span></div>
+    <div class="menu-item" data-panel="hist">历史记录<span class="menu-key">Ctrl+H</span></div>
     <div class="menu-item" data-panel="dl">下载内容<span class="menu-key">Ctrl+J</span></div>
     <div class="menu-item" data-act="bmtoggle">书签栏<span class="menu-key">Ctrl+Shift+B</span></div>
     <div class="menu-item" data-panel="pw">密码<span class="menu-key"></span></div>
@@ -427,6 +467,14 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <div class="menu-item disabled">关于 Shift<span class="menu-key">待补</span></div>
     <div class="menu-sep"></div>
     <div class="menu-item" data-act="winclose">退出<span class="menu-key"></span></div>
+  </div>
+  <div id="histpanel">
+    <div class="hist-head">
+      <input id="histsearch" type="text" spellcheck="false" placeholder="搜索历史记录">
+      <span id="histclear" class="hist-clear">清空</span>
+      <span id="histclose" class="hist-close">关闭</span>
+    </div>
+    <div id="histlist"></div>
   </div>
   <script id="bm-data" type="application/json">__SHIFT_BOOKMARKS_JSON__</script>
   <script id="pw-data" type="application/json">__SHIFT_PASSWORDS_JSON__</script>
@@ -987,7 +1035,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 
   function setPwPanel(open) {
     document.documentElement.classList.toggle('pw-open', open);
-    if (open) document.documentElement.classList.remove('dl-open', 'find-open');
+    if (open) document.documentElement.classList.remove('dl-open', 'find-open', 'hist-open');
     act('pwpanel|' + (open ? '1' : '0'));
     if (open) { pwSearch.value = ''; renderPasswords(); pwSearch.focus(); }
   }
@@ -1089,7 +1137,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 
   function setDlPanel(open) {
     document.documentElement.classList.toggle('dl-open', open);
-    if (open) document.documentElement.classList.remove('pw-open', 'find-open');
+    if (open) document.documentElement.classList.remove('pw-open', 'find-open', 'hist-open');
     act('dlpanel|' + (open ? '1' : '0'));
     if (open) renderDownloads();
   }
@@ -1124,10 +1172,109 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (document.documentElement.classList.contains('dl-open')) renderDownloads();
   };
 
+  // ---- 历史面板（F-CEF-19）----
+  // 数据来自 Rust（history 表），页面不自己数 DOM；点击行导航，删除/清空二次确认。
+  let histList = [];
+  const histPanelEl = document.getElementById('histpanel');
+  const histSearch = document.getElementById('histsearch');
+  const histListEl = document.getElementById('histlist');
+  let histTimer = null;
+
+  function renderHistory(list) {
+    histList = Array.isArray(list) ? list : [];
+    histListEl.innerHTML = '';
+    if (histList.length === 0) {
+      const e = document.createElement('div');
+      e.className = 'hist-empty';
+      e.textContent = '没有历史记录';
+      histListEl.appendChild(e);
+      return;
+    }
+    histList.forEach((h) => {
+      const row = document.createElement('div');
+      row.className = 'hist-row';
+      row.dataset.id = String(h.id);
+      const t = document.createElement('span');
+      t.className = 'h-title';
+      t.textContent = h.title || h.url || '';
+      const u = document.createElement('span');
+      u.className = 'h-url';
+      u.textContent = h.url || '';
+      const tm = document.createElement('span');
+      tm.className = 'h-time';
+      tm.textContent = (h.last_visit_at || '').slice(0, 16);
+      const del = document.createElement('span');
+      del.className = 'h-del';
+      del.textContent = '删除';
+      row.append(t, u, tm, del);
+      histListEl.appendChild(row);
+    });
+  }
+  window.__shiftHistory = renderHistory;
+
+  function setHistPanel(open) {
+    document.documentElement.classList.toggle('hist-open', open);
+    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'find-open');
+    act('histpanel|' + (open ? '1' : '0'));
+    if (open) {
+      histSearch.value = '';
+      renderHistory([]);
+      histSearch.focus();
+    }
+  }
+  document.getElementById('histclose').addEventListener('click', () => setHistPanel(false));
+  histSearch.addEventListener('input', () => {
+    clearTimeout(histTimer);
+    histTimer = setTimeout(() => act('histsearch|' + histSearch.value.trim()), 150);
+  });
+  histListEl.addEventListener('click', (e) => {
+    const del = e.target.closest('.h-del');
+    const row = e.target.closest('.hist-row');
+    if (!row) return;
+    const id = row.dataset.id;
+    if (del) {
+      if (del.dataset.armed === '1') {
+        act('histdel|' + id);
+        histList = histList.filter((h) => String(h.id) !== id);
+        renderHistory(histList);
+      } else {
+        del.dataset.armed = '1';
+        del.textContent = '确认';
+        setTimeout(() => { del.dataset.armed = ''; del.textContent = '删除'; }, 3000);
+      }
+      return;
+    }
+    const h = histList.find((x) => String(x.id) === id);
+    if (h) {
+      act('nav|' + h.url);
+      setHistPanel(false);
+    }
+  });
+  const histClearBtn = document.getElementById('histclear');
+  histClearBtn.addEventListener('click', () => {
+    if (histClearBtn.dataset.armed === '1') {
+      act('histclear');
+      histList = [];
+      renderHistory([]);
+      histClearBtn.dataset.armed = '';
+      histClearBtn.textContent = '清空';
+      histClearBtn.classList.remove('danger');
+    } else {
+      histClearBtn.dataset.armed = '1';
+      histClearBtn.textContent = '确认清空';
+      histClearBtn.classList.add('danger');
+      setTimeout(() => {
+        histClearBtn.dataset.armed = '';
+        histClearBtn.textContent = '清空';
+        histClearBtn.classList.remove('danger');
+      }, 3000);
+    }
+  });
+
   // ---- 主菜单（F-CEF-16）----
   function setMenuPanel(open) {
     document.documentElement.classList.toggle('menu-open', open);
-    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'find-open');
+    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'find-open', 'hist-open');
     act('menupanel|' + (open ? '1' : '0'));
   }
   document.getElementById('menubtn').addEventListener('click', (e) => {
@@ -1138,6 +1285,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     const item = e.target.closest('.menu-item');
     if (!item || item.classList.contains('disabled')) return;
     setMenuPanel(false);
+    if (item.dataset.panel === 'hist') { setHistPanel(true); return; }
     if (item.dataset.panel === 'dl') { setDlPanel(true); return; }
     if (item.dataset.panel === 'pw') { setPwPanel(true); return; }
     act(item.dataset.act);
@@ -1165,7 +1313,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 
   window.__shiftFindOpen = function () {
     document.documentElement.classList.add('find-open');
-    document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open');
+    document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'hist-open');
     closeOmni();
     findinput.focus();
     findinput.select();

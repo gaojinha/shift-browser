@@ -42,6 +42,7 @@ fn toolbar_height() -> i32 {
         + DL_EXTRA.load(Ordering::Relaxed)
         + MENU_EXTRA.load(Ordering::Relaxed)
         + FIND_EXTRA.load(Ordering::Relaxed)
+        + HIST_EXTRA.load(Ordering::Relaxed)
 }
 
 /// 密码面板（F-CEF-12）展开时工具栏视图额外加高的像素，收起为 0
@@ -66,6 +67,7 @@ pub fn set_dl_panel(open: bool) {
         BM_EXTRA.store(0, Ordering::Relaxed);
         MENU_EXTRA.store(0, Ordering::Relaxed);
         FIND_EXTRA.store(0, Ordering::Relaxed);
+        HIST_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -82,6 +84,24 @@ pub fn set_menu_panel(open: bool) {
         BM_EXTRA.store(0, Ordering::Relaxed);
         DL_EXTRA.store(0, Ordering::Relaxed);
         FIND_EXTRA.store(0, Ordering::Relaxed);
+        HIST_EXTRA.store(0, Ordering::Relaxed);
+    }
+    apply_toolbar_height();
+}
+
+/// 历史面板（F-CEF-19）展开时工具栏视图额外加高的像素
+const HIST_PANEL_EXTRA: i32 = 340;
+static HIST_EXTRA: AtomicI32 = AtomicI32::new(0);
+
+/// 历史面板开合：与其它面板互斥
+pub fn set_hist_panel(open: bool) {
+    HIST_EXTRA.store(if open { HIST_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+    if open {
+        PW_EXTRA.store(0, Ordering::Relaxed);
+        BM_EXTRA.store(0, Ordering::Relaxed);
+        DL_EXTRA.store(0, Ordering::Relaxed);
+        MENU_EXTRA.store(0, Ordering::Relaxed);
+        FIND_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -94,6 +114,7 @@ pub fn set_pw_panel(open: bool) {
         DL_EXTRA.store(0, Ordering::Relaxed);
         MENU_EXTRA.store(0, Ordering::Relaxed);
         FIND_EXTRA.store(0, Ordering::Relaxed);
+        HIST_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -127,6 +148,7 @@ fn set_find_bar(open: bool) {
         BM_EXTRA.store(0, Ordering::Relaxed);
         DL_EXTRA.store(0, Ordering::Relaxed);
         MENU_EXTRA.store(0, Ordering::Relaxed);
+        HIST_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -963,6 +985,72 @@ fn refresh_star_state(url: &str) {
     });
 }
 
+/// 历史面板数据（F-CEF-19）：空查询取最近 100 条，否则搜索 50 条。
+fn send_history(query: &str) {
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
+    let q = query.trim().to_string();
+    tauri::async_runtime::spawn(async move {
+        let res = if q.is_empty() {
+            crate::db::history::list_recent(&pool, 100).await
+        } else {
+            crate::db::history::search(&pool, &q, 50).await
+        };
+        match res {
+            Ok(rows) => {
+                let json = serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string());
+                let _ = app.run_on_main_thread(move || {
+                    run_toolbar_js(&format!(
+                        "window.__shiftHistory && window.__shiftHistory({json})"
+                    ));
+                });
+            }
+            Err(e) => log::warn!("[cef] 读历史失败: {e}"),
+        }
+    });
+}
+
+/// 清空全部历史（页面侧二次确认后再发）。
+fn clear_history_all() {
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        match sqlx::query("DELETE FROM history").execute(&pool).await {
+            Ok(r) => {
+                log::info!("[cef] 历史已清空：{} 行", r.rows_affected());
+                send_history("");
+            }
+            Err(e) => log::warn!("[cef] 清空历史失败: {e}"),
+        }
+    });
+}
+
+/// 删除单条历史。
+fn delete_history_item(id: i64) {
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        match sqlx::query("DELETE FROM history WHERE id = ?")
+            .bind(id)
+            .execute(&pool)
+            .await
+        {
+            Ok(r) if r.rows_affected() > 0 => {
+                log::info!("[cef] 历史记录已删除 id={id}");
+                send_history("");
+            }
+            Ok(_) => log::warn!("[cef] 历史记录不存在 id={id}"),
+            Err(e) => log::warn!("[cef] 删除历史失败 id={id}: {e}"),
+        }
+    });
+}
+
 wrap_display_handler! {
     struct ShellContentDisplay {
         tab_id: String,
@@ -1761,6 +1849,27 @@ fn handle_action(action: &str) {
             toggle_star();
             return;
         }
+        "histpanel" => {
+            set_hist_panel(arg == "1");
+            if arg == "1" {
+                send_history("");
+            }
+            return;
+        }
+        "histsearch" => {
+            send_history(arg);
+            return;
+        }
+        "histclear" => {
+            clear_history_all();
+            return;
+        }
+        "histdel" => {
+            if let Ok(id) = arg.parse::<i64>() {
+                delete_history_item(id);
+            }
+            return;
+        }
         "dlpanel" => {
             set_dl_panel(arg == "1");
             return;
@@ -2456,8 +2565,10 @@ wrap_find_handler! {
             if active_id.as_deref() != Some(self.tab_id.as_str()) {
                 return;
             }
+            // C API 的 ordinal 是 0 基（-1 = 无匹配）；工具栏显示 1 基「第几条」
+            let active = active_match_ordinal.saturating_add(1);
             run_toolbar_js(&format!(
-                "window.__shiftFind && window.__shiftFind({count}, {active_match_ordinal})"
+                "window.__shiftFind && window.__shiftFind({count}, {active})"
             ));
         }
     }
