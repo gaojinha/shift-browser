@@ -912,6 +912,95 @@ pub fn set_bookmarks(rows: Vec<(String, String)>) {
     gtk::glib::idle_add_local_once(refresh_bookmarks_ui);
 }
 
+/// 从库重查书签并推给页面（操作增删改后调用）。
+fn reload_bookmarks_from_db() {
+    let Some(pool) = crate::db::GLOBAL_POOL.get() else {
+        log::warn!("[cef] 书签刷新失败：全局连接池未注册");
+        return;
+    };
+    let pool = pool.clone();
+    let rows = tauri::async_runtime::block_on(async move {
+        sqlx::query_as::<_, (i64, String, String)>(
+            "SELECT id, title, url FROM bookmarks ORDER BY sort_order, id LIMIT 200",
+        )
+        .fetch_all(&pool)
+        .await
+    });
+    match rows {
+        Ok(rows) => {
+            let list: Vec<(String, String)> = rows
+                .iter()
+                .map(|(_, t, u)| (t.clone(), u.clone()))
+                .collect();
+            BOOKMARKS.with(|b| *b.borrow_mut() = list.clone());
+            let json = rows
+                .iter()
+                .map(|(id, t, u)| serde_json::json!({ "id": id, "title": t, "url": u }))
+                .collect::<Vec<_>>();
+            let json = serde_json::to_string(&json).unwrap_or_else(|_| "[]".to_string());
+            run_toolbar_js(&format!(
+                "if (window.__shiftBookmarks) {{ window.__shiftBookmarks({json}); }}"
+            ));
+            log::info!("[cef] 书签已刷新：{} 条", rows.len());
+        }
+        Err(e) => log::warn!("[cef] 书签刷新失败: {e}"),
+    }
+}
+
+/// 删除书签并刷新（右键菜单「删除」）。
+fn delete_bookmark_and_refresh(id: i64) {
+    let Some(pool) = crate::db::GLOBAL_POOL.get() else { return };
+    let pool = pool.clone();
+    let res = tauri::async_runtime::block_on(async move {
+        sqlx::query("DELETE FROM bookmarks WHERE id = ?")
+            .bind(id)
+            .execute(&pool)
+            .await
+    });
+    match res {
+        Ok(r) => {
+            log::info!("[cef] 书签已删除 id={id}（影响 {} 行）", r.rows_affected());
+            reload_bookmarks_from_db();
+        }
+        Err(e) => log::warn!("[cef] 删除书签失败: {e}"),
+    }
+}
+
+/// 把当前页加为书签（右键菜单「新建书签」）。
+fn add_bookmark_from_current() {
+    let Some(pool) = crate::db::GLOBAL_POOL.get() else { return };
+    // 取当前活动标签的 URL 与标题
+    let (url, title) = SHELL_TABS.with(|t| {
+        let tabs = t.borrow();
+        let idx = ACTIVE_TAB.with(|a| a.get());
+        tabs.get(idx)
+            .map(|x| (x.url.clone(), x.title.clone()))
+            .unwrap_or_default()
+    });
+    if url.is_empty() || url.starts_with("file://") {
+        log::info!("[cef] 当前页不可收藏: {url}");
+        return;
+    }
+    let pool = pool.clone();
+    let (title_for_db, url_for_db) = (title.clone(), url.clone());
+    let res = tauri::async_runtime::block_on(async move {
+        sqlx::query(
+            "INSERT INTO bookmarks (title, url, folder_id, sort_order, created_at) VALUES (?, ?, NULL, 0, datetime('now'))",
+        )
+        .bind(&title_for_db)
+        .bind(&url_for_db)
+        .execute(&pool)
+        .await
+    });
+    match res {
+        Ok(_) => {
+            log::info!("[cef] 已收藏: {title} -> {url}");
+            reload_bookmarks_from_db();
+        }
+        Err(e) => log::warn!("[cef] 收藏失败: {e}"),
+    }
+}
+
 /// 把书签表推给工具栏页面的书签栏（调 `window.__shiftBookmarks`）。
 pub fn refresh_bookmarks_ui() {
     let json = BOOKMARKS.with(|b| {
@@ -1103,6 +1192,16 @@ fn handle_action(action: &str) {
             if let Ok(idx) = arg.parse::<usize>() {
                 close_other_tabs(idx);
             }
+            return;
+        }
+        "bmdel" => {
+            if let Ok(id) = arg.parse::<i64>() {
+                delete_bookmark_and_refresh(id);
+            }
+            return;
+        }
+        "bmadd" => {
+            add_bookmark_from_current();
             return;
         }
         "needbookmarks" => {

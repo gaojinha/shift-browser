@@ -24,6 +24,10 @@ pub mod workspaces;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::path::PathBuf;
 
+/// 进程级主连接池句柄：Tauri 命令走 `State<Db>`；CEF 外壳的 console 回调拿不到
+/// AppHandle，只能经此取池（F-CEF-13 书签管理动作）。`Db::init` 时注册一次。
+pub static GLOBAL_POOL: std::sync::OnceLock<SqlitePool> = std::sync::OnceLock::new();
+
 /// 全局数据库连接池（Tauri State 管理）
 pub struct Db {
     pub pool: SqlitePool,
@@ -86,6 +90,8 @@ impl Db {
             .max_connections(5)
             .connect_with(options)
             .await?;
+
+        let _ = GLOBAL_POOL.set(pool.clone());
 
         // 安全：数据库含加密密码/设置，权限收紧到 600（仅当前用户可读写）。
         // 必须在 connect_with（此时才 create_if_missing 建文件）之后执行，

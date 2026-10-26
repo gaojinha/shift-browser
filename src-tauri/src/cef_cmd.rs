@@ -307,8 +307,8 @@ fn cef_bookmarks_json(app: &AppHandle) -> String {
     };
     let pool = db.pool.clone();
     let rows = tauri::async_runtime::block_on(async move {
-        sqlx::query_as::<_, (String, String)>(
-            "SELECT title, url FROM bookmarks ORDER BY sort_order, id LIMIT 200",
+        sqlx::query_as::<_, (i64, String, String)>(
+            "SELECT id, title, url FROM bookmarks ORDER BY sort_order, id LIMIT 200",
         )
         .fetch_all(&pool)
         .await
@@ -318,7 +318,7 @@ fn cef_bookmarks_json(app: &AppHandle) -> String {
             log::info!("[cef] 书签同步读取 {} 条", rows.len());
             let list: Vec<serde_json::Value> = rows
                 .iter()
-                .map(|(t, u)| serde_json::json!({ "title": t, "url": u }))
+                .map(|(id, t, u)| serde_json::json!({ "id": id, "title": t, "url": u }))
                 .collect();
             serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
         }

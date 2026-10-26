@@ -117,6 +117,17 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     color: #e8eaed; font-size: 18px; line-height: 1; margin: 0 0 4px 4px;
   }
   .tab-new:hover { background: #3c4043; }
+  /* 书签右键菜单 */
+  #bmmenu {
+    position: fixed; z-index: 200; display: none;
+    min-width: 130px; padding: 4px;
+    background: #292a2d; border: 1px solid #3c4043; border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.5); font-size: 12px; color: #e8eaed;
+  }
+  #bmmenu.open { display: block; }
+  #bmmenu div { padding: 7px 10px; border-radius: 6px; cursor: default; }
+  #bmmenu div:hover { background: #3c4043; }
+  #bmmenu div.danger:hover { background: #e81123; color: #fff; }
   /* 加载中：刷新按钮转圈（Rust 侧 data-loading 控制） */
   @keyframes spin { to { transform: rotate(360deg); } }
   html[data-loading="1"] #reload svg { animation: spin .9s linear infinite; }
@@ -237,6 +248,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     </button>
   </div>
   <div class="bookmarks" id="bookmarks"></div>
+  <div id="bmmenu"></div>
   <div id="pwpanel">
     <input id="pwsearch" type="text" spellcheck="false" placeholder="搜索站点或用户名">
     <div id="pwlist"></div>
@@ -331,6 +343,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       const el = document.createElement('div');
       el.className = 'bm';
       el.dataset.url = b.url || '';
+      el.dataset.id = String(b.id || '');
       const ico = document.createElement('span');
       ico.className = 'bm-ico';
       const title = b.title || b.url || '书签';
@@ -385,6 +398,44 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     act('tabnew');
   });
 
+  // ---- 书签右键菜单（F-CEF-13）----
+  const bmmenu = document.getElementById('bmmenu');
+  let bmMenuTarget = null;
+
+  function hideBmMenu() {
+    bmmenu.classList.remove('open');
+    bmMenuTarget = null;
+  }
+
+  document.getElementById('bookmarks').addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const item = e.target.closest('.bm');
+    bmMenuTarget = item;
+    const rows = item
+      ? [
+          ['打开', () => act('nav|' + item.dataset.url)],
+          ['删除', () => act('bmdel|' + item.dataset.id), 'danger'],
+        ]
+      : [
+          ['新建书签（当前页）', () => act('bmadd')],
+        ];
+    bmmenu.innerHTML = '';
+    rows.forEach(([label, fn, cls]) => {
+      const d = document.createElement('div');
+      d.textContent = label;
+      if (cls) d.className = cls;
+      d.addEventListener('click', () => { hideBmMenu(); fn(); });
+      bmmenu.appendChild(d);
+    });
+    bmmenu.style.left = e.clientX + 'px';
+    bmmenu.style.top = e.clientY + 'px';
+    bmmenu.classList.add('open');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#bmmenu')) hideBmMenu();
+  });
+
   // 启动时渲染内嵌书签（生成页面时由 Rust 写入，无时序问题）
   (function renderBookmarks() {
     const el = document.getElementById('bm-data');
@@ -398,6 +449,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       const item = document.createElement('div');
       item.className = 'bm';
       item.dataset.url = b.url || '';
+      item.dataset.id = String(b.id || '');
       const ico = document.createElement('span');
       ico.className = 'bm-ico';
       const title = b.title || b.url || '书签';
