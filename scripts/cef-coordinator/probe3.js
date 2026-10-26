@@ -20,7 +20,7 @@
   try {
     out.uad_high = uad ? await uad.getHighEntropyValues(
       ['architecture', 'bitness', 'model', 'platformVersion', 'fullVersionList']) : null;
-  } catch (e) { out.uad_high = 'ERR:' + String(e).slice(0, 80); }
+  } catch { out.uad_high = 'ERR:' + String(e).slice(0, 80); }
   out.gpc_defined = ('globalPrivacyControl' in navigator);
   out.gpc_value = out.gpc_defined ? navigator.globalPrivacyControl : '__NOT_DEFINED__';
   out.webdriver = navigator.webdriver;
@@ -34,6 +34,6 @@
   out.touchMax = navigator.maxTouchPoints;
   out.screen = { w: screen.width, h: screen.height, availW: screen.availWidth, availH: screen.availHeight, dpr: window.devicePixelRatio, depth: screen.colorDepth };
   out.chrome_type = typeof window.chrome;
-  out.timezone = (() => { try { return new Date().getTimezoneOffset(); } catch (e) { return null; } })();
+  out.timezone = (() => { try { return new Date().getTimezoneOffset(); } catch { return null; } })();
   return out;
 })()

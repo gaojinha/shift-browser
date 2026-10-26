@@ -12,7 +12,7 @@
     //   CEF 的 browser 还要单独 set_focus(1)，那时 document.hasFocus() 一直 false）。
     //   Ctrl+Shift+B 挂在 CEF KeyboardHandler::on_pre_key_event（shell.rs:1342/1352），
     //   所以"键按下去没反应"要先分清：是 toggle_bookmarks 坏了，还是事件根本没进 browser。
-    has_focus: (() => { try { return document.hasFocus(); } catch (e) { return 'ERR'; } })(),
+    has_focus: (() => { try { return document.hasFocus(); } catch { return 'ERR'; } })(),
     doc_height_css: getComputedStyle(document.documentElement).height,
     bookmark_count: bm ? bm.querySelectorAll('a, .bm, [data-bookmark]').length : null,
     // 判读口径以**本机实测**为准（12:52 三段复现 + 13:15 几何核对），不是抄来的数：
