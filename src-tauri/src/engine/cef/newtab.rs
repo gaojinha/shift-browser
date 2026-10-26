@@ -6,13 +6,102 @@
 
 use std::path::Path;
 
-/// 写入启动页 HTML 并返回 `file://` URL（幂等：文件已存在则直接复用）。
+/// 启动页快捷站点（与主应用 `settings.quick_sites` 同结构）。
+#[derive(serde::Serialize)]
+struct QuickSite {
+    icon: String,
+    name: String,
+    url: String,
+}
+
+/// 写入启动页 HTML 并返回 `file://` URL（幂等：文件已存在则覆盖重写）。
+///
+/// 搜索引擎与快捷站点跟主应用设置联动（`settings.search_engine` /
+/// `settings.quick_sites`），不再硬编码 Google + 5 个写死站点。
 pub fn ensure_newtab_html(shell_dir: &Path) -> Result<String, String> {
     let dir = shell_dir;
     std::fs::create_dir_all(dir).map_err(|e| format!("建启动页目录失败: {e}"))?;
+    let (search_url, sites) = load_newtab_settings();
+    let html = render_newtab_html(&search_url, &sites);
     let path = dir.join("cef-newtab.html");
-    std::fs::write(&path, NEWTAB_HTML).map_err(|e| format!("写启动页失败: {e}"))?;
+    std::fs::write(&path, html).map_err(|e| format!("写启动页失败: {e}"))?;
     Ok(format!("file://{}", path.display()))
+}
+
+/// 读主应用设置（同步：开窗时只跑一次，几十毫秒可接受，与书签注入同一模式）。
+fn load_newtab_settings() -> (String, Vec<QuickSite>) {
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return (
+            crate::constants::search::url_template(crate::constants::search::DEFAULT_ENGINE)
+                .to_string(),
+            default_sites(),
+        );
+    };
+    let (engine, sites_json) = tauri::async_runtime::block_on(async move {
+        let engine: Option<String> =
+            sqlx::query_scalar("SELECT value FROM settings WHERE key = 'search_engine'")
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten();
+        let sites: Option<String> =
+            sqlx::query_scalar("SELECT value FROM settings WHERE key = 'quick_sites'")
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten();
+        (engine, sites)
+    });
+    let engine = engine.unwrap_or_else(|| crate::constants::search::DEFAULT_ENGINE.to_string());
+    let search_url = crate::constants::search::url_template(&engine).to_string();
+    let sites = sites_json
+        .and_then(|j| serde_json::from_str::<Vec<serde_json::Value>>(&j).ok())
+        .map(|arr| arr.iter().filter_map(parse_site).collect::<Vec<_>>())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(default_sites);
+    (search_url, sites)
+}
+
+/// 单条快捷站点：只放行 http/https（与 `newtab::quick_sites::is_safe_web_url` 同口径）。
+fn parse_site(v: &serde_json::Value) -> Option<QuickSite> {
+    let url = v.get("url")?.as_str()?.trim().to_string();
+    if !crate::newtab::quick_sites::is_safe_web_url(&url) {
+        return None;
+    }
+    Some(QuickSite {
+        icon: v.get("icon").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        name: v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        url,
+    })
+}
+
+/// 内置默认站点（用户没配置 `quick_sites` 时）。
+fn default_sites() -> Vec<QuickSite> {
+    [
+        ("🔍", "百度", "https://www.baidu.com"),
+        ("📖", "知乎", "https://www.zhihu.com"),
+        ("📺", "B站", "https://www.bilibili.com"),
+        ("🐙", "GitHub", "https://github.com"),
+        ("📰", "HN", "https://news.ycombinator.com"),
+    ]
+    .iter()
+    .map(|(icon, name, url)| QuickSite {
+        icon: icon.to_string(),
+        name: name.to_string(),
+        url: url.to_string(),
+    })
+    .collect()
+}
+
+/// 模板替换（纯函数，便于单测）：注入搜索模板与快捷站点 JSON。
+fn render_newtab_html(search_url: &str, sites: &[QuickSite]) -> String {
+    let search_json = serde_json::to_string(search_url).unwrap_or_else(|_| "\"\"".to_string());
+    let sites_json = serde_json::to_string(sites)
+        .unwrap_or_else(|_| "[]".to_string())
+        .replace("</", "<\\/");
+    NEWTAB_HTML
+        .replace("__SEARCH_URL__", &search_json)
+        .replace("__QUICK_SITES__", &sites_json)
 }
 
 const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
@@ -76,29 +165,39 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
     <input id="q" type="text" spellcheck="false" placeholder="搜索或输入网址" autofocus>
   </div>
-  <div class="links">
-    <a class="link" href="https://www.baidu.com"><i>🔍</i>百度</a>
-    <a class="link" href="https://www.zhihu.com"><i>📖</i>知乎</a>
-    <a class="link" href="https://www.bilibili.com"><i>📺</i>B站</a>
-    <a class="link" href="https://github.com"><i>🐙</i>GitHub</a>
-    <a class="link" href="https://news.ycombinator.com"><i>📰</i>HN</a>
-  </div>
+  <div class="links" id="links"></div>
   <div class="hint">Ctrl+T 新标签 · Ctrl+W 关闭 · Ctrl+Tab 切换</div>
 </div>
 <script>
+  // 搜索模板与快捷站点由 Rust 从 settings 注入（F-CEF-17 配套）
+  const SEARCH_URL = __SEARCH_URL__;
+  const QUICK_SITES = __QUICK_SITES__;
   const q = document.getElementById('q');
+  const linksEl = document.getElementById('links');
+
+  (QUICK_SITES || []).forEach(function (s) {
+    var a = document.createElement('a');
+    a.className = 'link';
+    a.href = s.url;
+    var icon = document.createElement('i');
+    icon.textContent = s.icon || '🔗';
+    var name = document.createElement('span');
+    name.textContent = s.name || s.url;
+    a.append(icon, name);
+    linksEl.appendChild(a);
+  });
 
   function go() {
     const v = q.value.trim();
     if (!v) return;
-    // 有 scheme 或像域名 → 直接访问；否则当搜索词
+    // 有 scheme 或像域名 → 直接访问；否则用设置里的搜索引擎
     let url;
     if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(v) || v.startsWith('about:') || v.startsWith('data:')) {
       url = v;
     } else if (v.includes('.') && !v.includes(' ')) {
       url = 'https://' + v;
     } else {
-      url = 'https://www.google.com/search?q=' + encodeURIComponent(v);
+      url = SEARCH_URL + encodeURIComponent(v);
     }
     location.href = url;
   }
@@ -117,7 +216,7 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
 
 #[cfg(test)]
 mod tests {
-    use super::ensure_newtab_html;
+    use super::{ensure_newtab_html, parse_site, render_newtab_html, QuickSite};
 
     #[test]
     fn newtab_html_written_and_self_contained() {
@@ -131,5 +230,41 @@ mod tests {
         assert!(body.contains("id=\"q\""), "必须有搜索框");
         assert!(!body.contains("__TAURI_INTERNALS__"), "不得依赖 Tauri IPC");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn render_newtab_injects_search_and_sites() {
+        let sites = vec![
+            QuickSite {
+                icon: "🔍".into(),
+                name: "必应".into(),
+                url: "https://www.bing.com".into(),
+            },
+            QuickSite {
+                icon: "📖".into(),
+                name: "a</script>".into(),
+                url: "https://a.com".into(),
+            },
+        ];
+        let html = render_newtab_html("https://www.bing.com/search?q=", &sites);
+        assert!(
+            html.contains("\"https://www.bing.com/search?q=\""),
+            "搜索模板必须注入"
+        );
+        assert!(html.contains("必应"));
+        assert!(html.contains("a<\\/script>"), "</ 必须转义，防提前闭合 script");
+        assert!(!html.contains("a</script>"));
+        assert!(!html.contains("__SEARCH_URL__"));
+        assert!(!html.contains("__QUICK_SITES__"));
+    }
+
+    #[test]
+    fn parse_site_rejects_non_web_schemes() {
+        let ok = serde_json::json!({"icon":"x","name":"站点","url":"https://example.com"});
+        assert!(parse_site(&ok).is_some());
+        let bad = serde_json::json!({"icon":"x","name":"坏","url":"javascript:alert(1)"});
+        assert!(parse_site(&bad).is_none());
+        let no_url = serde_json::json!({"icon":"x","name":"缺 URL"});
+        assert!(parse_site(&no_url).is_none());
     }
 }
