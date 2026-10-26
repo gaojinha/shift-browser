@@ -206,6 +206,21 @@ pub(crate) async fn get_password_by_id_for_host_inner(
     }))
 }
 
+/// 按 id 取密码明文，**不做活动标签 host 校验**。
+/// 仅限浏览器自己的可信 UI（CEF 工具栏密码面板，用户主动点「复制」）调用，
+/// 不得暴露为 Tauri 命令或让页面脚本可达。
+pub(crate) async fn get_password_plain_trusted_inner(db: &Db, id: i64) -> DbResult<Option<String>> {
+    let row = sqlx::query_as::<_, (String,)>("SELECT password FROM passwords WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&db.pool)
+        .await?;
+    let Some((encrypted,)) = row else {
+        return Ok(None);
+    };
+    let key = get_master_key(db).await?;
+    Ok(Some(decrypt(&key, &encrypted)?))
+}
+
 /// 取某域名下所有密码记录（解密）。
 /// 安全：domain 必须非空且匹配当前活动标签 host；LIKE 通配符转义，空串直接拒
 /// （旧实现空串变 LIKE '%%' 全表捞明文）。
@@ -346,6 +361,87 @@ pub struct PasswordEntry {
     pub notes: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// 从 Chrome 导出的 CSV 导入密码（`#[ignore]`，一次性工具）。
+/// 跑法：`PW_CSV=/path/to/passwords.csv cargo test --lib import_passwords_from_csv -- --ignored --nocapture`
+///
+/// 为什么走 CSV 而不是直接读 Chrome 库：Chrome 的 v11 密文要 keyring 里的
+/// "Chromium Safe Storage" 密钥，本机 keyring 取不到（F-100 之后环境变了）；
+/// Chrome 自己导出 CSV 时已经解好密，省掉这一环。
+#[tokio::test]
+#[ignore]
+async fn import_passwords_from_csv() {
+    let path = std::env::var("PW_CSV")
+        .unwrap_or_else(|_| "/home/gao/Downloads/passwords.csv".to_string());
+    let content = std::fs::read_to_string(&path).expect("读 CSV 失败（路径用 PW_CSV 指定）");
+    let home = std::env::var("HOME").expect("HOME");
+    let dir = std::path::PathBuf::from(home).join(".local/share/com.shiftbrowser.app");
+    let db = crate::db::Db::init(dir).await.expect("初始化数据库失败");
+
+    let mut lines = content.lines();
+    let header = lines.next().unwrap_or("");
+    println!("[CSV] 表头: {header}");
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+    let mut failed = 0usize;
+    for (i, line) in lines.enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let fields = parse_csv_line(line);
+        if fields.len() < 4 {
+            failed += 1;
+            continue;
+        }
+        let (_name, url, username, password) = (&fields[0], &fields[1], &fields[2], &fields[3]);
+        if password.is_empty() {
+            skipped += 1;
+            continue;
+        }
+        // 域名取 host 部分（Chrome CSV 的 url 是完整地址）
+        let domain = url
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .split('/')
+            .next()
+            .unwrap_or(url)
+            .to_string();
+        let user = if username.is_empty() { None } else { Some(username.clone()) };
+        match save_password_inner(&db, &domain, user, password, None).await {
+            Ok(_) => imported += 1,
+            Err(e) => {
+                failed += 1;
+                if failed <= 3 {
+                    println!("[CSV] 第 {} 行失败: {e:?}", i + 2);
+                }
+            }
+        }
+    }
+    println!("[CSV 导入结果] imported={imported} skipped_empty={skipped} failed={failed}");
+}
+
+/// 最小 CSV 行解析：处理双引号包裹与 `""` 转义（Chrome 导出格式）。
+/// 只被 `#[ignore]` 的导入测试使用，正常构建下视为未引用。
+#[allow(dead_code)]
+fn parse_csv_line(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if in_quotes && chars.peek() == Some(&'"') => {
+                cur.push('"');
+                chars.next();
+            }
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => out.push(std::mem::take(&mut cur)),
+            _ => cur.push(c),
+        }
+    }
+    out.push(cur);
+    out
 }
 
 #[cfg(test)]

@@ -450,7 +450,10 @@ const CBC_IV: [u8; 16] = [0x20; 16];
 /// keyring label 硬映射：只认这两个精确 label，其余一律 None（不许猜、不许硬试）
 fn keyring_label(browser: &str) -> Option<&'static str> {
     match browser {
-        "chrome" => Some("Chrome Safe Storage"),
+        // 2026-10-26 实测本机 keyring：Chrome 的条目 label 是 **Chromium Safe Storage**
+        //（不是 "Chrome Safe Storage"，两条同名条目），另有 "Application key for com.google.Chrome"。
+        // 原来只认 "Chrome Safe Storage" → 密钥取不到 → 89 条 v11 全 failed。
+        "chrome" => Some("Chromium Safe Storage"),
         "brave" => Some("Brave Safe Storage"),
         _ => None,
     }
@@ -720,7 +723,8 @@ mod f90_tests {
 
     #[test]
     fn keyring_label_hard_mapping_exact() {
-        assert_eq!(keyring_label("chrome"), Some("Chrome Safe Storage"));
+        // 2026-10-26 实测本机 keyring：Chrome 的条目 label 是 Chromium Safe Storage
+        assert_eq!(keyring_label("chrome"), Some("Chromium Safe Storage"));
         assert_eq!(keyring_label("brave"), Some("Brave Safe Storage"));
         // 不许猜：未知浏览器一律 None
         assert_eq!(keyring_label("chromium"), None);

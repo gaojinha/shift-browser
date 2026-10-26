@@ -329,6 +329,23 @@ async fn snapshot_login_meta(
     )
 }
 
+/// 一次性导入（`#[ignore]`）：把本机 Chrome/Brave 的密码写进**真实**应用库。
+/// 跑法：`cargo test --lib import_passwords_once -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn import_passwords_once() {
+    let home = std::env::var("HOME").expect("HOME");
+    let dir = std::path::PathBuf::from(home).join(".local/share/com.shiftbrowser.app");
+    let db = crate::db::Db::init(dir).await.expect("初始化数据库失败");
+    match import_passwords_inner(&db).await {
+        Ok(r) => println!(
+            "[导入结果] imported={} skipped_existing={} skipped_empty={} failed={} skipped_sources={:?}",
+            r.imported, r.skipped_existing, r.skipped_empty, r.failed, r.skipped_sources
+        ),
+        Err(e) => panic!("导入失败: {e:?}"),
+    }
+}
+
 #[cfg(test)]
 mod f92_tests {
     use super::*;

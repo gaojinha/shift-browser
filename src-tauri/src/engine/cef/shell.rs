@@ -36,7 +36,17 @@ static TOOLBAR_H: AtomicI32 = AtomicI32::new(122);
 
 /// 当前应使用的工具栏高度（书签栏展开或收起，F-CEF-09）。
 fn toolbar_height() -> i32 {
-    TOOLBAR_H.load(Ordering::Relaxed)
+    TOOLBAR_H.load(Ordering::Relaxed) + PW_EXTRA.load(Ordering::Relaxed)
+}
+
+/// 密码面板（F-CEF-12）展开时工具栏视图额外加高的像素，收起为 0
+const PW_PANEL_EXTRA: i32 = 260;
+static PW_EXTRA: AtomicI32 = AtomicI32::new(0);
+
+/// 密码面板开合：加/减工具栏视图高度并重排（只动 PW_EXTRA，不碰书签栏态）
+pub fn set_pw_panel(open: bool) {
+    PW_EXTRA.store(if open { PW_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+    apply_toolbar_height();
 }
 
 /// 一个标签页：视图 + 标题（浏览器句柄另存在 `BROWSERS`，按 `id` 取）
@@ -941,7 +951,7 @@ fn run_toolbar_js(code: &str) {
 /// → 触发 BoxLayout 重算（preferred_size 已改读 toolbar_height()，内容区自动吃满
 /// 让出的 34px）。状态只存进程内存，默认展开。
 fn toggle_bookmarks() {
-    let next = if toolbar_height() == TOOLBAR_HEIGHT_COLLAPSED {
+    let next = if TOOLBAR_H.load(Ordering::Relaxed) == TOOLBAR_HEIGHT_COLLAPSED {
         TOOLBAR_HEIGHT_EXPANDED
     } else {
         TOOLBAR_HEIGHT_COLLAPSED
@@ -1062,6 +1072,11 @@ fn handle_action(action: &str) {
         Some((c, a)) => (c, a),
         None => (action, ""),
     };
+
+    // 密码面板动作（F-CEF-12）
+    if super::passwords_ui::handle(cmd, arg) {
+        return;
+    }
 
     // 标签相关动作先处理（不需要当前 content 浏览器）
     match cmd {

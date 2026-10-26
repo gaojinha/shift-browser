@@ -14,5 +14,6 @@
 pub mod app;
 pub mod browser;
 pub mod newtab;
+pub mod passwords_ui;
 pub mod shell;
 pub mod toolbar;

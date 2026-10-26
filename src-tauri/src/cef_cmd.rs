@@ -335,7 +335,9 @@ fn open_shell_on_main(app: &AppHandle, url: &str) -> Result<(), String> {
         .app_cache_dir()
         .map_err(|e| format!("拿不到缓存目录: {e}"))?;
     let bookmarks_json = cef_bookmarks_json(app);
-    let toolbar_url = cef_toolbar::ensure_toolbar_html(&cache, &bookmarks_json)?;
+    crate::engine::cef::passwords_ui::init(app);
+    let passwords_json = crate::engine::cef::passwords_ui::passwords_json(app);
+    let toolbar_url = cef_toolbar::ensure_toolbar_html(&cache, &bookmarks_json, &passwords_json)?;
     cef_shell::open(url, &toolbar_url)?;
 
     // 窗口创建回调里调 show() 会卡死；出回调后立刻用 X11 直接映射
