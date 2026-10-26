@@ -27,73 +27,89 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 <style>
   * { box-sizing: border-box; }
   html, body {
-    margin: 0; padding: 0; height: 84px; overflow: hidden;
-    background: #20242c; color: #e6e8eb;
-    font-family: -apple-system, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+    margin: 0; padding: 0; height: 88px; overflow: hidden;
+    /* Chrome 深色模式配色（2026-10-26 按 Chrome 实测对齐） */
+    background: #35363a; color: #e8eaed;
+    font-family: "Segoe UI", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
     font-size: 13px;
     user-select: none;
   }
   .bar {
-    display: flex; align-items: center; gap: 6px;
-    height: 48px; padding: 0 10px;
-    border-bottom: 1px solid #333844;
+    display: flex; align-items: center; gap: 2px;
+    height: 48px; padding: 0 8px;
+    background: #35363a;
   }
   .brand {
-    font-weight: 600; letter-spacing: .5px; color: #8ab4f8;
-    padding-right: 6px; white-space: nowrap;
+    font-weight: 600; letter-spacing: .3px; color: #8ab4f8;
+    padding: 0 6px 0 2px; white-space: nowrap; font-size: 13px;
   }
   button {
-    width: 30px; height: 30px; border: 0; border-radius: 8px;
-    background: transparent; color: #cfd3da; cursor: pointer;
+    width: 28px; height: 28px; border: 0; border-radius: 50%;
+    background: transparent; color: #e8eaed; cursor: default;
     display: flex; align-items: center; justify-content: center;
-    padding: 0;
+    padding: 0; flex: 0 0 auto;
   }
-  button:hover { background: #2d3340; }
-  button:active { background: #3a4150; }
+  button:hover { background: #3c4043; }
+  button:active { background: #4a4d51; }
+  button:disabled { color: #5f6368; }
   button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2;
     stroke-linecap: round; stroke-linejoin: round; }
-  /* 标签栏（2026-10-26 新增，M2 独立开窗方向） */
+  /* 标签栏：Chrome 深色 40px（标签在上、工具栏在下，顺序与 Chrome 一致） */
   .tabbar {
-    display: flex; align-items: center; gap: 4px;
-    height: 36px; padding: 0 8px;
-    background: #1b1f26; border-bottom: 1px solid #2b3038;
+    display: flex; align-items: flex-end; gap: 0;
+    height: 40px; padding: 4px 8px 0;
+    background: #202124;
     overflow-x: auto; overflow-y: hidden;
   }
   .tabbar::-webkit-scrollbar { height: 0; }
   .tab {
-    display: flex; align-items: center; gap: 6px;
-    min-width: 90px; max-width: 200px; height: 28px;
-    padding: 0 4px 0 10px; border-radius: 8px;
-    background: transparent; color: #9aa2ad; cursor: default;
-    font-size: 12px; white-space: nowrap; flex: 0 0 auto;
+    display: flex; align-items: center; gap: 8px;
+    min-width: 32px; max-width: 240px; height: 36px;
+    padding: 0 6px 0 12px; border-radius: 8px 8px 0 0;
+    background: transparent; color: #9aa0a6; cursor: default;
+    font-size: 12px; white-space: nowrap; flex: 0 1 auto;
+    position: relative;
   }
-  .tab:hover { background: #242a33; }
-  .tab.active { background: #2f3742; color: #e6e8eb; }
+  .tab:hover { background: #2a2b2e; color: #e8eaed; }
+  .tab.active { background: #35363a; color: #e8eaed; }
+  /* 标签之间的分隔线（Chrome 非激活标签右侧一道细线，激活/相邻时隐藏） */
+  .tab + .tab::before {
+    content: ''; position: absolute; left: -1px; top: 10px; bottom: 10px;
+    width: 1px; background: #3c4043;
+  }
+  .tab.active::before, .tab.active + .tab::before { display: none; }
+  .tab:hover::before, .tab:hover + .tab::before { display: none; }
   .tab .t-title {
     flex: 1; overflow: hidden; text-overflow: ellipsis;
   }
   .tab .t-close {
-    width: 18px; height: 18px; border-radius: 6px; flex: 0 0 auto;
+    width: 16px; height: 16px; border-radius: 50%; flex: 0 0 auto;
     display: flex; align-items: center; justify-content: center;
-    font-size: 13px; line-height: 1; color: #8b93a0;
+    font-size: 12px; line-height: 1; color: #9aa0a6;
   }
-  .tab .t-close:hover { background: #3d4552; color: #e6e8eb; }
+  .tab .t-close:hover { background: #3c4043; color: #e8eaed; }
   .tab-new {
-    width: 26px; height: 26px; border-radius: 8px; flex: 0 0 auto;
+    width: 28px; height: 28px; border-radius: 50%; flex: 0 0 auto;
     display: flex; align-items: center; justify-content: center;
-    color: #cfd3da; font-size: 17px; line-height: 1;
+    color: #e8eaed; font-size: 18px; line-height: 1; margin: 0 0 4px 4px;
   }
-  .tab-new:hover { background: #2d3340; }
+  .tab-new:hover { background: #3c4043; }
   /* 加载中：刷新按钮转圈（Rust 侧 data-loading 控制） */
   @keyframes spin { to { transform: rotate(360deg); } }
   html[data-loading="1"] #reload svg { animation: spin .9s linear infinite; }
   html[data-loading="1"] #reload { color: #8ab4f8; }
   .addr-wrap {
     flex: 1; display: flex; align-items: center; height: 32px;
-    background: #151920; border: 1px solid #333844; border-radius: 16px;
-    padding: 0 12px; min-width: 0;
+    background: #202124; border: 1px solid transparent; border-radius: 16px;
+    padding: 0 12px; min-width: 0; margin: 0 4px;
   }
-  .addr-wrap:focus-within { border-color: #5b8def; background: #10141a; }
+  .addr-wrap:hover { background: #292a2d; }
+  .addr-wrap:focus-within { background: #202124; border-color: #8ab4f8; }
+  .addr-wrap svg { width: 16px; height: 16px; stroke: #9aa0a6; fill: none;
+    stroke-width: 2; stroke-linecap: round; margin-right: 8px; flex: 0 0 auto; }
+  #addr { flex: 1; height: 100%; border: 0; outline: 0; background: transparent;
+    color: #e8eaed; font-size: 13px; min-width: 0; }
+  #addr::placeholder { color: #9aa0a6; }
   #addr {
     flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
     color: #e6e8eb; font-size: 13px;
@@ -103,6 +119,13 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 </style>
 </head>
 <body>
+  <div class="tabbar" id="tabbar">
+    <div class="tab active" data-idx="0">
+      <span class="t-title">新标签页</span>
+      <span class="t-close" title="关闭标签">×</span>
+    </div>
+    <div class="tab-new" id="tabnew" title="新建标签">+</div>
+  </div>
   <div class="bar">
     <span class="brand">Shift</span>
 
@@ -124,13 +147,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       <input id="addr" type="text" spellcheck="false" placeholder="输入网址或搜索词，回车打开">
     </div>
   </div>
-  <div class="tabbar" id="tabbar">
-    <div class="tab active" data-idx="0">
-      <span class="t-title">新标签页</span>
-      <span class="t-close" title="关闭标签">×</span>
-    </div>
-    <div class="tab-new" id="tabnew" title="新建标签">+</div>
-  </div>
+
 
 <script>
   const addr = document.getElementById('addr');

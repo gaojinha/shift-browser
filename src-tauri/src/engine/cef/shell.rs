@@ -26,7 +26,7 @@ pub const CONTENT_ID: &str = "shell-content";
 pub const TOOLBAR_ID: &str = "shell-toolbar";
 /// 工具栏高度（像素）：地址栏 48 + 标签栏 36（2026-10-26 起标签栏并入同一 WebUI，
 /// 省一层 BrowserView；标签栏 DOM 由 `window.__shiftTabs()` 刷新）
-pub const TOOLBAR_HEIGHT: i32 = 84;
+pub const TOOLBAR_HEIGHT: i32 = 88;
 
 /// 一个标签页：视图 + 标题（浏览器句柄另存在 `BROWSERS`，按 `id` 取）
 struct ShellTab {
