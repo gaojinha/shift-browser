@@ -17,6 +17,7 @@
 
 use cef::*;
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 use super::browser::BROWSERS;
 
@@ -24,9 +25,19 @@ use super::browser::BROWSERS;
 pub const CONTENT_ID: &str = "shell-content";
 /// 工具栏页的固定 tab id
 pub const TOOLBAR_ID: &str = "shell-toolbar";
-/// 工具栏高度（像素）：地址栏 48 + 标签栏 36（2026-10-26 起标签栏并入同一 WebUI，
-/// 省一层 BrowserView；标签栏 DOM 由 `window.__shiftTabs()` 刷新）
-pub const TOOLBAR_HEIGHT: i32 = 122;
+/// 工具栏高度（像素）= 标签栏 40 + 地址栏 48 + 书签栏 34（2026-10-26 起标签栏并入
+/// 同一 WebUI，省一层 BrowserView；标签栏 DOM 由 `window.__shiftTabs()` 刷新）。
+/// 书签栏开关（F-CEF-09，Ctrl+Shift+B）两态：展开 122 / 收起 88（书签栏占 34px）。
+/// 当前态放进程内存原子 `TOOLBAR_H`，不持久化，默认展开。
+pub const TOOLBAR_HEIGHT_EXPANDED: i32 = 122;
+pub const TOOLBAR_HEIGHT_COLLAPSED: i32 = 88;
+
+static TOOLBAR_H: AtomicI32 = AtomicI32::new(122);
+
+/// 当前应使用的工具栏高度（书签栏展开或收起，F-CEF-09）。
+fn toolbar_height() -> i32 {
+    TOOLBAR_H.load(Ordering::Relaxed)
+}
 
 /// 一个标签页：视图 + 标题（浏览器句柄另存在 `BROWSERS`，按 `id` 取）
 struct ShellTab {
@@ -46,6 +57,9 @@ thread_local! {
 
     /// 窗口的 BoxLayout（新建标签时要往里 add_child_view + set_flex）
     static SHELL_LAYOUT: RefCell<Option<BoxLayout>> = const { RefCell::new(None) };
+
+    /// 工具栏 View 句柄（窗口创建回调里登记，供书签栏开关 set_bounds 用，F-CEF-09）
+    static SHELL_TOOLBAR_VIEW: RefCell<Option<View>> = const { RefCell::new(None) };
 
     /// 标签表（顺序即标签栏顺序）与当前活动索引
     static SHELL_TABS: RefCell<Vec<ShellTab>> = const { RefCell::new(Vec::new()) };
@@ -98,7 +112,7 @@ pub fn open(content_url: &str, toolbar_url: &str) -> Result<(), String> {
     // 两个视图都必须是 ALLOY 风格，否则 CEF 拒绝把它们加进 Alloy 窗口
     // （报错：Cannot add Chrome style BrowserView to Alloy style Window）
     let mut content_delegate = ShellViewDelegate::new(RuntimeStyle::ALLOY, 0);
-    let mut toolbar_delegate = ShellViewDelegate::new(RuntimeStyle::ALLOY, TOOLBAR_HEIGHT);
+    let mut toolbar_delegate = ShellViewDelegate::new(RuntimeStyle::ALLOY, TOOLBAR_HEIGHT_EXPANDED);
 
     let content_view = browser_view_create(
         Some(&mut content_client),
@@ -354,9 +368,17 @@ wrap_browser_view_delegate! {
             // 注意：width 给 0 会让内容区渲染空白（2026-10-26 实测），
             // 这里维持 100；多标签下隐藏标签仍参与宽度分配（活动标签被挤成半屏）
             // 是已知问题，待用 set_bounds 手动布局解决，见 WORKBOARD。
+            // F-CEF-09：preferred_height 初值 0 是内容视图、非 0 是工具栏视图；
+            // 工具栏高度改读 toolbar_height()（书签栏状态），这样窗口 resize 触发
+            // BoxLayout 重算时结果仍然正确，不会被回写回 122。
+            let height = if self.preferred_height == 0 {
+                0
+            } else {
+                toolbar_height()
+            };
             Size {
                 width: 100,
-                height: self.preferred_height,
+                height,
             }
         }
     }
@@ -410,6 +432,10 @@ wrap_window_delegate! {
 
             let mut content_view = View::from(&*content);
             let mut toolbar_view = View::from(&*toolbar);
+            // 工具栏 View 句柄留一份：书签栏开关要 set_bounds 改它的高度（F-CEF-09）
+            SHELL_TOOLBAR_VIEW.with(|v| {
+                *v.borrow_mut() = Some(toolbar_view.clone());
+            });
 
             // 先加工具栏（上），再加内容（下）——BoxLayout 按添加顺序排
             window.add_child_view(Some(&mut toolbar_view));
@@ -785,6 +811,8 @@ fn switch_tab(idx: usize) {
         }
     });
     ACTIVE_TAB.with(|a| a.set(idx));
+    // 切标签后活动视图换了，按当前书签栏态重排一次（收起态下内容视图 y 仍是新高度）
+    apply_toolbar_height();
     log::info!("[cef] 切换到标签 {idx}");
     refresh_tabbar();
 }
@@ -884,6 +912,62 @@ fn run_toolbar_js(code: &str) {
                     -1,
                 );
             }
+        }
+    });
+}
+
+/// 书签栏开关（F-CEF-09，Ctrl+Shift+B）：翻转高度态（122↔88）→ 同步 DOM 显隐
+/// → 触发 BoxLayout 重算（preferred_size 已改读 toolbar_height()，内容区自动吃满
+/// 让出的 34px）。状态只存进程内存，默认展开。
+fn toggle_bookmarks() {
+    let next = if toolbar_height() == TOOLBAR_HEIGHT_COLLAPSED {
+        TOOLBAR_HEIGHT_EXPANDED
+    } else {
+        TOOLBAR_HEIGHT_COLLAPSED
+    };
+    let visible = next == TOOLBAR_HEIGHT_EXPANDED;
+    TOOLBAR_H.store(next, Ordering::Relaxed);
+    run_toolbar_js(&format!(
+        "window.__shiftBookmarksVisible && window.__shiftBookmarksVisible({});",
+        visible
+    ));
+    apply_toolbar_height();
+    log::info!("[cef] 书签栏切换: height={} visible={}", next, visible);
+}
+
+/// 按当前书签栏态手动重算「工具栏 + 活动内容视图」的 bounds（F-CEF-09）。
+/// 为什么不用 window.layout()：BoxLayout 缓存了工具栏的首选尺寸（实测改原子后再
+/// layout() 工具栏仍停 122），只能像 switch_tab 压 hidden 视图那样直接 set_bounds。
+/// 非活动标签视图已被 switch_tab 压成 0，这里只搬工具栏与活动标签两块。
+fn apply_toolbar_height() {
+    let h = toolbar_height();
+    let (win_w, win_h) = SHELL_WINDOW.with(|w| {
+        w.borrow()
+            .as_ref()
+            .map(|w| (w.bounds().width, w.bounds().height))
+            .unwrap_or((0, 0))
+    });
+    if (win_w, win_h) == (0, 0) {
+        return;
+    }
+    if let Some(tb) = SHELL_TOOLBAR_VIEW.with(|v| v.borrow().clone()) {
+        tb.set_bounds(Some(&Rect {
+            x: 0,
+            y: 0,
+            width: win_w,
+            height: h,
+        }));
+    }
+    let active = ACTIVE_TAB.with(|a| a.get());
+    SHELL_TABS.with(|t| {
+        let tabs = t.borrow();
+        if let Some(tab) = tabs.get(active) {
+            tab.view.set_bounds(Some(&Rect {
+                x: 0,
+                y: h,
+                width: win_w,
+                height: win_h - h,
+            }));
         }
     });
 }
@@ -1275,6 +1359,14 @@ fn handle_shortcut(
                 log::error!("[cef] 恢复标签失败: {e}");
             }
         }
+        if let Some(flag) = is_shortcut {
+            *flag = 1;
+        }
+        return 1;
+    }
+    // Ctrl+Shift+B 切换书签栏（F-CEF-09；B = 0x42 = 66）
+    if shift && ev.windows_key_code == 66 {
+        toggle_bookmarks();
         if let Some(flag) = is_shortcut {
             *flag = 1;
         }

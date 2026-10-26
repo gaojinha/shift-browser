@@ -122,6 +122,10 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     overflow-x: auto; overflow-y: hidden;
   }
   .bookmarks::-webkit-scrollbar { height: 0; }
+  /* 书签栏收起态（F-CEF-09，Ctrl+Shift+B）：在 html 上挂 bookmarks-hidden，
+     同时把页面高度从 122 收到 88（少书签栏 34px），否则底部留白。 */
+  html.bookmarks-hidden, html.bookmarks-hidden body { height: 88px; }
+  html.bookmarks-hidden .bookmarks { display: none; }
   .bm {
     display: flex; align-items: center; gap: 6px;
     height: 26px; padding: 0 8px; border-radius: 6px;
@@ -294,6 +298,12 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       el.appendChild(name);
       bar.appendChild(el);
     });
+  };
+
+  // 书签栏显隐（F-CEF-09，Ctrl+Shift+B，Rust 侧 execute_java_script 调用）：
+  // 在 html 挂 bookmarks-hidden 类，CSS 同时隐藏书签栏并把页面高度 122→88。
+  window.__shiftBookmarksVisible = function (visible) {
+    document.documentElement.classList.toggle('bookmarks-hidden', !visible);
   };
 
   // 书签点击 → 当前标签导航
