@@ -303,28 +303,44 @@ fn create_gtk_cef_window(tab_id: &str, url: &str) -> Result<(), String> {
 fn cef_bookmarks_json(app: &AppHandle) -> String {
     use tauri::Manager;
     let Some(db) = app.try_state::<crate::db::Db>() else {
-        return "[]".to_string();
+        return "{\"folders\":[],\"bookmarks\":[]}".to_string();
     };
     let pool = db.pool.clone();
-    let rows = tauri::async_runtime::block_on(async move {
-        sqlx::query_as::<_, (i64, String, String)>(
-            "SELECT id, title, url FROM bookmarks ORDER BY sort_order, id LIMIT 200",
+    let data = tauri::async_runtime::block_on(async move {
+        let bms = sqlx::query_as::<_, (i64, String, String, Option<i64>)>(
+            "SELECT id, title, url, folder_id FROM bookmarks ORDER BY sort_order, id LIMIT 300",
         )
         .fetch_all(&pool)
-        .await
+        .await?;
+        let folders = sqlx::query_as::<_, (i64, String, Option<i64>)>(
+            "SELECT id, name, parent_id FROM bookmark_folders ORDER BY sort_order, id",
+        )
+        .fetch_all(&pool)
+        .await?;
+        Ok::<_, sqlx::Error>((bms, folders))
     });
-    match rows {
-        Ok(rows) => {
-            log::info!("[cef] 书签同步读取 {} 条", rows.len());
-            let list: Vec<serde_json::Value> = rows
+    match data {
+        Ok((bms, folders)) => {
+            log::info!(
+                "[cef] 书签同步读取 {} 条 + {} 个文件夹",
+                bms.len(),
+                folders.len()
+            );
+            let bm_json: Vec<serde_json::Value> = bms
                 .iter()
-                .map(|(id, t, u)| serde_json::json!({ "id": id, "title": t, "url": u }))
+                .map(|(id, t, u, f)| {
+                    serde_json::json!({ "id": id, "title": t, "url": u, "folderId": f })
+                })
                 .collect();
-            serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
+            let f_json: Vec<serde_json::Value> = folders
+                .iter()
+                .map(|(id, n, p)| serde_json::json!({ "id": id, "name": n, "parentId": p }))
+                .collect();
+            serde_json::json!({ "folders": f_json, "bookmarks": bm_json }).to_string()
         }
         Err(e) => {
             log::warn!("[cef] 读书签失败: {e}");
-            "[]".to_string()
+            "{\"folders\":[],\"bookmarks\":[]}".to_string()
         }
     }
 }

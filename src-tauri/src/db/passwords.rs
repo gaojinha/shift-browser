@@ -209,6 +209,10 @@ pub(crate) async fn get_password_by_id_for_host_inner(
 /// 按 id 取密码明文，**不做活动标签 host 校验**。
 /// 仅限浏览器自己的可信 UI（CEF 工具栏密码面板，用户主动点「复制」）调用，
 /// 不得暴露为 Tauri 命令或让页面脚本可达。
+///
+/// 唯一调用方在 `engine::cef::passwords_ui`（`cef-engine` 特性内），
+/// 所以这里也按特性门控——不门控时默认构建会报 dead_code。
+#[cfg(feature = "cef-engine")]
 pub(crate) async fn get_password_plain_trusted_inner(db: &Db, id: i64) -> DbResult<Option<String>> {
     let row = sqlx::query_as::<_, (String,)>("SELECT password FROM passwords WHERE id = ?")
         .bind(id)

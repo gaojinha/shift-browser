@@ -36,16 +36,37 @@ static TOOLBAR_H: AtomicI32 = AtomicI32::new(122);
 
 /// 当前应使用的工具栏高度（书签栏展开或收起，F-CEF-09）。
 fn toolbar_height() -> i32 {
-    TOOLBAR_H.load(Ordering::Relaxed) + PW_EXTRA.load(Ordering::Relaxed)
+    TOOLBAR_H.load(Ordering::Relaxed) + PW_EXTRA.load(Ordering::Relaxed) + BM_EXTRA.load(Ordering::Relaxed)
 }
 
 /// 密码面板（F-CEF-12）展开时工具栏视图额外加高的像素，收起为 0
 const PW_PANEL_EXTRA: i32 = 260;
 static PW_EXTRA: AtomicI32 = AtomicI32::new(0);
 
+/// 书签文件夹下拉展开时额外加高：CEF 的工具栏是独立视图，`position:fixed` 的
+/// 下拉框照样被 122px 视口裁掉（2026-10-26 实测截图里看不到），只能临时把
+/// 视图撑高；面板收起即还原（内容区跟着上下让位，跟密码面板同一套做法）。
+const BM_POPUP_EXTRA: i32 = 360;
+static BM_EXTRA: AtomicI32 = AtomicI32::new(0);
+
 /// 密码面板开合：加/减工具栏视图高度并重排（只动 PW_EXTRA，不碰书签栏态）
 pub fn set_pw_panel(open: bool) {
     PW_EXTRA.store(if open { PW_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+    if open {
+        BM_EXTRA.store(0, Ordering::Relaxed);
+    }
+    apply_toolbar_height();
+}
+
+/// 书签下拉开合：临时加高/还原工具栏视图（下拉要画在书签栏下方）。
+/// `need` 是页面算出的下拉高度（含间距），钳在 80..360，防止异常值把窗口撑坏。
+fn set_bm_popup(open: bool, need: i32) {
+    let extra = if open {
+        need.clamp(80, BM_POPUP_EXTRA)
+    } else {
+        0
+    };
+    BM_EXTRA.store(extra, Ordering::Relaxed);
     apply_toolbar_height();
 }
 
@@ -692,7 +713,10 @@ wrap_display_handler! {
             static BOOKMARKS_PUSHED: std::sync::atomic::AtomicBool =
                 std::sync::atomic::AtomicBool::new(false);
             if !BOOKMARKS_PUSHED.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                refresh_bookmarks_ui();
+                // 推新格式（folders + bookmarks）：页面启动时自己的 bootBookmarks
+                // 实测没跑起来（手动调 renderBookmarks 有效，说明是启动时序问题），
+                // 这里在标题回调里补一次，确定会执行。
+                reload_bookmarks_from_db();
             }
         }
     }
@@ -920,30 +944,85 @@ fn reload_bookmarks_from_db() {
     };
     let pool = pool.clone();
     let rows = tauri::async_runtime::block_on(async move {
-        sqlx::query_as::<_, (i64, String, String)>(
-            "SELECT id, title, url FROM bookmarks ORDER BY sort_order, id LIMIT 200",
+        let bms = sqlx::query_as::<_, (i64, String, String, Option<i64>)>(
+            "SELECT id, title, url, folder_id FROM bookmarks ORDER BY sort_order, id LIMIT 300",
         )
         .fetch_all(&pool)
-        .await
+        .await?;
+        let folders = sqlx::query_as::<_, (i64, String, Option<i64>)>(
+            "SELECT id, name, parent_id FROM bookmark_folders ORDER BY sort_order, id",
+        )
+        .fetch_all(&pool)
+        .await?;
+        Ok::<_, sqlx::Error>((bms, folders))
     });
     match rows {
-        Ok(rows) => {
-            let list: Vec<(String, String)> = rows
+        Ok((bms, folders)) => {
+            let list: Vec<(String, String)> = bms
                 .iter()
-                .map(|(_, t, u)| (t.clone(), u.clone()))
+                .map(|(_, t, u, _)| (t.clone(), u.clone()))
                 .collect();
-            BOOKMARKS.with(|b| *b.borrow_mut() = list.clone());
-            let json = rows
+            BOOKMARKS.with(|b| *b.borrow_mut() = list);
+            let bm_json: Vec<serde_json::Value> = bms
                 .iter()
-                .map(|(id, t, u)| serde_json::json!({ "id": id, "title": t, "url": u }))
-                .collect::<Vec<_>>();
-            let json = serde_json::to_string(&json).unwrap_or_else(|_| "[]".to_string());
+                .map(|(id, t, u, f)| serde_json::json!({ "id": id, "title": t, "url": u, "folderId": f }))
+                .collect();
+            let f_json: Vec<serde_json::Value> = folders
+                .iter()
+                .map(|(id, n, p)| serde_json::json!({ "id": id, "name": n, "parentId": p }))
+                .collect();
+            let json = serde_json::json!({ "folders": f_json, "bookmarks": bm_json }).to_string();
             run_toolbar_js(&format!(
                 "if (window.__shiftBookmarks) {{ window.__shiftBookmarks({json}); }}"
             ));
-            log::info!("[cef] 书签已刷新：{} 条", rows.len());
+            log::info!("[cef] 书签已刷新：{} 条 / {} 个文件夹", bms.len(), folders.len());
         }
         Err(e) => log::warn!("[cef] 书签刷新失败: {e}"),
+    }
+}
+
+/// 新建书签文件夹并刷新。`parent_id` 为 None 表示顶层。
+fn create_folder(name: &str, parent_id: Option<i64>) {
+    let Some(pool) = crate::db::GLOBAL_POOL.get() else { return };
+    let pool = pool.clone();
+    let name = name.to_string();
+    let name_for_db = name.clone();
+    let res = tauri::async_runtime::block_on(async move {
+        sqlx::query(
+            "INSERT INTO bookmark_folders (name, parent_id, sort_order, created_at) \
+             VALUES (?, ?, 0, datetime('now'))",
+        )
+        .bind(&name_for_db)
+        .bind(parent_id)
+        .execute(&pool)
+        .await
+    });
+    match res {
+        Ok(r) => {
+            log::info!("[cef] 文件夹已创建「{name}」parent={parent_id:?}（{} 行）", r.rows_affected());
+            reload_bookmarks_from_db();
+        }
+        Err(e) => log::warn!("[cef] 新建文件夹失败: {e}"),
+    }
+}
+
+/// 移动书签到文件夹（`folder_id` 为 None 表示移回书签栏）。
+fn move_bookmark(id: i64, folder_id: Option<i64>) {
+    let Some(pool) = crate::db::GLOBAL_POOL.get() else { return };
+    let pool = pool.clone();
+    let res = tauri::async_runtime::block_on(async move {
+        sqlx::query("UPDATE bookmarks SET folder_id = ? WHERE id = ?")
+            .bind(folder_id)
+            .bind(id)
+            .execute(&pool)
+            .await
+    });
+    match res {
+        Ok(r) => {
+            log::info!("[cef] 书签已移动 id={id} -> folder={folder_id:?}（{} 行）", r.rows_affected());
+            reload_bookmarks_from_db();
+        }
+        Err(e) => log::warn!("[cef] 移动书签失败: {e}"),
     }
 }
 
@@ -1022,24 +1101,13 @@ fn add_bookmark_from_current() {
     }
 }
 
-/// 把书签表推给工具栏页面的书签栏（调 `window.__shiftBookmarks`）。
+/// 把书签推给工具栏页面的书签栏。
+///
+/// 只此一份实现：必须带文件夹（`{folders,bookmarks}`），否则页面会把
+/// 已分组的书签按平铺重画、文件夹被抹掉（2026-10-26 实测：另一条老路径
+/// `refresh_bookmarks_ui` 推纯数组，启动后把 13 个文件夹覆盖成 65 条平铺）。
 pub fn refresh_bookmarks_ui() {
-    let json = BOOKMARKS.with(|b| {
-        let list: Vec<serde_json::Value> = b
-            .borrow()
-            .iter()
-            .map(|(t, u)| serde_json::json!({ "title": t, "url": u }))
-            .collect();
-        serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
-    });
-    let has_toolbar = BROWSERS.with(|m| m.borrow().contains_key(TOOLBAR_ID));
-    log::info!(
-        "[cef] 推书签 {} 条（toolbar browser 已注册={has_toolbar}）",
-        json.matches("\"url\"").count()
-    );
-    run_toolbar_js(&format!(
-        "if (window.__shiftBookmarks) {{ window.__shiftBookmarks({json}); }}"
-    ));
+    reload_bookmarks_from_db();
 }
 
 /// 在工具栏页面里执行一段 JS（地址栏/加载态等 UI 更新统一走这里）
@@ -1221,6 +1289,42 @@ fn handle_action(action: &str) {
                 let title = v["title"].as_str().unwrap_or("").to_string();
                 if let Some(id) = id {
                     update_bookmark_title(id, &title);
+                }
+            }
+            return;
+        }
+        "bmfoldopen" => {
+            let need = arg.parse::<i32>().unwrap_or(BM_POPUP_EXTRA);
+            set_bm_popup(true, need);
+            return;
+        }
+        "bmfoldclose" => {
+            set_bm_popup(false, 0);
+            return;
+        }
+        "bmnewfolder" => {
+            // 两种入参：纯名称（顶层）或 {name,parentId}（子文件夹）
+            if arg.starts_with('{') {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(arg) {
+                    let name = v["name"].as_str().unwrap_or("").trim().to_string();
+                    let parent = v["parentId"].as_i64();
+                    if !name.is_empty() {
+                        create_folder(&name, parent);
+                    }
+                }
+            } else if !arg.trim().is_empty() {
+                create_folder(arg.trim(), None);
+            }
+            return;
+        }
+        "bmmove" => {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(arg) {
+                let id = v["id"]
+                    .as_i64()
+                    .or_else(|| v["id"].as_str().and_then(|s| s.parse::<i64>().ok()));
+                let folder = v["folderId"].as_i64();
+                if let Some(id) = id {
+                    move_bookmark(id, folder);
                 }
             }
             return;

@@ -117,6 +117,27 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     color: #e8eaed; font-size: 18px; line-height: 1; margin: 0 0 4px 4px;
   }
   .tab-new:hover { background: #3c4043; }
+  /* 文件夹项与下拉 */
+  .bm.folder .bm-ico { background: #4a5a72; }
+  #bmfolders {
+    position: fixed; z-index: 180; display: none;
+    min-width: 180px; max-width: 320px; max-height: 300px; overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: #5f6368 transparent;
+    padding: 4px; background: #292a2d; border: 1px solid #3c4043;
+    border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    font-size: 12px; color: #e8eaed;
+  }
+  #bmfolders.open { display: block; }
+  #bmfolders::-webkit-scrollbar { width: 10px; }
+  #bmfolders::-webkit-scrollbar-thumb {
+    background: #5f6368; border-radius: 5px; border: 2px solid #292a2d;
+  }
+  #bmfolders::-webkit-scrollbar-track { background: transparent; }
+  #bmfolders .fd-title { padding: 6px 10px; color: #9aa0a6; font-size: 11px; }
+  #bmfolders .fd-item { padding: 6px 10px; border-radius: 6px; cursor: default;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #bmfolders .fd-item:hover { background: #3c4043; }
+  #bmfolders .fd-empty { padding: 8px 10px; color: #9aa0a6; }
   .bm-edit {
     width: 110px; height: 20px; padding: 0 6px;
     background: #202124; color: #e8eaed; font-size: 12px;
@@ -133,6 +154,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   #bmmenu div { padding: 7px 10px; border-radius: 6px; cursor: default; }
   #bmmenu div:hover { background: #3c4043; }
   #bmmenu div.danger:hover { background: #e81123; color: #fff; }
+  #bmmenu .menu-edit { padding: 2px; }
+  #bmmenu .menu-edit input { width: 150px; }
   /* 加载中：刷新按钮转圈（Rust 侧 data-loading 控制） */
   @keyframes spin { to { transform: rotate(360deg); } }
   html[data-loading="1"] #reload svg { animation: spin .9s linear infinite; }
@@ -253,6 +276,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     </button>
   </div>
   <div class="bookmarks" id="bookmarks"></div>
+  <div id="bmfolders"></div>
   <div id="bmmenu"></div>
   <div id="pwpanel">
     <input id="pwsearch" type="text" spellcheck="false" placeholder="搜索站点或用户名">
@@ -339,31 +363,12 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   });
 
   // 书签栏：Rust 侧读到数据库后整表刷新；未读到前保留 HTML 里的静态兜底
-  window.__shiftBookmarks = function (list) {
-    const bar = document.getElementById('bookmarks');
-    if (!bar || !Array.isArray(list)) return;
-    if (list.length === 0) return; // 库里没书签就保留兜底，避免空条
-    bar.innerHTML = '';
-    list.forEach((b) => {
-      const el = document.createElement('div');
-      el.className = 'bm';
-      el.dataset.url = b.url || '';
-      el.dataset.id = String(b.id || '');
-      const ico = document.createElement('span');
-      ico.className = 'bm-ico';
-      const title = b.title || b.url || '书签';
-      ico.textContent = title.trim().charAt(0).toUpperCase();
-      const name = document.createElement('span');
-      name.className = 'bm-name';
-      name.textContent = title;
-      el.appendChild(ico);
-      el.appendChild(name);
-      bar.appendChild(el);
-    });
+  window.__shiftBookmarks = function (data) {
+    // 新格式 {folders,bookmarks}；旧格式（纯数组）也能吃
+    if (Array.isArray(data)) { renderBookmarks({ folders: [], bookmarks: data }); return; }
+    renderBookmarks(data);
   };
 
-  // 书签栏显隐（F-CEF-09，Ctrl+Shift+B，Rust 侧 execute_java_script 调用）：
-  // 在 html 挂 bookmarks-hidden 类，CSS 同时隐藏书签栏并把页面高度 122→88。
   window.__shiftBookmarksVisible = function (visible) {
     document.documentElement.classList.toggle('bookmarks-hidden', !visible);
   };
@@ -439,25 +444,64 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   // ---- 书签右键菜单（F-CEF-13）----
   const bmmenu = document.getElementById('bmmenu');
   let bmMenuTarget = null;
+  let bmMenuPos = { x: 0, y: 0 };
 
   function hideBmMenu() {
     bmmenu.classList.remove('open');
     bmMenuTarget = null;
   }
 
+  // 菜单里就地输入文件夹名（CEF 没有 window.prompt，只能自己画）
+  function newFolderPrompt() {
+    bmmenu.innerHTML = '';
+    const box = document.createElement('div');
+    box.className = 'menu-edit';
+    const input = document.createElement('input');
+    input.className = 'bm-edit';
+    input.placeholder = '文件夹名称';
+    input.spellcheck = false;
+    box.appendChild(input);
+    bmmenu.appendChild(box);
+    input.focus();
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const v = input.value.trim();
+        hideBmMenu();
+        if (v) act('bmnewfolder|' + v);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        hideBmMenu();
+      }
+    });
+    input.addEventListener('click', (e) => e.stopPropagation());
+  }
+
   document.getElementById('bookmarks').addEventListener('contextmenu', (e) => {
     e.preventDefault();
     const item = e.target.closest('.bm');
     bmMenuTarget = item;
-    const rows = item
-      ? [
-          ['打开', () => act('nav|' + item.dataset.url)],
-          ['编辑标题', () => editBookmarkTitle(item)],
-          ['删除', () => act('bmdel|' + item.dataset.id), 'danger'],
-        ]
-      : [
-          ['新建书签（当前页）', () => act('bmadd')],
-        ];
+    bmMenuPos = { x: e.clientX, y: e.clientY };
+    let rows;
+    if (!item) {
+      rows = [
+        ['新建书签（当前页）', () => act('bmadd')],
+        ['新建文件夹', () => newFolderPrompt()],
+      ];
+    } else if (item.classList.contains('folder')) {
+      const fid = Number(item.dataset.folder);
+      rows = [
+        ['打开文件夹', () => showFolderMenu({ id: fid, name: item.querySelector('.bm-name').textContent }, item)],
+        ['在此新建子文件夹', () => newSubFolderPrompt(fid)],
+      ];
+    } else {
+      rows = [
+        ['打开', () => act('nav|' + item.dataset.url)],
+        ['编辑标题', () => editBookmarkTitle(item)],
+        ['移到文件夹', () => showMoveMenu(item.dataset.id, bmMenuPos)],
+        ['删除', () => act('bmdel|' + item.dataset.id), 'danger'],
+      ];
+    }
     bmmenu.innerHTML = '';
     rows.forEach(([label, fn, cls]) => {
       const d = document.createElement('div');
@@ -475,31 +519,187 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (!e.target.closest('#bmmenu')) hideBmMenu();
   });
 
-  // 启动时渲染内嵌书签（生成页面时由 Rust 写入，无时序问题）
-  (function renderBookmarks() {
-    const el = document.getElementById('bm-data');
+  // 「移到文件夹」选择面板（复用 #bmfolders 面板，位置沿用右键点）
+  function showMoveMenu(bmId, pos) {
+    const panel = document.getElementById('bmfolders');
+    panel.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'fd-title';
+    head.textContent = '移到文件夹';
+    panel.appendChild(head);
+    const mk = (label, folderId) => {
+      const d = document.createElement('div');
+      d.className = 'fd-item';
+      d.textContent = label;
+      d.addEventListener('click', () => {
+        hideFolderMenu();
+        act('bmmove|' + JSON.stringify({ id: Number(bmId), folderId }));
+      });
+      panel.appendChild(d);
+    };
+    mk('— 书签栏（不分组）', null);
+    // 按父子关系展开，缩进表示层级
+    const kids = new Map();
+    (bmData.folders || []).forEach((f) => {
+      const k = f.parentId === null || f.parentId === undefined ? 'root' : f.parentId;
+      if (!kids.has(k)) kids.set(k, []);
+      kids.get(k).push(f);
+    });
+    const walk = (key, depth) => {
+      (kids.get(key) || []).forEach((f) => {
+        mk('　'.repeat(depth) + f.name, f.id);
+        walk(f.id, depth + 1);
+      });
+    };
+    walk('root', 0);
+    panel.style.left = Math.min(pos.x, window.innerWidth - 340) + 'px';
+    panel.style.top = Math.min(pos.y + 6, window.innerHeight - 380) + 'px';
+    panel.classList.add('open');
+    act('bmfoldopen|' + (Math.min(panel.scrollHeight, 300) + 20));
+  }
+
+  // 在指定文件夹下新建子文件夹
+  function newSubFolderPrompt(parentId) {
+    bmmenu.innerHTML = '';
+    const box = document.createElement('div');
+    box.className = 'menu-edit';
+    const input = document.createElement('input');
+    input.className = 'bm-edit';
+    input.placeholder = '子文件夹名称';
+    input.spellcheck = false;
+    box.appendChild(input);
+    bmmenu.appendChild(box);
+    input.focus();
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const v = input.value.trim();
+        hideBmMenu();
+        if (v) act('bmnewfolder|' + JSON.stringify({ name: v, parentId }));
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        hideBmMenu();
+      }
+    });
+    input.addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  // 书签栏渲染：未分组书签平铺 + 顶层文件夹（点击展开下拉）
+  // 数据格式 { folders: [{id,name,parentId}], bookmarks: [{id,title,url,folderId}] }
+  const bmfolders = document.getElementById('bmfolders');
+  let bmData = { folders: [], bookmarks: [] };
+
+  function hideFolderMenu() {
+    if (!bmfolders.classList.contains('open')) return; // 避免每次点页面都往 Rust 发消息
+    bmfolders.classList.remove('open');
+    act('bmfoldclose');
+  }
+
+  function bmItemHtml(b) {
+    const el = document.createElement('div');
+    el.className = 'bm';
+    el.dataset.url = b.url || '';
+    el.dataset.id = String(b.id || '');
+    const ico = document.createElement('span');
+    ico.className = 'bm-ico';
+    const title = b.title || b.url || '书签';
+    ico.textContent = title.trim().charAt(0).toUpperCase();
+    const name = document.createElement('span');
+    name.className = 'bm-name';
+    name.textContent = title;
+    el.appendChild(ico);
+    el.appendChild(name);
+    return el;
+  }
+
+  function renderBookmarks(data) {
     const bar = document.getElementById('bookmarks');
-    if (!el || !bar) return;
-    let list = [];
-    try { list = JSON.parse(el.textContent || '[]'); } catch (e) { list = []; }
-    if (!Array.isArray(list) || list.length === 0) return;
+    if (!bar || !data || !Array.isArray(data.bookmarks)) return;
+    bmData = data;
     bar.innerHTML = '';
-    list.forEach((b) => {
-      const item = document.createElement('div');
-      item.className = 'bm';
-      item.dataset.url = b.url || '';
-      item.dataset.id = String(b.id || '');
+    const topFolders = (data.folders || []).filter((f) => f.parentId === null || f.parentId === undefined);
+    // 所有层级的文件夹 id：子文件夹里的书签也只在下拉里出现，不平铺
+    const allFolderIds = new Set((data.folders || []).map((f) => f.id));
+    data.bookmarks
+      .filter((b) => b.folderId === null || b.folderId === undefined || !allFolderIds.has(b.folderId))
+      .forEach((b) => bar.appendChild(bmItemHtml(b)));
+    // 顶层文件夹
+    topFolders.forEach((f) => {
+      const el = document.createElement('div');
+      el.className = 'bm folder';
+      el.dataset.folder = String(f.id);
       const ico = document.createElement('span');
       ico.className = 'bm-ico';
-      const title = b.title || b.url || '书签';
-      ico.textContent = title.trim().charAt(0).toUpperCase();
+      ico.textContent = '📁';
       const name = document.createElement('span');
       name.className = 'bm-name';
-      name.textContent = title;
-      item.appendChild(ico);
-      item.appendChild(name);
-      bar.appendChild(item);
+      name.textContent = f.name;
+      el.appendChild(ico);
+      el.appendChild(name);
+      el.addEventListener('click', () => showFolderMenu(f, el));
+      bar.appendChild(el);
     });
+  }
+
+  function showFolderMenu(folder, anchorEl) {
+    // 递归收集该文件夹及子文件夹里的书签
+    const ids = new Set([folder.id]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      (bmData.folders || []).forEach((f) => {
+        if (f.parentId && ids.has(f.parentId) && !ids.has(f.id)) { ids.add(f.id); grew = true; }
+      });
+    }
+    const items = (bmData.bookmarks || []).filter((b) => ids.has(b.folderId));
+    bmfolders.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'fd-title';
+    head.textContent = folder.name + '（' + items.length + '）';
+    bmfolders.appendChild(head);
+    if (items.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'fd-empty';
+      empty.textContent = '这个文件夹是空的';
+      bmfolders.appendChild(empty);
+    }
+    items.forEach((b) => {
+      const d = document.createElement('div');
+      d.className = 'fd-item';
+      d.textContent = b.title || b.url || '书签';
+      d.title = b.url || '';
+      d.addEventListener('click', () => { hideFolderMenu(); act('nav|' + b.url); });
+      bmfolders.appendChild(d);
+    });
+    // 按文件夹元素定位（不依赖事件坐标：程序化点击时 clientX/Y 都是 0）
+    const rc = anchorEl ? anchorEl.getBoundingClientRect() : { left: 0, bottom: 122 };
+    bmfolders.style.left = Math.max(4, Math.min(rc.left, window.innerWidth - 330)) + 'px';
+    bmfolders.style.top = (rc.bottom + 4) + 'px';
+    bmfolders.classList.add('open');
+    // 工具栏视图临时加高（下拉是独立视图，不撑高就被 122px 视口裁掉）。
+    // 加高值按下拉实际高度算，短文件夹就不会顶出一大块空白。
+    act('bmfoldopen|' + (Math.min(bmfolders.scrollHeight, 300) + 20));
+  }
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#bmfolders') && !e.target.closest('.bm.folder')) hideFolderMenu();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      hideFolderMenu();
+      hideBmMenu();
+    }
+  });
+
+  // 启动：解析内嵌数据并渲染
+  (function bootBookmarks() {
+    const el = document.getElementById('bm-data');
+    if (!el) return;
+    let data = { folders: [], bookmarks: [] };
+    try { data = JSON.parse(el.textContent || '{}'); } catch (e) { data = { folders: [], bookmarks: [] }; }
+    if (Array.isArray(data)) data = { folders: [], bookmarks: data };
+    renderBookmarks(data);
   })();
 
   // ---- 密码面板（F-CEF-12）----
