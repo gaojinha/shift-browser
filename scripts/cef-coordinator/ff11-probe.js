@@ -38,15 +38,31 @@
       GPC_ON: has('__SHIFT_GPC_ON__')
     },
 
-    // ③ 隐私脚本（privacy.js）自己留的特征
+    // ③ 隐私脚本（src-tauri/resources/js/privacy.js）自己留的特征
+    //    ⚠️ 12:43 那轮本块有两项是【探针自己的错】，不是页面缺陷，别再照字面读：
+    //    (a) 旧 `patched: has('__shiftPatched')` → false。**假阴性**：`__shiftPatched`
+    //        从不挂 window，它是 WebRTC 防护的幂等哨兵，挂在构造函数上
+    //        （privacy.js:233 `if (OrigRTC && !OrigRTC.__shiftPatched)`）。
+    //        真判据在下面 rtc_webrtc_patched。
+    //    (b) 旧 `brands_val: brief(window.__shiftBrands)` → null。**假阴性**：`__shiftBrands`
+    //        是函数内局部变量（privacy.js:337 `var __shiftBrands = null;`），
+    //        页面上永远读不到。品牌表真值在 __SHIFT_UA_BRANDS__（注入侧）
+    //        和 navigator.userAgentData（运行时侧），拆成下面两项分别取。
     privacy_marks: {
-      patched: has('__shiftPatched'),
       features: brief(window.__shiftPrivacyFeatures),
-      installed: has('__shiftPrivacyInstalled'),
-      noise_on: has('__shiftNoiseOn'),
-      fp_mode_val: brief(window.__shiftFpMode),
-      brands_val: brief(window.__shiftBrands),
-      origin_seed: has('__shiftOriginSeed')
+      installed: has('__shiftPrivacyInstalled'),      // privacy.js:4 window 上，有效
+      noise_on: has('__shiftNoiseOn'),                // privacy.js:43/92，有效
+      fp_mode_val: brief(window.__shiftFpMode),       // privacy.js:101，有效
+      origin_seed: has('__shiftOriginSeed'),          // privacy.js:78，有效
+      // 修正后的 WebRTC 判据：哨兵挂构造函数上
+      rtc_webrtc_patched: !!(window.RTCPeerConnection && window.RTCPeerConnection.__shiftPatched),
+      rtc_ctor_changed: window.RTCPeerConnection !== window.__shiftOrigRTC,
+      // 品牌表：注入侧 vs 运行时侧必须分开看，两者不一致才是真问题
+      brands_injected: brief(window.__SHIFT_UA_BRANDS__),
+      brands_runtime: (function () {
+        try { return brief(window.navigator.userAgentData && window.navigator.userAgentData.brands); }
+        catch (e) { return 'ERR:' + e.message; }
+      })()
     },
 
     // ★ 翻译桥（context_translate.js）。12:43 我拿错符号名（window.__shiftTranslate

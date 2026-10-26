@@ -82,26 +82,42 @@ say "主窗口 XID=$XID  初始几何=$GEO0  与期望差=$BESTDIFF（差>40 说
 printf "$CANDS" | sed 's/^/  /'
 
 TB() { python3 scripts/cef-coordinator/cdp-eval-target.py "$PORT" toolbar.html "$1" scripts/cef-coordinator/ff09-probe.js >/dev/null 2>&1; }
-PG() { echo '({innerHeight: window.innerHeight, innerWidth: window.innerWidth, href: location.href})' > /tmp/opencode/h.js
+PG() { echo '({innerHeight: window.innerHeight, innerWidth: window.innerWidth, has_focus: document.hasFocus(), href: location.href})' > /tmp/opencode/h.js
        python3 scripts/cef-coordinator/cdp-eval-target.py "$PORT" example.com "$1" /tmp/opencode/h.js >/dev/null 2>&1; }
+PGF() { python3 -c "
+import json;d=json.load(open('$1'));e=d.get('eval',{})
+print('    内容页: innerHeight=%s hasFocus=%s' % (e.get('innerHeight'), e.get('has_focus')))" 2>/dev/null; }
 R() { python3 -c "
 import json;d=json.load(open('$1'));e=d.get('eval',{})
 print('   ', json.dumps({k:e.get(k) for k in ('bookmarks_offsetHeight','html_class','innerHeight','innerWidth')},ensure_ascii=False))"; }
 GEO() { xdotool getwindowgeometry "$XID" 2>/dev/null | sed -n 's/.*Geometry: \([0-9]*x[0-9]*\).*/\1/p'; }
 
 press() {
-  # 12:52 那轮能成，靠的是「先 windowactivate --sync 再 key」；12:58 只发 key 就全废。
-  # 三条都发一遍：activate 拿焦点 → --window 定向发 → 裸 key 发给焦点窗兜底。
-  xdotool windowactivate --sync "$XID" 2>/dev/null; sleep 0.6
+  # Ctrl+Shift+B 挂在 CEF 的 KeyboardHandler::on_pre_key_event（shell.rs:1342/1352）
+  # → 键盘事件必须真进到 browser 里才算数。c91d383（13:05）修的正是「点进去没反应」：
+  #   View 层 request_focus 不够，CEF browser 还要单独 set_focus(1)，否则 document.hasFocus() 恒 false。
+  # 所以按**用户真实动作**走：激活窗 → 焦点给窗 → 鼠标点内容区空白（触发上面那条聚焦路径）→ 发键。
+  # 点角落而非中央：example.com 正文中间有链接，点中央会跳页、把 target 换掉。
+  xdotool windowactivate --sync "$XID" 2>/dev/null
+  xdotool windowfocus --sync "$XID" 2>/dev/null
+  eval "$(xdotool getwindowgeometry --shell "$XID" 2>/dev/null)"   # 得 X Y WIDTH HEIGHT
+  xdotool mousemove --sync $(( ${X:-100} + 24 )) $(( ${Y:-100} + ${HEIGHT:-600} - 24 )) 2>/dev/null
+  xdotool click 1 2>/dev/null; sleep 0.6
+  xdotool key --clearmodifiers ctrl+shift+b 2>/dev/null; sleep 0.35
   xdotool key --window "$XID" --clearmodifiers ctrl+shift+b 2>/dev/null
-  sleep 0.3
-  xdotool key --clearmodifiers ctrl+shift+b 2>/dev/null
 }
 die_if_not_collapsed() {  # 按键后必须校验"真收起"了，否则后面全是在测展开态
   local f="$1" oh
   oh="$(python3 -c "import json;print(json.load(open('$f'))['eval'].get('bookmarks_offsetHeight'))" 2>/dev/null || echo ERR)"
   if [ "$oh" != "0" ]; then
     say "FAIL 按键后 offsetHeight=${oh}（应为 0）→ 键没走到 toggle_bookmarks，后续 resize 数据全部无效"
+    # 归因分两层：内容页有没有键盘焦点 → 决定是「事件没进 browser」还是「toggle_bookmarks 坏了」
+    PG "$OUTD/fail-page.json"
+    say "  $(python3 -c "
+import json;d=json.load(open('$OUTD/fail-page.json'));e=d.get('eval',{})
+print('内容页 hasFocus=%s innerHeight=%s' % (e.get('has_focus'), e.get('innerHeight')))" 2>/dev/null)"
+    say "  判读：hasFocus=False ⇒ 键盘事件没进 CEF browser（焦点通道问题，非本卡缺陷）"
+    say "        hasFocus=True 且 offsetHeight≠0 ⇒ toggle_bookmarks 真坏了 / 或 c91d383 引入回归"
     say "  换窗再试：候选清单见上；也可手动 XID=<正确窗> 重跑本脚本"
     timeout 20 import -window "$XID" "$OUTD/shot-die.png" 2>/dev/null && say "  已截图 $OUTD/shot-die.png"
     systemctl --user stop "$UNIT" 2>/dev/null; sleep 2; rm -rf "$PROF"
@@ -111,12 +127,10 @@ die_if_not_collapsed() {  # 按键后必须校验"真收起"了，否则后面�
 }
 
 say "── ① 基线（展开态）──"
-TB "$OUTD/a-toolbar.json"; R "$OUTD/a-toolbar.json"; PG "$OUTD/a-page.json"; say "    内容: $(python3 -c "import json;print(json.load(open('$OUTD/a-page.json'))['eval']['innerHeight'])")"; say "    窗口: $(GEO)"
-
+PG "$OUTD/a-page.json"; PGF "$OUTD/a-page.json"; say "    工具栏: "; R "$OUTD/a-toolbar.json"
 say "── ② 收起（真按键）──"; press; sleep 1.8
 TB "$OUTD/b-toolbar.json"; R "$OUTD/b-toolbar.json"; die_if_not_collapsed "$OUTD/b-toolbar.json"
-PG "$OUTD/b-page.json"; say "    内容: $(python3 -c "import json;print(json.load(open('$OUTD/b-page.json'))['eval']['innerHeight'])")"; say "    窗口: $(GEO)"
-
+PG "$OUTD/b-page.json"; PGF "$OUTD/b-page.json"
 say "── ③ 收起态 resize 到 1000x700（copilot 猜的翻车点）──"
 xdotool windowsize "$XID" 1000 700; sleep 2.0
 TB "$OUTD/c-toolbar.json"; R "$OUTD/c-toolbar.json"; PG "$OUTD/c-page.json"

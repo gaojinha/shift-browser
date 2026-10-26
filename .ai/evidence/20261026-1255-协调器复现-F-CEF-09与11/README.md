@@ -42,3 +42,24 @@ copilot 13:00 验收回执里「二狗的复跑不能作为 F-CEF-09 证据」�
 
 `resize` 压测（收起态下手动改窗口高度，看工具栏会不会被 BoxLayout 顶回 122）。
 这是 copilot 13:00 回执里提出的风险点，它没权限实测；我的补测脚本 `scripts/cef-coordinator/ff09-resize-probe.sh` 跑成后，数据追加到这里。
+
+
+## ✖ 第三处更正（13:20-13:32）：`04-inject.json` 里三项读数是**我探针的错**，不得当缺陷证据
+
+原始件**不改**（留证），但引用前必须知道：
+
+| 字段 | 原始读数 | 真相 |
+|---|---|---|
+| `prefix_vars.TRANSLATE_TIMEOUT` | `false` | **假阴性**。探针名写成 `__SHIFT_TRANSLATE_TIMEOUT__`（多两个尾下划线），真名无尾缀（`adblock.rs:157`）。已改 `TRANSLATE_TIMEOUT_VAL` 取实际值（本机 settings `translate_timeout=120`，合法区间 5..=120） |
+| `privacy_marks.patched` | `false` | **假阴性**。`__shiftPatched` 不挂 window，是 WebRTC 防护的幂等哨兵，挂在构造函数上（`privacy.js:233 !OrigRTC.__patched` 形如 `OrigRTC.__shiftPatched`）。探针已换 `rtc_webrtc_patched` 直读 `RTCPeerConnection.__shiftPatched` |
+| `privacy_marks.brands_val` | `null` | **假阴性**。`__shiftBrands` 是函数内局部变量（`privacy.js:337 var`），页面永远读不到。**品牌表其实装上了**：同件 `ua_brands` 有完整三项 `{Not_A Brand 24, Chromium 154, Google Chrome 154}` |
+
+**仍然有效的读数**（符号确在 window 上，逐条从 `resources/js/privacy.js` 定位过行号）：`installed` ✔(4) / `noise_on` ✔(43,92) / `origin_seed` ✔(78) / `fp_mode_val="uniform"` ✔(101) / `features` ✔(417)；以及 `inject_ok`、`style_count=1`、`style_len_head=290`、`ctxMenuReg`。
+
+**推论订正**：
+- 「wl_prefix 整段没执行」——**作废**（正数 3 实测到，6/7 前缀变量为 true）。
+- 「隐私补丁没打上 / 品牌表未生效」——**作废**（两项都是探针位置读错）。
+- 「翻译在 CEF 下不可用」——**仍成立**，但理由换成**宿主通道缺失**（WebKit messageHandlers + Tauri 自定义协议两通道 CEF 都没有），详见 `.ai/inbox/copilot/20261026-1320-F-CEF-11更正-我误报两条.md`。
+- §1.2 指纹那份「brands 待重采」**未销账**：本件只确证了**注入侧** `__SHIFT_UA_BRANDS__`，**运行时侧** `navigator.userAgentData.brands` 当时没读。探针已加 `brands_runtime`，下轮一并采。
+
+**根因（一句话）**：探针里的字符串常量**必须 `grep` 从源码取**，还要确认它**挂在哪个对象上**（window / 构造函数 / 局部变量）。手抄名字 = 拿假钥匙开锁，倒说屋里没人。
