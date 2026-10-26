@@ -63,7 +63,7 @@ async def main() -> int:
                 val = res.get("value")
                 # 表达式返回字符串时直接打印，脚本侧 grep 更直观；
                 # 返回对象/异常时保留完整 result（含 exceptionDetails）。
-                if isinstance(val, str):
+                if isinstance(val, (str, int, float, bool)):
                     print(val)
                 else:
                     print(json.dumps(msg.get("result", {}), ensure_ascii=False))

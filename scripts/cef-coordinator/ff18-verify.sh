@@ -30,7 +30,8 @@ for p in 9380 9381 9382 9383 9384; do
 done
 [ -z "$PORT" ] && { say "ABORT 9380-9384 全占"; exit 91; }
 
-say "端口=$PORT profile=$PROF"
+XAUTH="$(ls -1 /run/user/1000/.mutter-Xwaylandauth.* 2>/dev/null | head -1)"
+say "端口=$PORT profile=$PROF XAUTH=$XAUTH"
 {
   say "采集时刻: $(date '+%F %T%z')"
   say "HEAD: $(git -C "$REPO" rev-parse --short HEAD)"
@@ -38,7 +39,7 @@ say "端口=$PORT profile=$PROF"
   say "工作树改动: $(git -C "$REPO" status --short -- src-tauri/ | wc -l)"
 } > "$OUTD/meta.md"
 
-( cd "$REPO/src-tauri" && nohup env DISPLAY=:0 \
+( cd "$REPO/src-tauri" && nohup env DISPLAY=:0 XAUTHORITY="$XAUTH" \
     SHIFT_CEF_DEBUG_PORT="$PORT" SHIFT_CEF_SHELL_URL="$URL" \
     SHIFT_CEF_CACHE_DIR="$PROF" GDK_BACKEND=x11 \
     LD_LIBRARY_PATH="$REPO/src-tauri/target/debug" \
