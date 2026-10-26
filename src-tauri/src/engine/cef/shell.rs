@@ -220,6 +220,17 @@ pub fn force_show() {
                             x11::xlib::XFlush(dpy);
                         }
 
+                        // 无装饰窗口要显式声明「接受键盘焦点」，否则 Mutter 会把
+                        // windowfocus 请求转给别的窗口（实测焦点被踢回 0x600003）。
+                        {
+                            let mut wh = x11::xlib::XWMHints {
+                                flags: x11::xlib::InputHint,
+                                input: 1,
+                                ..std::mem::zeroed()
+                            };
+                            x11::xlib::XSetWMHints(dpy, win, &mut wh);
+                        }
+
                         // 去掉系统装饰需要 remap 一次（属性已在 on_window_created 写好）
                         x11::xlib::XUnmapWindow(dpy, win);
                         x11::xlib::XMapRaised(dpy, win);
@@ -813,6 +824,16 @@ fn switch_tab(idx: usize) {
     ACTIVE_TAB.with(|a| a.set(idx));
     // 切标签后活动视图换了，按当前书签栏态重排一次（收起态下内容视图 y 仍是新高度）
     apply_toolbar_height();
+    // View 层 request_focus ≠ 网页能收键盘：CEF 的 browser 还要单独 set_focus(1)。
+    // 2026-10-26 实测：只 request_focus 时 document.hasFocus() 一直 false。
+    let active_id = SHELL_TABS.with(|t| t.borrow().get(idx).map(|x| x.id.clone()));
+    if let Some(id) = active_id {
+        BROWSERS.with(|m| {
+            if let Some(b) = m.borrow().get(&id) {
+                super::browser::focus(b);
+            }
+        });
+    }
     log::info!("[cef] 切换到标签 {idx}");
     refresh_tabbar();
 }
