@@ -57,8 +57,14 @@
 > ① **CEF 侧当前未设 UA**（`engine/cef/` 与 `cef_cmd.rs` 里 grep `user_agent` 零命中）——这是**对的**，
 >    内核原生 UA=Chromium 154 与 JA4 一致。接注入通道时**千万别把 WebKit 那套 142 的 UA 覆盖顺手带进来**，
 >    否则变成「JA4=154、UA=142」自相矛盾（正是诊断报告 1.2 节说的被判异常特征）。
-> ② `compat_chrome.js`（brands 伪装 142）在 CEF 下**应关闭**——原生 `navigator.userAgentData` 已是真实值，
->    再伪装反而造 lies。注入通道建成后按 `cef-engine` 特性分流，别一把注入。
+> ② ~~`compat_chrome.js`（brands 伪装 142）在 CEF 下**应关闭**——原生 `navigator.userAgentData` 已是真实值，
+>    再伪装反而造 lies。注入通道建成后按 `cef-engine` 特性分流，别一把注入。~~
+>    **⚠️ 2026-10-26 08:00 协调器实测更正（本条方向反了，以更正为准）**：CEF 原生 brands 只有
+>    `Chromium 154` + `Not A(Brand 99` 两项，**缺真 Chrome 的第三项 `Google Chrome 154`**（`fullVersionList` 同步缺），
+>    于是「UA 说 `Chrome/154.0.0.0`、品牌表里没有 Chrome」——正是风控专查的自洽性断裂，**不是"真实值"**。
+>    所以 CEF 侧不是关掉伪装，而是**要反向补全 `Google Chrome` 品牌**；且补进去的版本**必须由内核原生 UA 派生**，
+>    不得沿用 `UA_BRANDS_VERSION`（`142.0.7339.207`），否则变成「UA 154 / brands 142」新矛盾。已立卡 **F-CEF-08**。
+>    证据：`.ai/evidence/20261026-0138-协调器自采-CEF新构建同轮对照.md` §4（同轮实测，非推断）。
 > ③ 规划要求的「CEF 下 e2e 冒烟 12/12」**现有 `scripts/smoke.sh` 跑不了**（写死主仓二进制 + 全是 WebKit 专属检查项），
 >    须新建 `scripts/smoke-cef.sh`（CEF 日志关键字版），归本卡交付内容。
 > **领取顺序**：F-CEF-02 无前置可领；F-CEF-03/04 必须等 F-CEF-02 交付；F-CEF-05 必须等 F-CEF-02 交付；F-CEF-06 必须等 F-CEF-05 交付。前置没交就领后面的 = 白干，别抢跑。
@@ -71,6 +77,7 @@
 | F-CEF-05 | 【M3】指纹基线复测 + 请求头补齐 + UA 跟版对齐 + Cloudflare 实站验证集 + CreepJS 面板 | copilot（2026-10-25 14:35 派） | 验收/测试 | CEF 构建 vs 真 Chrome 154，跑 tls.peet.ws / httpbin.org：JA3/JA4、HTTP/2 指纹（Akamai）、UA/Client Hints 全家逐项对比，出报告 `docs/test-reports/cef-fingerprint-<date>.md`；按诊断报告 1.2 节第 3 层清单补齐应用层请求头（若 CEF 仍缺）；UA 跟版对齐（`useragent.rs` 现默认 Chrome/142 → CEF 是 Chromium 154，三处同步 + 季度跟版机制）；Cloudflare 实站验证集 3-5 个已知「真人验证」站点端到端复测（对照 WebKit 构建通过率）；CreepJS / Cover Your Tracks 全项指纹面板对比。**前置 F-CEF-02 交付后领取；当前可做不依赖 M2 的准备项**（工具链预研/UA 清单/站点清单/面板方案）。关口：JA4 与 Chrome 154 基线一致或差异可解释（逐项列差异表）；Cloudflare 验证站通过率 CEF > WebKit 且轻中度 ≥ 90%。数字铁律：指纹数据全部实测来源，不许编数。派单 `.ai/inbox/copilot/20261025-1435-F-CEF-05指纹实测派单.md` |
 | F-CEF-06 | 【M4】生产化：发布物/校验/崩溃取证/降级提示 + Wayland(XWayland) 验证 + 性能基线 | atomcode 队尾（前置 F-CEF-05） | 生产化 | 发布物走 **GitHub 实验 tag/Release 单一实验版**（高哥 2026-10-25 拍板）：CEF 构建产物发 GitHub Releases 的 `shift-browser-cef` tag（deb/zip + CEF runtime 说明），WebKit 默认版继续走常规渠道；CEF runtime 随构建期自动下载（crates.io cef-dll-sys 机制），发布说明标注 SHA/缓存机制与「推荐 X11 会话」；崩溃取证复用（`crash_signal.rs`，93ec309）在 CEF 路径生效验证；回退策略写进 `SECURITY.md`/发布说明（编译期 `--features cef-engine` 关 = WebKitGTK 零影响 + 运行期降级提示）；Wayland 验证（XWayland 下 CEF 子窗口 + DMA-BUF 视频渲染）；性能基线对照 `docs/test-reports/perf-baseline-2026-09-25.md`。关口：发布物在干净机器安装可跑（X11 会话）+ WebKit 构建发布物行为零变化（双轨验证）。 |
 | F-CEF-07 | 【M3】GPC 分构建默认值：CEF 关、WebKit 保持 + 设置页独立开关 | **done（二狗接管交付，提交 `5aa98bb`）** | 功能改造 | 高哥 2026-10-25 拍板。现状：`contracts.rs:89` / `src/constants.ts:68` 的 `gpc_header` 默认 `true`，`db/settings.rs:290-299` 无设置时视为开，每个出网请求发 `Sec-GPC: 1`，且 `extensions/privacy.rs:167` + `privacy.js` 注入 `navigator.globalPrivacyControl=true`。**实测真 Chrome 154 两者都没有**（见 `docs/test-reports/cef-fingerprint-2026-10-25.md` §7）。改法：① 默认值按构建分流（CEF 构建默认 false，WebKit 保持 true）；② 设置项文案注明「开启后与普通 Chrome 行为不同，部分风控站点更易识别」；③ 单测钉住两种构建下的默认值与注入行为（沿用 `contracts.rs` 单一来源，前端常量随 `cargo test --lib ts_export` 重生成）。关口：clippy 双配置 0 / cargo test --lib 默认 + cef-engine / vitest / lint + vue-tsc + build。
+| F-CEF-08 | 【M3】CEF 品牌表与 GPU 串对齐：补 `Google Chrome` brand + WebGL renderer 归一化 | copilot（2026-10-26 08:00 立，**前置 F-CEF-03 注入通道**） | 功能改造 | 协调器 01:38 同轮实测（`.ai/evidence/20261026-0138-协调器自采-CEF新构建同轮对照.md`）暴露三项真差异：① **`navigator.userAgentData.brands` 只有 `Chromium`+`Not A(Brand` 两项，缺 `Google Chrome`**（真 Chrome 三项，`fullVersionList` 同步缺）——`user-agent` 说 154、品牌表却没有 Chrome，属风控专查的自洽性断裂；② `UNMASKED_RENDERER` 走 Vulkan（`ANGLE (Intel, Vulkan 1.4.318 (Intel(R) HD Graphics 630 (KBL GT2)...), Intel open-source Mesa driver)`）vs 真 Chrome GL（`ANGLE (Intel, Mesa Intel(R) HD Graphics 630 (KBL GT2), OpenGL 4.6)`）——`7496476` 为救 WebGL 换后端付的代价，同块真核显；③ WebGL 扩展数 38→37（与②同源）。**手段现成**：`privacy.js:357/364` 拦 `userAgentData`（值来自 `adblock.rs:157` 的 `__SHIFT_UA_BRANDS__`）、`privacy.js:154-175` 归一化 37445/37446 为 `Google Inc.`/`ANGLE (Generic Renderer)`；**缺的是 CEF 侧注入通道 = F-CEF-03，故本卡必须排其后**。**铁律**：CEF 下 brands 版本**必须由内核原生 UA 派生**，不得沿用 `useragent.rs:63 UA_BRANDS_VERSION`（`142.0.7339.207`），否则变成「UA 154 / brands 142」新矛盾。**关口**：① noise 模式下 CEF 与 WebKit 两构建的 `brands`/`fullVersionList`/`UNMASKED_RENDERER` 输出一致；② 若走 GL 路线（补 `libEGL.so`/`libGLESv2.so`）则 `UNMASKED_RENDERER` 与真 Chrome 逐字相同——**关口语义是「与自家 WebKit 构建一致」，不是「与真 Chrome 逐字相同」**，别按后者验收。另附：`src/constants.ts:68` 的 `gpc_header.default` 仍硬编码 `'true'`（CEF 后端默认 `false`，前后端契约不一致），随本卡一并处理 |
 
 ## 待领任务
 

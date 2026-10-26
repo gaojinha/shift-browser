@@ -31,6 +31,7 @@
 > ⚠️ **协调器标注（2026-10-26 01:05）：本节为 n=1 单次采集、无原始证据落盘，且采集构建含 `--disable-gpu`（已于 `7496476` 换为 Vulkan+SwiftShader）。**
 > TLS/H2 层理论上不受 GPU 后端影响，但**理论不算实测**，且本节**完全没测浏览器层的 WebGL**（换核后最可能露馅的层面，见 §8）。
 > 定论以新构建重采为准，重测要求见 `.ai/inbox/copilot/20261026-0101-F-CEF-05重测派单.md`。
+> **2026-10-26 08:00 补**：协调器已在含 Vulkan 的新构建上自采一轮同轮对照（CEF 01:38:30 / 真 Chrome 01:38:43，同一段 JS、同机同出口），原始件 `assets/cef-coordinator-2026-10-26/`（已脱敏），结论见 `.ai/evidence/20261026-0138-协调器自采-CEF新构建同轮对照.md`：**TLS/H2 五项仍全同、`globalPrivacyControl` 两边均未定义（F-CEF-07 运行时成立）；暴露 `brands` 缺 `Google Chrome`、`UNMASKED_RENDERER` GL vs Vulkan 两项真差异 → 立卡 F-CEF-08。**该样本 n=1 且未做 CF 实站，**仍不可替代本节结论，M3 关口不得据此勾**。
 
 **结论：TLS/H2 层指纹与真 Chrome 154 完全一致**——JA4、Akamai H2、peetprint、套件数、扩展数五项全同。这是换核立项目标的直接验证（`docs/兼容性诊断-Cloudflare检测与视频闪烁根因_2026-10-14.md` 指的 TLS/JA4 硬伤已被消除）。
 
