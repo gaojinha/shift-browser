@@ -248,6 +248,23 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   .dl-row .dl-btn:hover { background: #4a4d51; }
   .dl-row .dl-btn.danger { color: #f28b82; }
   .dl-empty { color: #9aa0a6; padding: 12px 6px; font-size: 12px; }
+  /* 主菜单（F-CEF-16）：右上角下拉，样式对齐 Chrome 深色菜单 */
+  html.menu-open, html.menu-open body { height: 100vh; }
+  #menupanel {
+    display: none; position: absolute; right: 8px; top: 88px; width: 240px;
+    background: #292a2d; border: 1px solid #3c4043; border-radius: 8px;
+    padding: 6px; z-index: 20; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  }
+  html.menu-open #menupanel { display: block; }
+  html:not(.bookmarks-hidden) #menupanel { top: 122px; }
+  .menu-item {
+    display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px;
+    border-radius: 4px; font-size: 12px; color: #e8eaed; cursor: default;
+  }
+  .menu-item:hover { background: #3c4043; }
+  .menu-item.disabled { color: #5f6368; pointer-events: none; }
+  .menu-item .menu-key { margin-left: auto; color: #9aa0a6; font-size: 11px; }
+  .menu-sep { height: 1px; background: #3c4043; margin: 6px 0; }
   .addr-wrap {
     flex: 1; display: flex; align-items: center; height: 32px;
     background: #202124; border: 1px solid transparent; border-radius: 16px;
@@ -309,6 +326,9 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <button title="下载" id="dlbtn">
       <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>
     </button>
+    <button title="菜单" id="menubtn">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
+    </button>
   </div>
   <div class="bookmarks" id="bookmarks"></div>
   <div id="bmfolders"></div>
@@ -319,6 +339,23 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   </div>
   <div id="dlpanel">
     <div id="dllist"></div>
+  </div>
+  <div id="menupanel">
+    <div class="menu-item" data-act="tabnew">新标签页<span class="menu-key">Ctrl+T</span></div>
+    <div class="menu-sep"></div>
+    <div class="menu-item disabled">历史记录<span class="menu-key">待补</span></div>
+    <div class="menu-item" data-panel="dl">下载内容<span class="menu-key">Ctrl+J</span></div>
+    <div class="menu-item" data-act="bmtoggle">书签栏<span class="menu-key">Ctrl+Shift+B</span></div>
+    <div class="menu-item" data-panel="pw">密码<span class="menu-key"></span></div>
+    <div class="menu-sep"></div>
+    <div class="menu-item disabled">缩放<span class="menu-key">待补</span></div>
+    <div class="menu-item disabled">打印<span class="menu-key">待补</span></div>
+    <div class="menu-item disabled">查找<span class="menu-key">待补</span></div>
+    <div class="menu-sep"></div>
+    <div class="menu-item disabled">设置<span class="menu-key">待补</span></div>
+    <div class="menu-item disabled">关于 Shift<span class="menu-key">待补</span></div>
+    <div class="menu-sep"></div>
+    <div class="menu-item" data-act="winclose">退出<span class="menu-key"></span></div>
   </div>
   <script id="bm-data" type="application/json">__SHIFT_BOOKMARKS_JSON__</script>
   <script id="pw-data" type="application/json">__SHIFT_PASSWORDS_JSON__</script>
@@ -926,6 +963,31 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (document.documentElement.classList.contains('dl-open')) renderDownloads();
   };
 
+  // ---- 主菜单（F-CEF-16）----
+  function setMenuPanel(open) {
+    document.documentElement.classList.toggle('menu-open', open);
+    if (open) document.documentElement.classList.remove('pw-open', 'dl-open');
+    act('menupanel|' + (open ? '1' : '0'));
+  }
+  document.getElementById('menubtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    setMenuPanel(!document.documentElement.classList.contains('menu-open'));
+  });
+  document.getElementById('menupanel').addEventListener('click', (e) => {
+    const item = e.target.closest('.menu-item');
+    if (!item || item.classList.contains('disabled')) return;
+    setMenuPanel(false);
+    if (item.dataset.panel === 'dl') { setDlPanel(true); return; }
+    if (item.dataset.panel === 'pw') { setPwPanel(true); return; }
+    act(item.dataset.act);
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#menupanel') && !e.target.closest('#menubtn')) setMenuPanel(false);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') setMenuPanel(false);
+  });
+
   // 防止工具栏页面拖动/选中
   document.addEventListener('dragstart', (e) => e.preventDefault());
 </script>
@@ -962,6 +1024,7 @@ mod tests {
         assert!(body.contains("addr"), "工具栏 HTML 必须含地址栏");
         assert!(body.contains("pwpanel"), "工具栏 HTML 必须含密码面板");
         assert!(body.contains("dlpanel"), "工具栏 HTML 必须含下载面板");
+        assert!(body.contains("menupanel"), "工具栏 HTML 必须含主菜单");
         assert!(
             body.contains(r#""filename":"a.zip""#),
             "下载记录 JSON 必须嵌进页面"

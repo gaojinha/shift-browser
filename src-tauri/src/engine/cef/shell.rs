@@ -40,6 +40,7 @@ fn toolbar_height() -> i32 {
         + PW_EXTRA.load(Ordering::Relaxed)
         + BM_EXTRA.load(Ordering::Relaxed)
         + DL_EXTRA.load(Ordering::Relaxed)
+        + MENU_EXTRA.load(Ordering::Relaxed)
 }
 
 /// 密码面板（F-CEF-12）展开时工具栏视图额外加高的像素，收起为 0
@@ -62,6 +63,22 @@ pub fn set_dl_panel(open: bool) {
     if open {
         PW_EXTRA.store(0, Ordering::Relaxed);
         BM_EXTRA.store(0, Ordering::Relaxed);
+        MENU_EXTRA.store(0, Ordering::Relaxed);
+    }
+    apply_toolbar_height();
+}
+
+/// 主菜单（F-CEF-16）展开时工具栏视图额外加高的像素
+const MENU_PANEL_EXTRA: i32 = 340;
+static MENU_EXTRA: AtomicI32 = AtomicI32::new(0);
+
+/// 主菜单开合：同样与其它面板互斥
+pub fn set_menu_panel(open: bool) {
+    MENU_EXTRA.store(if open { MENU_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+    if open {
+        PW_EXTRA.store(0, Ordering::Relaxed);
+        BM_EXTRA.store(0, Ordering::Relaxed);
+        DL_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -72,6 +89,7 @@ pub fn set_pw_panel(open: bool) {
     if open {
         BM_EXTRA.store(0, Ordering::Relaxed);
         DL_EXTRA.store(0, Ordering::Relaxed);
+        MENU_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -616,6 +634,15 @@ wrap_client! {
             }
         }
 
+        /// 页面右键菜单（F-CEF-16）：只挂内容页，工具栏页不接管。
+        fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
+            if self.toolbar {
+                None
+            } else {
+                Some(ShellContextMenuHandler::new())
+            }
+        }
+
         fn download_handler(&self) -> Option<DownloadHandler> {
             Some(ShellDownloadHandler::new())
         }
@@ -677,6 +704,73 @@ wrap_life_span_handler! {
 //
 // CEF 的 on_title_change 每页只回调一次（首次拿到标题时），
 // 后续 SPA 内改标题需要 LoadEnd 后补一次读取（待 M2 完善）。
+/// 内容页自绘右键菜单（F-CEF-16）。
+///
+/// 为什么自绘：CEF 单栈窗口用 Alloy 运行时，2026-10-26 实测 `GetContextMenuHandler`
+/// 根本不被调用，原生菜单弹不出来。改成内容页内注入 DOM 菜单。
+///
+/// 只发白名单动作（ctxback/ctxforward/ctxreload/ctxcopy/ctxselectall/ctxviewsource），
+/// `on_console_message` 侧逐条比对；页面脚本伪造 `SHIFT_ACT:` 也触发不了敏感命令。
+const CONTEXT_MENU_JS: &str = r#"
+(function () {
+  if (window.__shiftCtxMenuInstalled) return;
+  window.__shiftCtxMenuInstalled = true;
+  var menu = null;
+  function close() { if (menu) { menu.remove(); menu = null; } }
+  function item(label, act) {
+    var d = document.createElement('div');
+    d.textContent = label;
+    d.style.cssText = 'padding:6px 10px;border-radius:4px;cursor:default;';
+    d.onmouseenter = function () { d.style.background = '#3c4043'; };
+    d.onmouseleave = function () { d.style.background = 'transparent'; };
+    d.onclick = function () { console.log('SHIFT_ACT:' + act); close(); };
+    return d;
+  }
+  function sep() {
+    var s = document.createElement('div');
+    s.style.cssText = 'height:1px;background:#3c4043;margin:6px 0;';
+    return s;
+  }
+  document.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+    close();
+    menu = document.createElement('div');
+    menu.id = '__shift_ctxmenu';
+    menu.style.cssText = 'position:fixed;z-index:2147483647;background:#292a2d;border:1px solid #3c4043;border-radius:8px;padding:6px;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,.5);font:12px system-ui,sans-serif;color:#e8eaed;';
+    menu.appendChild(item('后退', 'ctxback'));
+    menu.appendChild(item('前进', 'ctxforward'));
+    menu.appendChild(item('重新加载', 'ctxreload'));
+    menu.appendChild(sep());
+    menu.appendChild(item('复制', 'ctxcopy'));
+    menu.appendChild(item('全选', 'ctxselectall'));
+    menu.appendChild(sep());
+    menu.appendChild(item('查看网页源代码', 'ctxviewsource'));
+    menu.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
+    menu.style.top = Math.min(e.clientY, window.innerHeight - 240) + 'px';
+    document.body.appendChild(menu);
+  }, true);
+  document.addEventListener('click', close, true);
+  document.addEventListener('scroll', close, true);
+  window.addEventListener('blur', close);
+})();
+"#;
+
+/// 对当前活动标签的主 frame 执行一个动作（右键菜单用）。
+fn with_active_frame(f: impl FnOnce(&mut Frame)) {
+    let active_id = SHELL_TABS.with(|t| {
+        let tabs = t.borrow();
+        tabs.get(ACTIVE_TAB.with(|a| a.get())).map(|x| x.id.clone())
+    });
+    let Some(id) = active_id else { return };
+    BROWSERS.with(|m| {
+        if let Some(b) = m.borrow().get(&id) {
+            if let Some(mut frame) = b.main_frame() {
+                f(&mut frame);
+            }
+        }
+    });
+}
+
 wrap_display_handler! {
     struct ShellContentDisplay {
         tab_id: String,
@@ -739,6 +833,29 @@ wrap_display_handler! {
                 // 这里在标题回调里补一次，确定会执行。
                 reload_bookmarks_from_db();
             }
+        }
+
+        /// 右键菜单动作（F-CEF-16）：只放行白名单，其余 console 消息一律不处理。
+        fn on_console_message(
+            &self,
+            _browser: Option<&mut Browser>,
+            _level: LogSeverity,
+            message: Option<&CefString>,
+            _source: Option<&CefString>,
+            _line: std::os::raw::c_int,
+        ) -> i32 {
+            let Some(msg) = message else { return 0 };
+            let text = msg.to_string();
+            match text.trim() {
+                "SHIFT_ACT:ctxback" => handle_action("back"),
+                "SHIFT_ACT:ctxforward" => handle_action("forward"),
+                "SHIFT_ACT:ctxreload" => handle_action("reload"),
+                "SHIFT_ACT:ctxcopy" => with_active_frame(|f| f.copy()),
+                "SHIFT_ACT:ctxselectall" => with_active_frame(|f| f.select_all()),
+                "SHIFT_ACT:ctxviewsource" => with_active_frame(|f| f.view_source()),
+                _ => return 0,
+            }
+            1
         }
     }
 }
@@ -1279,6 +1396,14 @@ fn handle_action(action: &str) {
 
     // 下载面板动作（F-CEF-15）：面板开合 / 打开目录 / 重新下载 / 删记录
     match cmd {
+        "menupanel" => {
+            set_menu_panel(arg == "1");
+            return;
+        }
+        "bmtoggle" => {
+            toggle_bookmarks();
+            return;
+        }
         "dlpanel" => {
             set_dl_panel(arg == "1");
             return;
@@ -1491,7 +1616,7 @@ fn urlencode(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_attachment_disposition, normalize_url, urlencode};
+    use super::{is_attachment_disposition, normalize_url, urlencode, CONTEXT_MENU_JS};
 
     // ---- normalize_url：地址栏补全规则（P0 实测逻辑，防改坏）----
 
@@ -1570,6 +1695,114 @@ mod tests {
         assert!(!is_attachment_disposition(""));
         assert!(!is_attachment_disposition("x-attachment-foo"));
         assert!(!is_attachment_disposition("inline; filename=\"a.zip\""));
+    }
+
+    /// 右键菜单只许发白名单动作，页面脚本伪造 `SHIFT_ACT:` 也不能越权。
+    #[test]
+    fn context_menu_js_only_emits_whitelisted_actions() {
+        for act in [
+            "ctxback",
+            "ctxforward",
+            "ctxreload",
+            "ctxcopy",
+            "ctxselectall",
+            "ctxviewsource",
+        ] {
+            assert!(
+                CONTEXT_MENU_JS.contains(&format!("'{act}'")),
+                "右键菜单缺少动作 {act}"
+            );
+        }
+        // 不允许出现标签/窗口/书签/密码等敏感动作
+        for forbidden in ["tabnew", "tabclose", "winclose", "bmadd", "pwdel"] {
+            assert!(
+                !CONTEXT_MENU_JS.contains(forbidden),
+                "右键菜单混入了越权动作 {forbidden}"
+            );
+        }
+    }
+}
+
+// ---- 页面右键菜单（F-CEF-16）----
+// Chrome 页面右键最小集：导航 + 编辑 + 查看源代码。
+// 命令 ID 从 1001 起，避开 CEF 内置 ID。
+const CMD_CTX_BACK: i32 = 1001;
+const CMD_CTX_FORWARD: i32 = 1002;
+const CMD_CTX_RELOAD: i32 = 1003;
+const CMD_CTX_COPY: i32 = 1004;
+const CMD_CTX_SELECT_ALL: i32 = 1005;
+const CMD_CTX_VIEW_SOURCE: i32 = 1006;
+
+wrap_context_menu_handler! {
+    struct ShellContextMenuHandler;
+
+    impl ContextMenuHandler {
+        fn on_before_context_menu(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _params: Option<&mut ContextMenuParams>,
+            model: Option<&mut MenuModel>,
+        ) {
+            let Some(model) = model else { return };
+            // CEF 传进来的 model 可能带默认项；先清空，按 Chrome 的顺序重建。
+            let _ = model.clear();
+            let _ = model.add_item(CMD_CTX_BACK, Some(&CefString::from("后退")));
+            let _ = model.add_item(CMD_CTX_FORWARD, Some(&CefString::from("前进")));
+            let _ = model.add_item(CMD_CTX_RELOAD, Some(&CefString::from("重新加载")));
+            let _ = model.add_separator();
+            let _ = model.add_item(CMD_CTX_COPY, Some(&CefString::from("复制")));
+            let _ = model.add_item(CMD_CTX_SELECT_ALL, Some(&CefString::from("全选")));
+            let _ = model.add_separator();
+            let _ = model.add_item(
+                CMD_CTX_VIEW_SOURCE,
+                Some(&CefString::from("查看网页源代码")),
+            );
+        }
+
+        fn on_context_menu_command(
+            &self,
+            browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            _params: Option<&mut ContextMenuParams>,
+            command_id: ::std::os::raw::c_int,
+            _event_flags: EventFlags,
+        ) -> ::std::os::raw::c_int {
+            match command_id {
+                CMD_CTX_BACK => {
+                    if let Some(b) = browser {
+                        b.go_back();
+                    }
+                }
+                CMD_CTX_FORWARD => {
+                    if let Some(b) = browser {
+                        b.go_forward();
+                    }
+                }
+                CMD_CTX_RELOAD => {
+                    if let Some(b) = browser {
+                        b.reload();
+                    }
+                }
+                CMD_CTX_COPY => {
+                    if let Some(f) = frame {
+                        f.copy();
+                    }
+                }
+                CMD_CTX_SELECT_ALL => {
+                    if let Some(f) = frame {
+                        f.select_all();
+                    }
+                }
+                CMD_CTX_VIEW_SOURCE => {
+                    if let Some(f) = frame {
+                        f.view_source();
+                    }
+                }
+                _ => return 0,
+            }
+            1
+        }
     }
 }
 
@@ -1711,6 +1944,12 @@ wrap_load_handler! {
                     self.tab_id
                 );
             }
+            // 右键菜单（F-CEF-16）：内容页自绘，Alloy 模式不弹原生菜单
+            frame.execute_java_script(
+                Some(&CefString::from(CONTEXT_MENU_JS)),
+                Some(&CefString::from("shift://ctxmenu")),
+                0,
+            );
         }
 
         // CEF 回调参数名跟随 C API 风格（camelCase），不改签名
