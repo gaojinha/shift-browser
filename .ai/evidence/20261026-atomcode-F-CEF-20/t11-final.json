@@ -1,0 +1,10 @@
+{
+ "meta": {
+  "ts": "2026-10-27 00:02:38+0800",
+  "port": 9365,
+  "target": "file:///tmp/cef-f20/shell/toolbar.html",
+  "target_title": "toolbar.html"
+ },
+ "eval": "bmmanage",
+ "exception": null
+}

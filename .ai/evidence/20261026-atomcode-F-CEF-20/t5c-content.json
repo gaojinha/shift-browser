@@ -1,0 +1,10 @@
+{
+ "meta": {
+  "ts": "2026-10-27 00:10:44+0800",
+  "port": 9365,
+  "target": "file:///tmp/f20-open-check.html",
+  "target_title": "F20 打开检查"
+ },
+ "eval": "file:///tmp/f20-open-check.html | F20-OPEN-OK\n\n书签打开链路检查页",
+ "exception": null
+}

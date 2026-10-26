@@ -1,0 +1,10 @@
+{
+ "meta": {
+  "ts": "2026-10-27 00:10:44+0800",
+  "port": 9365,
+  "target": "file:///tmp/cef-f20/shell/toolbar.html",
+  "target_title": "toolbar.html"
+ },
+ "eval": "{\"cls\":[\"bmmanage-open\"],\"h\":122,\"tree\":[\"全部书签\",\"未分类\",\"📁 F1\",\"📁 F1a\",\"📁 F2\",\"📁 F3\"],\"rows\":[\"201\",\"202\",\"203\",\"204\",\"205\",\"206\",\"207\"]}",
+ "exception": null
+}

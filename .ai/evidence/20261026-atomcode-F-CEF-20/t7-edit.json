@@ -1,0 +1,69 @@
+{
+ "meta": {
+  "ts": "2026-10-27 00:02:32+0800",
+  "port": 9365,
+  "target": "file:///tmp/cef-f20/shell/toolbar.html",
+  "target_title": "toolbar.html"
+ },
+ "eval": null,
+ "exception": {
+  "exceptionId": 5,
+  "text": "Uncaught",
+  "lineNumber": 0,
+  "columnNumber": 15,
+  "scriptId": "19",
+  "stackTrace": {
+   "callFrames": [
+    {
+     "functionName": "",
+     "scriptId": "19",
+     "url": "",
+     "lineNumber": 0,
+     "columnNumber": 15
+    },
+    {
+     "functionName": "",
+     "scriptId": "19",
+     "url": "",
+     "lineNumber": 0,
+     "columnNumber": 307
+    }
+   ]
+  },
+  "exception": {
+   "type": "object",
+   "subtype": "error",
+   "className": "DOMException",
+   "description": "SyntaxError: Failed to execute 'querySelector' on 'Document': '#bmmlist .bmm-item[data-id=204] .m-op[data-op=edit]' is not a valid selector.\n    at <anonymous>:1:16\n    at <anonymous>:1:308",
+   "objectId": "-2627986415568668031.1.2",
+   "preview": {
+    "type": "object",
+    "subtype": "error",
+    "description": "SyntaxError: Failed to execute 'querySelector' on 'Document': '#bmmlist .bmm-item[data-id=204] .m-op[data-op=edit]' is not a valid selector.\n    at <anonymous>:1:16\n    at <anonymous>:1:308",
+    "overflow": false,
+    "properties": [
+     {
+      "name": "stack",
+      "type": "string",
+      "value": "SyntaxError: Failed to execute 'querySelector' on …\n    at <anonymous>:1:16\n    at <anonymous>:1:308"
+     },
+     {
+      "name": "code",
+      "type": "number",
+      "value": "12"
+     },
+     {
+      "name": "name",
+      "type": "string",
+      "value": "SyntaxError"
+     },
+     {
+      "name": "message",
+      "type": "string",
+      "value": "Failed to execute 'querySelector' on 'Document': '…04] .m-op[data-op=edit]' is not a valid selector."
+     }
+    ]
+   }
+  }
+ }
+}
