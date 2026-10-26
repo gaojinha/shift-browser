@@ -62,6 +62,9 @@ thread_local! {
 
     /// 正在关闭某个标签：期间拦掉 CEF 顺带发起的窗口关闭请求
     static TAB_CLOSING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+
+    /// 书签（title, url），由 cef_cmd 从主应用数据库读入
+    static BOOKMARKS: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// 打开单栈窗口。**必须在 CEF UI 线程调用。**
@@ -197,15 +200,32 @@ pub fn force_show() {
                                 hints.as_ptr() as *const u8,
                                 5,
                             );
-                            // X11 的装饰在 map 时由 WM 决定；属性设置后需要重新 map 一次，
-                            // 否则 Mutter 不会重建 frame（实测：属性写进去了但窗口仍是 897 高）
-                            x11::xlib::XUnmapWindow(dpy, win);
-                            x11::xlib::XMapWindow(dpy, win);
+                            // 只写属性；unmap/remap 放到 force_show 里做——
+                            // 在 on_window_created 里做会等 WM 响应而阻塞，
+                            // 导致 open() 不返回、后续 force_show 与书签推送全不执行。
                             x11::xlib::XFlush(dpy);
                         }
 
+                        // 去掉系统装饰需要 remap 一次（属性已在 on_window_created 写好）
+                        x11::xlib::XUnmapWindow(dpy, win);
                         x11::xlib::XMapRaised(dpy, win);
                         x11::xlib::XFlush(dpy);
+
+                        // 窗口映射后补推一次书签与标签栏：cef_cmd 的数据库查询
+                        // 可能在窗口创建之前就完成了，那一次 execute_java_script
+                        // 会打到还不存在的页面上（实测：库里 64 条，UI 仍是静态兜底 7 条）。
+                        // 推三轮：工具栏页面（file://）加载时机不定，单次推送容易
+                        // 打在脚本还没就绪的窗口期（实测 800ms 一次时 __shiftBookmarks
+                        // 已存在但 UI 未更新，说明推送早于脚本执行）。
+                        for delay in [800u64, 2000, 4000] {
+                            gtk::glib::timeout_add_local_once(
+                                std::time::Duration::from_millis(delay),
+                                || {
+                                    refresh_bookmarks_ui();
+                                    refresh_tabbar();
+                                },
+                            );
+                        }
                     }
                     log::info!("[cef] XSetClassHint + XMapRaised 已调用");
                 }
@@ -620,6 +640,13 @@ wrap_display_handler! {
                 }
             });
             refresh_tabbar();
+            // 书签补推：glib 定时器在 CEF 回调链里注册后实测不触发，
+            // 改挂在这个确定会执行的回调上（原子标记保证只推一次）。
+            static BOOKMARKS_PUSHED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if !BOOKMARKS_PUSHED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                refresh_bookmarks_ui();
+            }
         }
     }
 }
@@ -819,6 +846,33 @@ fn close_tab(idx: usize) {
     log::info!("[cef] 标签已关闭: {id}，切到 {new_idx}");
 }
 
+/// 由 `cef_cmd` 在主线程之外查到书签后调用：存起来并派回主线程刷新 UI。
+pub fn set_bookmarks(rows: Vec<(String, String)>) {
+    log::info!("[cef] 书签已加载 {} 条", rows.len());
+    BOOKMARKS.with(|b| *b.borrow_mut() = rows);
+    gtk::glib::idle_add_local_once(refresh_bookmarks_ui);
+}
+
+/// 把书签表推给工具栏页面的书签栏（调 `window.__shiftBookmarks`）。
+pub fn refresh_bookmarks_ui() {
+    let json = BOOKMARKS.with(|b| {
+        let list: Vec<serde_json::Value> = b
+            .borrow()
+            .iter()
+            .map(|(t, u)| serde_json::json!({ "title": t, "url": u }))
+            .collect();
+        serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
+    });
+    let has_toolbar = BROWSERS.with(|m| m.borrow().contains_key(TOOLBAR_ID));
+    log::info!(
+        "[cef] 推书签 {} 条（toolbar browser 已注册={has_toolbar}）",
+        json.matches("\"url\"").count()
+    );
+    run_toolbar_js(&format!(
+        "if (window.__shiftBookmarks) {{ window.__shiftBookmarks({json}); }}"
+    ));
+}
+
 /// 在工具栏页面里执行一段 JS（地址栏/加载态等 UI 更新统一走这里）
 fn run_toolbar_js(code: &str) {
     BROWSERS.with(|m| {
@@ -929,6 +983,11 @@ fn handle_action(action: &str) {
             if let Ok(idx) = arg.parse::<usize>() {
                 close_other_tabs(idx);
             }
+            return;
+        }
+        "needbookmarks" => {
+            log::info!("[cef] 工具栏请求书签");
+            refresh_bookmarks_ui();
             return;
         }
         "winmin" => {

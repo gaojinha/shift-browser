@@ -7,12 +7,15 @@
 use std::path::Path;
 
 /// 生成（覆盖写）工具栏 HTML，返回可直接加载的 `file://` URL
-pub fn ensure_toolbar_html(cache_dir: &Path) -> Result<String, String> {
+pub fn ensure_toolbar_html(cache_dir: &Path, bookmarks_json: &str) -> Result<String, String> {
     let dir = cache_dir.join("shell");
     std::fs::create_dir_all(&dir).map_err(|e| format!("建工具栏目录失败: {e}"))?;
 
+    // 书签直接嵌进页面：CEF 侧的推送时机不可靠（glib 定时器在回调链里不触发、
+    // console 桥的单向请求也实测没到），生成页面时写死最稳。
+    let html = TOOLBAR_HTML.replace("__SHIFT_BOOKMARKS_JSON__", bookmarks_json);
     let path = dir.join("toolbar.html");
-    std::fs::write(&path, TOOLBAR_HTML).map_err(|e| format!("写工具栏页失败: {e}"))?;
+    std::fs::write(&path, html).map_err(|e| format!("写工具栏页失败: {e}"))?;
 
     // 用绝对路径拼 file:// URL（路径里不能有空格，缓存目录一般没有）
     let url = format!("file://{}", path.display());
@@ -190,15 +193,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       <input id="addr" type="text" spellcheck="false" placeholder="输入网址或搜索词，回车打开">
     </div>
   </div>
-  <div class="bookmarks" id="bookmarks">
-    <div class="bm" data-url="https://www.baidu.com"><span class="bm-ico">百</span><span class="bm-name">百度</span></div>
-    <div class="bm" data-url="https://www.zhihu.com"><span class="bm-ico">知</span><span class="bm-name">知乎</span></div>
-    <div class="bm" data-url="https://www.bilibili.com"><span class="bm-ico">B</span><span class="bm-name">B站</span></div>
-    <div class="bm" data-url="https://github.com"><span class="bm-ico">G</span><span class="bm-name">GitHub</span></div>
-    <div class="bm" data-url="https://news.ycombinator.com"><span class="bm-ico">H</span><span class="bm-name">Hacker News</span></div>
-    <div class="bm" data-url="https://tls.peet.ws/api/all"><span class="bm-ico">T</span><span class="bm-name">TLS 指纹</span></div>
-    <div class="bm" data-url="https://abrahamjuliot.github.io/creepjs/"><span class="bm-ico">C</span><span class="bm-name">CreepJS</span></div>
-  </div>
+  <div class="bookmarks" id="bookmarks"></div>
+  <script id="bm-data" type="application/json">__SHIFT_BOOKMARKS_JSON__</script>
 
 
 <script>
@@ -277,6 +273,29 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (tab) act('tab|' + tab.dataset.idx);
   });
 
+  // 书签栏：Rust 侧读到数据库后整表刷新；未读到前保留 HTML 里的静态兜底
+  window.__shiftBookmarks = function (list) {
+    const bar = document.getElementById('bookmarks');
+    if (!bar || !Array.isArray(list)) return;
+    if (list.length === 0) return; // 库里没书签就保留兜底，避免空条
+    bar.innerHTML = '';
+    list.forEach((b) => {
+      const el = document.createElement('div');
+      el.className = 'bm';
+      el.dataset.url = b.url || '';
+      const ico = document.createElement('span');
+      ico.className = 'bm-ico';
+      const title = b.title || b.url || '书签';
+      ico.textContent = title.trim().charAt(0).toUpperCase();
+      const name = document.createElement('span');
+      name.className = 'bm-name';
+      name.textContent = title;
+      el.appendChild(ico);
+      el.appendChild(name);
+      bar.appendChild(el);
+    });
+  };
+
   // 书签点击 → 当前标签导航
   document.getElementById('bookmarks').addEventListener('click', (e) => {
     const bm = e.target.closest('.bm');
@@ -312,6 +331,32 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     act('tabnew');
   });
 
+  // 启动时渲染内嵌书签（生成页面时由 Rust 写入，无时序问题）
+  (function renderBookmarks() {
+    const el = document.getElementById('bm-data');
+    const bar = document.getElementById('bookmarks');
+    if (!el || !bar) return;
+    let list = [];
+    try { list = JSON.parse(el.textContent || '[]'); } catch (e) { list = []; }
+    if (!Array.isArray(list) || list.length === 0) return;
+    bar.innerHTML = '';
+    list.forEach((b) => {
+      const item = document.createElement('div');
+      item.className = 'bm';
+      item.dataset.url = b.url || '';
+      const ico = document.createElement('span');
+      ico.className = 'bm-ico';
+      const title = b.title || b.url || '书签';
+      ico.textContent = title.trim().charAt(0).toUpperCase();
+      const name = document.createElement('span');
+      name.className = 'bm-name';
+      name.textContent = title;
+      item.appendChild(ico);
+      item.appendChild(name);
+      bar.appendChild(item);
+    });
+  })();
+
   // 防止工具栏页面拖动/选中
   document.addEventListener('dragstart', (e) => e.preventDefault());
 </script>
@@ -328,7 +373,7 @@ mod tests {
     fn ensure_toolbar_html_writes_file_and_content_bridge() {
         let dir = std::env::temp_dir().join(format!("cef-toolbar-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
-        let out = ensure_toolbar_html(&dir).unwrap();
+        let out = ensure_toolbar_html(&dir, r#"[{"title":"测试书签","url":"https://a.com"}]"#).unwrap();
         assert!(out.starts_with("file://"), "须返回 file:// URL，实得 {out}");
         assert!(out.ends_with("toolbar.html"));
         // URL 是 file:// 形态，落盘路径剥掉前缀再验

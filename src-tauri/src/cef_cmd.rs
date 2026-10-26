@@ -107,6 +107,29 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
 
     log::info!("[cef] 初始化完成，资源目录 {resources}");
 
+    // 书签：从主应用数据库读真实书签，推给 CEF 工具栏页面。
+    // 为什么异步：sqlx 只有 async API，而 init 在 CEF/GTK 主线程；
+    // 查完用 glib idle 派回主线程再动 UI（execute_java_script 必须在主线程）。
+    {
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            use tauri::Manager;
+            let Some(db) = handle.try_state::<crate::db::Db>() else {
+                log::warn!("[cef] 拿不到数据库状态，书签栏留空");
+                return;
+            };
+            match sqlx::query_as::<_, (String, String)>(
+                "SELECT title, url FROM bookmarks ORDER BY sort_order, id LIMIT 200",
+            )
+            .fetch_all(&db.pool)
+            .await
+            {
+                Ok(rows) => crate::engine::cef::shell::set_bookmarks(rows),
+                Err(e) => log::warn!("[cef] 读书签失败: {e}"),
+            }
+        });
+    }
+
     // ---- 单栈外壳测试入口（新方案）----
     // SHIFT_CEF_SHELL_URL=https://example.com 启动后等上下文就绪，开一个 CEF 自建窗口
     if let Ok(url) = std::env::var("SHIFT_CEF_SHELL_URL") {
@@ -256,16 +279,59 @@ fn create_gtk_cef_window(tab_id: &str, url: &str) -> Result<(), String> {
 /// 打开单栈窗口（窗口、工具栏、内容页全在 CEF 内）。
 ///
 /// 必须在主线程调用；`app` 只用来取缓存目录。
+/// 同步读书签（生成工具栏页面用）。
+///
+/// CEF 侧的异步推送实测不可靠（glib 定时器在回调链里不触发），
+/// 改成生成页面时同步查一次——阻塞几十毫秒可接受，换来确定性。
+fn cef_bookmarks_json(app: &AppHandle) -> String {
+    use tauri::Manager;
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return "[]".to_string();
+    };
+    let pool = db.pool.clone();
+    let rows = tauri::async_runtime::block_on(async move {
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT title, url FROM bookmarks ORDER BY sort_order, id LIMIT 200",
+        )
+        .fetch_all(&pool)
+        .await
+    });
+    match rows {
+        Ok(rows) => {
+            log::info!("[cef] 书签同步读取 {} 条", rows.len());
+            let list: Vec<serde_json::Value> = rows
+                .iter()
+                .map(|(t, u)| serde_json::json!({ "title": t, "url": u }))
+                .collect();
+            serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
+        }
+        Err(e) => {
+            log::warn!("[cef] 读书签失败: {e}");
+            "[]".to_string()
+        }
+    }
+}
+
 fn open_shell_on_main(app: &AppHandle, url: &str) -> Result<(), String> {
     let cache = app
         .path()
         .app_cache_dir()
         .map_err(|e| format!("拿不到缓存目录: {e}"))?;
-    let toolbar_url = cef_toolbar::ensure_toolbar_html(&cache)?;
+    let bookmarks_json = cef_bookmarks_json(app);
+    let toolbar_url = cef_toolbar::ensure_toolbar_html(&cache, &bookmarks_json)?;
     cef_shell::open(url, &toolbar_url)?;
 
     // 窗口创建回调里调 show() 会卡死；出回调后立刻用 X11 直接映射
     cef_shell::force_show();
+
+    // 书签/标签栏补推：glib 定时器在 force_show 里注册后实测不触发，
+    // 改在这里用 GTK 主循环的 timeout 直接挂（同一线程、同一 main context）。
+    for delay in [1500u64, 3500, 6000] {
+        gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(delay), || {
+            cef_shell::refresh_bookmarks_ui();
+            cef_shell::refresh_tabbar();
+        });
+    }
     Ok(())
 }
 
