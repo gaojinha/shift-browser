@@ -1,0 +1,10 @@
+{
+ "meta": {
+  "ts": "2026-10-26 23:01:36+0800",
+  "port": 9364,
+  "target": "file:///tmp/cef-f18-final-test.html",
+  "target_title": "F18 终验靶页"
+ },
+ "eval": "{\"title\":\"F18 终验靶页\",\"needle_rendered\":18}",
+ "exception": null
+}

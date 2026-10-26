@@ -63,7 +63,7 @@
 | atomcode | 🔄 | **领 F-CEF-13 书签管理**（2026-10-26 13:08 派，high，60 分钟窗口至 ~14:08，超窗交根因）：右键增删改 + 文件夹下拉 + 局部刷新（`__shiftBookmarks` 扩 id/folders、`SHIFT_ACT:bm*` 走 `db::bookmarks` inner + block_on）。**并行注意**：与 copilot F-CEF-12 同文件（toolbar.rs/shell.rs），我的 hunk 不与他重叠，在其未提交改动之上编辑、交付未提交；越界一处：`db/mod.rs` 加 4 行 `GLOBAL_POOL`（CEF 回调无 AppHandle、`cef_cmd.rs` 归 copilot 不碰，回执注明）。真机 CDP 独立临时 profile + 端口 9337，避开他人实例窗口 | ⏱ 超时（14:08:49 退码 124）｜已由王二狗接管交付 `6765478` | 2026-10-26 15:32 |
 | atomcode | 🔄 | **领 F-CEF-14 下载**（2026-10-26 16:20 派，high，60 分钟窗口至 ~17:20）：接二狗未提交半成品（shell.rs 的 attachment 拦截 + 临时诊断），先修 `SHIFT_CEF_CACHE_DIR` 隔离，再验 GitHub zip 闭环（落盘 + 原页保留）、清诊断、抽 `is_attachment_disposition` 纯函数补单测、跑双配置关口、提交。编译窗口独占（copilot 本轮只读不编译） | ⏹ 已停（17:10 高哥决定重启；41 分钟 0 文件改动，连接挂 7897 等模型） | 2026-10-26 17:12 |
 | copilot | 🔄 | **F-CEF-14 独立审查 + 验收脚本**（2026-10-26 16:21 派，normal）：只读审查 `on_resource_response`（空值/所有权、取消导航后 UI 脏值、302 重复下载、iframe/POST/误伤、失败提示），新建 `scripts/cef-coordinator/fc14-verify.sh`（隔离实例 + CDP 导航 + 断言 zip 落盘/原页保留/无 .crdownload），不动源码、不编译。复验等 atomcode 交付后由二狗唤醒 | ⏸ 挂起（配额 429，$4.54/$2.00 上限） | 2026-10-26 17:12 |
-| atomcode | ✅ | **F-CEF-18 已交付（王二狗收口）**：缩放七档 + Ctrl+F 查找，真机 `ff18-verify.sh` PASS（110%/dpr1.101、1/1、close）。实现 atomcode，60 分钟窗口超时退码 124 未交回执，收口修 0-based 计数 + 验收脚本 XAUTHORITY。提交 `95de1d5` | done | 2026-10-26 21:08 |
+| atomcode | ✅ | **F-CEF-18 已交付（王二狗收口）+ 23:14 条号显示补丁**：缩放七档 + Ctrl+F 查找，真机 `ff18-verify.sh` PASS（110%/dpr1.101、1/1、close）。实现 atomcode，60 分钟窗口超时退码 124 未交回执，收口修 0-based 计数 + 验收脚本 XAUTHORITY。提交 `95de1d5`。**23:14 补丁**：查找条号双加一（Rust 侧 +1 与收口工具栏侧 +1 叠加，首条显示 2/N）→ 去 Rust 侧 +1，隔离实例 18 条靶页复验全绿（1/18、wrap 18/18、1/1、0/0、Esc、缩放 110/100）；hunk 被共树卷入 `bf23486` 未另提交，详见回执 | done | 2026-10-26 23:14 |
 
 ### 【新派 2026-10-25 14:35】CEF 换核项目（M2/M3，高哥拍板「实施 + 单一实验版发布」）
 
@@ -101,7 +101,7 @@
 | F-CEF-15 | 【功能】下载完整链路（attachment 转下载 + 记账 + 面板） | **done（王二狗，`45d5227`）** | 功能升级 | 设置目录/同名去重/downloads 表/进度/终态/事件；工具栏面板（进度条/打开目录/重下/删记录）。真机：GitHub zip 362K、原页保留、重名 (1)、普通页不误伤。 |
 | F-CEF-16 | 【功能】主菜单 ⋮ + 页面右键菜单 | **done（王二狗，`9f1590c`）** | 功能升级 | 主菜单 11 项（6 项待补置灰）+ 面板互斥；页面右键菜单（Alloy 不弹原生，改内容页自绘，6 个 ctx* 白名单动作）。 |
 | F-CEF-17 | 【功能】地址栏下拉建议 + 书签星标 | **done（王二狗，`12a8989`）** | 功能升级 | 历史/书签各 8 条、LIKE 转义、键盘选择；星标收藏/取消 + 书签栏刷新。 |
-| F-CEF-18 | 【功能】缩放 + 页内查找 | **done（atomcode 实现，王二狗收口，`95de1d5`）** | 功能升级 | 见状态表；验收人=王二狗。 |
+| F-CEF-18 | 【功能】缩放 + 页内查找 | **done（atomcode 实现，王二狗收口，`95de1d5`）**；2026-10-26 23:14 条号显示补丁（hunk 共树卷入 `bf23486`） | 功能升级 | 见状态表；验收人=王二狗。23:14 补丁：查找条号双加一修复（去 Rust 侧 +1），隔离实例 18 条靶页复验全绿，见 atomcode 回执。 |
 | F-CEF-19 | 【功能】历史面板 + 设置页 + 站点信息 | **done（王二狗，`504ecdc` / `5e5aa37` / `ff1e6a6`）** | 功能升级 | 历史面板（搜索/列表/删除/清空）、站点信息（锁图标→host/协议/安全）、设置页（搜索引擎/下载目录/广告拦截/GPC）全部完成。 |
 
 | F-CEF-14 | 【M2】CEF 注入补**子 frame** + 翻译宿主通道缺失（**待高哥拍板，未派单**） | 拟派 copilot | 后端功能 | 二狗原拟号 12，13:08 撞「密码管理」已改 14。① F-CEF-11 的注入走页面级 `execute_javascript`，**只落主 frame**，iframe 内广告拦截/用户脚本/翻译全不生效；② 翻译发送通道（`window.webkit.messageHandlers.shiftTranslate` 属 WebKit、`shift://__translate__/` 属 Tauri 协议）CEF 独立窗口**两样都没有**，且 `cef_inject.rs` 空 catch + `__SHIFT_INJECT_ERRS__` 不存在 → **页面上零报错不可归因**。修法首选 V8 context 级接管（含子 frame）+ `CefMessageRouter/cefQuery` 补宿主通道（`shell.rs` 注释已预留）。依据 `.ai/inbox/copilot/20261026-1320-F-CEF-11更正-我误报两条.md`。 |

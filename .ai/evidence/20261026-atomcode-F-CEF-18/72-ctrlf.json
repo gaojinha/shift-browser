@@ -1,0 +1,10 @@
+{
+ "meta": {
+  "ts": "2026-10-26 22:13:44+0800",
+  "port": 9363,
+  "target": "file:///tmp/cef-f18-3/shell/toolbar.html",
+  "target_title": "toolbar.html"
+ },
+ "eval": "{\"find_open\":true,\"focused\":\"findinput\",\"findcount\":\"0/0\"}",
+ "exception": null
+}

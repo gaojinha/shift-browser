@@ -1,0 +1,10 @@
+{
+ "meta": {
+  "ts": "2026-10-26 23:02:33+0800",
+  "port": 9364,
+  "target": "file:///tmp/cef-f18-4/shell/toolbar.html",
+  "target_title": "toolbar.html"
+ },
+ "eval": "zoom:110%",
+ "exception": null
+}
