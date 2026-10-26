@@ -138,15 +138,16 @@ CEF 构建若 UA 仍是应用层设置的 142，`user_agent` 与 `Sec-Ch-Ua` 行
 | indeed.com | 3/3 | 1/3（#2 CF 排障页、#3 403 挑战，均硬拦） | ✅ |
 | linux.do（n=6） | 5/6（#6 429） | 2/6（#2/#3 403，#5/#6 429） | ✅ |
 
-**结论**：本轮 5 站逐站 CEF ≥ 同口径真 Chrome，口径「CEF ≥ 同口径真 Chrome」**在本样本内成立**。
+**结论**：本轮 5 站逐站 CEF ≥ 同口径真 Chrome。**【协调器判定 10-26 11:00】** 该比较性关口「在本样本内成立」，但因下述污染声明未排除、且国内口径未取得，**暂不判定 M3 的 CF 关口通过**。
 
 **必须同时看的局限**：
-1. 出口是海外代理 LAX，不代表国内网络；n 很小（3/6），差异（如 indeed 3/3 vs 1/3）不能当统计显著，只能说「没有比 Chrome 差」。
-2. 真 Chrome 比 CEF 多次被拦、且被拦集中在后半程，不排除**先后手/IP 信誉漂移**影响；虽已奇偶换先后手，但 linux.do #5/#6 两边都吃到 429（限流），该两次对比价值低。
-3. 全程**未出现 Turnstile iframe**（`has_cf_iframe` 恒 0），「Turnstile 框可点过」中档本轮 0 次观察；失败均为 403/429 + 「请稍候…」或排障页。`has_challenge_platform` 在正常页也为 1，不能单独作拦截依据。
+1. 出口是海外代理 LAX，不代表国内网络；n 很小（3/6）。**【协调器补统计 10-26 11:00】** 按 `verdict_final` 语义口径 CEF 17/18 vs Chrome 11/18；按同站同轮 18 对做配对分析：双过 11｜只 CEF 过 6｜**只 Chrome 过 0**｜双挂 1（严格包含关系）。McNemar 精确二项 p=0.031，合计 Fisher p=0.041。**限定**：同站重复访问非独立样本，p 值只作粗略参考；叠加局限 3 的未观测项与下方污染声明，本轮只支持"方向性优势"，不支持"CEF 引擎更强"。
+2. 真 Chrome 比 CEF 多次被拦、且被拦集中在后半程，不排除**先后手/IP 信誉漂移**影响；虽已奇偶换先后手，但 linux.do #5/#6 两边都吃到 429（限流），该两次对比价值低。**【协调器订正】** 后半程（10:27 后各 9 次）CEF 8/9、Chrome 3/9 —— 交错设计下两侧处于同一分钟级窗口，IP 信誉漂移是共同变量，不构成偏袒某一侧的机制，此项自我怀疑可降级。
+3. ~~全程未出现 Turnstile iframe~~ —— **【协调器订正 10-26 11:00】** 原表述有误：`has_cf_iframe` 恒 0 只是探针只查顶层 document 的产物，原始数据显示 **17/36 次访问加载了 `challenges.cloudflare.com/cdn-cgi/challenge-platform/` 的 Document（cef 9/18、chrome 8/18）**，即 CF 挑战资产确实被拉起。正确说法是「探针无法观测嵌套 frame，Turnstile 是否可点过本轮未覆盖」。重采需改用 `Page.getFrameTree` 遍历各 frame。`has_challenge_platform` 在正常页也为 1，不能单独作拦截依据。
 4. 脚本 verdict 有一处误判已人工订正（Chrome indeed #2：脚本判 pass，实为 CF 排障页）；`cf-raw.json` 保留 `verdict` 原值与 `verdict_final`。
 5. 两侧都是 CDP 驱动；CEF 侧页面里还有应用层注入脚本，本轮未做「关注入」对照。WebKit 列仍未测。
 6. §1.2 指纹五项/brands/WebGL 一栏**本轮未重测**（派单第二轮已限定只做 CF 实站），仍沿用协调器 `.ai/evidence/20261026-0138-*.md` 的数据。
+7. **【协调器污染声明 10-26 11:00】被测身份与并发未隔离**：① 被测二进制 `target/debug/shift-browser` mtime 由 00:51 变为 **10:25**（526018792→526033024 字节），落在本窗口 10:20:49–10:33 内，10:51 再编一次 → meta 声称的"00:51 构建 HEAD 4269ea5"无法自证；② **10:26:54 `shift-cef-atom3.service` 启动**（另一 agent 跑 F-CEF-03），与本测试并发，CEF 的 `--user-data-dir=/home/gao/.cache/com.shiftbrowser.app/cef` 是**应用真实持久化 profile**（`Default/Cookies` mtime 10:42），两侧共用；③ `Network.clearBrowserCookies` 在 CEF 上的生效性**从未验证**，linux.do 的 5/6 vs 2/6 存在"历史 `cf_clearance` 携带"的解释空间，而该站是本轮唯一大差异来源。下轮须：CEF 用一次性独立 profile 重采 + 清除生效性最小实验 + meta 记录 mtime/sha256/HEAD/工作区干净度。
 
 ## 5. 指纹面板对比方案（CreepJS / Cover Your Tracks）
 
