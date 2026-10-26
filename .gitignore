@@ -60,3 +60,6 @@ release-artifacts/
 e2e/.last-report.json
 test-results/
 __pycache__/
+
+# 临时截图/取证垃圾（2026-10-27 二狗补：曾被 git add -A 误入账）
+tmp/
