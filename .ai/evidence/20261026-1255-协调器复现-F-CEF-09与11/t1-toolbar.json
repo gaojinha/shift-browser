@@ -1,0 +1,20 @@
+{
+ "meta": {
+  "ts": "2026-10-26 12:47:41+0800",
+  "port": 9338,
+  "target": "file:///home/gao/.cache/com.shiftbrowser.app/shell/toolbar.html",
+  "target_title": "toolbar.html"
+ },
+ "eval": {
+  "href": "file:///home/gao/.cache/com.shiftbrowser.app/shell/toolbar.html",
+  "bookmarks_offsetHeight": 34,
+  "bookmarks_display": "flex",
+  "html_class": "(空)",
+  "innerHeight": 122,
+  "innerWidth": 1280,
+  "doc_height_css": "122px",
+  "bookmark_count": 64,
+  "判读": "展开应 offsetHeight=34/class 空/innerHeight=738；收起应 0/bookmarks-hidden/772"
+ },
+ "exception": null
+}

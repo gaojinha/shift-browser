@@ -1,0 +1,13 @@
+{
+ "meta": {
+  "ts": "2026-10-26 12:47:41+0800",
+  "port": 9338,
+  "target": "https://example.com/",
+  "target_title": "Example Domain"
+ },
+ "eval": {
+  "innerHeight": 775,
+  "innerWidth": 1280
+ },
+ "exception": null
+}

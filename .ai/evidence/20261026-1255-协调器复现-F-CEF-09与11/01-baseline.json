@@ -1,0 +1,25 @@
+{
+ "meta": {
+  "collected_by": "wang-ergou（协调器自采，非 copilot 交付）",
+  "collected_at": "2026-10-26 12:43:48",
+  "binary": "src-tauri/target/debug/shift-browser (00:51, --features cef-engine)",
+  "git_head": "da5c2be",
+  "cef_engine_flags": "--ozone-platform=x11 --use-angle=vulkan --use-vulkan=swiftshader --enable-features=Vulkan",
+  "page_target_url": "https://example.com/",
+  "cdp_browser": "",
+  "exit_ip": "104.28.208.28",
+  "note": "SwiftShader 软件光栅，非真 GPU；与真 Chrome 的 renderer 字符串必然不同"
+ },
+ "eval": {
+  "href": "about:blank",
+  "bookmarks_offsetHeight": "NO #bookmarks 元素",
+  "bookmarks_display": null,
+  "html_class": "(空)",
+  "innerHeight": 738,
+  "innerWidth": 1280,
+  "doc_height_css": "738px",
+  "bookmark_count": null,
+  "判读": "展开应 offsetHeight=34/class 空/innerHeight=738；收起应 0/bookmarks-hidden/772"
+ },
+ "dom_head": "<html><head></head><body></body></html>"
+}
