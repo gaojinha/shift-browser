@@ -947,6 +947,27 @@ fn reload_bookmarks_from_db() {
     }
 }
 
+/// 改书签标题并刷新（右键菜单「编辑标题」）。
+fn update_bookmark_title(id: i64, title: &str) {
+    let Some(pool) = crate::db::GLOBAL_POOL.get() else { return };
+    let pool = pool.clone();
+    let title = title.to_string();
+    let res = tauri::async_runtime::block_on(async move {
+        sqlx::query("UPDATE bookmarks SET title = ? WHERE id = ?")
+            .bind(&title)
+            .bind(id)
+            .execute(&pool)
+            .await
+    });
+    match res {
+        Ok(r) => {
+            log::info!("[cef] 书签标题已更新 id={id}（{} 行）", r.rows_affected());
+            reload_bookmarks_from_db();
+        }
+        Err(e) => log::warn!("[cef] 更新书签失败: {e}"),
+    }
+}
+
 /// 删除书签并刷新（右键菜单「删除」）。
 fn delete_bookmark_and_refresh(id: i64) {
     let Some(pool) = crate::db::GLOBAL_POOL.get() else { return };
@@ -1167,7 +1188,7 @@ fn handle_action(action: &str) {
         return;
     }
 
-    // 标签相关动作先处理（不需要当前 content 浏览器）
+    // 标签相关动作先处理（不需要 current content 浏览器）
     match cmd {
         "tabnew" => {
             let url = newtab_url();
@@ -1191,6 +1212,16 @@ fn handle_action(action: &str) {
         "tabcloseothers" => {
             if let Ok(idx) = arg.parse::<usize>() {
                 close_other_tabs(idx);
+            }
+            return;
+        }
+        "bmedit" => {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(arg) {
+                let id = v["id"].as_str().and_then(|s| s.parse::<i64>().ok());
+                let title = v["title"].as_str().unwrap_or("").to_string();
+                if let Some(id) = id {
+                    update_bookmark_title(id, &title);
+                }
             }
             return;
         }

@@ -117,6 +117,11 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     color: #e8eaed; font-size: 18px; line-height: 1; margin: 0 0 4px 4px;
   }
   .tab-new:hover { background: #3c4043; }
+  .bm-edit {
+    width: 110px; height: 20px; padding: 0 6px;
+    background: #202124; color: #e8eaed; font-size: 12px;
+    border: 1px solid #8ab4f8; border-radius: 4px; outline: 0;
+  }
   /* 书签右键菜单 */
   #bmmenu {
     position: fixed; z-index: 200; display: none;
@@ -398,6 +403,39 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     act('tabnew');
   });
 
+  // 内联改标题（CEF 的 Views 模式没有 window.prompt，只能自己画输入框）
+  function editBookmarkTitle(item) {
+    const nameEl = item.querySelector('.bm-name');
+    if (!nameEl || item.querySelector('.bm-edit')) return;
+    const old = nameEl.textContent;
+    const input = document.createElement('input');
+    input.className = 'bm-edit';
+    input.value = old;
+    input.spellcheck = false;
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      const v = input.value.trim();
+      const span = document.createElement('span');
+      span.className = 'bm-name';
+      span.textContent = save && v ? v : old;
+      input.replaceWith(span);
+      if (save && v && v !== old) {
+        act('bmedit|' + JSON.stringify({ id: item.dataset.id, title: v }));
+      }
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(false));
+    input.addEventListener('click', (e) => e.stopPropagation());
+  }
+
   // ---- 书签右键菜单（F-CEF-13）----
   const bmmenu = document.getElementById('bmmenu');
   let bmMenuTarget = null;
@@ -414,6 +452,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     const rows = item
       ? [
           ['打开', () => act('nav|' + item.dataset.url)],
+          ['编辑标题', () => editBookmarkTitle(item)],
           ['删除', () => act('bmdel|' + item.dataset.id), 'danger'],
         ]
       : [
