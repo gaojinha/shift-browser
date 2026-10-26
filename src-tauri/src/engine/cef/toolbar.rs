@@ -27,7 +27,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 <style>
   * { box-sizing: border-box; }
   html, body {
-    margin: 0; padding: 0; height: 88px; overflow: hidden;
+    margin: 0; padding: 0; height: 122px; overflow: hidden;
     /* Chrome 深色模式配色（2026-10-26 按 Chrome 实测对齐） */
     background: #35363a; color: #e8eaed;
     font-family: "Segoe UI", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
@@ -111,6 +111,29 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   @keyframes spin { to { transform: rotate(360deg); } }
   html[data-loading="1"] #reload svg { animation: spin .9s linear infinite; }
   html[data-loading="1"] #reload { color: #8ab4f8; }
+  /* 书签栏：Chrome 34px，图标 + 名称，横向滚动 */
+  .bookmarks {
+    display: flex; align-items: center; gap: 2px;
+    height: 34px; padding: 0 8px;
+    background: #35363a;
+    overflow-x: auto; overflow-y: hidden;
+  }
+  .bookmarks::-webkit-scrollbar { height: 0; }
+  .bm {
+    display: flex; align-items: center; gap: 6px;
+    height: 26px; padding: 0 8px; border-radius: 6px;
+    color: #e8eaed; font-size: 12px; white-space: nowrap;
+    flex: 0 0 auto; cursor: default;
+  }
+  .bm:hover { background: #3c4043; }
+  .bm .bm-ico {
+    width: 16px; height: 16px; border-radius: 4px; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    background: #4a4d51; font-size: 10px; color: #e8eaed;
+  }
+  .bm .bm-name {
+    max-width: 140px; overflow: hidden; text-overflow: ellipsis;
+  }
   .addr-wrap {
     flex: 1; display: flex; align-items: center; height: 32px;
     background: #202124; border: 1px solid transparent; border-radius: 16px;
@@ -166,6 +189,15 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       </svg>
       <input id="addr" type="text" spellcheck="false" placeholder="输入网址或搜索词，回车打开">
     </div>
+  </div>
+  <div class="bookmarks" id="bookmarks">
+    <div class="bm" data-url="https://www.baidu.com"><span class="bm-ico">百</span><span class="bm-name">百度</span></div>
+    <div class="bm" data-url="https://www.zhihu.com"><span class="bm-ico">知</span><span class="bm-name">知乎</span></div>
+    <div class="bm" data-url="https://www.bilibili.com"><span class="bm-ico">B</span><span class="bm-name">B站</span></div>
+    <div class="bm" data-url="https://github.com"><span class="bm-ico">G</span><span class="bm-name">GitHub</span></div>
+    <div class="bm" data-url="https://news.ycombinator.com"><span class="bm-ico">H</span><span class="bm-name">Hacker News</span></div>
+    <div class="bm" data-url="https://tls.peet.ws/api/all"><span class="bm-ico">T</span><span class="bm-name">TLS 指纹</span></div>
+    <div class="bm" data-url="https://abrahamjuliot.github.io/creepjs/"><span class="bm-ico">C</span><span class="bm-name">CreepJS</span></div>
   </div>
 
 
@@ -243,6 +275,12 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     }
     const tab = e.target.closest('.tab');
     if (tab) act('tab|' + tab.dataset.idx);
+  });
+
+  // 书签点击 → 当前标签导航
+  document.getElementById('bookmarks').addEventListener('click', (e) => {
+    const bm = e.target.closest('.bm');
+    if (bm && bm.dataset.url) act('nav|' + bm.dataset.url);
   });
 
   // 窗口控制按钮
