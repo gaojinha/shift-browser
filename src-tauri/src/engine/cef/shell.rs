@@ -44,6 +44,7 @@ fn toolbar_height() -> i32 {
         + FIND_EXTRA.load(Ordering::Relaxed)
         + HIST_EXTRA.load(Ordering::Relaxed)
         + SITE_EXTRA.load(Ordering::Relaxed)
+        + SETTINGS_EXTRA.load(Ordering::Relaxed)
 }
 
 /// 密码面板（F-CEF-12）展开时工具栏视图额外加高的像素，收起为 0
@@ -70,6 +71,7 @@ pub fn set_dl_panel(open: bool) {
         FIND_EXTRA.store(0, Ordering::Relaxed);
         HIST_EXTRA.store(0, Ordering::Relaxed);
         SITE_EXTRA.store(0, Ordering::Relaxed);
+        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -88,6 +90,7 @@ pub fn set_menu_panel(open: bool) {
         FIND_EXTRA.store(0, Ordering::Relaxed);
         HIST_EXTRA.store(0, Ordering::Relaxed);
         SITE_EXTRA.store(0, Ordering::Relaxed);
+        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -106,6 +109,7 @@ pub fn set_hist_panel(open: bool) {
         MENU_EXTRA.store(0, Ordering::Relaxed);
         FIND_EXTRA.store(0, Ordering::Relaxed);
         SITE_EXTRA.store(0, Ordering::Relaxed);
+        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -128,6 +132,25 @@ pub fn set_site_panel(open: bool) {
     apply_toolbar_height();
 }
 
+/// 设置面板（F-CEF-19）展开时工具栏视图额外加高的像素
+const SETTINGS_PANEL_EXTRA: i32 = 320;
+static SETTINGS_EXTRA: AtomicI32 = AtomicI32::new(0);
+
+/// 设置面板开合：与其它面板互斥
+pub fn set_settings_panel(open: bool) {
+    SETTINGS_EXTRA.store(if open { SETTINGS_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+    if open {
+        PW_EXTRA.store(0, Ordering::Relaxed);
+        BM_EXTRA.store(0, Ordering::Relaxed);
+        DL_EXTRA.store(0, Ordering::Relaxed);
+        MENU_EXTRA.store(0, Ordering::Relaxed);
+        FIND_EXTRA.store(0, Ordering::Relaxed);
+        HIST_EXTRA.store(0, Ordering::Relaxed);
+        SITE_EXTRA.store(0, Ordering::Relaxed);
+    }
+    apply_toolbar_height();
+}
+
 /// 密码面板开合：加/减工具栏视图高度并重排（只动 PW_EXTRA，不碰书签栏态）
 pub fn set_pw_panel(open: bool) {
     PW_EXTRA.store(if open { PW_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
@@ -138,6 +161,7 @@ pub fn set_pw_panel(open: bool) {
         FIND_EXTRA.store(0, Ordering::Relaxed);
         HIST_EXTRA.store(0, Ordering::Relaxed);
         SITE_EXTRA.store(0, Ordering::Relaxed);
+        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -173,6 +197,7 @@ fn set_find_bar(open: bool) {
         MENU_EXTRA.store(0, Ordering::Relaxed);
         HIST_EXTRA.store(0, Ordering::Relaxed);
         SITE_EXTRA.store(0, Ordering::Relaxed);
+        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -1004,6 +1029,67 @@ fn refresh_star_state(url: &str) {
         let _ = app.run_on_main_thread(move || {
             run_toolbar_js(&format!(
                 "window.__shiftStar && window.__shiftStar({on})"
+            ));
+        });
+    });
+}
+
+/// 设置面板数据（F-CEF-19）：只推工具栏需要的四项。
+fn send_settings() {
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
+    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    tauri::async_runtime::spawn(async move {
+        let mut map = serde_json::Map::new();
+        for key in ["search_engine", "download_dir", "adblock_enabled", "gpc_header"] {
+            let v: Option<String> =
+                sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
+                    .bind(key)
+                    .fetch_optional(&pool)
+                    .await
+                    .ok()
+                    .flatten();
+            map.insert(key.to_string(), serde_json::Value::String(v.unwrap_or_default()));
+        }
+        let json = serde_json::Value::Object(map).to_string();
+        let _ = app.run_on_main_thread(move || {
+            run_toolbar_js(&format!(
+                "window.__shiftSettings && window.__shiftSettings({json})"
+            ));
+        });
+    });
+}
+
+/// 保存设置（只允许白名单四项；写库走 set_setting_inner，缓存/静态同步一起走）。
+fn save_settings(json: &str) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
+        return;
+    };
+    let pairs: Vec<(String, String)> = ["search_engine", "download_dir", "adblock_enabled", "gpc_header"]
+        .iter()
+        .filter_map(|k| {
+            v.get(*k)
+                .and_then(|x| x.as_str())
+                .map(|s| (k.to_string(), s.to_string()))
+        })
+        .collect();
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
+    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    tauri::async_runtime::spawn(async move {
+        let mut errs = Vec::new();
+        for (k, val) in pairs {
+            if let Err(e) = crate::db::settings::set_setting_inner(&pool, &k, &val).await {
+                errs.push(format!("{k}: {e}"));
+            }
+        }
+        let msg = if errs.is_empty() {
+            "已保存（广告拦截/GPC 重开窗口生效）".to_string()
+        } else {
+            format!("保存失败: {}", errs.join("; "))
+        };
+        let json_msg = serde_json::to_string(&msg).unwrap_or_else(|_| "\"\"".to_string());
+        let _ = app.run_on_main_thread(move || {
+            run_toolbar_js(&format!(
+                "window.__shiftSettingsSaved && window.__shiftSettingsSaved({json_msg})"
             ));
         });
     });
@@ -1897,6 +1983,17 @@ fn handle_action(action: &str) {
         }
         "startoggle" => {
             toggle_star();
+            return;
+        }
+        "settingspanel" => {
+            set_settings_panel(arg == "1");
+            if arg == "1" {
+                send_settings();
+            }
+            return;
+        }
+        "settingssave" => {
+            save_settings(arg);
             return;
         }
         "siteinfo" => {

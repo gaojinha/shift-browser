@@ -288,6 +288,28 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   }
   .hist-row .h-del:hover { background: #4a4d51; }
   .hist-empty { color: #9aa0a6; padding: 12px 6px; font-size: 12px; }
+  /* 设置面板（F-CEF-19） */
+  html.settings-open, html.settings-open body { height: 100vh; }
+  #settingspanel {
+    display: none; position: absolute; left: 0; right: 0; top: 88px; bottom: 0;
+    background: #292a2d; border-top: 1px solid #3c4043; padding: 10px 12px;
+    flex-direction: column; gap: 8px; z-index: 10; font-size: 12px;
+  }
+  html.settings-open #settingspanel { display: flex; }
+  html:not(.bookmarks-hidden) #settingspanel { top: 122px; }
+  .set-row { display: flex; align-items: center; gap: 10px; color: #e8eaed; }
+  .set-row select, .set-row input[type=text] {
+    height: 26px; background: #202124; border: 1px solid #3c4043; border-radius: 6px;
+    color: #e8eaed; padding: 0 8px; font-size: 12px;
+  }
+  .set-row input[type=text] { flex: 1; }
+  .set-foot { display: flex; align-items: center; }
+  .set-save {
+    color: #8ab4f8; cursor: default; padding: 0 10px; height: 24px;
+    line-height: 24px; border-radius: 12px;
+  }
+  .set-save:hover { background: #4a4d51; }
+  .set-msg { color: #9aa0a6; margin-left: 10px; }
   /* 站点信息（F-CEF-19）：点地址栏锁图标弹出 */
   html.site-open, html.site-open body { height: 100vh; }
   #sitepanel {
@@ -484,7 +506,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <div class="menu-item disabled">打印<span class="menu-key">待补</span></div>
     <div class="menu-item" data-act="findopen">查找<span class="menu-key">Ctrl+F</span></div>
     <div class="menu-sep"></div>
-    <div class="menu-item disabled">设置<span class="menu-key">待补</span></div>
+    <div class="menu-item" data-panel="settings">设置<span class="menu-key"></span></div>
     <div class="menu-item disabled">关于 Shift<span class="menu-key">待补</span></div>
     <div class="menu-sep"></div>
     <div class="menu-item" data-act="winclose">退出<span class="menu-key"></span></div>
@@ -502,6 +524,17 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <div class="site-state" id="sitestate"></div>
     <div class="site-url" id="siteurl"></div>
     <span id="siteclose" class="site-close">关闭</span>
+  </div>
+  <div id="settingspanel">
+    <label class="set-row">搜索引擎
+      <select id="set-engine"><option value="bing">必应</option><option value="baidu">百度</option><option value="google">谷歌</option></select>
+    </label>
+    <label class="set-row">下载目录
+      <input id="set-download" type="text" spellcheck="false" placeholder="空=系统默认">
+    </label>
+    <label class="set-row"><input id="set-adblock" type="checkbox"> 广告拦截</label>
+    <label class="set-row"><input id="set-gpc" type="checkbox"> 发送 Sec-GPC（与普通 Chrome 不同）</label>
+    <div class="set-foot"><span id="set-save" class="set-save">保存</span><span id="set-msg" class="set-msg"></span></div>
   </div>
   <script id="bm-data" type="application/json">__SHIFT_BOOKMARKS_JSON__</script>
   <script id="pw-data" type="application/json">__SHIFT_PASSWORDS_JSON__</script>
@@ -1298,6 +1331,33 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     }
   });
 
+  // ---- 设置面板（F-CEF-19）----
+  const settingsPanel = document.getElementById('settingspanel');
+  function setSettingsPanel(open) {
+    document.documentElement.classList.toggle('settings-open', open);
+    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'hist-open', 'find-open', 'site-open');
+    act('settingspanel|' + (open ? '1' : '0'));
+  }
+  window.__shiftSettings = function (d) {
+    if (!d) return;
+    document.getElementById('set-engine').value = d.search_engine || 'bing';
+    document.getElementById('set-download').value = d.download_dir || '';
+    document.getElementById('set-adblock').checked = d.adblock_enabled !== 'false';
+    document.getElementById('set-gpc').checked = d.gpc_header === 'true';
+  };
+  window.__shiftSettingsSaved = function (m) {
+    document.getElementById('set-msg').textContent = m || '';
+  };
+  document.getElementById('set-save').addEventListener('click', () => {
+    const d = {
+      search_engine: document.getElementById('set-engine').value,
+      download_dir: document.getElementById('set-download').value.trim(),
+      adblock_enabled: document.getElementById('set-adblock').checked ? 'true' : 'false',
+      gpc_header: document.getElementById('set-gpc').checked ? 'true' : 'false',
+    };
+    act('settingssave|' + JSON.stringify(d));
+  });
+
   // ---- 站点信息（F-CEF-19）----
   const lockBtn = document.getElementById('lockbtn');
   const sitePanel = document.getElementById('sitepanel');
@@ -1344,6 +1404,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (!item || item.classList.contains('disabled')) return;
     setMenuPanel(false);
     if (item.dataset.panel === 'hist') { setHistPanel(true); return; }
+    if (item.dataset.panel === 'settings') { setSettingsPanel(true); return; }
     if (item.dataset.panel === 'dl') { setDlPanel(true); return; }
     if (item.dataset.panel === 'pw') { setPwPanel(true); return; }
     act(item.dataset.act);

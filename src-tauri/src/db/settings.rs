@@ -103,51 +103,39 @@ pub async fn get_all_settings(db: tauri::State<'_, Db>) -> DbResult<Vec<Setting>
 /// 设置单个值
 #[tauri::command]
 pub async fn set_setting(db: tauri::State<'_, Db>, key: String, value: String) -> DbResult<()> {
-    // 主密钥等敏感设置不允许前端写入
-    if is_sensitive(&key) {
-        return Err(crate::db::DbError::Other(format!(
-            "设置 {} 受保护，不允许通过前端修改",
-            key
-        )));
+    set_setting_inner(&db.pool, &key, &value)
+        .await
+        .map_err(crate::db::DbError::Other)
+}
+
+/// 设置单个值（内部共用：Tauri 命令与 CEF 设置页走同一入口）。
+pub async fn set_setting_inner(pool: &sqlx::SqlitePool, key: &str, value: &str) -> Result<(), String> {
+    if is_sensitive(key) {
+        return Err(format!("设置 {key} 受保护，不允许通过前端修改"));
     }
-    // 白名单校验：未知键拒绝写入，防止垃圾数据/错别字键
-    if !is_allowed(&key) {
-        return Err(crate::db::DbError::Other(format!(
-            "设置 {} 不在白名单内，拒绝写入",
-            key
-        )));
+    if !is_allowed(key) {
+        return Err(format!("设置 {key} 不在白名单内，拒绝写入"));
     }
-    // 内部键仅专用命令读写，通用入口拒绝直写（P1-1 暗键收编：白名单是"存在的键"，内部键是"存在的键"但不可通用写）
-    if crate::contracts::settings::is_internal(&key) {
-        return Err(crate::db::DbError::Other(format!(
-            "设置 {} 为内部键，仅专用命令可写",
-            key
-        )));
+    if crate::contracts::settings::is_internal(key) {
+        return Err(format!("设置 {key} 为内部键，仅专用命令可写"));
     }
-    // 掩码防御：前端把"****xxxx"这类掩码回写会盖掉真实密钥/令牌。
-    // 前端读到的凭据值是掩码（get_all_settings 里已 mask），回写黑洞会毁掉真实值。
-    // master_key 走上面的 is_sensitive 早拒；凭据键（ai_api_key / opencode_password）
-    // 必须在入库前拦掉掩码——否则前端整表回写 settings 就让真实值变成掩码串。
-    if (is_sensitive(&key) || is_masked(&key)) && value.contains("****") {
-        return Err(crate::db::DbError::Other(format!(
-            "设置 {} 收到掩码回写（含 ****），已拒绝。真实值不会写库，请重新输入完整值",
-            key
-        )));
+    if (is_sensitive(key) || is_masked(key)) && value.contains("****") {
+        return Err(format!(
+            "设置 {key} 收到掩码回写（含 ****），已拒绝。真实值不会写库，请重新输入完整值"
+        ));
     }
     sqlx::query(
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
     )
-    .bind(&key)
-    .bind(&value)
-    .execute(&db.pool)
-    .await?;
-    // 性能 P0：同步更新缓存，保持一致性
-    crate::db::settings_cache::update(&key, &value);
-    // 开发者工具开关即时生效（免重启）：新开 webview 创建时读静态值，已开标签关掉重开即可
-    sync_devtools_static(&key, &value);
-    // 下载目录覆盖值即时同步（GTK 下载回调同步读，不能查库）
-    sync_download_dir_static(&key, &value);
+    .bind(key)
+    .bind(value)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    crate::db::settings_cache::update(key, value);
+    sync_devtools_static(key, value);
+    sync_download_dir_static(key, value);
     Ok(())
 }
 
