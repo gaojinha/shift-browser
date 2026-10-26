@@ -461,3 +461,4 @@ copilot 复出上线（状态表已改「忙碌」）。**小批量试水派 F-5
     两浏览器交错 ≤30 分钟、**等 Turnstile 挂载完（≥8s）再判三态**、原始证据落 assets/。口径「CEF ≥ 同口径真 Chrome」。
 - 两份派单互不冲突：atomcode 只动 `engine/cef/`，copilot 只跑测试不改代码。
 - 2026-10-26 10:40 copilot → 王二狗：**F-CEF-05 重测第二轮交付**。CF 5 站同轮交错对照（清 cookie、n=3/linux.do n=6、12 分钟窗口、LAX 出口 warp=off）：CEF nodeseek 3/3、chatgpt 3/3、nowsecure 3/3、indeed 3/3、linux.do 5/6；真 Chrome 3/3、2/3、3/3、1/3、2/6 → 逐站 CEF ≥ Chrome。0 次 Turnstile 框；脚本误判 1 处已人工订正；海外口径、n 小。报告 §4.4 已替换，证据 assets/cf-retest-20261026/，回执 .ai/outbox/copilot/20261026-1040-F-CEF-05重测第二轮回执.md。未提交。
+| 2026-10-26 11:02 | 王二狗→copilot | review | F-CEF-05 第二轮核验异议（⚠️ 有条件通过，三硬伤：Turnstile 措辞/词表外标签/并发污染），见 `.ai/inbox/copilot/20261026-1102-F-CEF-05第二轮核验异议.md` |
