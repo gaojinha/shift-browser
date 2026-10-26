@@ -22,8 +22,15 @@
 
     // ② wl_prefix 的 7 个前缀变量（派单点名要求一起注入、别重写）
     prefix_vars: {
+      // ⚠️ 名字一律从代码原文抄，别手敲：12:43 那轮我把这项写成
+      //    '__SHIFT_TRANSLATE_TIMEOUT__'（多两个尾下划线），害得误报"变量缺失"，
+      //    还顺着假理由推出"wl_prefix 整段没执行"。真实名见 adblock.rs:157：
+      //    window.__SHIFT_TRANSLATE_TIMEOUT = {};   ← 无尾下划线
       PRIVACY_WHITELIST: has('__SHIFT_PRIVACY_WHITELIST__'),
-      TRANSLATE_TIMEOUT: has('__SHIFT_TRANSLATE_TIMEOUT__'),
+      TRANSLATE_TIMEOUT: has('__SHIFT_TRANSLATE_TIMEOUT'),
+      // 本机 settings 里 translate_timeout=120（在 adblock.rs 的 5..=120 合法区间内）
+      // → 真机该读到 120；读到 15 说明取的是默认值（设置没传下来），读不到说明前缀没执行
+      TRANSLATE_TIMEOUT_VAL: brief(window.__SHIFT_TRANSLATE_TIMEOUT),
       FP_MODE: has('__SHIFT_FP_MODE__'),
       SESSION_KEY: has('__SHIFT_SESSION_KEY__'),
       UA_BRANDS: has('__SHIFT_UA_BRANDS__'),
@@ -40,6 +47,23 @@
       fp_mode_val: brief(window.__shiftFpMode),
       brands_val: brief(window.__shiftBrands),
       origin_seed: has('__shiftOriginSeed')
+    },
+
+    // ★ 翻译桥（context_translate.js）。12:43 我拿错符号名（window.__shiftTranslate
+    //   根本不存在）误判"桥没装"。真实标志与通道见 context_translate.js:13/17/46：
+    //     window.__sbTrSend        —— 发送函数（双通道：webkit 原生桥 → 回退 shift:// Image）
+    //     window.__shiftTranslateMenu —— 幂等标志（http/https 页才置位）
+    //   主通道依赖 window.webkit.messageHandlers.shiftTranslate —— WebKit 专属，CEF 无；
+    //   回退通道 shift://__translate__ 是 Tauri protocol handler（受站点 img-src CSP 拦，
+    //   2026-09-21 正因如此才改走原生桥），且 CEF 侧未见注册 shift:// handler。
+    //   判据：三个符号都在 + webkit 不存在 ⇒ 脚本装了、通道死了（不是"没注入"）。
+    translate_bridge: {
+      sb_tr_send: has('__sbTrSend'),
+      menu_flag: has('__shiftTranslateMenu'),
+      typeof_webkit: typeof window.webkit,                    // CEF 预期 'undefined'
+      has_msg_handlers: !!(window.webkit && window.webkit.messageHandlers
+        && window.webkit.messageHandlers.shiftTranslate),     // 主通道是否可用
+      wpt_flag: has('__shift_wpt_active')                     // 整页翻译脚本的标记
     },
 
     // 品牌表不能被 compat/隐私覆盖坏（F-CEF-08 的成果要守住）
@@ -61,7 +85,10 @@
     // adblock 的 DOM 观察器：document_start 时 body 为 null 则不挂（已知，非 CEF 新增）
     adblock_observer_note: '见 adblock.js:48 if(document.body)',
 
-    // 用户脚本 / 扩展在本机的样本量（决定这次验收覆盖到哪一层）
-    note_sample_zero: '本机 extensions 表 0 行、userscripts 0 行 → 这两条链路本轮无法行为级取证'
+    // 用户脚本 / 扩展样本量（决定覆盖到哪一层）。
+    // 12:33 我查的是 app.db —— 那是 0 表的空壳，结论凑巧对但地基错。
+    // 13:12 用真库复核：~/.local/share/com.shiftbrowser.app/shift-browser.db（24 表）
+    //   → extensions 0 行、userscripts 0 行（settings 43 行）
+    note_sample_zero: '真库 shift-browser.db 复核：extensions 0 行 / userscripts 0 行 → 这两条链路无样本，本轮不可行为级取证（需先造样本）',
   };
 })()
