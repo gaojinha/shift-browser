@@ -374,4 +374,35 @@ mod tests {
             .await
             .unwrap();
     }
+
+    /// list_downloads 是 WebKit 与 CEF 共用入口（CEF 工具栏面板也走它），
+    /// 钉住：空库空数组、按 id 倒序、字段原样回读。
+    #[tokio::test]
+    async fn test_list_downloads_empty_and_ordered_desc() {
+        let (_dir, pool) = temp_pool().await;
+        assert!(list_downloads(&pool).await.unwrap().is_empty(), "空库应空数组");
+
+        let a = insert_download(&pool, "a.bin", Some("https://a"), Some("/tmp/a"), 10)
+            .await
+            .unwrap();
+        let b = insert_download(&pool, "b.bin", None, None, 20)
+            .await
+            .unwrap();
+        let c = insert_download(&pool, "c.bin", Some("https://c"), Some("/tmp/c"), 30)
+            .await
+            .unwrap();
+        update_download_state(&pool, b, "completed", Some(20))
+            .await
+            .unwrap();
+
+        let list = list_downloads(&pool).await.unwrap();
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[0].id, c, "按 id 倒序，最新的在前");
+        assert_eq!(list[2].id, a);
+        assert_eq!(list[1].state, "completed");
+        assert_eq!(list[1].received_bytes, 20);
+        assert_eq!(list[0].filename, "c.bin");
+        assert_eq!(list[0].total_bytes, 30);
+        assert_eq!(list[0].path.as_deref(), Some("/tmp/c"));
+    }
 }
