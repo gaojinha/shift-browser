@@ -1,0 +1,12 @@
+{
+ "meta": {
+  "ts": "2026-10-26 20:54:29+0800",
+  "port": 9362,
+  "target": "file:///tmp/cef-f18-1/shell/cef-newtab.html",
+  "target_title": "新标签页"
+ },
+ "eval": {
+  "inner_w": 1162
+ },
+ "exception": null
+}

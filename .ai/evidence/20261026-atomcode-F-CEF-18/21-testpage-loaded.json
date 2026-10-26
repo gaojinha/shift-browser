@@ -1,0 +1,14 @@
+{
+ "meta": {
+  "ts": "2026-10-26 21:00:01+0800",
+  "port": 9362,
+  "target": "file:///tmp/cef-f18-test.html",
+  "target_title": "F18 查找靶页"
+ },
+ "eval": {
+  "title": "F18 查找靶页",
+  "rows": 20,
+  "needle_dom": 18
+ },
+ "exception": null
+}

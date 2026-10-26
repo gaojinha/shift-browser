@@ -309,6 +309,38 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     color: #9aa0a6;
   }
   .lock { width: 14px; height: 14px; margin-right: 8px; color: #8b93a1; flex: none; }
+  /* 缩放控件（F-CEF-18）：− / 百分比 / +，放地址栏右侧 */
+  .zoomctl {
+    display: flex; align-items: center; flex: 0 0 auto;
+    height: 28px; background: #202124; border-radius: 14px; padding: 0 2px; margin: 0 2px;
+  }
+  .zoomctl button {
+    width: 24px; height: 24px; border-radius: 50%; font-size: 14px; line-height: 24px;
+  }
+  #zoomval {
+    min-width: 44px; text-align: center; font-size: 12px; color: #9aa0a6;
+    cursor: default; user-select: none;
+  }
+  #zoomval:hover { color: #e8eaed; }
+  /* 页内查找（F-CEF-18）：地址栏下方浮层，覆盖书签栏位置。
+     工具栏是独立视图，浮层会被固定视口裁掉，开栏时 Rust 撑高 FIND_BAR_EXTRA。 */
+  #findbar {
+    display: none; position: absolute; left: 0; right: 0; top: 88px;
+    height: 44px; z-index: 40;
+    align-items: center; gap: 6px; padding: 0 10px 0 12px;
+    background: #292a2d; border-top: 1px solid #3c4043;
+  }
+  html.find-open #findbar { display: flex; }
+  #findinput {
+    flex: 1; min-width: 0; height: 28px;
+    background: #202124; border: 1px solid #3c4043; border-radius: 14px;
+    outline: 0; color: #e8eaed; font-size: 12px; padding: 0 12px; user-select: text;
+  }
+  #findinput:focus { border-color: #8ab4f8; }
+  #findcount {
+    flex: 0 0 auto; min-width: 40px; text-align: center;
+    color: #9aa0a6; font-size: 12px;
+  }
 </style>
 </head>
 <body>
@@ -348,6 +380,11 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       <button class="star" id="starbtn" title="收藏此页">☆</button>
       <div id="omni"></div>
     </div>
+    <div class="zoomctl" title="缩放（Ctrl++ / Ctrl+- / Ctrl+0）">
+      <button title="缩小（Ctrl+-）" onclick="act('zoomout')">−</button>
+      <span id="zoomval" title="点击复位 100%（Ctrl+0）" onclick="act('zoomreset')">100%</span>
+      <button title="放大（Ctrl++）" onclick="act('zoomin')">+</button>
+    </div>
     <button title="密码" id="pwbtn">
       <svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/></svg>
     </button>
@@ -359,6 +396,13 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     </button>
   </div>
   <div class="bookmarks" id="bookmarks"></div>
+  <div id="findbar">
+    <input id="findinput" type="text" spellcheck="false" placeholder="在此页面上查找">
+    <span id="findcount">0/0</span>
+    <button id="findprev" title="上一个（Shift+Enter）">↑</button>
+    <button id="findnext" title="下一个（Enter）">↓</button>
+    <button id="findclose" title="关闭（Esc）">✕</button>
+  </div>
   <div id="bmfolders"></div>
   <div id="bmmenu"></div>
   <div id="pwpanel">
@@ -376,9 +420,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <div class="menu-item" data-act="bmtoggle">书签栏<span class="menu-key">Ctrl+Shift+B</span></div>
     <div class="menu-item" data-panel="pw">密码<span class="menu-key"></span></div>
     <div class="menu-sep"></div>
-    <div class="menu-item disabled">缩放<span class="menu-key">待补</span></div>
     <div class="menu-item disabled">打印<span class="menu-key">待补</span></div>
-    <div class="menu-item disabled">查找<span class="menu-key">待补</span></div>
+    <div class="menu-item" data-act="findopen">查找<span class="menu-key">Ctrl+F</span></div>
     <div class="menu-sep"></div>
     <div class="menu-item disabled">设置<span class="menu-key">待补</span></div>
     <div class="menu-item disabled">关于 Shift<span class="menu-key">待补</span></div>
@@ -500,6 +543,12 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   };
   window.__shiftLoading = function (on) {
     document.documentElement.dataset.loading = on ? '1' : '';
+  };
+
+  // ---- 缩放显示（F-CEF-18）：Rust 侧推活动标签的档位百分比 ----
+  const zoomval = document.getElementById('zoomval');
+  window.__shiftZoom = function (pct) {
+    zoomval.textContent = pct + '%';
   };
 
   // ---- 标签栏（M2 独立开窗）----
@@ -938,7 +987,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 
   function setPwPanel(open) {
     document.documentElement.classList.toggle('pw-open', open);
-    if (open) document.documentElement.classList.remove('dl-open');
+    if (open) document.documentElement.classList.remove('dl-open', 'find-open');
     act('pwpanel|' + (open ? '1' : '0'));
     if (open) { pwSearch.value = ''; renderPasswords(); pwSearch.focus(); }
   }
@@ -1040,7 +1089,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 
   function setDlPanel(open) {
     document.documentElement.classList.toggle('dl-open', open);
-    if (open) document.documentElement.classList.remove('pw-open');
+    if (open) document.documentElement.classList.remove('pw-open', 'find-open');
     act('dlpanel|' + (open ? '1' : '0'));
     if (open) renderDownloads();
   }
@@ -1078,7 +1127,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   // ---- 主菜单（F-CEF-16）----
   function setMenuPanel(open) {
     document.documentElement.classList.toggle('menu-open', open);
-    if (open) document.documentElement.classList.remove('pw-open', 'dl-open');
+    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'find-open');
     act('menupanel|' + (open ? '1' : '0'));
   }
   document.getElementById('menubtn').addEventListener('click', (e) => {
@@ -1098,6 +1147,62 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') setMenuPanel(false);
+  });
+
+  // ---- 页内查找（F-CEF-18）----
+  // 计数与当前条号来自 CEF FindHandler 真回调（Rust 侧推 window.__shiftFind），
+  // 本页不自己数 DOM。动作走 console 桥：find|<词> / findnext / findprev / findclose。
+  const findbar = document.getElementById('findbar');
+  const findinput = document.getElementById('findinput');
+  const findcount = document.getElementById('findcount');
+  let findTimer = null;
+
+  function renderFindCount(count, active) {
+    // CEF 的 active_match_ordinal 是 0-based（第一个匹配 = 0），界面按 Chrome 显示 1-based
+    findcount.textContent = count <= 0 ? '0/0' : Math.min(active + 1, count) + '/' + count;
+  }
+  window.__shiftFind = renderFindCount;
+
+  window.__shiftFindOpen = function () {
+    document.documentElement.classList.add('find-open');
+    document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open');
+    closeOmni();
+    findinput.focus();
+    findinput.select();
+  };
+  window.__shiftFindClose = function () {
+    if (!document.documentElement.classList.contains('find-open')) return;
+    document.documentElement.classList.remove('find-open');
+    renderFindCount(0, 0);
+  };
+
+  // 输入防抖发起查找（find_next=0 = 新查找）；清空输入只重置计数，不发空查找
+  findinput.addEventListener('input', () => {
+    clearTimeout(findTimer);
+    const q = findinput.value;
+    if (!q.trim()) { renderFindCount(0, 0); return; }
+    findTimer = setTimeout(() => act('find|' + q), 150);
+  });
+  findinput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!findinput.value) return;
+      // Enter = 下一个，Shift+Enter = 上一个（继续查找，find_next=1）
+      act(e.shiftKey ? 'findprev' : 'findnext');
+      findinput.select();
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      act('findclose');
+    }
+  });
+  document.getElementById('findnext').addEventListener('click', () => act('findnext'));
+  document.getElementById('findprev').addEventListener('click', () => act('findprev'));
+  document.getElementById('findclose').addEventListener('click', () => act('findclose'));
+  findbar.addEventListener('mousedown', (e) => {
+    // 点查找栏空白处不给焦点跳走（按钮/输入框除外）
+    if (e.target === findbar) e.preventDefault();
   });
 
   // 防止工具栏页面拖动/选中
@@ -1137,6 +1242,8 @@ mod tests {
         assert!(body.contains("pwpanel"), "工具栏 HTML 必须含密码面板");
         assert!(body.contains("dlpanel"), "工具栏 HTML 必须含下载面板");
         assert!(body.contains("menupanel"), "工具栏 HTML 必须含主菜单");
+        assert!(body.contains("findbar"), "工具栏 HTML 必须含页内查找栏（F-CEF-18）");
+        assert!(body.contains("zoomval"), "工具栏 HTML 必须含缩放百分比显示（F-CEF-18）");
         assert!(
             body.contains(r#""filename":"a.zip""#),
             "下载记录 JSON 必须嵌进页面"

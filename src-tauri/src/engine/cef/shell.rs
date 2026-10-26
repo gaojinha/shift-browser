@@ -41,6 +41,7 @@ fn toolbar_height() -> i32 {
         + BM_EXTRA.load(Ordering::Relaxed)
         + DL_EXTRA.load(Ordering::Relaxed)
         + MENU_EXTRA.load(Ordering::Relaxed)
+        + FIND_EXTRA.load(Ordering::Relaxed)
 }
 
 /// 密码面板（F-CEF-12）展开时工具栏视图额外加高的像素，收起为 0
@@ -64,6 +65,7 @@ pub fn set_dl_panel(open: bool) {
         PW_EXTRA.store(0, Ordering::Relaxed);
         BM_EXTRA.store(0, Ordering::Relaxed);
         MENU_EXTRA.store(0, Ordering::Relaxed);
+        FIND_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -79,6 +81,7 @@ pub fn set_menu_panel(open: bool) {
         PW_EXTRA.store(0, Ordering::Relaxed);
         BM_EXTRA.store(0, Ordering::Relaxed);
         DL_EXTRA.store(0, Ordering::Relaxed);
+        FIND_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -90,6 +93,7 @@ pub fn set_pw_panel(open: bool) {
         BM_EXTRA.store(0, Ordering::Relaxed);
         DL_EXTRA.store(0, Ordering::Relaxed);
         MENU_EXTRA.store(0, Ordering::Relaxed);
+        FIND_EXTRA.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -103,6 +107,27 @@ fn set_bm_popup(open: bool, need: i32) {
         0
     };
     BM_EXTRA.store(extra, Ordering::Relaxed);
+    if open {
+        FIND_EXTRA.store(0, Ordering::Relaxed);
+    }
+    apply_toolbar_height();
+}
+
+/// 页内查找栏（F-CEF-18）展开时工具栏视图额外加高的像素，收起为 0。
+/// 查找栏是地址栏下方的浮层（44px），工具栏独立视图会被固定视口裁掉，
+/// 所以开合都走撑高（跟密码面板同一套做法）。
+const FIND_BAR_EXTRA: i32 = 44;
+static FIND_EXTRA: AtomicI32 = AtomicI32::new(0);
+
+/// 查找栏开合：与其它面板互斥，同一时刻只留一个撑高来源
+fn set_find_bar(open: bool) {
+    FIND_EXTRA.store(if open { FIND_BAR_EXTRA } else { 0 }, Ordering::Relaxed);
+    if open {
+        PW_EXTRA.store(0, Ordering::Relaxed);
+        BM_EXTRA.store(0, Ordering::Relaxed);
+        DL_EXTRA.store(0, Ordering::Relaxed);
+        MENU_EXTRA.store(0, Ordering::Relaxed);
+    }
     apply_toolbar_height();
 }
 
@@ -140,6 +165,12 @@ thread_local! {
 
     /// 最近关闭标签的 URL 栈（上限 20），供 Ctrl+Shift+T 恢复
     static CLOSED_URLS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+
+    /// 各标签的缩放档位（tab_id → zoom level，F-CEF-18）。
+    /// CEF 154 的 C API 只有 `set_zoom_level`、没有 getter（C++ API 才有），
+    /// 而档位只会被本模块改动，所以自己记账；未记录 = 0.0 = 100%。
+    /// （`HashMap::new` 非 const，不能用 `const {}` 块，走惰性初始化。）
+    static ZOOM_LEVELS: RefCell<HashMap<String, f64>> = RefCell::new(HashMap::new());
 
     /// 正在关闭某个标签：期间拦掉 CEF 顺带发起的窗口关闭请求
     static TAB_CLOSING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -652,6 +683,15 @@ wrap_client! {
             Some(ShellKeyboardHandler::new())
         }
 
+        /// 页内查找（F-CEF-18）：find 作用于内容页浏览器，FindHandler 只挂内容页
+        fn find_handler(&self) -> Option<FindHandler> {
+            if self.toolbar {
+                None
+            } else {
+                Some(ShellFindHandler::new(self.tab_id.clone()))
+            }
+        }
+
         fn display_handler(&self) -> Option<DisplayHandler> {
             // 工具栏：接收 JS 传上来的动作（console 桥）
             // 内容页：接收标题变化，回写标签栏（2026-10-26 多标签）
@@ -1153,12 +1193,35 @@ fn switch_tab(idx: usize) {
     // View 层 request_focus ≠ 网页能收键盘：CEF 的 browser 还要单独 set_focus(1)。
     // 2026-10-26 实测：只 request_focus 时 document.hasFocus() 一直 false。
     let active_id = SHELL_TABS.with(|t| t.borrow().get(idx).map(|x| x.id.clone()));
-    if let Some(id) = active_id {
+    if let Some(ref id) = active_id {
         BROWSERS.with(|m| {
-            if let Some(b) = m.borrow().get(&id) {
+            if let Some(b) = m.borrow().get(id) {
                 super::browser::focus(b);
             }
         });
+    }
+    // 页内查找是标签级状态（F-CEF-18）：切走时停旧标签的查找并收起查找栏，
+    // 否则旧计数会留在工具栏上
+    let prev = ACTIVE_TAB.with(|a| a.get());
+    if prev != idx && FIND_EXTRA.load(Ordering::Relaxed) != 0 {
+        let prev_id = SHELL_TABS.with(|t| t.borrow().get(prev).map(|x| x.id.clone()));
+        if let Some(pid) = prev_id {
+            BROWSERS.with(|m| {
+                if let Some(host) = m.borrow().get(&pid).and_then(|b| b.host()) {
+                    host.stop_finding(1);
+                }
+            });
+        }
+        LAST_FIND_TEXT.with(|t| *t.borrow_mut() = String::new());
+        set_find_bar(false);
+        run_toolbar_js("window.__shiftFindClose && window.__shiftFindClose()");
+    }
+    // 切标签后同步活动标签的缩放档位显示（缩放是标签级状态，自管表为准）
+    let zoom_pct = active_id.and_then(|id| {
+        ZOOM_LEVELS.with(|z| z.borrow().get(&id).map(|l| zoom_pct_for_level(*l)))
+    });
+    if let Some(pct) = zoom_pct {
+        run_toolbar_js(&format!("window.__shiftZoom && window.__shiftZoom({pct})"));
     }
     log::info!("[cef] 切换到标签 {idx}");
     refresh_tabbar();
@@ -1215,6 +1278,8 @@ fn close_tab(idx: usize) {
     // 代价是短时间内留一个不可见视图，先保证不崩，M2 迭代里再找安全的移除时机。
     view.set_visible(0);
 
+    // 档位表随标签清理（CEF 侧没有 get_zoom_level，表是唯一事实源）
+    ZOOM_LEVELS.with(|z| z.borrow_mut().remove(&id));
     let new_idx = idx.saturating_sub(1).min(len.saturating_sub(2));
     ACTIVE_TAB.with(|a| a.set(new_idx));
     switch_tab(new_idx);
@@ -1536,6 +1601,136 @@ pub fn refresh_tabbar() {
     });
 }
 
+// ---- 缩放（F-CEF-18）----
+// CEF 的 zoom level：0 = 100%，数值越大放得越大。档位对齐 Chrome 的
+// 90/100/110/125/150/175/200（派单给的档位值，低档位与 1.2^level 换算吻合）。
+// 只做当前标签；按站点记忆是 P2。
+const ZOOM_STEPS: [f64; 7] = [-0.58, 0.0, 0.53, 1.14, 2.01, 2.65, 3.41];
+const ZOOM_PCTS: [u32; 7] = [90, 100, 110, 125, 150, 175, 200];
+
+/// 找最接近 `level` 的档位下标（同距离取较低档）
+fn nearest_zoom_idx(level: f64) -> usize {
+    (0..ZOOM_STEPS.len()).fold(0, |best, i| {
+        if (ZOOM_STEPS[i] - level).abs() < (ZOOM_STEPS[best] - level).abs() {
+            i
+        } else {
+            best
+        }
+    })
+}
+
+/// 把实际 zoom level 归到最近档位，得到工具栏显示的百分比
+fn zoom_pct_for_level(level: f64) -> u32 {
+    ZOOM_PCTS[nearest_zoom_idx(level)]
+}
+
+/// 上一档/下一档/复位的目标档位。`dir`：+1 放大、-1 缩小、0 回 100%。
+fn zoom_step(level: f64, dir: i32) -> f64 {
+    if dir == 0 {
+        return ZOOM_STEPS[1];
+    }
+    let i = nearest_zoom_idx(level);
+    let n = (i as i32 + dir).clamp(0, ZOOM_STEPS.len() as i32 - 1) as usize;
+    ZOOM_STEPS[n]
+}
+
+/// 对活动标签执行缩放，并把档位百分比推给工具栏显示。
+fn apply_zoom(dir: i32) {
+    let active_id = SHELL_TABS.with(|t| {
+        let tabs = t.borrow();
+        tabs.get(ACTIVE_TAB.with(|a| a.get())).map(|tab| tab.id.clone())
+    });
+    let Some(active_id) = active_id else {
+        return;
+    };
+    // CEF 侧没有 get_zoom_level（154 C API 只有 setter），档位以自管表为准
+    let (cur, target) = ZOOM_LEVELS.with(|z| {
+        let map = z.borrow();
+        let cur = map.get(&active_id).copied().unwrap_or(0.0);
+        (cur, zoom_step(cur, dir))
+    });
+    if target == cur {
+        return;
+    }
+    ZOOM_LEVELS.with(|z| z.borrow_mut().insert(active_id.clone(), target));
+    BROWSERS.with(|m| {
+        if let Some(host) = m.borrow().get(&active_id).and_then(|b| b.host()) {
+            host.set_zoom_level(target);
+        }
+    });
+    let pct = zoom_pct_for_level(target);
+    log::info!("[cef] 缩放 dir={dir:+} level {cur} -> {target}（{pct}%）");
+    run_toolbar_js(&format!("window.__shiftZoom && window.__shiftZoom({pct})"));
+}
+
+// ---- 页内查找（F-CEF-18）----
+// 查找是标签级状态：动作从工具栏发出（内容页 console 白名单不放行查找动作，
+// 页面脚本伪造 SHIFT_ACT 触发不了），CEF FindHandler 回调只在来源标签是
+// 活动标签时把 count/ordinal 推给工具栏。
+// 最近一次的查找词：CEF `find` 每次调用都要带词，findnext/findprev 重发它。
+// （UI 线程专用，跟本文件其它 UI 状态一样用 thread_local。）
+thread_local! {
+    static LAST_FIND_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// 打开查找栏：撑高视图、工具栏页面显示并聚焦输入框、把键盘焦点切回工具栏
+/// （查找栏是独立 BrowserView，不 set_focus 就收不到按键）
+fn open_find_bar() {
+    set_find_bar(true);
+    run_toolbar_js("window.__shiftFindOpen && window.__shiftFindOpen()");
+    BROWSERS.with(|m| {
+        if let Some(b) = m.borrow().get(TOOLBAR_ID) {
+            super::browser::focus(b);
+        }
+    });
+}
+
+/// 关闭查找栏：停活动标签的查找（清高亮）、还原视图高度、收起工具栏浮层
+fn close_find_bar() {
+    let active_id = SHELL_TABS.with(|t| {
+        let tabs = t.borrow();
+        tabs.get(ACTIVE_TAB.with(|a| a.get())).map(|tab| tab.id.clone())
+    });
+    if let Some(id) = active_id {
+        BROWSERS.with(|m| {
+            if let Some(host) = m.borrow().get(&id).and_then(|b| b.host()) {
+                host.stop_finding(1);
+            }
+        });
+    }
+    LAST_FIND_TEXT.with(|t| *t.borrow_mut() = String::new());
+    set_find_bar(false);
+    run_toolbar_js("window.__shiftFindClose && window.__shiftFindClose()");
+}
+
+/// 在活动标签上发起/继续查找。关键词只记字符数进日志，不落全文。
+fn do_find(text: &str, forward: i32, find_next: i32) {
+    if text.trim().is_empty() {
+        return;
+    }
+    let active_id = SHELL_TABS.with(|t| {
+        let tabs = t.borrow();
+        tabs.get(ACTIVE_TAB.with(|a| a.get())).map(|tab| tab.id.clone())
+    });
+    let Some(active_id) = active_id else {
+        return;
+    };
+    LAST_FIND_TEXT.with(|t| *t.borrow_mut() = text.to_string());
+    BROWSERS.with(|m| {
+        let map = m.borrow();
+        match map.get(&active_id).and_then(|b| b.host()) {
+            Some(host) => {
+                host.find(Some(&CefString::from(text)), forward, 0, find_next);
+                log::info!(
+                    "[cef] 页内查找: {} 字, forward={forward}, find_next={find_next}",
+                    text.chars().count()
+                );
+            }
+            None => log::warn!("[cef] 页内查找: 活动标签 {active_id} 无 host"),
+        }
+    });
+}
+
 /// 执行工具栏动作
 fn handle_action(action: &str) {
     let (cmd, arg) = match action.split_once('|') {
@@ -1568,6 +1763,46 @@ fn handle_action(action: &str) {
         }
         "dlpanel" => {
             set_dl_panel(arg == "1");
+            return;
+        }
+        // 缩放（F-CEF-18）：工具栏 −/+/百分比 控件与主菜单共用
+        "zoomin" => {
+            apply_zoom(1);
+            return;
+        }
+        "zoomout" => {
+            apply_zoom(-1);
+            return;
+        }
+        "zoomreset" => {
+            apply_zoom(0);
+            return;
+        }
+        // 页内查找（F-CEF-18）：动作只从工具栏来（内容页 console 白名单不含这些）
+        "findopen" => {
+            open_find_bar();
+            return;
+        }
+        "find" => {
+            do_find(arg, 1, 0);
+            return;
+        }
+        "findnext" => {
+            let t = LAST_FIND_TEXT.with(|t| t.borrow().clone());
+            if !t.is_empty() {
+                do_find(&t, 1, 1);
+            }
+            return;
+        }
+        "findprev" => {
+            let t = LAST_FIND_TEXT.with(|t| t.borrow().clone());
+            if !t.is_empty() {
+                do_find(&t, 0, 1);
+            }
+            return;
+        }
+        "findclose" => {
+            close_find_bar();
             return;
         }
         "dlopen" => {
@@ -1779,10 +2014,58 @@ fn urlencode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        escape_like, is_attachment_disposition, normalize_url, urlencode, CONTEXT_MENU_JS,
+        escape_like, is_attachment_disposition, nearest_zoom_idx, normalize_url, urlencode,
+        zoom_pct_for_level, zoom_step, CONTEXT_MENU_JS,
     };
 
     // ---- normalize_url：地址栏补全规则（P0 实测逻辑，防改坏）----
+
+    // ---- 缩放档位（F-CEF-18）----
+
+    #[test]
+    fn zoom_step_steps_through_chrome_levels_and_clamps() {
+        // 逐档：100 -> 110 -> 125 -> 150 -> 175 -> 200（档位值以 ZOOM_STEPS 为准）
+        assert_eq!(zoom_step(0.0, 1), 0.53);
+        assert_eq!(zoom_step(0.53, 1), 1.14);
+        assert_eq!(zoom_step(1.14, 1), 2.01);
+        assert_eq!(zoom_step(2.01, 1), 2.65);
+        assert_eq!(zoom_step(2.65, 1), 3.41);
+        // 高档钳制：200% 再放大不越界
+        assert_eq!(zoom_step(3.41, 1), 3.41);
+        // 逐档缩小：110 -> 100 -> 90
+        assert_eq!(zoom_step(0.53, -1), 0.0);
+        assert_eq!(zoom_step(0.0, -1), -0.58);
+        // 低档钳制：90% 再缩小不越界
+        assert_eq!(zoom_step(-0.58, -1), -0.58);
+    }
+
+    #[test]
+    fn zoom_step_reset_always_returns_100pct() {
+        assert_eq!(zoom_step(0.0, 0), 0.0);
+        assert_eq!(zoom_step(-0.58, 0), 0.0);
+        assert_eq!(zoom_step(3.41, 0), 0.0);
+    }
+
+    #[test]
+    fn zoom_pct_maps_each_level_to_its_percent() {
+        assert_eq!(zoom_pct_for_level(-0.58), 90);
+        assert_eq!(zoom_pct_for_level(0.0), 100);
+        assert_eq!(zoom_pct_for_level(0.53), 110);
+        assert_eq!(zoom_pct_for_level(1.14), 125);
+        assert_eq!(zoom_pct_for_level(2.01), 150);
+        assert_eq!(zoom_pct_for_level(2.65), 175);
+        assert_eq!(zoom_pct_for_level(3.41), 200);
+    }
+
+    #[test]
+    fn zoom_pct_nearest_rounding_is_deterministic() {
+        // 0.0 与 0.53 的中点 0.265 之下归 100%，之上归 110%
+        assert_eq!(zoom_pct_for_level(0.26), 100);
+        assert_eq!(zoom_pct_for_level(0.27), 110);
+        // 越界值归到最近端档
+        assert_eq!(nearest_zoom_idx(-1.0), 0);
+        assert_eq!(nearest_zoom_idx(5.0), 6);
+    }
 
     #[test]
     fn normalize_url_empty_or_blank_returns_empty() {
@@ -2148,6 +2431,38 @@ wrap_load_handler! {
     }
 }
 
+wrap_find_handler! {
+    struct ShellFindHandler {
+        tab_id: String,
+    }
+
+    impl FindHandler {
+        /// CEF 查找结果回调（UI 线程）。count/ordinal 是内核真值，
+        /// 转推给工具栏显示「3/17」；页面 JS 自己数不到这个数。
+        /// 只有来源标签是活动标签才推，后台标签的查找结果不覆盖前台计数。
+        fn on_find_result(
+            &self,
+            _browser: Option<&mut Browser>,
+            _identifier: std::os::raw::c_int,
+            count: std::os::raw::c_int,
+            _selection_rect: Option<&Rect>,
+            active_match_ordinal: std::os::raw::c_int,
+            _final_update: std::os::raw::c_int,
+        ) {
+            let active_id = SHELL_TABS.with(|t| {
+                let tabs = t.borrow();
+                tabs.get(ACTIVE_TAB.with(|a| a.get())).map(|x| x.id.clone())
+            });
+            if active_id.as_deref() != Some(self.tab_id.as_str()) {
+                return;
+            }
+            run_toolbar_js(&format!(
+                "window.__shiftFind && window.__shiftFind({count}, {active_match_ordinal})"
+            ));
+        }
+    }
+}
+
 wrap_keyboard_handler! {
     struct ShellKeyboardHandler;
 
@@ -2239,6 +2554,27 @@ fn handle_shortcut(
                 let cur = ACTIVE_TAB.with(|a| a.get());
                 switch_tab((cur + 1) % len);
             }
+            1
+        }
+        // Ctrl+F 页内查找（F-CEF-18）
+        70 => {
+            open_find_bar();
+            1
+        }
+        // Ctrl++（不按 Shift 是 Ctrl+=；windows_key_code 两者同为 187，
+        // 数字小键盘 + 是 107）放大
+        187 | 107 => {
+            apply_zoom(1);
+            1
+        }
+        // Ctrl+- 缩小（数字小键盘 - 是 109）
+        189 | 109 => {
+            apply_zoom(-1);
+            1
+        }
+        // Ctrl+0 复位 100%
+        48 => {
+            apply_zoom(0);
             1
         }
         _ => 0,
