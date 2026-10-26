@@ -1,0 +1,1389 @@
+{
+ "started": "2026-10-26 10:20:49",
+ "results": [
+  {
+   "loaded": true,
+   "elapsed_s": 25.1,
+   "docs": [
+    {
+     "url": "https://www.nodeseek.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505fc07b90bd908-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://www.nodeseek.com/",
+    "title": "NodeSeek",
+    "body_head100": " NodeSeekbeta\n日常\n技术\n情报\n测评\n交易\n拼车\n推广\nDeepFlood\n新评论\n新帖子\n 12345 ..100 \n论坛内容限制与违规处罚2.0 只读\n Lloyd  181502 ",
+    "body_len": 6295,
+    "has_challenge_platform": true,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "nodeseek",
+   "url": "https://www.nodeseek.com/",
+   "run": 1,
+   "at": "2026-10-26 10:21:16",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 23.7,
+   "docs": [
+    {
+     "url": "https://www.nodeseek.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505fc9fa94e69b6-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://www.nodeseek.com/",
+    "title": "NodeSeek",
+    "body_head100": " NodeSeekbeta\n日常\n技术\n情报\n测评\n交易\n拼车\n推广\nDeepFlood\n新评论\n新帖子\n 12345 ..100 \n论坛内容限制与违规处罚2.0 只读\n Lloyd  181502 ",
+    "body_len": 6681,
+    "has_challenge_platform": true,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "chrome",
+   "site": "nodeseek",
+   "url": "https://www.nodeseek.com/",
+   "run": 1,
+   "at": "2026-10-26 10:21:40",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 15.0,
+   "docs": [
+    {
+     "url": "https://chatgpt.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505fd3dc8676f97-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://chatgpt.com/",
+    "title": "ChatGPT: Chat, Work, Create & Code with AI",
+    "body_head100": "ChatGPT\n登录\n图像\n插件\n查看套餐和定价\n帮助\n深度研究\n获取为你量身定制的回复\n\n登录以获取基于已保存聊天的回答，并可创建图片和上传文件。\n\n登录\n聊天\n你想做点什么？\n可以告诉我你能做些什",
+    "body_len": 180,
+    "has_challenge_platform": false,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "chatgpt",
+   "url": "https://chatgpt.com/",
+   "run": 1,
+   "at": "2026-10-26 10:21:56",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 16.0,
+   "docs": [
+    {
+     "url": "https://chatgpt.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505fda9ac494ce5-LAX"
+    },
+    {
+     "url": "https://chatgpt.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505fdbb78364ce5-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://chatgpt.com/",
+    "title": "ChatGPT: Chat, Work, Create & Code with AI",
+    "body_head100": "登录\n免费注册\nChatGPT\n新聊天\n图像\n插件\n查看套餐和定价\n帮助\n深度研究\n设置\n获取为你量身定制的回复\n\n登录以获取基于已保存聊天的回答，并可创建图片和上传文件。\n\n登录\n我们先从哪里开始呢",
+    "body_len": 192,
+    "has_challenge_platform": false,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "chrome",
+   "site": "chatgpt",
+   "url": "https://chatgpt.com/",
+   "run": 1,
+   "at": "2026-10-26 10:22:13",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 18.7,
+   "docs": [
+    {
+     "url": "https://nowsecure.nl/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505fe06dac5bd64-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/d9s2d/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505fe2c98a8867d-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/6dt7f/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505fe2c98a0867d-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://nowsecure.nl/",
+    "title": "nowsecure.nl",
+    "body_head100": "NOWSECURE\nBY NODRIVER\nNOWSECURE\nBY NODRIVER",
+    "body_len": 43,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "nowsecure",
+   "url": "https://nowsecure.nl/",
+   "run": 1,
+   "at": "2026-10-26 10:22:32",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 17.8,
+   "docs": [
+    {
+     "url": "https://nowsecure.nl/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505fe7cefe44ea0-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/zt6a5/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505fea339592f40-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/4apft/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505fea339572f40-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://nowsecure.nl/",
+    "title": "nowsecure.nl",
+    "body_head100": "NOWSECURE\nBY NODRIVER\nNOWSECURE\nBY NODRIVER",
+    "body_len": 43,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "chrome",
+   "site": "nowsecure",
+   "url": "https://nowsecure.nl/",
+   "run": 1,
+   "at": "2026-10-26 10:22:50",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 27.6,
+   "docs": [
+    {
+     "url": "https://www.indeed.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505fef268871e08-LAX"
+    },
+    {
+     "url": "https://sgtm.indeed.com/_/service_worker/6al0/sw_iframe.html?origin=https%3A%2F%2Fwww.indeed.com&1p=1",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505ff4fbbe70f27-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://www.indeed.com/",
+    "title": "Job Search | Indeed",
+    "body_head100": "Skip to main content\nSign in\n1\nnew update\nStart of main content\nKeyword : all jobs\nEdit location inp",
+    "body_len": 573,
+    "has_challenge_platform": true,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "indeed",
+   "url": "https://www.indeed.com/",
+   "run": 1,
+   "at": "2026-10-26 10:23:19",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 28.7,
+   "docs": [
+    {
+     "url": "https://www.indeed.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a505ffa61dddf7d1-LAX"
+    },
+    {
+     "url": "https://sgtm.indeed.com/_/service_worker/6al0/sw_iframe.html?origin=https%3A%2F%2Fwww.indeed.com&1p=1",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50600073e11e9dd-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://www.indeed.com/",
+    "title": "Job Search | Indeed",
+    "body_head100": "Skip to main content\nSign in\n1\nnew update\nStart of main content\nKeyword : all jobs\n&nbsp;\nEdit locat",
+    "body_len": 580,
+    "has_challenge_platform": true,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "chrome",
+   "site": "indeed",
+   "url": "https://www.indeed.com/",
+   "run": 1,
+   "at": "2026-10-26 10:23:48",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 23.3,
+   "docs": [
+    {
+     "url": "https://linux.do/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a506005b8f91e6d4-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/n9oau/0x4AAAAAAAc2BQjPEms9tKlM/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a506009daa1190fe-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/n9oau/0x4AAAAAAAc2BQjPEms9tKlM/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50600a4a8ba90fe-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://linux.do/",
+    "title": "(1) LINUX DO - 新的理想型社区",
+    "body_head100": "跳到主要内容\n登录\nZH\n​\n真诚、友善、团结、专业，共建你我引以为荣之社区。《社区准则》\n所有最新话题\n最新\n查看 1 个新的或更新的话题\n话题列表，带有按钮的列标题可以排序。\n比快更快，社区官方 ",
+    "body_len": 3238,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "linux.do",
+   "url": "https://linux.do/",
+   "run": 1,
+   "at": "2026-10-26 10:24:12",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 32.6,
+   "docs": [
+    {
+     "url": "https://linux.do/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50600f2bcf3a5f0-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/nc8d7/0x4AAAAAAAc2BQjPEms9tKlM/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a5060127c8b5a733-LAX"
+    },
+    {
+     "url": "https://js.stripe.com/v3/m-outer-3437aaddcdf6922d623e172c2d6f9278.html",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": null
+    }
+   ],
+   "state_8s": {
+    "url": "https://linux.do/",
+    "title": "(4) LINUX DO - 新的理想型社区",
+    "body_head100": "跳到主要内容\n登录\nZH\n话题\n近期活动\n更多\n资源\niOS App\nConnect\nChannel\nIDC Flare\nMore...\n类别\n开发调优\n国产替代\n资源荟萃\n网盘资源\n文档共建\n非我莫",
+    "body_len": 3505,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "chrome",
+   "site": "linux.do",
+   "url": "https://linux.do/",
+   "run": 1,
+   "at": "2026-10-26 10:24:45",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 21.8,
+   "docs": [
+    {
+     "url": "https://www.nodeseek.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50601b75db922b3-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://www.nodeseek.com/",
+    "title": "NodeSeek",
+    "body_head100": " NodeSeekbeta\n日常\n技术\n情报\n测评\n交易\n拼车\n推广\nDeepFlood\n新评论\n新帖子\n 12345 ..100 \n论坛内容限制与违规处罚2.0 只读\n Lloyd  181503 ",
+    "body_len": 6652,
+    "has_challenge_platform": true,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "chrome",
+   "site": "nodeseek",
+   "url": "https://www.nodeseek.com/",
+   "run": 2,
+   "at": "2026-10-26 10:25:08",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 15.4,
+   "docs": [
+    {
+     "url": "https://www.nodeseek.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a5060244ddead908-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://www.nodeseek.com/",
+    "title": "NodeSeek",
+    "body_head100": " NodeSeekbeta\n日常\n技术\n情报\n测评\n交易\n拼车\n推广\nDeepFlood\n新评论\n新帖子\n 12345 ..100 \n『新功能，PWA』把论坛安装到桌面，利好手机用户\n 酒神  709",
+    "body_len": 6350,
+    "has_challenge_platform": true,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "nodeseek",
+   "url": "https://www.nodeseek.com/",
+   "run": 2,
+   "at": "2026-10-26 10:25:24",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 10.8,
+   "docs": [
+    {
+     "url": "https://chatgpt.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50602a37ce54ce5-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://chatgpt.com/",
+    "title": "ChatGPT: Chat, Work, Create & Code with AI",
+    "body_head100": "登录\n免费注册\nChatGPT\n新聊天\n图像\n插件\n查看套餐和定价\n帮助\n深度研究\n设置\n获取为你量身定制的回复\n\n登录以获取基于已保存聊天的回答，并可创建图片和上传文件。\n\n登录\n我们先从哪里开始呢",
+    "body_len": 195,
+    "has_challenge_platform": false,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "chrome",
+   "site": "chatgpt",
+   "url": "https://chatgpt.com/",
+   "run": 2,
+   "at": "2026-10-26 10:25:35",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 11.8,
+   "docs": [
+    {
+     "url": "https://chatgpt.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50602f33f326f97-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://chatgpt.com/",
+    "title": "ChatGPT: Chat, Work, Create & Code with AI",
+    "body_head100": "ChatGPT\n登录\n图像\n插件\n查看套餐和定价\n帮助\n深度研究\n获取为你量身定制的回复\n\n登录以获取基于已保存聊天的回答，并可创建图片和上传文件。\n\n登录\n聊天\n你想做点什么？\n可以告诉我你能做些什",
+    "body_len": 180,
+    "has_challenge_platform": false,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "chatgpt",
+   "url": "https://chatgpt.com/",
+   "run": 2,
+   "at": "2026-10-26 10:25:49",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 11.7,
+   "docs": [
+    {
+     "url": "https://nowsecure.nl/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50603409d474ea0-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/48ro7/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a506034f8c6f2f40-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/n22sb/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50603503cc62f40-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://nowsecure.nl/",
+    "title": "nowsecure.nl",
+    "body_head100": "NOWSECURE\nBY NODRIVER\nNOWSECURE\nBY NODRIVER",
+    "body_len": 43,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "chrome",
+   "site": "nowsecure",
+   "url": "https://nowsecure.nl/",
+   "run": 2,
+   "at": "2026-10-26 10:26:01",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 12.1,
+   "docs": [
+    {
+     "url": "https://nowsecure.nl/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a506039e6f39bd64-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/o3vay/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50603adcd3f867d-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/jlenl/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50603ae7fbc867d-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://nowsecure.nl/",
+    "title": "nowsecure.nl",
+    "body_head100": "NOWSECURE\nBY NODRIVER\nNOWSECURE\nBY NODRIVER",
+    "body_len": 43,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "nowsecure",
+   "url": "https://nowsecure.nl/",
+   "run": 2,
+   "at": "2026-10-26 10:26:17",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 15.6,
+   "docs": [
+    {
+     "url": "https://www.indeed.com/",
+     "status": 403,
+     "cf_mitigated": "challenge",
+     "cf_ray": "a50603f1f9c1f7d1-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/ynorj/0x4AAAAAAADnPIDROrmt1Wwj/light/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a506041629e7687a-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://www.indeed.com/",
+    "title": "Security Check - Indeed.com",
+    "body_head100": "查找职位\n公司评论\n查询薪资\n上传您的简历\n登录\n雇主/发布职位\n需要进行其他验证\n\n您本次请求的 Ray ID 为 a50603f1f9c1f7d1\n\n返回主页\n  →\n\nCloudflare 故障",
+    "body_len": 116,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "chrome",
+   "site": "indeed",
+   "url": "https://www.indeed.com/",
+   "run": 2,
+   "at": "2026-10-26 10:26:33",
+   "verdict": "pass",
+   "verdict_final": "hard_block",
+   "verdict_note": "脚本误判pass；页面为CF排障页「需要进行其他验证」+403 cf-mitigated，人工订正",
+   "ok": false
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 18.6,
+   "docs": [
+    {
+     "url": "https://www.indeed.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50604544b9d1e08-LAX"
+    },
+    {
+     "url": "https://sgtm.indeed.com/_/service_worker/6al0/sw_iframe.html?origin=https%3A%2F%2Fwww.indeed.com&1p=1",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50604914bdd0f27-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://www.indeed.com/",
+    "title": "Job Search | Indeed",
+    "body_head100": "Skip to main content\nSign in\n1\nnew update\nStart of main content\nKeyword : all jobs\nEdit location inp",
+    "body_len": 573,
+    "has_challenge_platform": true,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "indeed",
+   "url": "https://www.indeed.com/",
+   "run": 2,
+   "at": "2026-10-26 10:26:52",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 25.7,
+   "docs": [
+    {
+     "url": "https://linux.do/",
+     "status": 403,
+     "cf_mitigated": "challenge",
+     "cf_ray": "a50604cbfe9ba5f0-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/ygzlg/0x4AAAAAAADnPIDROrmt1Wwj/light/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50604e89fd8a733-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://linux.do/",
+    "title": "请稍候…",
+    "body_head100": "",
+    "body_len": 0,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "state_20s": {
+    "url": "https://linux.do/",
+    "title": "请稍候…",
+    "body_head100": "",
+    "body_len": 0,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "browser": "chrome",
+   "site": "linux.do",
+   "url": "https://linux.do/",
+   "run": 2,
+   "at": "2026-10-26 10:27:19",
+   "verdict": "hard_block_or_stuck",
+   "verdict_final": "hard_block_or_stuck",
+   "ok": false
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 18.9,
+   "docs": [
+    {
+     "url": "https://linux.do/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a506057a3d46e6d4-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/ek75o/0x4AAAAAAAc2BQjPEms9tKlM/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50605979ed890fe-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/ek75o/0x4AAAAAAAc2BQjPEms9tKlM/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a506059d2ca190fe-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://linux.do/",
+    "title": "(2) LINUX DO - 新的理想型社区",
+    "body_head100": "跳到主要内容\n登录\nZH\n​\n真诚、友善、团结、专业，共建你我引以为荣之社区。《社区准则》\n所有最新话题\n最新\n查看 2 个新的或更新的话题\n话题列表，带有按钮的列标题可以排序。\n比快更快，社区官方 ",
+    "body_len": 3096,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "linux.do",
+   "url": "https://linux.do/",
+   "run": 2,
+   "at": "2026-10-26 10:27:38",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 15.9,
+   "docs": [
+    {
+     "url": "https://www.nodeseek.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50605f1f928d908-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://www.nodeseek.com/",
+    "title": "NodeSeek",
+    "body_head100": " NodeSeekbeta\n日常\n技术\n情报\n测评\n交易\n拼车\n推广\nDeepFlood\n新评论\n新帖子\n 12345 ..100 \n『新功能，PWA』把论坛安装到桌面，利好手机用户\n 酒神  709",
+    "body_len": 6434,
+    "has_challenge_platform": true,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "nodeseek",
+   "url": "https://www.nodeseek.com/",
+   "run": 3,
+   "at": "2026-10-26 10:27:55",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 15.4,
+   "docs": [
+    {
+     "url": "https://www.nodeseek.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a5060658fca722b3-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://www.nodeseek.com/",
+    "title": "NodeSeek",
+    "body_head100": " NodeSeekbeta\n日常\n技术\n情报\n测评\n交易\n拼车\n推广\nDeepFlood\n新评论\n新帖子\n 12345 ..100 \n『新功能，PWA』把论坛安装到桌面，利好手机用户\n 酒神  709",
+    "body_len": 6688,
+    "has_challenge_platform": true,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "chrome",
+   "site": "nodeseek",
+   "url": "https://www.nodeseek.com/",
+   "run": 3,
+   "at": "2026-10-26 10:28:11",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 12.1,
+   "docs": [
+    {
+     "url": "https://chatgpt.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50606b93e226f97-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://chatgpt.com/",
+    "title": "ChatGPT: Chat, Work, Create & Code with AI",
+    "body_head100": "ChatGPT\n登录\n图像\n插件\n查看套餐和定价\n帮助\n深度研究\n获取为你量身定制的回复\n\n登录以获取基于已保存聊天的回答，并可创建图片和上传文件。\n\n登录\n聊天\n你想做点什么？\n可以告诉我你能做些什",
+    "body_len": 180,
+    "has_challenge_platform": false,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "chatgpt",
+   "url": "https://chatgpt.com/",
+   "run": 3,
+   "at": "2026-10-26 10:28:24",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 28.5,
+   "docs": [
+    {
+     "url": "https://chatgpt.com/",
+     "status": 403,
+     "cf_mitigated": "challenge",
+     "cf_ray": "a50607087dea4ce5-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/qjwa5/0x4AAAAAAADnPIDROrmt1Wwj/light/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50607307adcb1b6-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://chatgpt.com/",
+    "title": "请稍候…",
+    "body_head100": "",
+    "body_len": 0,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "state_20s": {
+    "url": "https://chatgpt.com/",
+    "title": "请稍候…",
+    "body_head100": "",
+    "body_len": 0,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "browser": "chrome",
+   "site": "chatgpt",
+   "url": "https://chatgpt.com/",
+   "run": 3,
+   "at": "2026-10-26 10:28:53",
+   "verdict": "hard_block_or_stuck",
+   "verdict_final": "hard_block_or_stuck",
+   "ok": false
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 11.9,
+   "docs": [
+    {
+     "url": "https://nowsecure.nl/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50607c03fe4bd64-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/ac2au/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50607cef942867d-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/kqp2m/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50607cfabaf867d-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://nowsecure.nl/",
+    "title": "nowsecure.nl",
+    "body_head100": "NOWSECURE\nBY NODRIVER\nNOWSECURE\nBY NODRIVER",
+    "body_len": 43,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "nowsecure",
+   "url": "https://nowsecure.nl/",
+   "run": 3,
+   "at": "2026-10-26 10:29:06",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 12.1,
+   "docs": [
+    {
+     "url": "https://nowsecure.nl/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a506080d9f604ea0-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/bdj83/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a506081f5f722f40-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/w7tv7/3x00000000000000000000FF/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50608200fd62f40-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://nowsecure.nl/",
+    "title": "nowsecure.nl",
+    "body_head100": "NOWSECURE\nBY NODRIVER\nNOWSECURE\nBY NODRIVER",
+    "body_len": 43,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "chrome",
+   "site": "nowsecure",
+   "url": "https://nowsecure.nl/",
+   "run": 3,
+   "at": "2026-10-26 10:29:18",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 19.0,
+   "docs": [
+    {
+     "url": "https://www.indeed.com/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a506085d3e111e08-LAX"
+    },
+    {
+     "url": "https://sgtm.indeed.com/_/service_worker/6al0/sw_iframe.html?origin=https%3A%2F%2Fwww.indeed.com&1p=1",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a506089ad8010f27-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://www.indeed.com/",
+    "title": "Job Search | Indeed",
+    "body_head100": "Skip to main content\nSign in\n1\nnew update\nStart of main content\nKeyword : all jobs\nEdit location inp",
+    "body_len": 573,
+    "has_challenge_platform": true,
+    "has_turnstile_script": false,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "indeed",
+   "url": "https://www.indeed.com/",
+   "run": 3,
+   "at": "2026-10-26 10:29:38",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 22.7,
+   "docs": [
+    {
+     "url": "https://www.indeed.com/",
+     "status": 403,
+     "cf_mitigated": "challenge",
+     "cf_ray": "a50608d79dd0f7d1-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://www.indeed.com/",
+    "title": "请稍候…",
+    "body_head100": "查找职位\n公司评论\n查询薪资\n上传您的简历\n登录\n雇主/发布职位\n需要进行其他验证\n\n您本次请求的 Ray ID 为 a50608d79dd0f7d1\n\n返回主页\n  →\n\nCloudflare 故障",
+    "body_len": 116,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "state_20s": {
+    "url": "https://www.indeed.com/",
+    "title": "请稍候…",
+    "body_head100": "查找职位\n公司评论\n查询薪资\n上传您的简历\n登录\n雇主/发布职位\n需要进行其他验证\n\n您本次请求的 Ray ID 为 a50608d79dd0f7d1\n\n返回主页\n  →\n\nCloudflare 故障",
+    "body_len": 116,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "browser": "chrome",
+   "site": "indeed",
+   "url": "https://www.indeed.com/",
+   "run": 3,
+   "at": "2026-10-26 10:30:01",
+   "verdict": "hard_block_or_stuck",
+   "verdict_final": "hard_block_or_stuck",
+   "ok": false
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 15.1,
+   "docs": [
+    {
+     "url": "https://linux.do/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a506096b1ef6e6d4-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/gg4xk/0x4AAAAAAAc2BQjPEms9tKlM/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a5060984cc7290fe-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/gg4xk/0x4AAAAAAAc2BQjPEms9tKlM/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a50609896a4290fe-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://linux.do/",
+    "title": "(6) LINUX DO - 新的理想型社区",
+    "body_head100": "跳到主要内容\n登录\nZH\n​\n真诚、友善、团结、专业，共建你我引以为荣之社区。《社区准则》\n所有最新话题\n最新\n查看 6 个新的或更新的话题\n话题列表，带有按钮的列标题可以排序。\n比快更快，社区官方 ",
+    "body_len": 3066,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "linux.do",
+   "url": "https://linux.do/",
+   "run": 3,
+   "at": "2026-10-26 10:30:17",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 22.7,
+   "docs": [
+    {
+     "url": "https://linux.do/",
+     "status": 403,
+     "cf_mitigated": "challenge",
+     "cf_ray": "a50609cceec8a5f0-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://linux.do/",
+    "title": "请稍候…",
+    "body_head100": "",
+    "body_len": 0,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "state_20s": {
+    "url": "https://linux.do/",
+    "title": "请稍候…",
+    "body_head100": "",
+    "body_len": 0,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "browser": "chrome",
+   "site": "linux.do",
+   "url": "https://linux.do/",
+   "run": 3,
+   "at": "2026-10-26 10:30:40",
+   "verdict": "hard_block_or_stuck",
+   "verdict_final": "hard_block_or_stuck",
+   "ok": false
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 18.6,
+   "docs": [
+    {
+     "url": "https://linux.do/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a5060a5dfb45a5f0-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/lmr3k/0x4AAAAAAAc2BQjPEms9tKlM/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a5060a8ccb89a733-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://linux.do/",
+    "title": "(2) LINUX DO - 新的理想型社区",
+    "body_head100": "跳到主要内容\n登录\nZH\n话题\n近期活动\n更多\n资源\niOS App\nConnect\nChannel\nIDC Flare\nMore...\n类别\n开发调优\n国产替代\n资源荟萃\n网盘资源\n文档共建\n非我莫",
+    "body_len": 3316,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "chrome",
+   "site": "linux.do",
+   "url": "https://linux.do/",
+   "run": 4,
+   "at": "2026-10-26 10:31:00",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 18.1,
+   "docs": [
+    {
+     "url": "https://linux.do/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a5060ad77932e6d4-LAX"
+    },
+    {
+     "url": "https://js.stripe.com/v3/m-outer-3437aaddcdf6922d623e172c2d6f9278.html",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": null
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/5cv64/0x4AAAAAAAc2BQjPEms9tKlM/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a5060b0e98a990fe-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://linux.do/",
+    "title": "(7) LINUX DO - 新的理想型社区",
+    "body_head100": "跳到主要内容\n登录\nZH\n​\n真诚、友善、团结、专业，共建你我引以为荣之社区。《社区准则》\n所有最新话题\n最新\n查看 7 个新的或更新的话题\n话题列表，带有按钮的列标题可以排序。\n比快更快，社区官方 ",
+    "body_len": 3050,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "linux.do",
+   "url": "https://linux.do/",
+   "run": 4,
+   "at": "2026-10-26 10:31:18",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 16.6,
+   "docs": [
+    {
+     "url": "https://linux.do/",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a5060b4d3f85e6d4-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/iazl3/0x4AAAAAAAc2BQjPEms9tKlM/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a5060b6d6cb790fe-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/iazl3/0x4AAAAAAAc2BQjPEms9tKlM/auto/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a5060b725f9290fe-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://linux.do/",
+    "title": "(5) LINUX DO - 新的理想型社区",
+    "body_head100": "跳到主要内容\n登录\nZH\n​\n真诚、友善、团结、专业，共建你我引以为荣之社区。《社区准则》\n所有最新话题\n最新\n查看 5 个新的或更新的话题\n话题列表，带有按钮的列标题可以排序。\n比快更快，社区官方 ",
+    "body_len": 3162,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": false
+   },
+   "state_20s": null,
+   "browser": "cef",
+   "site": "linux.do",
+   "url": "https://linux.do/",
+   "run": 5,
+   "at": "2026-10-26 10:31:36",
+   "verdict": "pass",
+   "verdict_final": "pass",
+   "ok": true
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 25.3,
+   "docs": [
+    {
+     "url": "https://linux.do/",
+     "status": 429,
+     "cf_mitigated": "challenge",
+     "cf_ray": "a5060bb82e1ca5f0-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://linux.do/",
+    "title": "请稍候…",
+    "body_head100": "",
+    "body_len": 0,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "state_20s": {
+    "url": "https://linux.do/",
+    "title": "请稍候…",
+    "body_head100": "",
+    "body_len": 0,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "browser": "chrome",
+   "site": "linux.do",
+   "url": "https://linux.do/",
+   "run": 5,
+   "at": "2026-10-26 10:32:02",
+   "verdict": "hard_block_or_stuck",
+   "verdict_final": "hard_block_or_stuck",
+   "ok": false
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 23.8,
+   "docs": [
+    {
+     "url": "https://linux.do/",
+     "status": 429,
+     "cf_mitigated": "challenge",
+     "cf_ray": "a5060c59be4ca5f0-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://linux.do/",
+    "title": "请稍候…",
+    "body_head100": "",
+    "body_len": 0,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "state_20s": {
+    "url": "https://linux.do/",
+    "title": "请稍候…",
+    "body_head100": "",
+    "body_len": 0,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "browser": "chrome",
+   "site": "linux.do",
+   "url": "https://linux.do/",
+   "run": 6,
+   "at": "2026-10-26 10:32:26",
+   "verdict": "hard_block_or_stuck",
+   "verdict_final": "hard_block_or_stuck",
+   "ok": false
+  },
+  {
+   "loaded": true,
+   "elapsed_s": 28.2,
+   "docs": [
+    {
+     "url": "https://linux.do/",
+     "status": 429,
+     "cf_mitigated": "challenge",
+     "cf_ray": "a5060cf32dc1e6d4-LAX"
+    },
+    {
+     "url": "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/e7q0g/0x4AAAAAAADnPIDROrmt1Wwj/light/fbE/new/normal?lang=auto",
+     "status": 200,
+     "cf_mitigated": null,
+     "cf_ray": "a5060d14299890fe-LAX"
+    }
+   ],
+   "state_8s": {
+    "url": "https://linux.do/",
+    "title": "请稍候…",
+    "body_head100": "",
+    "body_len": 0,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "state_20s": {
+    "url": "https://linux.do/",
+    "title": "请稍候…",
+    "body_head100": "",
+    "body_len": 0,
+    "has_challenge_platform": true,
+    "has_turnstile_script": true,
+    "has_cf_iframe": false,
+    "title_is_jam": true
+   },
+   "browser": "cef",
+   "site": "linux.do",
+   "url": "https://linux.do/",
+   "run": 6,
+   "at": "2026-10-26 10:32:55",
+   "verdict": "hard_block_or_stuck",
+   "verdict_final": "hard_block_or_stuck",
+   "ok": false
+  }
+ ]
+}

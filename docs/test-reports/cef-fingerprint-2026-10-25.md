@@ -126,28 +126,27 @@ CEF 构建若 UA 仍是应用层设置的 142，`user_agent` 与 `Sec-Ch-Ua` 行
 - **样本局限**：每格 n=3，各条件顺序执行未交错（IP 信誉随时间漂移会混入），出口是海外代理 IP，**与高哥国内直连网络结果可能完全不同**。只作方向。
 - **未核实**：是否出现需要人手点击的 Turnstile 勾选框——我保存了截图但无法读取图像内容，因此**没有"需点击"的观察结论**，上表只是"自动通过 / 停在挑战页 / 排障页"三态，来自 DOM 文本与响应头。
 
-### 4.4 CEF / WebKit 列
+### 4.4 CEF vs 真 Chrome 同轮对照（2026-10-26 10:21–10:33 重测，替换 10-25 撤回数据）
 
-| 站点 | 真 Chrome 默认 CDP | 真 Chrome 去自动化标记 | **CEF 构建（2026-10-25 22:05 实测）** | WebKit 构建 |
-|---|---|---|---|---|
-| linux.do | 1/6（间隔 3s 与 60s 合计） | 1/3 正常内容（另 1/3 过挑战但是反 AI 提示页） | **2/2 正常内容**（标题「LINUX DO - 新的理想型社区」，带未读数） | 待测 |
-| indeed.com | 2/3 | 2/3 | **2/2 正常内容**（Job Search \| Indeed） | 待测 |
-| nodeseek.com | 3/3 | — | **2/2 正常内容**（NodeSeek 论坛列表） | 待测 |
-| chatgpt.com | 3/3 | — | **2/2 正常内容**（ChatGPT 首页） | 待测 |
-| nowsecure.nl | 3/3 | — | **2/2 正常内容**（NOWSECURE BY NODRIVER） | 待测 |
+**口径**：CEF（00:51 构建，含 Vulkan，HEAD 4269ea5）与真 Chrome 154.0.8037.57 有头，**两侧均 CDP 驱动**，严格交错（奇偶轮换先后手），总窗口 12.1 分钟；每次访问前清 cookie+缓存；load 后等 8s 再判，挑战态再等 12s 复查；出口 mihomo→LAX、`warp=off`（海外口径）。脚本 `scripts/cef-coordinator/cf-interleave.py`，原始证据与 meta：`assets/cf-retest-20261026/`。
 
-> ⚠️ **协调器标注（2026-10-26 01:00）：本节 CEF 数据已打回，勿引用、勿据此勾 M3 关口。** 理由：① 采集所用构建含 `--disable-gpu`（WebGL 完全缺失），该配置已于 `7496476`（22:47）被 Vulkan+SwiftShader 取代，**结论对应的构建已不存在**；② CEF n=2 且第二轮未清 cookie，与真 Chrome n=3/n=6（清 cookie、3s/60s 交错）非同一口径，**证不出「≥ 同口径真 Chrome」**；③ 无原始证据落盘（`assets/` 下无任何 `cef-*` 文件）。重测要求见 `.ai/inbox/copilot/20261026-0101-F-CEF-05重测派单.md`，验收台账 `.ai/RECEIPTS.md` 01:00 行。
+| 站点 | CEF 放行 | 真 Chrome 放行 | CEF ≥ Chrome |
+|---|---|---|---|
+| nodeseek.com | 3/3 | 3/3 | ✅ 持平 |
+| chatgpt.com | 3/3 | 2/3（#3 403 challenge 硬拦） | ✅ |
+| nowsecure.nl | 3/3 | 3/3 | ✅ 持平 |
+| indeed.com | 3/3 | 1/3（#2 CF 排障页、#3 403 挑战，均硬拦） | ✅ |
+| linux.do（n=6） | 5/6（#6 429） | 2/6（#2/#3 403，#5/#6 429） | ✅ |
 
-**CEF 侧结论：两轮 10/10 全部直接放行，无一次停在挑战页**，按 2026-10-25 高哥拍板的口径
-（「CEF ≥ 同口径真 Chrome」）**达成**。特别是 linux.do：真 Chrome 默认 CDP 驱动下仅 1/6，
-CEF 两次都直接拿到正常内容。
+**结论**：本轮 5 站逐站 CEF ≥ 同口径真 Chrome，口径「CEF ≥ 同口径真 Chrome」**在本样本内成立**。
 
-**局限（诚实声明，别当统计结论）**：
-1. 每站仅 2 次采样，样本量不足以判断稳定性差异（真 Chrome 在 linux.do 本身波动 0/3~2/3）。
-2. **第二轮未清 cookie**（CEF 单栈模式清 cookie 需销毁缓存目录并重启），linux.do 这类站可能因会话复用而更容易过。
-3. 采集时刻与真 Chrome 基线（19:50）不同，出口同为代理 IP 但线路状态可能变化。
-4. 判据是「是否停在挑战页」，未做「Turnstile 勾选一次可过」的中档判定。
-5. WebKit 构建列仍空（需另起实例，且 WebKit 版无 CDP 通道，要用其它驱动方式）。
+**必须同时看的局限**：
+1. 出口是海外代理 LAX，不代表国内网络；n 很小（3/6），差异（如 indeed 3/3 vs 1/3）不能当统计显著，只能说「没有比 Chrome 差」。
+2. 真 Chrome 比 CEF 多次被拦、且被拦集中在后半程，不排除**先后手/IP 信誉漂移**影响；虽已奇偶换先后手，但 linux.do #5/#6 两边都吃到 429（限流），该两次对比价值低。
+3. 全程**未出现 Turnstile iframe**（`has_cf_iframe` 恒 0），「Turnstile 框可点过」中档本轮 0 次观察；失败均为 403/429 + 「请稍候…」或排障页。`has_challenge_platform` 在正常页也为 1，不能单独作拦截依据。
+4. 脚本 verdict 有一处误判已人工订正（Chrome indeed #2：脚本判 pass，实为 CF 排障页）；`cf-raw.json` 保留 `verdict` 原值与 `verdict_final`。
+5. 两侧都是 CDP 驱动；CEF 侧页面里还有应用层注入脚本，本轮未做「关注入」对照。WebKit 列仍未测。
+6. §1.2 指纹五项/brands/WebGL 一栏**本轮未重测**（派单第二轮已限定只做 CF 实站），仍沿用协调器 `.ai/evidence/20261026-0138-*.md` 的数据。
 
 ## 5. 指纹面板对比方案（CreepJS / Cover Your Tracks）
 

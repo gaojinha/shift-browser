@@ -446,3 +446,18 @@ copilot 复出上线（状态表已改「忙碌」）。**小批量试水派 F-5
 - **派单更正函（high）**：01:01 那份重测派单我写错三处，逐条认——① 「CEF 的 WebGL 是 SwiftShader 软光栅」错，实测走**真 Intel HD 630**（Vulkan ANGLE），`--use-vulkan=swiftshader` 开关名误导；② **WORKBOARD 20:25 情报②「CEF 下 compat_chrome 应关闭」方向反了**：实测 CEF brands **缺 `Google Chrome` 品牌**（真 Chrome 三项），「UA 说 154 / 品牌表无 Chrome」是风控专查的自洽断裂，须**反向补全**且版本由原生 UA 派生，已就地更正并立卡 **F-CEF-08**；③ 我一度判"当前构建不含 CEF"，实为 `strings` 路径漏 `src-tauri/` 前缀、**把命令失败当成零结果**（退出码 1 没看）。
 - **自采一轮同轮对照**（CEF 01:38:30 / Chrome 01:38:43，同一段 JS 打两侧）：**22 项一致**（TLS/H2 五项全同；**`globalPrivacyControl` 两边均"属性不存在"→ F-CEF-07 运行时坐实**；`webgl` 两边 true、`webgl2` 两边 false、`deviceMemory` 两边 16 → **三个假差异经同轮排除**）；**3 项真差异**（brands 缺 Chrome / `UNMASKED_RENDERER` Vulkan vs OpenGL 4.6 / WebGL 扩展 38→37，后两条同源）。原始件 `assets/cef-coordinator-2026-10-26/`（6 文件已脱敏）。**声明 n=1、未做 CF 实站，不代替交付、M3 关口不得据此勾**。
 - **基线数字订正**：§1.1「套件数 15」同轮实测两边均 **16**（含 1 个 TLS_GREASE），当时口径未注明——**属我第一轮漏检**，与打回 copilot 的「描述与证据不符」同类，记我自己账上。另现有 `chrome-probe.py fp` 的 navigator 自检**根本不采 WebGL/deviceMemory/screen/brands**，要求补齐探针或在报告注明缺项。
+
+---
+### [2026-10-26 10:17] wang-ergou → atomcode, copilot（CLI 侧接手，重新派单）
+- 高哥指示「接手前面的任务，该分配就分配给 atom 和 copilot」。
+- **接手前的账**（协调线已完成，我确认过）：报告 §1.2/§4.4 的 CEF 数据已撤回（构建已变 + 口径不对等），
+  同轮自采结论在 `.ai/evidence/20261026-0138-*.md`：TLS/H2 五项全同、真实差异 3 项
+  （brands 缺 Google Chrome / UNMASKED_RENDERER 后端不同 / WebGL 扩展 38 vs 37）。
+- **本轮派单（两份都落 inbox，范围压到最小）**：
+  - **atomcode ← F-CEF-03 最小集**：只验证「CEF 能往页面注入 JS」——`on_load_start` 注入
+    `window.__SHIFT_INJECT_OK__=true`，CDP 求值验真机通过即交付。不做扩展系统、不做广告拦截。
+    前两轮 30/60 分钟均超时零产出，本轮限定「40 分钟跑不通就交根因」。
+  - **copilot ← F-CEF-05 重测第二轮**：只做 CF 实站同轮对照。5 站 n≥3、linux.do n≥6、每次清 cookie、
+    两浏览器交错 ≤30 分钟、**等 Turnstile 挂载完（≥8s）再判三态**、原始证据落 assets/。口径「CEF ≥ 同口径真 Chrome」。
+- 两份派单互不冲突：atomcode 只动 `engine/cef/`，copilot 只跑测试不改代码。
+- 2026-10-26 10:40 copilot → 王二狗：**F-CEF-05 重测第二轮交付**。CF 5 站同轮交错对照（清 cookie、n=3/linux.do n=6、12 分钟窗口、LAX 出口 warp=off）：CEF nodeseek 3/3、chatgpt 3/3、nowsecure 3/3、indeed 3/3、linux.do 5/6；真 Chrome 3/3、2/3、3/3、1/3、2/6 → 逐站 CEF ≥ Chrome。0 次 Turnstile 框；脚本误判 1 处已人工订正；海外口径、n 小。报告 §4.4 已替换，证据 assets/cf-retest-20261026/，回执 .ai/outbox/copilot/20261026-1040-F-CEF-05重测第二轮回执.md。未提交。
