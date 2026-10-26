@@ -288,6 +288,53 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   }
   .hist-row .h-del:hover { background: #4a4d51; }
   .hist-empty { color: #9aa0a6; padding: 12px 6px; font-size: 12px; }
+  /* 书签管理面板（F-CEF-20） */
+  html.bmmanage-open, html.bmmanage-open body { height: 100vh; }
+  #bmmanage {
+    display: none; position: absolute; left: 0; right: 0; top: 88px; bottom: 0;
+    background: #292a2d; border-top: 1px solid #3c4043; padding: 8px 12px;
+    flex-direction: column; gap: 6px; z-index: 10; font-size: 12px;
+  }
+  html.bmmanage-open #bmmanage { display: flex; }
+  html:not(.bookmarks-hidden) #bmmanage { top: 122px; }
+  .bmm-head { display: flex; align-items: center; gap: 8px; }
+  #bmmsearch {
+    flex: 1; height: 28px; border: 1px solid #3c4043; border-radius: 14px; outline: 0;
+    background: #202124; color: #e8eaed; padding: 0 12px; font-size: 12px; user-select: text;
+  }
+  .bmm-btn {
+    flex: 0 0 auto; color: #8ab4f8; padding: 0 10px; height: 24px;
+    line-height: 24px; border-radius: 12px; cursor: default;
+  }
+  .bmm-btn:hover { background: #4a4d51; }
+  .bmm-body { flex: 1; display: flex; gap: 10px; min-height: 0; }
+  #bmmtree { flex: 0 0 190px; overflow-y: auto; border-right: 1px solid #3c4043; padding-right: 6px; }
+  #bmmlist { flex: 1; overflow-y: auto; }
+  .bmm-folder {
+    display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px;
+    border-radius: 6px; color: #e8eaed; cursor: default;
+  }
+  .bmm-folder:hover, .bmm-folder.active { background: #3c4043; }
+  .bmm-folder.active { color: #8ab4f8; }
+  .bmm-item {
+    display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 6px;
+    border-radius: 6px;
+  }
+  .bmm-item:hover { background: #3c4043; }
+  .bmm-item .m-title {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .bmm-item .m-url {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: #9aa0a6;
+  }
+  .bmm-item .m-op {
+    flex: 0 0 auto; color: #8ab4f8; padding: 0 8px; height: 22px;
+    line-height: 22px; border-radius: 11px;
+  }
+  .bmm-item .m-op:hover { background: #4a4d51; }
+  .bmm-item .m-op.danger { color: #f28b82; }
+  .bmm-empty { color: #9aa0a6; padding: 12px 6px; }
   /* 设置面板（F-CEF-19） */
   html.settings-open, html.settings-open body { height: 100vh; }
   #settingspanel {
@@ -501,6 +548,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <div class="menu-item" data-panel="hist">历史记录<span class="menu-key">Ctrl+H</span></div>
     <div class="menu-item" data-panel="dl">下载内容<span class="menu-key">Ctrl+J</span></div>
     <div class="menu-item" data-act="bmtoggle">书签栏<span class="menu-key">Ctrl+Shift+B</span></div>
+    <div class="menu-item" data-panel="bmmanage">书签管理器<span class="menu-key">Ctrl+Shift+O</span></div>
     <div class="menu-item" data-panel="pw">密码<span class="menu-key"></span></div>
     <div class="menu-sep"></div>
     <div class="menu-item disabled">打印<span class="menu-key">待补</span></div>
@@ -524,6 +572,16 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <div class="site-state" id="sitestate"></div>
     <div class="site-url" id="siteurl"></div>
     <span id="siteclose" class="site-close">关闭</span>
+  </div>
+  <div id="bmmanage">
+    <div class="bmm-head">
+      <input id="bmmsearch" type="text" spellcheck="false" placeholder="搜索书签">
+      <span id="bmmclose" class="bmm-btn">关闭</span>
+    </div>
+    <div class="bmm-body">
+      <div id="bmmtree"></div>
+      <div id="bmmlist"></div>
+    </div>
   </div>
   <div id="settingspanel">
     <label class="set-row">搜索引擎
@@ -968,6 +1026,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     data.bookmarks
       .filter((b) => b.folderId === null || b.folderId === undefined || !allFolderIds.has(b.folderId))
       .forEach((b) => bar.appendChild(bmItemHtml(b)));
+    if (document.documentElement.classList.contains('bmmanage-open')) { renderBmmTree(); renderBmmList(); }
     // 顶层文件夹
     topFolders.forEach((f) => {
       const el = document.createElement('div');
@@ -1331,6 +1390,97 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     }
   });
 
+  // ---- 书签管理面板（F-CEF-20）----
+  let bmmFilter = 'all';
+  function bmmFoldersOf(parent) {
+    return (bmData.folders || []).filter((f) => (f.parentId === undefined ? null : f.parentId) === parent);
+  }
+  function renderBmmTree() {
+    const tree = document.getElementById('bmmtree');
+    if (!tree) return;
+    tree.innerHTML = '';
+    const mk = (label, key, depth) => {
+      const d = document.createElement('div');
+      d.className = 'bmm-folder' + (bmmFilter === key ? ' active' : '');
+      d.style.paddingLeft = 8 + depth * 14 + 'px';
+      d.textContent = label;
+      d.addEventListener('click', () => { bmmFilter = key; renderBmmTree(); renderBmmList(); });
+      tree.appendChild(d);
+    };
+    mk('全部书签', 'all', 0);
+    mk('未分类', 'root', 0);
+    const walk = (parent, depth) => {
+      bmmFoldersOf(parent).forEach((f) => {
+        mk('📁 ' + f.name, String(f.id), depth);
+        walk(f.id, depth + 1);
+      });
+    };
+    walk(null, 0);
+  }
+  function renderBmmList() {
+    const list = document.getElementById('bmmlist');
+    if (!list) return;
+    const q = (document.getElementById('bmmsearch')?.value || '').trim().toLowerCase();
+    let rows = (bmData.bookmarks || []).slice();
+    if (bmmFilter === 'root') rows = rows.filter((b) => b.folderId === null || b.folderId === undefined);
+    else if (bmmFilter !== 'all') rows = rows.filter((b) => String(b.folderId) === bmmFilter);
+    if (q) {
+      rows = rows.filter(
+        (b) => (b.title || '').toLowerCase().includes(q) || (b.url || '').toLowerCase().includes(q)
+      );
+    }
+    list.innerHTML = '';
+    if (rows.length === 0) {
+      const e = document.createElement('div');
+      e.className = 'bmm-empty';
+      e.textContent = '没有书签';
+      list.appendChild(e);
+      return;
+    }
+    rows.forEach((b) => {
+      const row = document.createElement('div');
+      row.className = 'bmm-item';
+      row.dataset.id = String(b.id);
+      const t = document.createElement('span');
+      t.className = 'm-title';
+      t.textContent = b.title || b.url || '';
+      const u = document.createElement('span');
+      u.className = 'm-url';
+      u.textContent = b.url || '';
+      const open = document.createElement('span');
+      open.className = 'm-op';
+      open.dataset.op = 'open';
+      open.textContent = '打开';
+      const del = document.createElement('span');
+      del.className = 'm-op danger';
+      del.dataset.op = 'del';
+      del.textContent = '删除';
+      row.append(t, u, open, del);
+      list.appendChild(row);
+    });
+  }
+  function setBmManage(open) {
+    document.documentElement.classList.toggle('bmmanage-open', open);
+    if (open) document.documentElement.classList.remove('pw-open', 'dl-open', 'menu-open', 'hist-open', 'find-open', 'site-open', 'settings-open');
+    act('bmmanage|' + (open ? '1' : '0'));
+    if (open) { bmmFilter = 'all'; document.getElementById('bmmsearch').value = ''; renderBmmTree(); renderBmmList(); }
+  }
+  document.getElementById('bmmclose')?.addEventListener('click', () => setBmManage(false));
+  document.getElementById('bmmsearch')?.addEventListener('input', renderBmmList);
+  document.getElementById('bmmlist')?.addEventListener('click', (e) => {
+    const op = e.target.closest('.m-op');
+    const row = e.target.closest('.bmm-item');
+    if (!op || !row) return;
+    const id = row.dataset.id;
+    if (op.dataset.op === 'open') {
+      const b = (bmData.bookmarks || []).find((x) => String(x.id) === id);
+      if (b) { act('nav|' + b.url); setBmManage(false); }
+    } else if (op.dataset.op === 'del') {
+      if (op.dataset.armed === '1') { act('bmdel|' + id); }
+      else { op.dataset.armed = '1'; op.textContent = '确认'; setTimeout(() => { op.dataset.armed = ''; op.textContent = '删除'; }, 3000); }
+    }
+  });
+
   // ---- 设置面板（F-CEF-19）----
   const settingsPanel = document.getElementById('settingspanel');
   function setSettingsPanel(open) {
@@ -1403,6 +1553,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     const item = e.target.closest('.menu-item');
     if (!item || item.classList.contains('disabled')) return;
     setMenuPanel(false);
+    if (item.dataset.panel === 'bmmanage') { setBmManage(true); return; }
     if (item.dataset.panel === 'hist') { setHistPanel(true); return; }
     if (item.dataset.panel === 'settings') { setSettingsPanel(true); return; }
     if (item.dataset.panel === 'dl') { setDlPanel(true); return; }

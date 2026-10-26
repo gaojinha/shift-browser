@@ -45,6 +45,7 @@ fn toolbar_height() -> i32 {
         + HIST_EXTRA.load(Ordering::Relaxed)
         + SITE_EXTRA.load(Ordering::Relaxed)
         + SETTINGS_EXTRA.load(Ordering::Relaxed)
+        + BM_MANAGE_EXTRA_V.load(Ordering::Relaxed)
 }
 
 /// 密码面板（F-CEF-12）展开时工具栏视图额外加高的像素，收起为 0
@@ -72,6 +73,7 @@ pub fn set_dl_panel(open: bool) {
         HIST_EXTRA.store(0, Ordering::Relaxed);
         SITE_EXTRA.store(0, Ordering::Relaxed);
         SETTINGS_EXTRA.store(0, Ordering::Relaxed);
+        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -91,6 +93,7 @@ pub fn set_menu_panel(open: bool) {
         HIST_EXTRA.store(0, Ordering::Relaxed);
         SITE_EXTRA.store(0, Ordering::Relaxed);
         SETTINGS_EXTRA.store(0, Ordering::Relaxed);
+        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -110,6 +113,7 @@ pub fn set_hist_panel(open: bool) {
         FIND_EXTRA.store(0, Ordering::Relaxed);
         SITE_EXTRA.store(0, Ordering::Relaxed);
         SETTINGS_EXTRA.store(0, Ordering::Relaxed);
+        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -151,6 +155,26 @@ pub fn set_settings_panel(open: bool) {
     apply_toolbar_height();
 }
 
+/// 书签管理面板（F-CEF-20）展开时工具栏视图额外加高的像素
+const BM_MANAGE_PANEL_EXTRA: i32 = 380;
+static BM_MANAGE_EXTRA_V: AtomicI32 = AtomicI32::new(0);
+
+/// 书签管理面板开合：与其它面板互斥
+pub fn set_bm_manage_panel(open: bool) {
+    BM_MANAGE_EXTRA_V.store(if open { BM_MANAGE_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
+    if open {
+        PW_EXTRA.store(0, Ordering::Relaxed);
+        BM_EXTRA.store(0, Ordering::Relaxed);
+        DL_EXTRA.store(0, Ordering::Relaxed);
+        MENU_EXTRA.store(0, Ordering::Relaxed);
+        FIND_EXTRA.store(0, Ordering::Relaxed);
+        HIST_EXTRA.store(0, Ordering::Relaxed);
+        SITE_EXTRA.store(0, Ordering::Relaxed);
+        SETTINGS_EXTRA.store(0, Ordering::Relaxed);
+    }
+    apply_toolbar_height();
+}
+
 /// 密码面板开合：加/减工具栏视图高度并重排（只动 PW_EXTRA，不碰书签栏态）
 pub fn set_pw_panel(open: bool) {
     PW_EXTRA.store(if open { PW_PANEL_EXTRA } else { 0 }, Ordering::Relaxed);
@@ -162,6 +186,7 @@ pub fn set_pw_panel(open: bool) {
         HIST_EXTRA.store(0, Ordering::Relaxed);
         SITE_EXTRA.store(0, Ordering::Relaxed);
         SETTINGS_EXTRA.store(0, Ordering::Relaxed);
+        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -198,6 +223,7 @@ fn set_find_bar(open: bool) {
         HIST_EXTRA.store(0, Ordering::Relaxed);
         SITE_EXTRA.store(0, Ordering::Relaxed);
         SETTINGS_EXTRA.store(0, Ordering::Relaxed);
+        BM_MANAGE_EXTRA_V.store(0, Ordering::Relaxed);
     }
     apply_toolbar_height();
 }
@@ -1985,6 +2011,13 @@ fn handle_action(action: &str) {
             toggle_star();
             return;
         }
+        "bmmanage" => {
+            set_bm_manage_panel(arg == "1");
+            if arg == "1" {
+                reload_bookmarks_from_db();
+            }
+            return;
+        }
         "settingspanel" => {
             set_settings_panel(arg == "1");
             if arg == "1" {
@@ -2788,6 +2821,14 @@ fn handle_shortcut(
                 log::error!("[cef] 恢复标签失败: {e}");
             }
         }
+        if let Some(flag) = is_shortcut {
+            *flag = 1;
+        }
+        return 1;
+    }
+    // Ctrl+Shift+O 书签管理器（F-CEF-20；O = 0x4F = 79）
+    if shift && ev.windows_key_code == 79 {
+        run_toolbar_js("setBmManage(true)");
         if let Some(flag) = is_shortcut {
             *flag = 1;
         }
