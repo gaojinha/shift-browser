@@ -14,30 +14,35 @@ struct QuickSite {
     url: String,
 }
 
+/// 最近访问（来自 history 表，最多 6 条）。
+#[derive(serde::Serialize)]
+struct RecentItem {
+    title: String,
+    url: String,
+}
+
 /// 写入启动页 HTML 并返回 `file://` URL（幂等：文件已存在则覆盖重写）。
 ///
-/// 搜索引擎与快捷站点跟主应用设置联动（`settings.search_engine` /
-/// `settings.quick_sites`），不再硬编码 Google + 5 个写死站点。
+/// 搜索引擎、快捷站点、最近访问都跟主应用数据联动，不再硬编码。
 pub fn ensure_newtab_html(shell_dir: &Path) -> Result<String, String> {
     let dir = shell_dir;
     std::fs::create_dir_all(dir).map_err(|e| format!("建启动页目录失败: {e}"))?;
-    let (search_url, sites) = load_newtab_settings();
-    let html = render_newtab_html(&search_url, &sites);
+    let (search_url, sites, recent) = load_newtab_settings();
+    let html = render_newtab_html(&search_url, &sites, &recent);
     let path = dir.join("cef-newtab.html");
     std::fs::write(&path, html).map_err(|e| format!("写启动页失败: {e}"))?;
     Ok(format!("file://{}", path.display()))
 }
 
-/// 读主应用设置（同步：开窗时只跑一次，几十毫秒可接受，与书签注入同一模式）。
-fn load_newtab_settings() -> (String, Vec<QuickSite>) {
+/// 读主应用设置与最近历史（同步：开窗时只跑一次，几十毫秒可接受）。
+fn load_newtab_settings() -> (String, Vec<QuickSite>, Vec<RecentItem>) {
+    let default_search =
+        crate::constants::search::url_template(crate::constants::search::DEFAULT_ENGINE)
+            .to_string();
     let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
-        return (
-            crate::constants::search::url_template(crate::constants::search::DEFAULT_ENGINE)
-                .to_string(),
-            default_sites(),
-        );
+        return (default_search, default_sites(), Vec::new());
     };
-    let (engine, sites_json) = tauri::async_runtime::block_on(async move {
+    let (engine, sites_json, recent_rows) = tauri::async_runtime::block_on(async move {
         let engine: Option<String> =
             sqlx::query_scalar("SELECT value FROM settings WHERE key = 'search_engine'")
                 .fetch_optional(&pool)
@@ -50,7 +55,13 @@ fn load_newtab_settings() -> (String, Vec<QuickSite>) {
                 .await
                 .ok()
                 .flatten();
-        (engine, sites)
+        let recent = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT url, title FROM history ORDER BY last_visit_at DESC LIMIT 6",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default();
+        (engine, sites, recent)
     });
     let engine = engine.unwrap_or_else(|| crate::constants::search::DEFAULT_ENGINE.to_string());
     let search_url = crate::constants::search::url_template(&engine).to_string();
@@ -59,7 +70,15 @@ fn load_newtab_settings() -> (String, Vec<QuickSite>) {
         .map(|arr| arr.iter().filter_map(parse_site).collect::<Vec<_>>())
         .filter(|v| !v.is_empty())
         .unwrap_or_else(default_sites);
-    (search_url, sites)
+    let recent = recent_rows
+        .into_iter()
+        .filter(|(url, _)| crate::newtab::quick_sites::is_safe_web_url(url))
+        .map(|(url, title)| RecentItem {
+            title: title.unwrap_or_default(),
+            url,
+        })
+        .collect();
+    (search_url, sites, recent)
 }
 
 /// 单条快捷站点：只放行 http/https（与 `newtab::quick_sites::is_safe_web_url` 同口径）。
@@ -93,15 +112,19 @@ fn default_sites() -> Vec<QuickSite> {
     .collect()
 }
 
-/// 模板替换（纯函数，便于单测）：注入搜索模板与快捷站点 JSON。
-fn render_newtab_html(search_url: &str, sites: &[QuickSite]) -> String {
+/// 模板替换（纯函数，便于单测）：注入搜索模板、快捷站点与最近访问。
+fn render_newtab_html(search_url: &str, sites: &[QuickSite], recent: &[RecentItem]) -> String {
     let search_json = serde_json::to_string(search_url).unwrap_or_else(|_| "\"\"".to_string());
     let sites_json = serde_json::to_string(sites)
+        .unwrap_or_else(|_| "[]".to_string())
+        .replace("</", "<\\/");
+    let recent_json = serde_json::to_string(recent)
         .unwrap_or_else(|_| "[]".to_string())
         .replace("</", "<\\/");
     NEWTAB_HTML
         .replace("__SEARCH_URL__", &search_json)
         .replace("__QUICK_SITES__", &sites_json)
+        .replace("__RECENT__", &recent_json)
 }
 
 const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
@@ -154,6 +177,25 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
   }
   .link:hover { background: #1f2530; border-color: #3a4453; color: #e6e8eb; }
   .link i { font-style: normal; font-size: 14px; }
+  /* 最近访问（F-CEF-17 配套）：3 列网格 */
+  .recent {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    margin-top: 26px; text-align: left;
+  }
+  .recent-item {
+    display: flex; flex-direction: column; gap: 3px;
+    padding: 10px 12px; border-radius: 10px;
+    background: #171b22; border: 1px solid #262d38; text-decoration: none;
+  }
+  .recent-item:hover { background: #1f2530; border-color: #3a4453; }
+  .recent-item .r-title {
+    color: #d7dce4; font-size: 13px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .recent-item .r-url {
+    color: #5d6674; font-size: 11px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
   .hint { margin-top: 26px; font-size: 12px; color: #4d5563; }
 </style>
 </head>
@@ -166,6 +208,7 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
     <input id="q" type="text" spellcheck="false" placeholder="搜索或输入网址" autofocus>
   </div>
   <div class="links" id="links"></div>
+  <div class="recent" id="recent"></div>
   <div class="hint">Ctrl+T 新标签 · Ctrl+W 关闭 · Ctrl+Tab 切换</div>
 </div>
 <script>
@@ -185,6 +228,23 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
     name.textContent = s.name || s.url;
     a.append(icon, name);
     linksEl.appendChild(a);
+  });
+
+  // 最近访问（来自 history 表，最多 6 条）
+  const RECENT = __RECENT__;
+  const recentEl = document.getElementById('recent');
+  (RECENT || []).forEach(function (r) {
+    var a = document.createElement('a');
+    a.className = 'recent-item';
+    a.href = r.url;
+    var t = document.createElement('span');
+    t.className = 'r-title';
+    t.textContent = r.title || r.url;
+    var u = document.createElement('span');
+    u.className = 'r-url';
+    u.textContent = r.url;
+    a.append(t, u);
+    recentEl.appendChild(a);
   });
 
   function go() {
@@ -216,7 +276,7 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_newtab_html, parse_site, render_newtab_html, QuickSite};
+    use super::{ensure_newtab_html, parse_site, render_newtab_html, QuickSite, RecentItem};
 
     #[test]
     fn newtab_html_written_and_self_contained() {
@@ -246,7 +306,11 @@ mod tests {
                 url: "https://a.com".into(),
             },
         ];
-        let html = render_newtab_html("https://www.bing.com/search?q=", &sites);
+        let recent = vec![RecentItem {
+            title: "示例".into(),
+            url: "https://example.com".into(),
+        }];
+        let html = render_newtab_html("https://www.bing.com/search?q=", &sites, &recent);
         assert!(
             html.contains("\"https://www.bing.com/search?q=\""),
             "搜索模板必须注入"
@@ -256,6 +320,8 @@ mod tests {
         assert!(!html.contains("a</script>"));
         assert!(!html.contains("__SEARCH_URL__"));
         assert!(!html.contains("__QUICK_SITES__"));
+        assert!(html.contains("\"url\":\"https://example.com\""), "最近访问必须注入");
+        assert!(!html.contains("__RECENT__"));
     }
 
     #[test]
