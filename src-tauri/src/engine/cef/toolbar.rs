@@ -316,6 +316,10 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   }
   .bmm-folder:hover, .bmm-folder.active { background: #3c4043; }
   .bmm-folder.active { color: #8ab4f8; }
+  .bmm-folder-del {
+    flex: 0 0 auto; color: #f28b82; padding: 0 6px; font-size: 12px;
+  }
+  .bmm-folder-del:hover { background: #4a4d51; border-radius: 4px; }
   .bmm-item {
     display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 6px;
     border-radius: 6px;
@@ -1408,11 +1412,34 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     const tree = document.getElementById('bmmtree');
     if (!tree) return;
     tree.innerHTML = '';
-    const mk = (label, key, depth) => {
+    const mk = (label, key, depth, folderId) => {
       const d = document.createElement('div');
       d.className = 'bmm-folder' + (bmmFilter === key ? ' active' : '');
       d.style.paddingLeft = 8 + depth * 14 + 'px';
-      d.textContent = label;
+      const name = document.createElement('span');
+      name.textContent = label;
+      name.style.flex = '1';
+      name.style.overflow = 'hidden';
+      name.style.textOverflow = 'ellipsis';
+      name.style.whiteSpace = 'nowrap';
+      d.appendChild(name);
+      if (folderId != null) {
+        const del = document.createElement('span');
+        del.className = 'bmm-folder-del';
+        del.textContent = '×';
+        del.title = '删除文件夹（会删掉夹内书签）';
+        del.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (del.dataset.armed === '1') {
+            act('bmdeletefolder|' + folderId);
+          } else {
+            del.dataset.armed = '1';
+            del.textContent = '确认';
+            setTimeout(() => { del.dataset.armed = ''; del.textContent = '×'; }, 3000);
+          }
+        });
+        d.appendChild(del);
+      }
       d.addEventListener('click', () => { bmmFilter = key; renderBmmTree(); renderBmmList(); });
       tree.appendChild(d);
     };
@@ -1420,7 +1447,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     mk('未分类', 'root', 0);
     const walk = (parent, depth) => {
       bmmFoldersOf(parent).forEach((f) => {
-        mk('📁 ' + f.name, String(f.id), depth);
+        mk('📁 ' + f.name, String(f.id), depth, f.id);
         walk(f.id, depth + 1);
       });
     };

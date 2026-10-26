@@ -1674,6 +1674,24 @@ fn delete_bookmark_and_refresh(id: i64) {
 }
 
 /// 把当前页加为书签（右键菜单「新建书签」）。
+/// 删除书签文件夹（级联删子夹与夹内书签；F-CEF-20）。
+fn delete_folder_and_refresh(id: i64) {
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        match crate::db::bookmarks::delete_bookmark_folder_inner(&pool, id).await {
+            Ok(()) => {
+                log::info!("[cef] 书签文件夹已删除 id={id}");
+                if let Some(app) = crate::cef_cmd::app_handle() {
+                    let _ = app.run_on_main_thread(reload_bookmarks_from_db);
+                }
+            }
+            Err(e) => log::warn!("[cef] 删除书签文件夹失败 id={id}: {e}"),
+        }
+    });
+}
+
 fn add_bookmark_from_current() {
     let Some(pool) = crate::db::GLOBAL_POOL.get() else { return };
     // 取当前活动标签的 URL 与标题
@@ -2181,6 +2199,12 @@ fn handle_action(action: &str) {
                 }
             } else if !arg.trim().is_empty() {
                 create_folder(arg.trim(), None);
+            }
+            return;
+        }
+        "bmdeletefolder" => {
+            if let Ok(id) = arg.parse::<i64>() {
+                delete_folder_and_refresh(id);
             }
             return;
         }
