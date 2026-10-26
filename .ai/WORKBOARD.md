@@ -173,7 +173,11 @@
 
 ## 待拍板（给高哥）
 
-1. ~~LiteLLM 代理开机自启~~ → **已办**（2026-10-18 22:01 二狗）：`~/.config/systemd/user/ssh-socks-proxy.service` 已建、`enable --now`，直接前台托管 `ssh -N -D 127.0.0.1:1080`（带 `Restart=always` 断线自愈），实测隧道通（出口 IP = VPS 148.135.98.65）。
+1. ~~LiteLLM 代理开机自启~~ → **已办**（2026-10-18 22:01 二狗）：`~/.config/systemd/user/ssh-socks-proxy.service` 已建、`enable --now`，直接前台托管 `ssh -N -D 127.0.0.1:1080`（带 `Restart=always` 断线自愈），实测隧道通（出口 IP = VPS <exit-ip>）。
 2. ~~claudcodeorigin 仓库 `package.json` 提交~~ → **已结（2026-10-19 05:32 高哥拍板）**：高哥明确「claudcodeorigin 已经删除了，以后不用管了」。该项永久关闭，不再追问、不再列入待拍板。
 3. ~~重建版（2.1.88）`-p` 挂死要不要深查~~ → **已按建议不查**（官方版已可用，深查成本高）。
 4. ~~U-4 怎么收口~~ → **已收口**（降级显示规则数，由 F-67 完成，提交 813eb81）
+
+5. **【2026-10-26 08:20 新增·待高哥拍板】CF 通过率到底在什么网络口径下测** —— 取证见 `.ai/evidence/20261026-0820-出口取证-CF通过率口径受限.md`。实查本机**两条出口都不是国内家宽**：① 系统默认 = **Cloudflare WARP**（`cdn-cgi/trace` 自证 `warp=on`，`nft table inet cloudflare-warp` + `ip rule fwmark 0x100cf lookup 65743` 全局劫持）→ **打 CF 站点等于自己测自己，数据一律作废**；② `mihomo` 7897/1080 出口 = **美国洛杉矶 VPS**（`warp=off loc=US`）→ 仅海外口径，可作构建间对比、不可外推国内放行率。
+   **四条路**：A 临时 `warp-cli disconnect`（十几分钟全机直连，科学上网断掉）；**B 手机热点采样（零改动，我倾向这个）**；C mihomo 加 DIRECT + 断 WARP（双重改动，不推荐）；D 把探针发国内朋友跑（长期最稳）。
+   **在此之前**：F-CEF-05 的 CF 部分只能标"海外口径"，**M3 关口不得据此判通过**。

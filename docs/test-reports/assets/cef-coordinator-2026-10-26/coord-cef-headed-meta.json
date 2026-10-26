@@ -2,7 +2,7 @@
   "mode": "headed",
   "version": "Chrome/154.0.8037.57",
   "time": "2026-10-26 01:36:44 +0800",
-  "exit_trace": "fl=445f259\nh=www.cloudflare.com\nip=2a09:bac1:1980:c770::1bd:12a\nts=1792949814.000\nvisit_scheme=https\nuag=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/<exit-ip> Safari/537.36\ncolo=LAX\nsliver=050-tier1\nhttp=http/3\nloc=CN\ntls=TLSv1.3\nsni=plaintext\nwarp=on\ngateway=off\nrbi=off\nkex=X25519MLKEM768\n",
+  "exit_trace": "fl=445f259\nh=www.cloudflare.com\nip=<warp-ip>\nts=1792949814.000\nvisit_scheme=https\nuag=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/<exit-ip> Safari/537.36\ncolo=LAX\nsliver=050-tier1\nhttp=http/3\nloc=CN\ntls=TLSv1.3\nsni=plaintext\nwarp=on\ngateway=off\nrbi=off\nkex=X25519MLKEM768\n",
   "navigator": {
     "ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/<exit-ip> Safari/537.36",
     "webdriver": true,
