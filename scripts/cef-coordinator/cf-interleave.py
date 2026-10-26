@@ -87,25 +87,57 @@ class Side:
         return {"loaded": loaded, "elapsed_s": round(time.time() - t0, 1), "docs": docs,
                 "state_8s": s8, "state_20s": s20}
 
+    def _frame_urls(self, node):
+        """递归收集 frameTree 里所有 frame 的 URL。"""
+        out = []
+        f = node.get("frame") or {}
+        if f.get("url"):
+            out.append(f["url"])
+        for c in node.get("childFrames") or []:
+            out.extend(self._frame_urls(c))
+        return out
+
     async def state(self):
         try:
             r = await self.call("Runtime.evaluate", {"expression": STATE_JS, "returnByValue": True})
-            return json.loads(r["result"]["value"])
+            st = json.loads(r["result"]["value"])
+            # 顶层 document 的 querySelector 看不到嵌套 frame 里的 CF 挑战框，
+            # 用 Page.getFrameTree 补一刀（2026-10-26 协调器核验指出的硬伤 1）。
+            try:
+                ft = await self.call("Page.getFrameTree")
+                urls = self._frame_urls(ft.get("frameTree", {}))
+                st["cf_frames"] = [u for u in urls if "challenges.cloudflare.com" in u]
+            except Exception:
+                st["cf_frames"] = []
+            st["has_cf_frame"] = bool(st["cf_frames"])
+            return st
         except Exception as e:
-            return {"error": repr(e), "title_is_jam": False, "has_cf_iframe": False, "body_len": -1}
+            return {"error": repr(e), "title_is_jam": False, "has_cf_iframe": False,
+                    "has_cf_frame": False, "cf_frames": [], "body_len": -1}
 
 
 def classify(res):
+    """三态判定，标签严格限定在 pass / turnstile_or_challenge_shown / hard_block_or_stuck。
+
+    2026-10-26 协调器核验指出两处要修：
+    - 挑战框检测不能只看顶层 document（嵌套 frame 看不到），用 has_cf_frame
+    - 原 pass_after_challenge 是词表外标签，会让按声明词表统计的脚本算错
+    """
     fin = res["state_20s"] or res["state_8s"]
     if not fin or "error" in fin:
         return "error"
-    if fin["title_is_jam"] and not fin["has_cf_iframe"] and fin["body_len"] < 200 and res["state_20s"]:
-        return "hard_block_or_stuck"
-    if fin["has_cf_iframe"] or fin["title_is_jam"]:
-        return "turnstile_or_challenge_shown"
+    challenged = bool(fin.get("has_cf_frame") or fin.get("has_cf_iframe"))
+    # HTTP 4xx/5xx = 被拦。不能因为标题"看起来正常"就判放行——
+    # 2026-10-26 实测踩到：indeed 返 403 + 标题 "Security Check - Indeed.com"，
+    # 标题不含 just a moment，旧逻辑会误判成 pass。
     first = res["docs"][0] if res["docs"] else {}
-    if first.get("cf_mitigated") and res["state_20s"]:
-        return "pass_after_challenge"
+    status = first.get("status") or 0
+    if status >= 400:
+        return "turnstile_or_challenge_shown" if challenged else "hard_block_or_stuck"
+    if fin["title_is_jam"] and not challenged and fin["body_len"] < 200 and res["state_20s"]:
+        return "hard_block_or_stuck"
+    if challenged or fin["title_is_jam"]:
+        return "turnstile_or_challenge_shown"
     return "pass"
 
 

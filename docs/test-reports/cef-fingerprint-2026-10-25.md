@@ -149,6 +149,33 @@ CEF 构建若 UA 仍是应用层设置的 142，`user_agent` 与 `Sec-Ch-Ua` 行
 6. §1.2 指纹五项/brands/WebGL 一栏**本轮未重测**（派单第二轮已限定只做 CF 实站），仍沿用协调器 `.ai/evidence/20261026-0138-*.md` 的数据。
 7. **【协调器污染声明 10-26 11:00】被测身份与并发未隔离**：① 被测二进制 `target/debug/shift-browser` mtime 由 00:51 变为 **10:25**（526018792→526033024 字节），落在本窗口 10:20:49–10:33 内，10:51 再编一次 → meta 声称的"00:51 构建 HEAD 4269ea5"无法自证；② **10:26:54 `shift-cef-atom3.service` 启动**（另一 agent 跑 F-CEF-03），与本测试并发，CEF 的 `--user-data-dir=/home/gao/.cache/com.shiftbrowser.app/cef` 是**应用真实持久化 profile**（`Default/Cookies` mtime 10:42），两侧共用；③ `Network.clearBrowserCookies` 在 CEF 上的生效性**从未验证**，linux.do 的 5/6 vs 2/6 存在"历史 `cf_clearance` 携带"的解释空间，而该站是本轮唯一大差异来源。下轮须：CEF 用一次性独立 profile 重采 + 清除生效性最小实验 + meta 记录 mtime/sha256/HEAD/工作区干净度。
 
+## 4.5 CEF vs 真 Chrome 干净复测（2026-10-26 11:17–11:33，可用于关口判定）
+
+> 上一轮（§4.4）因并发污染 / 真实 profile / 探针缺陷被降级。本节是堵住三条之后的复测。
+
+**隔离条件**：两个协作 AI 均退出、无其他实例；CEF 与 Chrome **各用全新临时 profile**
+（`SHIFT_CEF_CACHE_DIR` / `--user-data-dir`，跑完即删）；每次访问清 cookie+缓存；
+严格交错、每轮换先后手；挑战框用 `Page.getFrameTree` 递归探测；HTTP 4xx/5xx 必判拦截。
+
+| 站点 | CEF | 真 Chrome |
+|---|---|---|
+| nodeseek.com | 3/3 pass | 3/3 pass |
+| chatgpt.com | 3/3 pass | 3/3 pass |
+| nowsecure.nl | 3/3 pass | 3/3 pass |
+| indeed.com | **2 pass / 1 硬拦** | 1 pass / **2 硬拦** |
+| linux.do（n=6） | **4 pass / 2 硬拦**（403、429） | 3 pass / **3 硬拦**（均 403） |
+| **合计** | **15/18** | **13/18** |
+
+**结论**：按「CEF ≥ 同口径真 Chrome」口径，本轮 **5 站逐站不低于**（3 站持平、2 站略优），
+合计 15/18 vs 13/18。数据干净（临时 profile + 静默环境 + 修正后的探针与判定）。
+
+**局限（必须一起看）**：① 海外 LAX 出口，国内口径未取得；② n 小，不作统计显著；
+③ **全程 0 次出现 Turnstile 挑战框**（探针有能力，页面里确实没有），「可点过」档 0 观察；
+④ CEF/Chrome 内核小版本差（154.0.8037.98 vs .57）；⑤ 两侧均 CDP 驱动；
+⑥ 判定修正 2 处（各对一方不利），依据是 403 响应码。
+
+证据：`docs/test-reports/assets/cf-retest-clean-20261026/`（cf-raw.json / meta.md）
+
 ## 5. 指纹面板对比方案（CreepJS / Cover Your Tracks）
 
 - 对象：真 Chrome 154（有头）· WebKit 构建 · CEF 构建，三方同机同会话。
