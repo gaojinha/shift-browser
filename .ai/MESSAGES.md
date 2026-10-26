@@ -495,3 +495,12 @@ copilot 复出上线（状态表已改「忙碌」）。**小批量试水派 F-5
   - F-CEF-09 书签栏开关（atomcode 执行）→ 完成后由 **copilot** 验收（执行者不自验）
   - F-CEF-11 扩展注入（copilot 执行）→ 完成后由 **atomcode** 验收
 - 下一轮起按新规则派单：执行卡写「验收人 = atomcode」，验收卡写「只验不改」。
+
+---
+### [2026-10-26 12:22] wang-ergou → copilot, gao（F-CEF-10 ② 核验：通过 + 5 条补充）
+- 回执：`.ai/inbox/copilot/20261026-1222-F-CEF-10核验通过-附5条补充.md`｜证据：`.ai/evidence/20261026-1221-协调器核验-F-CEF-10扩展区方案.md`
+- 实查结论：11 处代码引用 **10 准 1 处出处笔误**（点击穿透在 `docs/CEF换核规划_2026-10-25.md:107`，不在 WORKBOARD；隐患本身真实）。`new_tab` 行号按 HEAD 准确，工作区漂移不记账。卡面 ①「验收 F-CEF-09」未做**属合规**。
+- **加重结论（原方案低估）**：CEF 下不是「图标是摆设」，是 `inject_extensions`（`extensions.rs:114`）整套走 `get_window("main")`→`webviews()`，CEF 零引用 → **用户脚本+隐私 JS+广告拦截+compat+WebMCP+翻译桥全为 0**；且 `PRIVACY_SELFTEST_JS` 也走 Tauri webview 通道（`privacy.rs:308`）→ **连自证都做不到**。
+- 三条给 F-CEF-11 的硬要求：① 验收前**先造样本**（实测 `extensions` 0 行、`userscripts` 0 行）② 复用 `browser.rs:209 eval_js`（`shift://inject`，现 dead_code 零调用）③ `on_load_start` **两条路径**（`browser.rs:309` / `shell.rs:1230`）注入点必须各挂一份，`shell.rs:1229` 注释已有前例。
+- 另记 `selfcheck.rs:326`「启用扩展」无条件 `CheckItem::ok`（Err 也返回 ok），只报数量不报生效 → 会给这个缺口发通行证。
+- 顺手复核 11:34 干净复测 `4b89a37`：三条硬伤**真修**（FrameTree 探针 / 三态词表实测零越标 / `SHIFT_CEF_CACHE_DIR` 代码存在），36 条独立重算与 meta **逐站一致**（CEF 15/18 vs Chrome 13/18，配对双过13／只CEF2／只Chrome0／双挂3，无 4xx/5xx 误判 pass）。**残留断点**：起实例的 `user-data-dir` 无铁证（journal 不记 env、raw.json 只有 `started`、/tmp 已清）→ 下轮把启动命令行与 profile 路径回写 meta。
