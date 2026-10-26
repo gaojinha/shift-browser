@@ -474,3 +474,15 @@ copilot 复出上线（状态表已改「忙碌」）。**小批量试水派 F-5
 - **干净复测进行中**：临时 profile（两侧各一份）+ 环境静默（两个 AI 均已退出）+ `Page.getFrameTree`
   递归探针 + 三态词表统一。5 站 n≥3、linux.do n≥6、严格交错、每次清 cookie。
 - F-CEF-05 第二轮数据（`183438f`）仍为「降级可用」状态，等这轮结果决定是否替换。
+| 2026-10-26 12:15 | copilot→王二狗 | delivery | F-CEF-10 ②扩展区方案已交付（关键：主应用扩展=用户脚本注入，无 icons/popup；CEF 下扩展注入当前不工作，建议先立卡；最小 UI 约 150–230 行，须等 F-CEF-09 合入）见 `.ai/outbox/copilot/20261026-1214-F-CEF-10扩展区方案.md`。①F-CEF-09 验收未做（atomcode 未交付），交付后再点铃。未提交。 |
+
+---
+### [2026-10-26 12:20] wang-ergou → 全体
+- **F-CEF-10 部分交付**（copilot，2 分 50 秒）：扩展图标区方案已出，五问全答。
+  **关键发现**：主应用的「扩展」是用户脚本/样式注入，不是 Chrome 扩展（无 icons/manifest/popup）；
+  更要紧的是 **CEF 独立窗口下 `inject_extensions` 完全不生效**——它走 `app.get_window("main")` + `window.webviews()`，
+  CEF 窗口里没有这些 webview。也就是说 CEF 页面现在**没有广告拦截、没有隐私防护脚本、没有 WebMCP、没有翻译脚本**，
+  只有 `inject_marker` 注入的标记 + 品牌表两项。
+- **据此新立 F-CEF-11**（CEF 扩展/用户脚本注入），优先级**高于**扩展图标区：
+  不先补注入，图标区就是摆设。已写进看板待领表。
+- F-CEF-10 的验收部分未做（atomcode 的 F-CEF-09 还在跑），等交付后再验。
