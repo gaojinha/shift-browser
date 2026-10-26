@@ -73,11 +73,19 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
             .unwrap_or_else(|| ".".to_string())
     });
 
-    let cache = app
-        .path()
-        .app_cache_dir()
-        .map(|p| p.join("cef"))
-        .map_err(|e| format!("拿不到缓存目录: {e}"))?;
+    // 缓存/profile 目录：默认用应用缓存目录，可用 SHIFT_CEF_CACHE_DIR 覆盖。
+    // 为什么需要覆盖：CEF 的 Cookies/LocalStorage 落在这个目录里，
+    // 测试时若复用应用真实 profile，上一轮的 cf_clearance 等历史信誉会带进下一轮，
+    // 造成「看起来是引擎能力、其实是旧 cookie」的污染（2026-10-26 已踩到）。
+    // 干净复测必须每轮一个临时目录。
+    let cache = match std::env::var("SHIFT_CEF_CACHE_DIR") {
+        Ok(dir) if !dir.trim().is_empty() => std::path::PathBuf::from(dir),
+        _ => app
+            .path()
+            .app_cache_dir()
+            .map(|p| p.join("cef"))
+            .map_err(|e| format!("拿不到缓存目录: {e}"))?,
+    };
     std::fs::create_dir_all(&cache).map_err(|e| format!("建缓存目录失败: {e}"))?;
 
     cef_app::initialize(
