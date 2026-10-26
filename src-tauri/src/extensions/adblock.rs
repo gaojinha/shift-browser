@@ -161,7 +161,8 @@ pub async fn collect_enabled_items(
         // U-5：进程级会话 key（启动随机生成）→ 反指纹种子 = f(会话 key, origin)
         serde_json::to_string(session_key()).unwrap_or_else(|_| "\"\"".to_string()),
         // Client Hints brands 与 UA 版本对齐（方案 B）：否则"UA 说 Chrome、brands 无 Chrome"被识破
-        crate::useragent::brands_json(&crate::useragent::ua_for("")),
+        // 按引擎选 UA 源：CEF 用内核原生 154（否则 UA/brands 版本打架，F-CEF-08）
+        crate::useragent::brands_json_for_engine(),
         // 站点覆盖表（2026-09-29）：注入全局不分站点，JS 按 location.host 查表
         // 动态对齐 platform/brands（privacy.js 与 compat 脚本消费）
         crate::useragent::overrides_json(),

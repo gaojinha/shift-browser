@@ -36,6 +36,32 @@ pub fn brands_json(ua: &str) -> String {
     )
 }
 
+/// CEF 构建的内核原生 UA（Chromium 154，对应 cef crate `154.5.0+154.0.34`）。
+///
+/// 为什么要单独一份：CEF 的 `User-Agent` 请求头由内核自己发（`Chrome/154.0.0.0`），
+/// 应用层不覆盖它；品牌表（`navigator.userAgentData.brands`）必须与这个版本对齐。
+/// 若沿用 WebKit 那套 `DEFAULT_UA`（142），就变成「UA 154 / brands 142」的新矛盾
+/// ——正是 F-CEF-08 要修的那条硬伤（见 `.ai/evidence/20261026-0138-*.md` §4）。
+///
+/// **跟版：升级 cef crate 时同步改这里**，与 `DEFAULT_UA` 同一节奏。
+#[cfg(feature = "cef-engine")]
+pub const CEF_KERNEL_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
+
+/// 品牌表派生：按引擎选 UA 源。
+///
+/// - CEF 构建：用内核原生 UA（154），保证 `sec-ch-ua` 与 `user-agent` 自洽
+/// - WebKit 构建：沿用应用层 UA（142，伪装机制不变）
+pub fn brands_json_for_engine() -> String {
+    #[cfg(feature = "cef-engine")]
+    {
+        brands_json(CEF_KERNEL_UA)
+    }
+    #[cfg(not(feature = "cef-engine"))]
+    {
+        brands_json(&ua_for(""))
+    }
+}
+
 /// 全局 UA 计算核心（命令层与测试共用）：trim 后空串回落默认
 pub fn normalized_global_ua(ua: &str) -> String {
     let val = ua.trim();
@@ -194,6 +220,27 @@ pub async fn set_user_agent_override(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// F-CEF-08：品牌表必须与「引擎实际发出的 UA」版本一致。
+    /// CEF 走内核原生 154、WebKit 走应用层 142；混用会造成 UA/brands 版本矛盾。
+    #[test]
+    fn brands_for_engine_matches_kernel_ua() {
+        let brands = brands_json_for_engine();
+        assert!(
+            brands.contains("Google Chrome"),
+            "品牌表必须包含 Google Chrome（真 Chrome 三项之一）：{brands}"
+        );
+        #[cfg(feature = "cef-engine")]
+        assert!(
+            brands.contains("\"154\""),
+            "CEF 构建 brands 必须是内核 154，不能是应用层 142：{brands}"
+        );
+        #[cfg(not(feature = "cef-engine"))]
+        assert!(
+            brands.contains("\"142\""),
+            "WebKit 构建沿用应用层 142：{brands}"
+        );
+    }
 
     /// 有全局静态可变状态的测试统一串行（GLOBAL_UA / SITE_OVERRIDES 进程级共享）；
     /// 用 tokio 互斥锁：状态类测试均 async，锁跨 await 不中毒
