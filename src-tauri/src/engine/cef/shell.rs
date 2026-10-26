@@ -177,6 +177,33 @@ pub fn force_show() {
                         };
                         x11::xlib::XSetClassHint(dpy, win, &mut hint);
 
+                        // 去掉系统标题栏（2026-10-26）：Chrome 的窗口按钮画在标签栏里，
+                        // 没有独立标题栏。_MOTIF_WM_HINTS = { flags=2(装饰), decorations=0 }
+                        {
+                            let atom = x11::xlib::XInternAtom(
+                                dpy,
+                                c"_MOTIF_WM_HINTS".as_ptr(),
+                                0,
+                            );
+                            // X11 的 32 位属性在 64 位平台上用 long 数组承载（只读低 32 位）
+                            let hints: [std::os::raw::c_long; 5] = [2, 0, 0, 0, 0];
+                            x11::xlib::XChangeProperty(
+                                dpy,
+                                win,
+                                atom,
+                                atom, // 类型也用 motif atom（用 XA_ATOM 会被 xprop 按 atom 名解析）
+                                32,
+                                0, // PropModeReplace
+                                hints.as_ptr() as *const u8,
+                                5,
+                            );
+                            // X11 的装饰在 map 时由 WM 决定；属性设置后需要重新 map 一次，
+                            // 否则 Mutter 不会重建 frame（实测：属性写进去了但窗口仍是 897 高）
+                            x11::xlib::XUnmapWindow(dpy, win);
+                            x11::xlib::XMapWindow(dpy, win);
+                            x11::xlib::XFlush(dpy);
+                        }
+
                         x11::xlib::XMapRaised(dpy, win);
                         x11::xlib::XFlush(dpy);
                     }
@@ -187,6 +214,90 @@ pub fn force_show() {
             log::warn!("[cef] force_show：没有窗口句柄");
         }
     });
+}
+
+/// 窗口控制：最小化 / 最大化切换 / 关闭（标签栏右侧按钮走这里）。
+pub fn window_minimize() {
+    SHELL_WINDOW.with(|w| {
+        if let Some(win) = w.borrow().as_ref() {
+            win.minimize();
+        }
+    });
+}
+
+pub fn window_toggle_maximize() {
+    SHELL_WINDOW.with(|w| {
+        if let Some(win) = w.borrow().as_ref() {
+            // CEF 没有 is_maximized 查询，用窗口尺寸对比近似的做法不可靠；
+            // 这里统一走 maximize()，连续点两下由 WM 自己处理（多数 WM 会 toggle）。
+            win.maximize();
+        }
+    });
+}
+
+pub fn window_close() {
+    SHELL_WINDOW.with(|w| {
+        if let Some(win) = w.borrow().as_ref() {
+            win.close();
+        }
+    });
+}
+
+/// 拖动窗口：发 `_NET_WM_MOVERESIZE` 给窗口管理器，由 WM 接管拖动
+/// （比自己在 Rust 里跟鼠标稳，GTK/Qt 都这么做）。
+pub fn window_begin_drag() {
+    let handle = SHELL_WINDOW.with(|w| w.borrow().as_ref().map(|x| x.window_handle()));
+    let Some(handle) = handle else { return };
+    if handle <= 1 {
+        return;
+    }
+    let dpy = cef::get_xdisplay();
+    if dpy.is_null() {
+        return;
+    }
+    unsafe {
+        let dpy = dpy as *mut x11::xlib::Display;
+        let win = handle as x11::xlib::Window;
+        let root = x11::xlib::XDefaultRootWindow(dpy);
+
+        // 取当前指针位置（_NET_WM_MOVERESIZE 要求 root 坐标）
+        let mut rx = 0;
+        let mut ry = 0;
+        let mut wx = 0;
+        let mut wy = 0;
+        let mut mask = 0;
+        let mut child: x11::xlib::Window = 0;
+        x11::xlib::XQueryPointer(
+            dpy, root, &mut root.clone(), &mut child, &mut rx, &mut ry, &mut wx, &mut wy, &mut mask,
+        );
+
+        let atom = x11::xlib::XInternAtom(
+            dpy,
+            c"_NET_WM_MOVERESIZE".as_ptr(),
+            0,
+        );
+        let mut ev = x11::xlib::XEvent {
+            client_message: x11::xlib::XClientMessageEvent {
+                type_: x11::xlib::ClientMessage,
+                serial: 0,
+                send_event: 1,
+                display: dpy,
+                window: win,
+                message_type: atom,
+                format: 32,
+                data: x11::xlib::ClientMessageData::from([rx as i64, ry as i64, 8, 1, 1]),
+            },
+        };
+        x11::xlib::XSendEvent(
+            dpy,
+            root,
+            0,
+            (1 << 20) | (1 << 19), // SubstructureRedirectMask | SubstructureNotifyMask
+            &mut ev,
+        );
+        x11::xlib::XFlush(dpy);
+    }
+    log::info!("[cef] 已请求窗口管理器接管拖动");
 }
 
 /// 让内容页导航（工具栏 JS 经 shell_msg 调 "nav" 时实际走 CefShellMsgHandler，本函数为
@@ -818,6 +929,22 @@ fn handle_action(action: &str) {
             if let Ok(idx) = arg.parse::<usize>() {
                 close_other_tabs(idx);
             }
+            return;
+        }
+        "winmin" => {
+            window_minimize();
+            return;
+        }
+        "winmax" => {
+            window_toggle_maximize();
+            return;
+        }
+        "winclose" => {
+            window_close();
+            return;
+        }
+        "windrag" => {
+            window_begin_drag();
             return;
         }
         "tabcloseright" => {

@@ -62,6 +62,19 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     overflow-x: auto; overflow-y: hidden;
   }
   .tabbar::-webkit-scrollbar { height: 0; }
+  .tabs {
+    display: flex; align-items: flex-end; flex: 1; min-width: 0;
+    height: 100%; overflow-x: auto; overflow-y: hidden;
+  }
+  .tabs::-webkit-scrollbar { height: 0; }
+  /* 窗口控制按钮（Chrome 画在标题栏右侧，Linux 版是方角 hover 块） */
+  .win-ctrl { display: flex; align-items: flex-end; flex: 0 0 auto; height: 40px; }
+  .win-ctrl button {
+    width: 44px; height: 32px; border-radius: 0; color: #e8eaed;
+    font-size: 13px; line-height: 1;
+  }
+  .win-ctrl button:hover { background: #3c4043; }
+  .win-ctrl button.close:hover { background: #e81123; color: #fff; }
   .tab {
     display: flex; align-items: center; gap: 8px;
     min-width: 32px; max-width: 240px; height: 36px;
@@ -120,11 +133,18 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 </head>
 <body>
   <div class="tabbar" id="tabbar">
-    <div class="tab active" data-idx="0">
-      <span class="t-title">新标签页</span>
-      <span class="t-close" title="关闭标签">×</span>
+    <div class="tabs" id="tabs">
+      <div class="tab active" data-idx="0">
+        <span class="t-title">新标签页</span>
+        <span class="t-close" title="关闭标签">×</span>
+      </div>
+      <div class="tab-new" id="tabnew" title="新建标签">+</div>
     </div>
-    <div class="tab-new" id="tabnew" title="新建标签">+</div>
+    <div class="win-ctrl">
+      <button title="最小化" data-act="winmin">─</button>
+      <button title="最大化" data-act="winmax">□</button>
+      <button class="close" title="关闭" data-act="winclose">✕</button>
+    </div>
   </div>
   <div class="bar">
     <span class="brand">Shift</span>
@@ -181,11 +201,12 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   // Rust 侧通过 execute_java_script 调用 window.__shiftTabs(data) 刷新标签栏；
   // 点击/关闭/新建通过 console.log SHIFT_ACT 回传，与地址栏同一套桥。
   const tabbar = document.getElementById('tabbar');
+  const tabs = document.getElementById('tabs');
 
-  window.__shiftTabs = function (tabs, active) {
-    if (!Array.isArray(tabs)) return;
-    tabbar.innerHTML = '';
-    tabs.forEach((t, i) => {
+  window.__shiftTabs = function (tabs_, active) {
+    if (!Array.isArray(tabs_)) return;
+    tabs.innerHTML = '';
+    tabs_.forEach((t, i) => {
       const el = document.createElement('div');
       el.className = 'tab' + (i === active ? ' active' : '');
       el.dataset.idx = String(i);
@@ -198,14 +219,14 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       close.textContent = '×';
       el.appendChild(title);
       el.appendChild(close);
-      tabbar.appendChild(el);
+      tabs.appendChild(el);
     });
     const add = document.createElement('div');
     add.className = 'tab-new';
     add.id = 'tabnew';
     add.title = '新建标签';
     add.textContent = '+';
-    tabbar.appendChild(add);
+    tabs.appendChild(add);
   };
 
   tabbar.addEventListener('click', (e) => {
@@ -222,6 +243,20 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     }
     const tab = e.target.closest('.tab');
     if (tab) act('tab|' + tab.dataset.idx);
+  });
+
+  // 窗口控制按钮
+  document.querySelector('.win-ctrl').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    act(btn.dataset.act);
+  });
+
+  // 拖动窗口：按住标签栏空白处拖动（走 _NET_WM_MOVERESIZE，由 WM 接管）
+  tabbar.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('.tab') || e.target.closest('button')) return;
+    act('windrag');
   });
 
   // 中键关闭标签（浏览器通用习惯）
