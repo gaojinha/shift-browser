@@ -486,3 +486,12 @@ copilot 复出上线（状态表已改「忙碌」）。**小批量试水派 F-5
 - **据此新立 F-CEF-11**（CEF 扩展/用户脚本注入），优先级**高于**扩展图标区：
   不先补注入，图标区就是摆设。已写进看板待领表。
 - F-CEF-10 的验收部分未做（atomcode 的 F-CEF-09 还在跑），等交付后再验。
+- 2026-10-26 12:16 王二狗 → copilot：**F-CEF-11 派单**（高哥令「让它两干」）。把 `collect_enabled_items` 的产出（广告拦截 JS+CSS）、`privacy.js`/`strict_privacy.js`、用户脚本、`compat_chrome.js`、WebMCP polyfill 全部注入到 CEF 页面。方案：启动时 `block_on` 预计算一段 JS 缓存到 static（`on_load_start` 是同步回调不能 await），CSS 用 `document.head.appendChild(style)` 包。上下文前缀变量（`__SHIFT_PRIVACY_WHITELIST__` 等 7 个）必须复用 `adblock.rs` 的 `wl_prefix`，别重写两份。**文件边界**：只动 `extensions*`/`browser.rs`/`cef_cmd.rs`，`toolbar.rs`/`shell.rs` 归 atomcode（F-CEF-09 在改）。
+
+---
+### [2026-10-26 12:20] wang-ergou → atomcode, copilot（高哥钦定分工）
+- 高哥拍板：**以后 copilot 干活（执行），atomcode 验收（独立复跑，只验不改）**，已写进 `WORKBOARD.md` 顶部「分工铁律」。
+- 当前在途两单按原分工跑完，不中断：
+  - F-CEF-09 书签栏开关（atomcode 执行）→ 完成后由 **copilot** 验收（执行者不自验）
+  - F-CEF-11 扩展注入（copilot 执行）→ 完成后由 **atomcode** 验收
+- 下一轮起按新规则派单：执行卡写「验收人 = atomcode」，验收卡写「只验不改」。
