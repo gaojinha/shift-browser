@@ -154,6 +154,58 @@ pub fn focus(browser: &Browser) {
     }
 }
 
+/// document_start 阶段的注入标记（F-CEF-03 最小集）。
+///
+/// 供 `CefTabLoadHandler` 与 `ShellContentLoadHandler` 共用——**同一类判定只许一份实现**。
+/// 本轮只注入一行标记，用于验证「CEF 能往页面注入 JS」这条链路；
+/// 后续 F-CEF-08（补 Google Chrome brand）、广告拦截、WebMCP 等全部搭这条通道。
+/// 只对主框架生效（子 frame 注入会重复且无意义）。
+pub fn inject_marker(frame: &mut Frame) -> bool {
+    if frame.is_main() != 1 {
+        return false;
+    }
+    // ① 链路标记（证明通道可用）② 品牌表（F-CEF-08：CEF 用内核 154 派生，
+    // 与 user-agent 头自洽）。privacy.js 一旦接上注入通道，就会读 __SHIFT_UA_BRANDS__
+    // 去覆盖 navigator.userAgentData。
+    let brands = crate::useragent::brands_json_for_engine();
+    // ③ userAgentData 覆盖：与 privacy.js 第 10 节同型（同一份品牌表语义），
+    //    这里是 CEF 侧的最小实现——完整 privacy.js 注入待 F-CEF-03 完整版。
+    //    真 Chrome 的 brands 有三项（含 Google Chrome），内核原生只有两项，
+    //    不覆盖就是「UA 说 Chrome、brands 里没有 Chrome」的硬伤（F-CEF-08）。
+    let script = format!(
+        r#"window.__SHIFT_INJECT_OK__ = true;
+window.__SHIFT_UA_BRANDS__ = {brands};
+(function () {{
+  try {{
+    var uad = navigator.userAgentData;
+    if (!uad) return;
+    var b = window.__SHIFT_UA_BRANDS__;
+    Object.defineProperty(navigator, 'userAgentData', {{
+      get: function () {{
+        return {{
+          brands: b || uad.brands,
+          mobile: false,
+          platform: 'Linux',
+          getHighEntropyValues: function () {{
+            return Promise.resolve({{ platform: 'Linux', platformVersion: '', architecture: '', model: '', uaFullVersion: '' }});
+          }},
+          toJSON: function () {{ return {{ brands: b || uad.brands, mobile: false, platform: 'Linux' }}; }}
+        }};
+      }},
+      configurable: true
+    }});
+  }} catch (e) {{}}
+}})();
+"#
+    );
+    frame.execute_java_script(
+        Some(&CefString::from(script.as_str())),
+        Some(&CefString::from("shift://inject")),
+        -1,
+    );
+    true
+}
+
 /// 在页面主框架执行 JS（忽略返回值）
 /// JS 注入（P2 快照/Agent 动作的注入口，接口已具备，见 docs/CEF换核规划_2026-10-25.md 第五节）。
 #[allow(dead_code)]
@@ -248,6 +300,24 @@ wrap_load_handler! {
     }
 
     impl LoadHandler {
+        /// document_start 阶段的 JS 注入口（F-CEF-03 最小集）。
+        ///
+        /// CEF 侧对 WebKit `UserContentManager` document_start 注入的等价通道：
+        /// 只在 **主框架** 首次加载开始时执行一段标记脚本，先验证「CEF 能往页面注入 JS」
+        /// 这条链路（后续 F-CEF-08 补 `Google Chrome` brand、广告拦截等全部搭这条通道）。
+        /// 回调在 UI 线程，`execute_java_script` 可直接调用；本轮只注入一行，不做重活。
+        fn on_load_start(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            _transition_type: TransitionType,
+        ) {
+            let Some(frame) = frame else { return };
+            if inject_marker(frame) {
+                log::info!("[cef] 注入通道 document_start 标记已执行 tab={}", self.tab_id);
+            }
+        }
+
         // CEF 回调参数名跟随 C API 风格（camelCase），不能改（签名对齐），scoped 放行
         #[allow(non_snake_case)]
         fn on_loading_state_change(

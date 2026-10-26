@@ -997,6 +997,23 @@ wrap_load_handler! {
     }
 
     impl LoadHandler {
+        /// document_start 注入标记（F-CEF-03）：CEF 独立窗口走的是 ShellClient，
+        /// 与 CefTabClient 是两条路径，注入点必须各挂一份（共用 `inject_marker`）。
+        fn on_load_start(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            _transition_type: TransitionType,
+        ) {
+            let Some(frame) = frame else { return };
+            if super::browser::inject_marker(frame) {
+                log::info!(
+                    "[cef] 注入通道 document_start 标记已执行（shell）tab={}",
+                    self.tab_id
+                );
+            }
+        }
+
         // CEF 回调参数名跟随 C API 风格（camelCase），不改签名
         #[allow(non_snake_case)]
         fn on_loading_state_change(
