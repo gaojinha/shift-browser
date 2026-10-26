@@ -723,6 +723,39 @@ fn run_toolbar_js(code: &str) {
     });
 }
 
+/// 关闭除 `keep` 之外的所有标签（右键菜单「关闭其他」）。
+/// 从大到小关，避免索引在删除过程中错位。
+fn close_other_tabs(keep: usize) {
+    let total = SHELL_TABS.with(|t| t.borrow().len());
+    if total <= 1 {
+        return;
+    }
+    for idx in (0..total).rev() {
+        if idx != keep && idx < SHELL_TABS.with(|t| t.borrow().len()) {
+            close_tab(idx);
+        }
+    }
+    // 关完之后保留下来的那个可能已换位，切到它
+    let cur = keep.min(SHELL_TABS.with(|t| t.borrow().len()).saturating_sub(1));
+    switch_tab(cur);
+    refresh_tabbar();
+}
+
+/// 关闭 `from` 右侧的所有标签（右键菜单「关闭右侧」）。
+fn close_tabs_right_of(from: usize) {
+    let total = SHELL_TABS.with(|t| t.borrow().len());
+    if from + 1 >= total {
+        return;
+    }
+    for idx in (from + 1..total).rev() {
+        if idx < SHELL_TABS.with(|t| t.borrow().len()) {
+            close_tab(idx);
+        }
+    }
+    switch_tab(from);
+    refresh_tabbar();
+}
+
 /// 把标签表同步到工具栏页面的标签栏（调 `window.__shiftTabs(tabs, active)`）
 pub fn refresh_tabbar() {
     let (list_json, active) = SHELL_TABS.with(|t| {
@@ -778,6 +811,18 @@ fn handle_action(action: &str) {
         "tabclose" => {
             if let Ok(idx) = arg.parse::<usize>() {
                 close_tab(idx);
+            }
+            return;
+        }
+        "tabcloseothers" => {
+            if let Ok(idx) = arg.parse::<usize>() {
+                close_other_tabs(idx);
+            }
+            return;
+        }
+        "tabcloseright" => {
+            if let Ok(idx) = arg.parse::<usize>() {
+                close_tabs_right_of(idx);
             }
             return;
         }

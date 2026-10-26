@@ -207,6 +207,21 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (tab) act('tab|' + tab.dataset.idx);
   });
 
+  // 中键关闭标签（浏览器通用习惯）
+  tabbar.addEventListener('auxclick', (e) => {
+    if (e.button !== 1) return;
+    const tab = e.target.closest('.tab');
+    if (!tab) return;
+    e.preventDefault();
+    act('tabclose|' + tab.dataset.idx);
+  });
+
+  // 标签栏空白处双击 = 新建标签（与主界面一致）
+  tabbar.addEventListener('dblclick', (e) => {
+    if (e.target.closest('.tab')) return;
+    act('tabnew');
+  });
+
   // 防止工具栏页面拖动/选中
   document.addEventListener('dragstart', (e) => e.preventDefault());
 </script>
