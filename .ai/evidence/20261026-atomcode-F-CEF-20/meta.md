@@ -36,16 +36,16 @@
 | 12 | 编辑 Esc 取消 | input 清除、DB 不写、无延迟幽灵提交 | liveEditInputs=0、row206title 原值；+0.7s 后 DB 仍原值 | ✅ | fb-esc-reprobe |
 | 13 | 移动 202→F1 | select 5 项（未分类+4 夹递归）；DB folder_id=101 | "moved options=5"；DB 202folder=101 | ✅ | t10-move |
 | 14 | 新建夹 F3（顶层） | DB (104,F3,NULL) + 树节点 | folders 含 (104,'F3',None)；树出现 📁 F3 | ✅ | t9-newfolder / t9b-tree + DB 直查 |
-| 15 | 互斥（Rust 高度侧） | 502/462/122 稳态 | bmmanage=502、hist=462、关=122 | ✅ | fb-stable-502 / fb-hist-both / t5-open |
-| 16 | 互斥（JS class 侧，旧→新） | 开旧面板后 cls 单面板 | **cls=[bmmanage-open, hist-open] 双开** | ❌ **缺陷** | fb-hist-both + fb-hist-both.png |
+| 15 | 互斥（Rust 高度侧） | 全对归零 | bmmanage=502、hist=462、关=122（**仅实测 bmmanage↔hist 一对**；补正①：set_site_panel/set_settings_panel 不清 BM_MANAGE_EXTRA_V，见「缺陷」节） | ⚠️ 部分覆盖 | fb-stable-502 / fb-hist-both / t5-open |
+| 16 | 互斥（JS class 侧，旧→新） | 开旧面板后 cls 单面板 | **cls=[bmmanage-open, hist-open] 双开**；源码核查另 4 处交叉缺项（补正②，见「缺陷」节） | ❌ **缺陷** | fb-hist-both + fb-hist-both.png |
 | 17 | 互斥（JS class 侧，新→旧） | setBmManage 清 7 旧 class | 实测/源码均对（T12 cls=[bmmanage-open]） | ✅ | fb-final-502 |
 
-## 缺陷（不通过项）
-**JS 侧面板互斥单向缺失**（源码核查 toolbar.rs @214a47b）：
-- `setBmManage` 的 class 移除清单含全部 7 个旧 class（新→旧 ✅）。
-- `setHistPanel / setDlPanel / setPwPanel / setSettingsPanel / setSitePanel / setMenuPanel` 六个 setter 的移除清单**均不含 `bmmanage-open`**（旧→新 ❌）→ bmmanage 开着时开任一旧面板，两个面板 DOM 同时 `display`（#bmmanage z-index:10 盖在上面）。
-- 稳态证据：开 hist 后 `cls=[bmmanage-open,hist-open]`、h=462（Rust 高度互斥正确，只缺 JS class 侧），截图 `fb-hist-both.png`。
-- 修法建议：六个 setter 各加一行 `'bmmanage-open'`；或抽 `removePanelClasses()` 统一（可顺带收口各清单既有缺项，如 setHistPanel 清单缺 settings-open/site-open）。
+## 缺陷（不通过项，2026-10-27 补正后列全；结论不通过不变）
+**面板互斥双向均不完整**（@214a47b；二狗 00:41 复核补正两处并入）：
+- **① JS class 侧（10 处缺项）**：`setBmManage` 清全 7 个旧 class（新→旧 ✅）；六个旧 setter 缺项明细——`setHistPanel`/`setDlPanel`/`setPwPanel`/`setSettingsPanel`/`setSitePanel`/`setMenuPanel` 均缺 `bmmanage-open`（6 处），另 `setPwPanel`/`setDlPanel` 缺 `site-open`+`settings-open`、`setSitePanel` 缺 `settings-open`、`setMenuPanel` 缺 `settings-open`+`site-open`（4 处交叉缺项）。
+- **② Rust extra 侧（2 处）**：`set_site_panel`/`set_settings_panel` 清零清单不含 `BM_MANAGE_EXTRA_V`（menu/hist/pw/dl/find_bar 均含）→ bmmanage 开着时开站点信息/设置页，两个 extra 叠加撑高视图。首轮只实测了清单完整的 bmmanage↔hist 对，15 项「稳态全对」仅对该对成立。
+- 真机稳态证据（bmmanage→hist 对）：`cls=[bmmanage-open,hist-open]`、h=462，截图 `fb-hist-both.png`；其余对各缺项经源码核查确认，未逐一上机。
+- **修复现状**：copilot F-CEF-21（面板互斥矩阵收口）已统一修复并提交入 HEAD——Rust `enum Panel` + `clear_all_extras_except(keep)`/`set_panel_extra()`，JS `removePanelClasses(except)` 由单一注册表 `PANEL_CLASSES`（`panel_classes_json()` 注入）驱动；复验待其交付真机 8×7=56 对全表后按回执「复验方式」补 site/settings 两对走一遍。
 
 ## 日志
 - 无新增形态 panic（`grep panicked` 无新命中）。
