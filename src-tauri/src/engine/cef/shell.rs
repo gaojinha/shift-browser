@@ -2242,6 +2242,19 @@ fn handle_action(action: &str) {
             }
             return;
         }
+        "tabreload" => {
+            if let Ok(idx) = arg.parse::<usize>() {
+                let id = SHELL_TABS.with(|t| t.borrow().get(idx).map(|x| x.id.clone()));
+                if let Some(id) = id {
+                    BROWSERS.with(|m| {
+                        if let Some(b) = m.borrow().get(&id) {
+                            b.reload();
+                        }
+                    });
+                }
+            }
+            return;
+        }
         "tabclose" => {
             if let Ok(idx) = arg.parse::<usize>() {
                 close_tab(idx);

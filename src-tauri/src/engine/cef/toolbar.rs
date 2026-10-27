@@ -298,6 +298,18 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   }
   .hist-row .h-del:hover { background: #4a4d51; }
   .hist-empty { color: #9aa0a6; padding: 12px 6px; font-size: 12px; }
+  /* 标签右键菜单（F-CEF-21） */
+  #tabmenu {
+    display: none; position: absolute; z-index: 30; min-width: 160px;
+    background: #292a2d; border: 1px solid #3c4043; border-radius: 8px;
+    padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.5); font-size: 12px;
+  }
+  #tabmenu.open { display: block; }
+  #tabmenu .tm-item {
+    padding: 6px 10px; border-radius: 4px; color: #e8eaed; cursor: default;
+  }
+  #tabmenu .tm-item:hover { background: #3c4043; }
+  #tabmenu .tm-item.danger { color: #f28b82; }
   /* 书签管理面板（F-CEF-20） */
   html.bmmanage-open, html.bmmanage-open body { height: 100vh; }
   #bmmanage {
@@ -562,6 +574,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       <button class="close" title="关闭" data-act="winclose">✕</button>
     </div>
   </div>
+  <div id="tabmenu"></div>
   <div class="bar">
     <span class="brand">Shift</span>
 
@@ -800,6 +813,28 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   addr.addEventListener('blur', () => setTimeout(closeOmni, 150));
   starBtn.addEventListener('click', () => act('startoggle'));
 
+  // 标签右键菜单（F-CEF-21）：复用现有 tab* 动作
+  const tabMenuEl = document.getElementById('tabmenu');
+  function closeTabMenu() { tabMenuEl.classList.remove('open'); tabMenuEl.innerHTML = ''; }
+  function showTabMenu(e, idx) {
+    tabMenuEl.innerHTML = '';
+    const mk = (label, cmd, danger) => {
+      const d = document.createElement('div');
+      d.className = 'tm-item' + (danger ? ' danger' : '');
+      d.textContent = label;
+      d.addEventListener('click', () => { act(cmd + '|' + idx); closeTabMenu(); });
+      tabMenuEl.appendChild(d);
+    };
+    mk('重新加载', 'tabreload');
+    mk('关闭标签', 'tabclose');
+    mk('关闭其他标签', 'tabcloseothers');
+    mk('关闭右侧标签', 'tabcloseright');
+    tabMenuEl.style.left = Math.min(e.clientX, window.innerWidth - 180) + 'px';
+    tabMenuEl.style.top = Math.min(e.clientY, window.innerHeight - 200) + 'px';
+    tabMenuEl.classList.add('open');
+  }
+  document.addEventListener('click', closeTabMenu);
+
   addr.addEventListener('focus', () => addr.select());
 
   // ---- 地址栏 / 加载态（Rust 侧 execute_java_script 调用）----
@@ -839,6 +874,11 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       close.textContent = '×';
       el.appendChild(title);
       el.appendChild(close);
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showTabMenu(e, i);
+      });
       tabs.appendChild(el);
     });
     const add = document.createElement('div');
