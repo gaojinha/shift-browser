@@ -1,16 +1,12 @@
 {
   "mcpServers": {
     "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"]
+      "command": "/home/gao/.local/node22/bin/context7-mcp",
+      "args": []
     },
     "playwright": {
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest"]
-    },
-    "shift-browser": {
-      "command": "/usr/bin/shift-browser-mcp",
-      "args": []
     }
   }
 }
