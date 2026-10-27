@@ -2150,6 +2150,10 @@ fn handle_action(action: &str) {
     if super::groups_ui::handle(cmd, arg) {
         return;
     }
+    // 下载清空动作（F-CEF-28）
+    if super::downloads_ui::handle(cmd, arg) {
+        return;
+    }
     // 用户脚本面板动作（F-CEF-23）
     if super::userscripts_ui::handle(cmd, arg) {
         return;
@@ -3230,7 +3234,7 @@ pub(crate) fn downloads_panel_json(list: &[crate::db::downloads::Download]) -> S
 }
 
 /// 通知工具栏面板重拉列表：库查询在 tokio 线程，JS 执行切回主线程。
-fn request_downloads_refresh() {
+pub(crate) fn request_downloads_refresh() {
     let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
     let Some(app) = crate::cef_cmd::app_handle() else { return };
     tauri::async_runtime::spawn(async move {

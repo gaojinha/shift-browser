@@ -238,6 +238,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   html.dl-open #dlpanel { display: flex; }
   html:not(.bookmarks-hidden) #dlpanel { top: 122px; }
   #dllist { flex: 1; overflow-y: auto; }
+  .dl-head { display: flex; align-items: center; gap: 8px; }
+  .dl-head .dl-title { flex: 1; color: #e8eaed; font-size: 12px; }
   .dl-row {
     display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 6px;
     border-radius: 6px; font-size: 12px;
@@ -664,6 +666,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <div id="pwlist"></div>
   </div>
   <div id="dlpanel">
+    <div class="dl-head"><span class="dl-title">下载记录</span><span id="dlclear" class="bmm-btn">清空已结束</span><span id="dlclose" class="bmm-btn">关闭</span></div>
     <div id="dllist"></div>
   </div>
   <div id="menupanel">
@@ -1446,6 +1449,12 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     act('dlpanel|' + (open ? '1' : '0'));
     if (open) renderDownloads();
   }
+  document.getElementById('dlclear')?.addEventListener('click', () => {
+    act('dlclear');
+    dlList = [];
+    renderDownloads();
+  });
+  document.getElementById('dlclose')?.addEventListener('click', () => setDlPanel(false));
   document.getElementById('dlbtn').addEventListener('click', () => {
     setDlPanel(!document.documentElement.classList.contains('dl-open'));
   });

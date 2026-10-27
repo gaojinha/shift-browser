@@ -403,6 +403,7 @@ fn open_shell_on_main(app: &AppHandle, url: Option<&str>) -> Result<(), String> 
     crate::engine::cef::passwords_ui::init(app);
     crate::engine::cef::certificates_ui::init(app);
     crate::engine::cef::groups_ui::init(app);
+    crate::engine::cef::downloads_ui::init(app);
     crate::engine::cef::userscripts_ui::init(app);
     let passwords_json = crate::engine::cef::passwords_ui::passwords_json(app);
     let downloads_json = cef_downloads_json(app);

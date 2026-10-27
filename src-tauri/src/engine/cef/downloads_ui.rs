@@ -46,7 +46,7 @@ fn clear_finished_downloads() {
     match tauri::async_runtime::block_on(crate::db::downloads::clear_finished(&db.pool)) {
         Ok(n) => {
             log::info!("[cef] 已清空已结束下载记录 {n} 条");
-            // TODO(接线，二狗补)：清空成功后经 push_downloads() 重渲染列表
+            super::shell::request_downloads_refresh();
         }
         Err(e) => log::warn!("[cef] 清空已结束下载记录失败: {e}"),
     }
