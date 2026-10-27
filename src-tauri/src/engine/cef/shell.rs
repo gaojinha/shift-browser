@@ -419,7 +419,7 @@ pub fn force_show() {
                                 0,
                             );
                             // X11 的 32 位属性在 64 位平台上用 long 数组承载（只读低 32 位）
-                            let hints: [std::os::raw::c_long; 5] = [2, 0, 0, 0, 0];
+                            let hints: [std::os::raw::c_long; 5] = [0, 0, 0, 0, 0]; // 实验：先不抢装饰，验证输入
                             x11::xlib::XChangeProperty(
                                 dpy,
                                 win,
