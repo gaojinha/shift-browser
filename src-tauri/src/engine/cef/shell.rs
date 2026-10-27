@@ -379,6 +379,8 @@ pub fn force_show() {
         if let Some(window) = w.borrow().as_ref() {
             log::info!("[cef] force_show: 调 window.show() 之前");
             window.show();
+            // 焦点兜底走 X11（CEF 的 Window 没有 set_focus；主窗口不创建后
+            // 必须自己拿焦点，否则 getactivewindow 为空、点不了）。
             log::info!("[cef] force_show: window.show() 已返回");
             // 兜底：CEF 的 show() 在 X11 + 无 GPU 组合下只登记不映射，
             // 直接用 X11 把窗口 map 出来（窗口句柄由 CEF 提供，同一连接由 CEF 持有）
@@ -400,6 +402,13 @@ pub fn force_show() {
                             res_class: class.as_mut_ptr() as *mut std::os::raw::c_char,
                         };
                         x11::xlib::XSetClassHint(dpy, win, &mut hint);
+                        // X11 层兜底：直接给输入焦点（CEF 的 set_focus 不一定同步到 X）
+                        x11::xlib::XSetInputFocus(
+                            dpy,
+                            win,
+                            x11::xlib::RevertToParent,
+                            x11::xlib::CurrentTime,
+                        );
 
                         // 去掉系统标题栏（2026-10-26）：Chrome 的窗口按钮画在标签栏里，
                         // 没有独立标题栏。_MOTIF_WM_HINTS = { flags=2(装饰), decorations=0 }
