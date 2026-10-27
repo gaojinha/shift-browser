@@ -323,7 +323,12 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     // ===== 系统托盘（关闭 = 缩托盘）=====
     // 见 tray.rs。ksni 菜单闭包跑在 D-Bus 线程，只往 mpsc 投动作，
     // 由 glib 定时器在 GTK 主线程排空执行（绝不跨线程碰 GTK）。
-    tray_setup::setup_tray(app);
+    // CEF 模式不建托盘：托盘菜单是旧主界面的入口，主窗口都停了，留着只会
+    // 在系统托盘里挂一个点不开的图标（2026-10-27 高哥问「原来的图标还在」）。
+    let cef_only = cfg!(feature = "cef-engine") && std::env::var("SHIFT_WEBKIT_UI").is_err();
+    if !cef_only {
+        tray_setup::setup_tray(app);
+    }
 
     // 外部 URL 打开（默认浏览器入口）：命令行带 http/https 参数时（desktop 文件
     // Exec=shift-browser %U），等前端建好初始标签后再开新标签，避免与初始标签竞争。

@@ -46,6 +46,7 @@ fn toolbar_height() -> i32 {
         + SITE_EXTRA.load(Ordering::Relaxed)
         + SETTINGS_EXTRA.load(Ordering::Relaxed)
         + BM_MANAGE_EXTRA_V.load(Ordering::Relaxed)
+        + CERT_EXTRA.load(Ordering::Relaxed)
 }
 
 /// 8 个根类面板的注册表（F-CEF-21）：根 class 与撑高原子的唯一对应。
@@ -64,10 +65,11 @@ pub(crate) enum Panel {
     Settings,
     BmManage,
     Find,
+    Cert,
 }
 
 impl Panel {
-    pub(crate) const ALL: [Panel; 8] = [
+    pub(crate) const ALL: [Panel; 9] = [
         Panel::Pw,
         Panel::Dl,
         Panel::Menu,
@@ -76,6 +78,7 @@ impl Panel {
         Panel::Settings,
         Panel::BmManage,
         Panel::Find,
+        Panel::Cert,
     ];
 
     /// 对应 `html.<class>` 根类名（须与 `toolbar::PANEL_CLASSES` 同序同值，有单测钉住）
@@ -89,6 +92,7 @@ impl Panel {
             Panel::Settings => "settings-open",
             Panel::BmManage => "bmmanage-open",
             Panel::Find => "find-open",
+            Panel::Cert => "cert-open",
         }
     }
 
@@ -102,6 +106,7 @@ impl Panel {
             Panel::Settings => SETTINGS_PANEL_EXTRA,
             Panel::BmManage => BM_MANAGE_PANEL_EXTRA,
             Panel::Find => FIND_BAR_EXTRA,
+            Panel::Cert => CERT_PANEL_EXTRA,
         }
     }
 
@@ -115,6 +120,7 @@ impl Panel {
             Panel::Settings => &SETTINGS_EXTRA,
             Panel::BmManage => &BM_MANAGE_EXTRA_V,
             Panel::Find => &FIND_EXTRA,
+            Panel::Cert => &CERT_EXTRA,
         }
     }
 }
@@ -204,6 +210,16 @@ static BM_MANAGE_EXTRA_V: AtomicI32 = AtomicI32::new(0);
 /// 书签管理面板开合：与其它面板互斥
 pub fn set_bm_manage_panel(open: bool) {
     set_panel_extra(Panel::BmManage, open);
+    apply_toolbar_height();
+}
+
+/// 证书面板（F-CEF-21）展开时工具栏视图额外加高的像素
+const CERT_PANEL_EXTRA: i32 = 360;
+static CERT_EXTRA: AtomicI32 = AtomicI32::new(0);
+
+/// 证书面板开合：与其它面板互斥
+pub fn set_cert_panel(open: bool) {
+    set_panel_extra(Panel::Cert, open);
     apply_toolbar_height();
 }
 
@@ -1168,6 +1184,15 @@ fn send_site_info() {
     ));
 }
 
+/// 把证书列表推给工具栏面板（F-CEF-21）。
+pub(crate) fn push_certs() {
+    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    let json = super::certificates_ui::certificates_json(app);
+    run_toolbar_js(&format!(
+        "window.__shiftCerts && window.__shiftCerts({json})"
+    ));
+}
+
 /// 历史面板数据（F-CEF-19）：空查询取最近 100 条，否则搜索 50 条。
 fn send_history(query: &str) {
     let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
@@ -1757,7 +1782,7 @@ pub fn refresh_bookmarks_ui() {
 }
 
 /// 在工具栏页面里执行一段 JS（地址栏/加载态等 UI 更新统一走这里）
-fn run_toolbar_js(code: &str) {
+pub(crate) fn run_toolbar_js(code: &str) {
     BROWSERS.with(|m| {
         if let Some(b) = m.borrow().get(TOOLBAR_ID) {
             if let Some(frame) = b.main_frame() {
@@ -2029,6 +2054,10 @@ fn handle_action(action: &str) {
 
     // 密码面板动作（F-CEF-12）
     if super::passwords_ui::handle(cmd, arg) {
+        return;
+    }
+    // 证书面板动作（F-CEF-21）
+    if super::certificates_ui::handle(cmd, arg) {
         return;
     }
 
@@ -2374,6 +2403,7 @@ mod tests {
             (Panel::Settings, "settings-open", 320),
             (Panel::BmManage, "bmmanage-open", 380),
             (Panel::Find, "find-open", 44),
+            (Panel::Cert, "cert-open", 360),
         ];
         assert_eq!(Panel::ALL.len(), want.len());
         for (p, c, px) in want {
@@ -2382,7 +2412,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_any_panel_zeroes_all_other_extras_56_pairs() {
+    fn opening_any_panel_zeroes_all_other_extras_72_pairs() {
         use super::{set_panel_extra, toolbar_height, Panel, BM_EXTRA, TOOLBAR_H};
         use std::sync::atomic::Ordering;
         let base = TOOLBAR_H.load(Ordering::Relaxed);
@@ -2406,7 +2436,7 @@ mod tests {
                 pairs += 1;
             }
         }
-        assert_eq!(pairs, 56);
+        assert_eq!(pairs, 72);
     }
 
     // ---- normalize_url：地址栏补全规则（P0 实测逻辑，防改坏）----

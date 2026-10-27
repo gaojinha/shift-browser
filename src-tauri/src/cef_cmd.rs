@@ -124,8 +124,9 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
     let _ = EVENT_TX.set(tx);
     *EVENT_RX.lock().unwrap_or_else(|e| e.into_inner()) = Some(rx);
 
-    // 4) 消息泵：挂到 GTK 主循环，10ms 一次
-    gtk::glib::timeout_add_local(std::time::Duration::from_millis(10), || {
+    // 4) 消息泵：固定 50ms（2026-10-27 实测 10ms 也 100% CPU，根因是 CEF 的 GLib
+    // X11 source 忙轮询，单独立卡优化；这里先保证窗口/输入可用）。
+    gtk::glib::timeout_add_local(std::time::Duration::from_millis(50), || {
         cef_app::pump();
         gtk::glib::ControlFlow::Continue
     });
@@ -400,6 +401,7 @@ fn open_shell_on_main(app: &AppHandle, url: Option<&str>) -> Result<(), String> 
     let cache = resolve_cef_cache_dir(app)?;
     let bookmarks_json = cef_bookmarks_json(app);
     crate::engine::cef::passwords_ui::init(app);
+    crate::engine::cef::certificates_ui::init(app);
     let passwords_json = crate::engine::cef::passwords_ui::passwords_json(app);
     let downloads_json = cef_downloads_json(app);
     let toolbar_url = cef_toolbar::ensure_toolbar_html(

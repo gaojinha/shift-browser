@@ -355,6 +355,34 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     height: 24px; background: #202124; border: 1px solid #3c4043; border-radius: 4px;
     color: #e8eaed; font-size: 12px; max-width: 180px;
   }
+  /* 证书面板（F-CEF-21） */
+  html.cert-open, html.cert-open body { height: 100vh; }
+  #certpanel {
+    display: none; position: absolute; left: 0; right: 0; top: 88px; bottom: 0;
+    background: #292a2d; border-top: 1px solid #3c4043; padding: 8px 12px;
+    flex-direction: column; gap: 6px; z-index: 10; font-size: 12px;
+  }
+  html.cert-open #certpanel { display: flex; }
+  html:not(.bookmarks-hidden) #certpanel { top: 122px; }
+  .cert-head { display: flex; align-items: center; gap: 8px; }
+  #certsearch {
+    flex: 1; height: 28px; border: 1px solid #3c4043; border-radius: 14px; outline: 0;
+    background: #202124; color: #e8eaed; padding: 0 12px; font-size: 12px; user-select: text;
+  }
+  #certlist { flex: 1; overflow-y: auto; }
+  .cert-row {
+    display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 6px;
+    border-radius: 6px;
+  }
+  .cert-row:hover { background: #3c4043; }
+  .cert-row .c-host { flex: 0 0 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cert-row .c-subject { flex: 1; color: #9aa0a6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cert-row .c-days { flex: 0 0 90px; color: #81c995; }
+  .cert-row .c-days.warn { color: #fdd663; }
+  .cert-row .c-days.danger { color: #f28b82; }
+  .cert-row .c-op { flex: 0 0 auto; color: #f28b82; padding: 0 8px; height: 22px; line-height: 22px; border-radius: 11px; }
+  .cert-row .c-op:hover { background: #4a4d51; }
+  .cert-empty { color: #9aa0a6; padding: 12px 6px; }
   /* 设置面板（F-CEF-19） */
   html.settings-open, html.settings-open body { height: 100vh; }
   #settingspanel {
@@ -574,6 +602,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <div class="menu-item disabled">打印<span class="menu-key">待补</span></div>
     <div class="menu-item" data-act="findopen">查找<span class="menu-key">Ctrl+F</span></div>
     <div class="menu-sep"></div>
+    <div class="menu-item" data-panel="cert">证书<span class="menu-key"></span></div>
     <div class="menu-item" data-panel="settings">设置<span class="menu-key"></span></div>
     <div class="menu-item disabled">关于 Shift<span class="menu-key">待补</span></div>
     <div class="menu-sep"></div>
@@ -603,6 +632,13 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       <div id="bmmtree"></div>
       <div id="bmmlist"></div>
     </div>
+  </div>
+  <div id="certpanel">
+    <div class="cert-head">
+      <input id="certsearch" type="text" spellcheck="false" placeholder="搜索 host / 主体 / 签发者">
+      <span id="certclose" class="bmm-btn">关闭</span>
+    </div>
+    <div id="certlist"></div>
   </div>
   <div id="settingspanel">
     <label class="set-row">搜索引擎
@@ -1601,6 +1637,70 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     }
   });
 
+  // ---- 证书面板（F-CEF-21）----
+  let certList = [];
+  function renderCerts(list) {
+    certList = Array.isArray(list) ? list : [];
+    const box = document.getElementById('certlist');
+    if (!box) return;
+    const q = (document.getElementById('certsearch')?.value || '').trim().toLowerCase();
+    const rows = certList.filter((c) => !q ||
+      (c.host || '').toLowerCase().includes(q) ||
+      (c.subject || '').toLowerCase().includes(q) ||
+      (c.issuer || '').toLowerCase().includes(q));
+    box.innerHTML = '';
+    if (rows.length === 0) {
+      const e = document.createElement('div');
+      e.className = 'cert-empty';
+      e.textContent = certList.length === 0 ? '还没有证书记录' : '没有匹配项';
+      box.appendChild(e);
+      return;
+    }
+    rows.forEach((c) => {
+      const row = document.createElement('div');
+      row.className = 'cert-row';
+      const host = document.createElement('span');
+      host.className = 'c-host';
+      host.textContent = c.host + ':' + c.port;
+      const subj = document.createElement('span');
+      subj.className = 'c-subject';
+      subj.textContent = c.subject || c.issuer || '';
+      const days = document.createElement('span');
+      days.className = 'c-days';
+      const d = c.days_left;
+      days.textContent = d == null ? '—' : (d + ' 天');
+      if (d != null && d <= 7) days.classList.add('danger');
+      else if (d != null && d <= 30) days.classList.add('warn');
+      const del = document.createElement('span');
+      del.className = 'c-op';
+      del.textContent = '删除';
+      del.dataset.host = c.host;
+      del.dataset.port = String(c.port);
+      del.addEventListener('click', () => {
+        if (del.dataset.armed === '1') {
+          act('certdel|' + c.host + ':' + c.port);
+          certList = certList.filter((x) => !(x.host === c.host && x.port === c.port));
+          renderCerts(certList);
+        } else {
+          del.dataset.armed = '1';
+          del.textContent = '确认';
+          setTimeout(() => { del.dataset.armed = ''; del.textContent = '删除'; }, 3000);
+        }
+      });
+      row.append(host, subj, days, del);
+      box.appendChild(row);
+    });
+  }
+  window.__shiftCerts = renderCerts;
+  function setCertPanel(open) {
+    document.documentElement.classList.toggle('cert-open', open);
+    if (open) removePanelClasses('cert-open');
+    act('certpanel|' + (open ? '1' : '0'));
+    if (open) { document.getElementById('certsearch').value = ''; renderCerts([]); }
+  }
+  document.getElementById('certclose')?.addEventListener('click', () => setCertPanel(false));
+  document.getElementById('certsearch')?.addEventListener('input', () => renderCerts(certList));
+
   // ---- 设置面板（F-CEF-19）----
   const settingsPanel = document.getElementById('settingspanel');
   function setSettingsPanel(open) {
@@ -1675,6 +1775,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     setMenuPanel(false);
     if (item.dataset.panel === 'bmmanage') { setBmManage(true); return; }
     if (item.dataset.panel === 'hist') { setHistPanel(true); return; }
+    if (item.dataset.panel === 'cert') { setCertPanel(true); return; }
     if (item.dataset.panel === 'settings') { setSettingsPanel(true); return; }
     if (item.dataset.panel === 'dl') { setDlPanel(true); return; }
     if (item.dataset.panel === 'pw') { setPwPanel(true); return; }
@@ -1758,7 +1859,7 @@ mod tests {
 
     #[test]
     fn panel_registry_has_eight_unique_classes_and_matches_css() {
-        assert_eq!(Panel::ALL.len(), 8);
+        assert_eq!(Panel::ALL.len(), 9);
         let json = panel_classes_json();
         for p in Panel::ALL {
             assert_eq!(json.matches(&format!("\"{}\"", p.class())).count(), 1, "{:?}", p);
@@ -1769,7 +1870,7 @@ mod tests {
 
     #[test]
     fn every_js_setter_uses_registry_not_hand_lists() {
-        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 8);
+        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 9);
         for line in TOOLBAR_HTML.lines().filter(|l| l.contains("classList.remove(")) {
             assert!(line.matches("-open").count() <= 1, "残留手写互斥清单: {line}");
         }

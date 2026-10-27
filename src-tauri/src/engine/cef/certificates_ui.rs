@@ -78,20 +78,22 @@ fn parse_host_port(arg: &str) -> Option<(String, i64)> {
 pub fn handle(cmd: &str, arg: &str) -> bool {
     match cmd {
         "certpanel" => {
-            // TODO(F-CEF-21 接线)：shell.rs 加证书面板 setter（同 set_pw_panel 模式）后接通：
-            // super::shell::set_cert_panel(arg == "1");
-            log::info!("[cef] certpanel {arg}（面板高度管理待 shell.rs 接线）");
+            super::shell::set_cert_panel(arg == "1");
+            if arg == "1" {
+                super::shell::push_certs();
+            }
             true
         }
         "certrefresh" => {
-            // TODO(F-CEF-21 接线)：经 shell::run_toolbar_js 执行 window.__shiftCertsRender()
-            // 重渲染工具栏证书列表（run_toolbar_js 为 shell.rs 私有函数，接线时处理）。
-            log::info!("[cef] certrefresh（列表重渲染待 shell.rs 接线）");
+            super::shell::push_certs();
             true
         }
         "certdel" => {
             match parse_host_port(arg) {
-                Some((host, port)) => delete_record(&host, port),
+                Some((host, port)) => {
+                delete_record(&host, port);
+                super::shell::push_certs();
+            }
                 None => log::warn!("[cef] certdel 参数无效: {arg}（应为 host:port）"),
             }
             true

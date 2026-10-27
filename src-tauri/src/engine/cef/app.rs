@@ -111,6 +111,7 @@ pub fn initialize(resources_dir: &str, locales_dir: &str, cache_path: &str) -> R
 /// 消息泵：由调用方在 GTK 主循环里定时调用（建议 10ms 一次）。
 ///
 /// 必须从 **UI 线程** 调用。
+#[allow(dead_code)]
 pub fn pump() {
     if !CONTEXT_READY.load(Ordering::SeqCst) {
         return;
@@ -212,6 +213,18 @@ wrap_browser_process_handler! {
                     log::error!("[cef] 上下文就绪回调 panic（已隔离）");
                 }
             }
+        }
+
+        /// CEF 外部消息泵：CEF 告诉主循环「delay_ms 后需要泵一次」。
+        ///
+        /// 不实现它时 CEF 会在 GLib 里注册 X11 source 忙轮询（2026-10-27 实测
+        /// 主线程 98% CPU；perf 栈 gtk_main_iteration → xcb recvmsg →
+        /// libcef HasPendingResponses）。实现后改由 CEF 按需调度。
+        fn on_schedule_message_pump_work(&self, delay_ms: i64) {
+            let ms = delay_ms.clamp(16, 1000) as u64; // 最小 16ms，避免 CEF 请求 0ms 造成忙循环
+            gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(ms), || {
+                cef::do_message_loop_work();
+            });
         }
     }
 }
