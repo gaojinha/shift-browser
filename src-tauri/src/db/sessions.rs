@@ -131,13 +131,13 @@ pub async fn load_last_session(
     Ok(session)
 }
 
-/// 列出所有会话
-#[tauri::command]
-pub async fn list_sessions(db: tauri::State<'_, Db>) -> DbResult<Vec<Session>> {
+/// 列出所有会话（最近 50 条，id 倒序 ≈ 时间倒序）。
+/// F-CEF-26：Tauri 命令与 CEF 面板共用的唯一 SQL 实现，两侧不许复制 SQL。
+pub async fn list_sessions_inner(pool: &sqlx::SqlitePool) -> DbResult<Vec<Session>> {
     let rows = sqlx::query_as::<_, (i64, String, Option<i64>, String, String)>(
         "SELECT id, name, workspace_id, data, created_at FROM sessions ORDER BY id DESC LIMIT 50",
     )
-    .fetch_all(&db.pool)
+    .fetch_all(pool)
     .await?;
 
     Ok(rows
@@ -150,6 +150,12 @@ pub async fn list_sessions(db: tauri::State<'_, Db>) -> DbResult<Vec<Session>> {
             created_at,
         })
         .collect())
+}
+
+/// 列出所有会话
+#[tauri::command]
+pub async fn list_sessions(db: tauri::State<'_, Db>) -> DbResult<Vec<Session>> {
+    list_sessions_inner(&db.pool).await
 }
 
 /// 删除会话
@@ -295,5 +301,65 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(total2.0, 54);
+    }
+
+    // ---- F-CEF-26：list_sessions_inner（Tauri 命令与 CEF 面板共用）----
+
+    #[tokio::test]
+    async fn list_sessions_empty_db_returns_empty() {
+        let (_dir, pool) = temp_pool().await;
+        assert!(
+            list_sessions_inner(&pool).await.unwrap().is_empty(),
+            "空库应返回空数组（CEF 面板空态依赖）"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_sessions_orders_by_id_desc() {
+        let (_dir, pool) = temp_pool().await;
+        let id1 = save_session_inner(&pool, "a", None, &[]).await.unwrap();
+        let id2 = save_session_inner(&pool, "b", None, &[]).await.unwrap();
+        let id3 = save_session_inner(&pool, "c", None, &[]).await.unwrap();
+        let got = list_sessions_inner(&pool).await.unwrap();
+        assert_eq!(got.len(), 3);
+        // id 倒序 = 最近创建在前
+        assert_eq!(got[0].id, id3);
+        assert_eq!(got[1].id, id2);
+        assert_eq!(got[2].id, id1);
+    }
+
+    #[tokio::test]
+    async fn list_sessions_field_roundtrip() {
+        let (_dir, pool) = temp_pool().await;
+        let tabs = vec![
+            super::SessionTab {
+                url: "https://example.com/x".to_string(),
+                title: Some("标题".to_string()),
+                group_id: Some(7),
+            },
+            super::SessionTab {
+                url: "https://e.com/y".to_string(),
+                title: None,
+                group_id: None,
+            },
+        ];
+        let id = save_session_inner(&pool, "会话名", Some(3), &tabs)
+            .await
+            .unwrap();
+        let got = list_sessions_inner(&pool).await.unwrap();
+        assert_eq!(got.len(), 1);
+        let s = &got[0];
+        assert_eq!(s.id, id);
+        assert_eq!(s.name, "会话名");
+        assert_eq!(s.workspace_id, Some(3));
+        assert!(!s.created_at.is_empty());
+        // data 是可解析的标签 JSON 快照，字段原样回读（CEF 侧只取 len 当标签数）
+        let parsed: Vec<super::SessionTab> = serde_json::from_str(&s.data).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].url, "https://example.com/x");
+        assert_eq!(parsed[0].title.as_deref(), Some("标题"));
+        assert_eq!(parsed[0].group_id, Some(7));
+        assert_eq!(parsed[1].url, "https://e.com/y");
+        assert_eq!(parsed[1].group_id, None);
     }
 }
