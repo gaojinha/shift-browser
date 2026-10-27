@@ -247,7 +247,7 @@ pub fn run() {
             default_browser::default_browser_status,
             default_browser::set_default_browser,
             // 用户脚本（阶段3.2 平台化：Tampermonkey 风格）
-            db::userscripts::list_userscripts,
+            db::userscripts::list_userscripts_cmd,
             db::userscripts::refresh_userscripts_cache,
             db::userscripts::add_userscript,
             db::userscripts::update_userscript,

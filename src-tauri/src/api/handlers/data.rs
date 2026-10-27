@@ -91,7 +91,7 @@ pub(super) async fn list_spaces(app: &AppHandle, _req: &Value) -> Value {
 
 pub(super) async fn list_userscripts(app: &AppHandle, _req: &Value) -> Value {
     let db = app.state::<crate::db::Db>();
-    match crate::db::userscripts::list_userscripts(db).await {
+    match crate::db::userscripts::list_userscripts(&db.pool).await {
         Ok(v) => json!({"ok": true, "data": v}),
         Err(e) => AppError::db(e.to_string()).error_json(),
     }

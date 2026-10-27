@@ -18,3 +18,4 @@ pub mod newtab;
 pub mod passwords_ui;
 pub mod shell;
 pub mod toolbar;
+pub mod userscripts_ui;

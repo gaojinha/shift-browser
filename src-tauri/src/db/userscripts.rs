@@ -17,13 +17,13 @@ pub struct Userscript {
     pub created_at: String,
 }
 
-/// 列出全部用户脚本
-#[tauri::command]
-pub async fn list_userscripts(db: tauri::State<'_, Db>) -> DbResult<Vec<Userscript>> {
+/// 列出全部用户脚本（按 id 升序）。
+/// F-CEF-22：Tauri 命令与 CEF 面板共用的唯一 SQL 实现，两侧不许复制 SQL。
+pub async fn list_userscripts(pool: &sqlx::SqlitePool) -> DbResult<Vec<Userscript>> {
     let rows = sqlx::query_as::<_, (i64, String, String, String, i64, String)>(
         "SELECT id, name, matches, code, enabled, created_at FROM userscripts ORDER BY id",
     )
-    .fetch_all(&db.pool)
+    .fetch_all(pool)
     .await?;
     Ok(rows
         .into_iter()
@@ -38,6 +38,38 @@ pub async fn list_userscripts(db: tauri::State<'_, Db>) -> DbResult<Vec<Userscri
             },
         )
         .collect())
+}
+
+/// Tauri 命令包装（IPC 名固定 `list_userscripts`，WebKit 侧 `invoke('list_userscripts')` 不变）
+#[tauri::command(name = "list_userscripts")]
+pub async fn list_userscripts_cmd(db: tauri::State<'_, Db>) -> DbResult<Vec<Userscript>> {
+    list_userscripts(&db.pool).await
+}
+
+/// 翻转单条用户脚本的启用状态（F-CEF-22 CEF 面板 `ustoggle` 用）。
+/// 返回新状态；`None` = 无此 id（不报错）。单条 SQL 原子翻转，无读改写竞态。
+pub async fn toggle_userscript(pool: &sqlx::SqlitePool, id: i64) -> DbResult<Option<bool>> {
+    let r = sqlx::query("UPDATE userscripts SET enabled = 1 - enabled WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    if r.rows_affected() == 0 {
+        return Ok(None);
+    }
+    let v: i64 = sqlx::query_scalar("SELECT enabled FROM userscripts WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await?;
+    Ok(Some(v != 0))
+}
+
+/// 删除单条用户脚本（F-CEF-22：Tauri 命令与 CEF 面板共用的唯一 SQL 实现）
+pub async fn delete_userscript_inner(pool: &sqlx::SqlitePool, id: i64) -> DbResult<()> {
+    sqlx::query("DELETE FROM userscripts WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 /// 新增用户脚本（返回 id）
@@ -113,10 +145,7 @@ pub async fn refresh_userscripts_cache(db: tauri::State<'_, Db>) -> DbResult<()>
 /// 删除用户脚本
 #[tauri::command]
 pub async fn delete_userscript(db: tauri::State<'_, Db>, id: i64) -> DbResult<()> {
-    sqlx::query("DELETE FROM userscripts WHERE id = ?")
-        .bind(id)
-        .execute(&db.pool)
-        .await?;
+    delete_userscript_inner(&db.pool, id).await?;
     refresh_cache(&db.pool).await;
     Ok(())
 }
@@ -243,5 +272,77 @@ mod tests {
             .unwrap();
         refresh_cache(&pool).await;
         assert!(cached_scripts().is_empty());
+    }
+
+    // ---- F-CEF-22：list_userscripts / toggle_userscript / delete_userscript_inner（CEF 面板共用）----
+    // 注意：以下用例只走纯 DB 共用函数，不碰全局 CACHE（与 refresh_cache 用例并行无冲突）
+
+    #[tokio::test]
+    async fn list_userscripts_empty_db_returns_empty() {
+        assert!(
+            list_userscripts(&pool().await).await.unwrap().is_empty(),
+            "空库应返回空数组（CEF 面板空态依赖）"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_userscripts_orders_by_id_and_reads_all_fields() {
+        let pool = pool().await;
+        for (name, matches, code, enabled) in [
+            ("脚本甲", "*://a.com/*", "CODE_A", 1i64),
+            ("脚本乙", "*://b.com/*\n*://c.com/*", "CODE_B", 0i64),
+            ("脚本丙", "*://d.com/*", "CODE_C", 1i64),
+        ] {
+            sqlx::query("INSERT INTO userscripts (name, matches, code, enabled) VALUES (?, ?, ?, ?)")
+                .bind(name)
+                .bind(matches)
+                .bind(code)
+                .bind(enabled)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        let got = list_userscripts(&pool).await.unwrap();
+        assert_eq!(got.len(), 3);
+        // id 升序 = 插入序
+        assert_eq!(
+            got.iter().map(|u| u.id).collect::<Vec<_>>(),
+            (1..=3).collect::<Vec<_>>()
+        );
+        // 字段全回读（含 enabled i64→bool 映射）
+        assert_eq!(&got[0].name, "脚本甲");
+        assert_eq!(got[0].matches, "*://a.com/*");
+        assert_eq!(got[0].code, "CODE_A");
+        assert_eq!(got[0].enabled, true);
+        assert!(!got[0].created_at.is_empty());
+        assert_eq!(got[1].name, "脚本乙");
+        assert_eq!(got[1].matches, "*://b.com/*\n*://c.com/*");
+        assert_eq!(got[1].enabled, false);
+        assert_eq!(got[2].code, "CODE_C");
+        assert_eq!(got[2].enabled, true);
+    }
+
+    #[tokio::test]
+    async fn toggle_userscript_flips_and_missing_id_is_none() {
+        let pool = pool().await;
+        insert(&pool, "*://a.com/*", "A", 1).await;
+        assert_eq!(toggle_userscript(&pool, 1).await.unwrap(), Some(false));
+        assert_eq!(toggle_userscript(&pool, 1).await.unwrap(), Some(true));
+        // 无此 id：不报错，返回 None
+        assert_eq!(toggle_userscript(&pool, 999).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn delete_userscript_inner_removes_row() {
+        let pool = pool().await;
+        insert(&pool, "*://a.com/*", "A", 1).await;
+        insert(&pool, "*://b.com/*", "B", 1).await;
+        delete_userscript_inner(&pool, 1).await.unwrap();
+        let got = list_userscripts(&pool).await.unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].id, 2);
+        // 无此 id：no-op 不报错
+        delete_userscript_inner(&pool, 999).await.unwrap();
+        assert_eq!(list_userscripts(&pool).await.unwrap().len(), 1);
     }
 }

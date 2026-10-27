@@ -108,8 +108,8 @@ mod tests {
         let mut defined: std::collections::HashSet<String> = std::collections::HashSet::new();
         for s in sources {
             let mut idx = 0;
-            while let Some(pos) = s[idx..].find("#[tauri::command]") {
-                let at = idx + pos + "#[tauri::command]".len();
+            while let Some(pos) = s[idx..].find("#[tauri::command") {
+                let at = idx + pos + "#[tauri::command".len();
                 // 找后续的 fn 名
                 if let Some(fpos) = s[at..].find("fn ") {
                     let after = &s[at + fpos + 3..];
