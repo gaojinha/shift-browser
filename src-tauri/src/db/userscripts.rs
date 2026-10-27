@@ -48,6 +48,8 @@ pub async fn list_userscripts_cmd(db: tauri::State<'_, Db>) -> DbResult<Vec<User
 
 /// 翻转单条用户脚本的启用状态（F-CEF-22 CEF 面板 `ustoggle` 用）。
 /// 返回新状态；`None` = 无此 id（不报错）。单条 SQL 原子翻转，无读改写竞态。
+/// 翻转启用状态（CEF 面板用；默认构建无调用方，feature 条件下允许 dead_code）。
+#[cfg_attr(not(feature = "cef-engine"), allow(dead_code))]
 pub async fn toggle_userscript(pool: &sqlx::SqlitePool, id: i64) -> DbResult<Option<bool>> {
     let r = sqlx::query("UPDATE userscripts SET enabled = 1 - enabled WHERE id = ?")
         .bind(id)
@@ -313,13 +315,13 @@ mod tests {
         assert_eq!(&got[0].name, "脚本甲");
         assert_eq!(got[0].matches, "*://a.com/*");
         assert_eq!(got[0].code, "CODE_A");
-        assert_eq!(got[0].enabled, true);
+        assert!(got[0].enabled);
         assert!(!got[0].created_at.is_empty());
         assert_eq!(got[1].name, "脚本乙");
         assert_eq!(got[1].matches, "*://b.com/*\n*://c.com/*");
-        assert_eq!(got[1].enabled, false);
+        assert!(!got[1].enabled);
         assert_eq!(got[2].code, "CODE_C");
-        assert_eq!(got[2].enabled, true);
+        assert!(got[2].enabled);
     }
 
     #[tokio::test]

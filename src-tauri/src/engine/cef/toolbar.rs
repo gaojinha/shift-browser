@@ -19,6 +19,7 @@ pub fn ensure_toolbar_html(
     bookmarks_json: &str,
     passwords_json: &str,
     downloads_json: &str,
+    userscripts_json: &str,
 ) -> Result<String, String> {
     let dir = cache_dir.join("shell");
     std::fs::create_dir_all(&dir).map_err(|e| format!("建工具栏目录失败: {e}"))?;
@@ -30,7 +31,8 @@ pub fn ensure_toolbar_html(
         .replace("__SHIFT_PANEL_CLASSES__", &panel_classes_json())
         .replace("__SHIFT_BOOKMARKS_JSON__", bookmarks_json)
         .replace("__SHIFT_PASSWORDS_JSON__", &passwords_json.replace("</", "<\\/"))
-        .replace("__SHIFT_DOWNLOADS_JSON__", &downloads_json.replace("</", "<\\/"));
+        .replace("__SHIFT_DOWNLOADS_JSON__", &downloads_json.replace("</", "<\\/"))
+        .replace("__SHIFT_USERSCRIPTS_JSON__", &userscripts_json.replace("</", "<\\/"));
     let path = dir.join("toolbar.html");
     std::fs::write(&path, html).map_err(|e| format!("写工具栏页失败: {e}"))?;
 
@@ -383,6 +385,32 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   .cert-row .c-op { flex: 0 0 auto; color: #f28b82; padding: 0 8px; height: 22px; line-height: 22px; border-radius: 11px; }
   .cert-row .c-op:hover { background: #4a4d51; }
   .cert-empty { color: #9aa0a6; padding: 12px 6px; }
+  /* 用户脚本面板（F-CEF-23） */
+  html.us-open, html.us-open body { height: 100vh; }
+  #uspanel {
+    display: none; position: absolute; left: 0; right: 0; top: 88px; bottom: 0;
+    background: #292a2d; border-top: 1px solid #3c4043; padding: 8px 12px;
+    flex-direction: column; gap: 6px; z-index: 10; font-size: 12px;
+  }
+  html.us-open #uspanel { display: flex; }
+  html:not(.bookmarks-hidden) #uspanel { top: 122px; }
+  .us-head { display: flex; align-items: center; gap: 8px; }
+  #ussearch {
+    flex: 1; height: 28px; border: 1px solid #3c4043; border-radius: 14px; outline: 0;
+    background: #202124; color: #e8eaed; padding: 0 12px; font-size: 12px; user-select: text;
+  }
+  #uslist { flex: 1; overflow-y: auto; }
+  .us-row {
+    display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px;
+    border-radius: 6px;
+  }
+  .us-row:hover { background: #3c4043; }
+  .us-row .us-name { flex: 0 0 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .us-row .us-patterns { flex: 1; color: #9aa0a6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .us-row .us-enabled { flex: 0 0 auto; display: flex; align-items: center; }
+  .us-row .us-del { flex: 0 0 auto; color: #f28b82; padding: 0 8px; height: 22px; line-height: 22px; border-radius: 11px; }
+  .us-row .us-del:hover { background: #4a4d51; }
+  .us-empty { color: #9aa0a6; padding: 12px 6px; }
   /* 设置面板（F-CEF-19） */
   html.settings-open, html.settings-open body { height: 100vh; }
   #settingspanel {
@@ -603,6 +631,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <div class="menu-item" data-act="findopen">查找<span class="menu-key">Ctrl+F</span></div>
     <div class="menu-sep"></div>
     <div class="menu-item" data-panel="cert">证书<span class="menu-key"></span></div>
+    <div class="menu-item" data-panel="us">用户脚本<span class="menu-key"></span></div>
     <div class="menu-item" data-panel="settings">设置<span class="menu-key"></span></div>
     <div class="menu-item disabled">关于 Shift<span class="menu-key">待补</span></div>
     <div class="menu-sep"></div>
@@ -640,6 +669,13 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     </div>
     <div id="certlist"></div>
   </div>
+  <div id="uspanel">
+    <div class="us-head">
+      <input id="ussearch" type="text" spellcheck="false" placeholder="搜索脚本名称 / 匹配模式">
+      <span id="usclose" class="bmm-btn">关闭</span>
+    </div>
+    <div id="uslist"></div>
+  </div>
   <div id="settingspanel">
     <label class="set-row">搜索引擎
       <select id="set-engine"><option value="bing">必应</option><option value="baidu">百度</option><option value="google">谷歌</option></select>
@@ -654,6 +690,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   <script id="bm-data" type="application/json">__SHIFT_BOOKMARKS_JSON__</script>
   <script id="pw-data" type="application/json">__SHIFT_PASSWORDS_JSON__</script>
   <script id="dl-data" type="application/json">__SHIFT_DOWNLOADS_JSON__</script>
+  <script id="us-data" type="application/json">__SHIFT_USERSCRIPTS_JSON__</script>
 
 
 <script>
@@ -1701,6 +1738,68 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   document.getElementById('certclose')?.addEventListener('click', () => setCertPanel(false));
   document.getElementById('certsearch')?.addEventListener('input', () => renderCerts(certList));
 
+  // ---- 用户脚本面板（F-CEF-23）----
+  let usList = [];
+  try { usList = JSON.parse(document.getElementById('us-data')?.textContent || '[]'); } catch (e) { usList = []; }
+  function renderUs(list) {
+    usList = Array.isArray(list) ? list : [];
+    const box = document.getElementById('uslist');
+    if (!box) return;
+    const q = (document.getElementById('ussearch')?.value || '').trim().toLowerCase();
+    const rows = usList.filter((u) => !q ||
+      (u.name || '').toLowerCase().includes(q) ||
+      (u.url_patterns || '').toLowerCase().includes(q));
+    box.innerHTML = '';
+    if (rows.length === 0) {
+      const e = document.createElement('div');
+      e.className = 'us-empty';
+      e.textContent = usList.length === 0 ? '还没有用户脚本' : '没有匹配项';
+      box.appendChild(e);
+      return;
+    }
+    rows.forEach((u) => {
+      const row = document.createElement('div');
+      row.className = 'us-row';
+      const name = document.createElement('span');
+      name.className = 'us-name';
+      name.textContent = u.name;
+      name.title = u.name;
+      const pat = document.createElement('span');
+      pat.className = 'us-patterns';
+      pat.textContent = (u.url_patterns || '').split('\n').filter(Boolean).join('  ');
+      pat.title = u.url_patterns || '';
+      const en = document.createElement('input');
+      en.type = 'checkbox';
+      en.className = 'us-enabled';
+      en.checked = !!u.enabled;
+      en.addEventListener('change', () => act('ustoggle|' + u.id));
+      const del = document.createElement('span');
+      del.className = 'us-del';
+      del.textContent = '删除';
+      del.addEventListener('click', () => {
+        if (del.dataset.armed === '1') {
+          del.remove();
+          act('usdel|' + u.id);
+        } else {
+          del.dataset.armed = '1';
+          del.textContent = '确认';
+          setTimeout(() => { del.dataset.armed = ''; del.textContent = '删除'; }, 3000);
+        }
+      });
+      row.append(name, pat, en, del);
+      box.appendChild(row);
+    });
+  }
+  window.__shiftUserscripts = renderUs;
+  function setUsPanel(open) {
+    document.documentElement.classList.toggle('us-open', open);
+    if (open) removePanelClasses('us-open');
+    act('uspanel|' + (open ? '1' : '0'));
+    if (open) { document.getElementById('ussearch').value = ''; renderUs([]); }
+  }
+  document.getElementById('usclose')?.addEventListener('click', () => setUsPanel(false));
+  document.getElementById('ussearch')?.addEventListener('input', () => renderUs(usList));
+
   // ---- 设置面板（F-CEF-19）----
   const settingsPanel = document.getElementById('settingspanel');
   function setSettingsPanel(open) {
@@ -1776,6 +1875,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (item.dataset.panel === 'bmmanage') { setBmManage(true); return; }
     if (item.dataset.panel === 'hist') { setHistPanel(true); return; }
     if (item.dataset.panel === 'cert') { setCertPanel(true); return; }
+    if (item.dataset.panel === 'us') { setUsPanel(true); return; }
     if (item.dataset.panel === 'settings') { setSettingsPanel(true); return; }
     if (item.dataset.panel === 'dl') { setDlPanel(true); return; }
     if (item.dataset.panel === 'pw') { setPwPanel(true); return; }
@@ -1858,8 +1958,8 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn panel_registry_has_eight_unique_classes_and_matches_css() {
-        assert_eq!(Panel::ALL.len(), 9);
+    fn panel_registry_has_ten_unique_classes_and_matches_css() {
+        assert_eq!(Panel::ALL.len(), 10);
         let json = panel_classes_json();
         for p in Panel::ALL {
             assert_eq!(json.matches(&format!("\"{}\"", p.class())).count(), 1, "{:?}", p);
@@ -1870,7 +1970,7 @@ mod tests {
 
     #[test]
     fn every_js_setter_uses_registry_not_hand_lists() {
-        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 9);
+        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 10);
         for line in TOOLBAR_HTML.lines().filter(|l| l.contains("classList.remove(")) {
             assert!(line.matches("-open").count() <= 1, "残留手写互斥清单: {line}");
         }
@@ -1880,7 +1980,7 @@ mod tests {
     fn injected_html_has_no_placeholder_and_lists_all_classes() {
         let dir = std::env::temp_dir().join(format!("cef-toolbar-pc-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
-        let url = ensure_toolbar_html(&dir, "[]", "[]", "[]").unwrap();
+        let url = ensure_toolbar_html(&dir, "[]", "[]", "[]", "[]").unwrap();
         let body = std::fs::read_to_string(url.strip_prefix("file://").unwrap()).unwrap();
         assert!(!body.contains("__SHIFT_PANEL_CLASSES__"));
         let want = format!("const PANEL_CLASSES = {};", panel_classes_json());
@@ -1897,6 +1997,7 @@ mod tests {
             r#"[{"title":"测试书签","url":"https://a.com"}]"#,
             r#"[{"id":1,"domain":"a.com</script>","username":"u"}]"#,
             r#"[{"id":7,"filename":"a.zip","state":"completed","total":10,"received":10}]"#,
+            "[]",
         )
         .unwrap();
         assert!(out.starts_with("file://"), "须返回 file:// URL，实得 {out}");
@@ -1913,6 +2014,7 @@ mod tests {
         assert!(body.contains("pwpanel"), "工具栏 HTML 必须含密码面板");
         assert!(body.contains("dlpanel"), "工具栏 HTML 必须含下载面板");
         assert!(body.contains("menupanel"), "工具栏 HTML 必须含主菜单");
+        assert!(body.contains("uspanel"), "工具栏 HTML 必须含用户脚本面板（F-CEF-23）");
         assert!(body.contains("findbar"), "工具栏 HTML 必须含页内查找栏（F-CEF-18）");
         assert!(body.contains("zoomval"), "工具栏 HTML 必须含缩放百分比显示（F-CEF-18）");
         assert!(

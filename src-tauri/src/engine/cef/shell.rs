@@ -47,6 +47,7 @@ fn toolbar_height() -> i32 {
         + SETTINGS_EXTRA.load(Ordering::Relaxed)
         + BM_MANAGE_EXTRA_V.load(Ordering::Relaxed)
         + CERT_EXTRA.load(Ordering::Relaxed)
+        + US_EXTRA.load(Ordering::Relaxed)
 }
 
 /// 8 个根类面板的注册表（F-CEF-21）：根 class 与撑高原子的唯一对应。
@@ -66,10 +67,11 @@ pub(crate) enum Panel {
     BmManage,
     Find,
     Cert,
+    Us,
 }
 
 impl Panel {
-    pub(crate) const ALL: [Panel; 9] = [
+    pub(crate) const ALL: [Panel; 10] = [
         Panel::Pw,
         Panel::Dl,
         Panel::Menu,
@@ -79,6 +81,7 @@ impl Panel {
         Panel::BmManage,
         Panel::Find,
         Panel::Cert,
+        Panel::Us,
     ];
 
     /// 对应 `html.<class>` 根类名（须与 `toolbar::PANEL_CLASSES` 同序同值，有单测钉住）
@@ -93,6 +96,7 @@ impl Panel {
             Panel::BmManage => "bmmanage-open",
             Panel::Find => "find-open",
             Panel::Cert => "cert-open",
+            Panel::Us => "us-open",
         }
     }
 
@@ -107,6 +111,7 @@ impl Panel {
             Panel::BmManage => BM_MANAGE_PANEL_EXTRA,
             Panel::Find => FIND_BAR_EXTRA,
             Panel::Cert => CERT_PANEL_EXTRA,
+            Panel::Us => US_PANEL_EXTRA,
         }
     }
 
@@ -121,6 +126,7 @@ impl Panel {
             Panel::BmManage => &BM_MANAGE_EXTRA_V,
             Panel::Find => &FIND_EXTRA,
             Panel::Cert => &CERT_EXTRA,
+            Panel::Us => &US_EXTRA,
         }
     }
 }
@@ -211,6 +217,25 @@ static BM_MANAGE_EXTRA_V: AtomicI32 = AtomicI32::new(0);
 pub fn set_bm_manage_panel(open: bool) {
     set_panel_extra(Panel::BmManage, open);
     apply_toolbar_height();
+}
+
+/// 用户脚本面板（F-CEF-23）展开时工具栏视图额外加高的像素（照 cert 口径 360）
+const US_PANEL_EXTRA: i32 = 360;
+static US_EXTRA: AtomicI32 = AtomicI32::new(0);
+
+/// 用户脚本面板开合：与其它面板互斥
+pub fn set_userscript_panel(open: bool) {
+    set_panel_extra(Panel::Us, open);
+    apply_toolbar_height();
+}
+
+/// 把用户脚本列表推给工具栏面板（F-CEF-23，同 `push_certs` 模式）
+pub(crate) fn push_userscripts() {
+    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    let json = super::userscripts_ui::userscripts_json(app);
+    run_toolbar_js(&format!(
+        "window.__shiftUserscripts && window.__shiftUserscripts({json})"
+    ));
 }
 
 /// 证书面板（F-CEF-21）展开时工具栏视图额外加高的像素
@@ -2060,6 +2085,10 @@ fn handle_action(action: &str) {
     if super::certificates_ui::handle(cmd, arg) {
         return;
     }
+    // 用户脚本面板动作（F-CEF-23）
+    if super::userscripts_ui::handle(cmd, arg) {
+        return;
+    }
 
     // 下载面板动作（F-CEF-15）：面板开合 / 打开目录 / 重新下载 / 删记录
     match cmd {
@@ -2404,6 +2433,7 @@ mod tests {
             (Panel::BmManage, "bmmanage-open", 380),
             (Panel::Find, "find-open", 44),
             (Panel::Cert, "cert-open", 360),
+            (Panel::Us, "us-open", 360),
         ];
         assert_eq!(Panel::ALL.len(), want.len());
         for (p, c, px) in want {
@@ -2412,7 +2442,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_any_panel_zeroes_all_other_extras_72_pairs() {
+    fn opening_any_panel_zeroes_all_other_extras_90_pairs() {
         use super::{set_panel_extra, toolbar_height, Panel, BM_EXTRA, TOOLBAR_H};
         use std::sync::atomic::Ordering;
         let base = TOOLBAR_H.load(Ordering::Relaxed);
@@ -2436,7 +2466,7 @@ mod tests {
                 pairs += 1;
             }
         }
-        assert_eq!(pairs, 72);
+        assert_eq!(pairs, 90);
     }
 
     // ---- normalize_url：地址栏补全规则（P0 实测逻辑，防改坏）----

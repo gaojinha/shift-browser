@@ -402,13 +402,16 @@ fn open_shell_on_main(app: &AppHandle, url: Option<&str>) -> Result<(), String> 
     let bookmarks_json = cef_bookmarks_json(app);
     crate::engine::cef::passwords_ui::init(app);
     crate::engine::cef::certificates_ui::init(app);
+    crate::engine::cef::userscripts_ui::init(app);
     let passwords_json = crate::engine::cef::passwords_ui::passwords_json(app);
     let downloads_json = cef_downloads_json(app);
+    let userscripts_json = crate::engine::cef::userscripts_ui::userscripts_json(app);
     let toolbar_url = cef_toolbar::ensure_toolbar_html(
         &cache,
         &bookmarks_json,
         &passwords_json,
         &downloads_json,
+        &userscripts_json,
     )?;
     // 初始页：显式 URL 优先；没给就用 CEF 内置启动页（本地文件，不依赖网络）。
     let content_url = match url {

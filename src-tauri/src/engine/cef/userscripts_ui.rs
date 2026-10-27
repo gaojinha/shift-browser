@@ -14,13 +14,14 @@
 //!   （`run_toolbar_js` 是 shell.rs 私有函数，接线时一并处理，同 push_certs 模式）；
 //! - 工具栏 HTML 生成处（cef_cmd.rs 的 `certificates_ui::init/certificates_json` 旁）加
 //!   `userscripts_ui::init(app)` + `userscripts_json(app)` 内嵌；
-//! - 启停/删除后 CEF 页面注入缓存 `extensions::cef_inject::build_and_cache` 需重建（TODO，接线时做）；
+//! - 启停/删除后 CEF 页面注入缓存 `extensions::cef_inject::build_and_cache` 需重建（已接通：
+//!   `rebuild_cef_inject_cache`，在 `toggle_script`/`delete_script` 成功后调用）；
 //! - 工具栏 JS 加 `__shiftUserscripts` 渲染函数（列表 + 启停 checkbox + 删除二次确认，页面侧）。
 //!
 //! 本模块先交付后接线：协调器接 `shell.rs::handle_action` 与 cef_cmd.rs HTML 内嵌之前
 //! （本卡禁改这两文件），整模块暂无业务引用——scoped dead_code 豁免（同 `certificates_ui.rs`），
 //! **接线完成后删掉下一行 `#![allow]`**。
-#![allow(dead_code)]
+// 接线已完成（2026-10-27）：shell.rs 注册表 / toolbar.rs / cef_cmd.rs 已接通，dead_code 豁免移除
 
 use std::sync::OnceLock;
 use tauri::{AppHandle, Manager};
@@ -72,13 +73,14 @@ fn parse_id(arg: &str) -> Option<i64> {
 pub fn handle(cmd: &str, arg: &str) -> bool {
     match cmd {
         "uspanel" => {
-            // TODO(接线)：shell.rs 加 `set_userscript_panel(open)`（Panel::Userscript 进注册表）后接通
-            log::info!("[cef] uspanel 待接线（shell.rs set_userscript_panel 未加）: arg={arg}");
+            super::shell::set_userscript_panel(arg == "1");
+            if arg == "1" {
+                super::shell::push_userscripts();
+            }
             true
         }
         "usrefresh" => {
-            // TODO(接线)：shell.rs 加 `push_userscripts()`（run_toolbar_js → `window.__shiftUserscripts(json)`）后接通
-            log::info!("[cef] usrefresh 待接线（shell.rs push_userscripts 未加）");
+            super::shell::push_userscripts();
             true
         }
         "ustoggle" => {
@@ -99,6 +101,15 @@ pub fn handle(cmd: &str, arg: &str) -> bool {
     }
 }
 
+fn rebuild_cef_inject_cache(app: &AppHandle) {
+    let Some(db) = app.try_state::<crate::db::Db>() else { return };
+    tauri::async_runtime::block_on(async {
+        if let Err(e) = crate::extensions::cef_inject::build_and_cache(&db).await {
+            log::warn!("[cef] 注入缓存重建失败（下条标签重新载入时恢复）: {e}");
+        }
+    });
+}
+
 fn toggle_script(id: i64) {
     let Some(app) = APP.get() else { return };
     let Some(db) = app.try_state::<crate::db::Db>() else { return };
@@ -107,8 +118,9 @@ fn toggle_script(id: i64) {
             log::info!("[cef] 用户脚本 {id} 启用状态 → {enabled}");
             // 注入缓存保持同步（WebKit 路径复用同一份）
             tauri::async_runtime::block_on(crate::db::userscripts::refresh_cache(&db.pool));
-            // TODO(接线)：shell.rs 接通 `push_userscripts()` 后在此重渲染列表；
-            //             `extensions::cef_inject::build_and_cache` 重建页面注入缓存也在此做
+            // 重建 CEF 页面注入缓存 + 重渲染工具栏列表
+            rebuild_cef_inject_cache(app);
+            super::shell::push_userscripts();
         }
         Ok(None) => log::warn!("[cef] ustoggle: 用户脚本 {id} 不存在"),
         Err(e) => log::warn!("[cef] 切换用户脚本 {id} 失败: {e}"),
@@ -125,7 +137,9 @@ fn delete_script(id: i64) {
         Ok(()) => {
             log::info!("[cef] 已删除用户脚本 {id}");
             tauri::async_runtime::block_on(crate::db::userscripts::refresh_cache(&db.pool));
-            // TODO(接线)：同上，push_userscripts 重渲染 + cef_inject 重建
+            // 重建 CEF 页面注入缓存 + 重渲染工具栏列表
+            rebuild_cef_inject_cache(app);
+            super::shell::push_userscripts();
         }
         Err(e) => log::warn!("[cef] 删除用户脚本 {id} 失败: {e}"),
     }
@@ -155,9 +169,9 @@ mod tests {
     }
 
     #[test]
-    fn own_cmds_swallowed_before_wiring() {
-        // 接线前 uspanel/usrefresh 吞掉（不误落到其它 handler）；
-        // usdel/ustoggle 参数无效分支也吞（warn 日志，不触 DB）
+    fn own_cmds_swallowed() {
+        // 接线后 uspanel/usrefresh 走 shell setter（APP 未初始化，走 no-op 路径）；
+        // usdel/ustoggle 参数无效分支吞（warn 日志，不触 DB）
         assert!(handle("uspanel", "1"));
         assert!(handle("usrefresh", ""));
         assert!(handle("usdel", "abc"));
