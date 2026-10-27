@@ -25,8 +25,6 @@
 //!
 //! 本模块先交付后接线：协调器接 `shell.rs::handle_action` 与 cef_cmd.rs HTML 内嵌之前
 //! （本卡禁改这几文件），整模块暂无业务引用——scoped dead_code 豁免（同
-//! `sessions_ui.rs` 交付期），**接线完成后删掉下一行 `#![allow]`**。
-#![allow(dead_code)]
 
 use std::sync::OnceLock;
 use tauri::{AppHandle, Manager};
@@ -153,7 +151,7 @@ fn delete_group(id: i64) {
     {
         Ok(()) => {
             log::info!("[cef] 已删除分组 {id}");
-            // TODO(接线，二狗补)：删除成功后经 push_groups() 重渲染列表
+            super::shell::push_groups();
         }
         Err(e) => log::warn!("[cef] 删除分组 {id} 失败: {e}"),
     }
@@ -166,7 +164,7 @@ fn delete_workspace(id: i64) {
     {
         Ok(()) => {
             log::info!("[cef] 已删除工作区 {id}");
-            // TODO(接线，二狗补)：删除成功后经 push_groups() 重渲染列表
+            super::shell::push_groups();
         }
         Err(e) => log::warn!("[cef] 删除工作区 {id} 失败: {e}"),
     }
