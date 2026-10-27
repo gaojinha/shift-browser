@@ -2242,6 +2242,17 @@ fn handle_action(action: &str) {
             }
             return;
         }
+        "tabdup" => {
+            if let Ok(idx) = arg.parse::<usize>() {
+                let url = SHELL_TABS.with(|t| t.borrow().get(idx).map(|x| x.url.clone()));
+                if let Some(u) = url {
+                    if let Err(e) = new_tab(&u) {
+                        log::error!("[cef] 复制标签失败: {e}");
+                    }
+                }
+            }
+            return;
+        }
         "tabreload" => {
             if let Ok(idx) = arg.parse::<usize>() {
                 let id = SHELL_TABS.with(|t| t.borrow().get(idx).map(|x| x.id.clone()));

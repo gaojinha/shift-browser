@@ -826,6 +826,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       tabMenuEl.appendChild(d);
     };
     mk('重新加载', 'tabreload');
+    mk('复制标签', 'tabdup');
     mk('关闭标签', 'tabclose');
     mk('关闭其他标签', 'tabcloseothers');
     mk('关闭右侧标签', 'tabcloseright');
