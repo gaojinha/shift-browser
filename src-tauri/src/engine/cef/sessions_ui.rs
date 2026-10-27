@@ -114,7 +114,7 @@ fn delete_session(id: i64) {
     match tauri::async_runtime::block_on(crate::db::sessions::delete_session_inner(&db.pool, id)) {
         Ok(()) => {
             log::info!("[cef] 已删除会话 {id}");
-            // TODO(接线，二狗补)：super::shell::push_sessions() 重渲染列表（同 certdel 后 push_certs 模式）
+            super::shell::push_sessions();
         }
         Err(e) => log::warn!("[cef] 删除会话 {id} 失败: {e}"),
     }
