@@ -77,3 +77,12 @@
 > ② **接线这条线是执行者自验**，按 10-26 铁律不认它的自测结论；补救办法＝atomcode 的 72 对全表把 cert 相关 16 对（`cert→8` ＋ `8→cert`）当场砸实，**期望高度写 482 不写 462**。
 > ③ **新增元测试缺口建议**（F-21 收口后补一张小卡）：`Panel::ALL` 长度、`class()` 唯一性、`class()` 与 JS `PANEL_CLASSES` 一一对应——现在这三样**只有人肉约定，没有测试钉**；第 10 个面板（userscripts）接进来时最容易在这儿翻车。届时矩阵 9×8=72 → **10×9=90 对**。
 > ④ **待高哥拍板两件事**（已进 WORKBOARD 第 9 条）：**a.** 安装版主进程 `ps` 实测 **CPU 100%**（接线回执自述 84%，perf 栈已取，根因＝CEF 的 GLib X11 source 忙轮询）要不要立 `F-CEF-24` 修消息循环；**b.** "自己交自己测＋写错高度数字"这种自验，要不要按铁律退回独立复验（我的倾向：不退回重做，由 atomcode 的 72 对覆盖，但要它把 462→482 勘误写进回执）。
+
+## 2026-10-27 19:10 — F-CEF-26 会话管理后端：复核通过（二狗）
+
+- 提交 `808c577` 实查为真（4 文件：db/sessions.rs +74 / sessions_ui.rs 156 新 / mod.rs +1 / 回执；无夹带、无 git add -A 痕迹）
+- 关口二狗主树独立复跑（19:05–19:12）：**clippy 默认 0 警告 / cef 0 警告；test 默认 660 / cef 693**
+  - cef 实跑 693 ≠ 回执 692：复核窗口内混入了 `959d9aa` 验收提交新增的 1 个 cef 用例（959d9aa 自述 test 693），非本卡代码问题；本卡净增 +3（db 双配置）/+3（ui cef）口径成立
+- 卡面全对：list_sessions_inner 共用（IPC 名不变）、delete_session_inner 复用、sessions_json 只给 id/name/created_at/tabCount 不含 data 全量、坏快照 tabCount=0、三命令 + restore TODO 照卡面、禁改文件零触碰
+- 次记不纠：回执「关口跑在共树 0b5c4ff 之上」口径成立；双 test 数字对账已如上
+- **F-CEF-26 通过，接线（Panel::Sess、sesspanel/sessrefresh/sessdel、11 面板 110 对矩阵）归二狗线；真机验收归接线后**
