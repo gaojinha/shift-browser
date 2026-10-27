@@ -501,6 +501,13 @@ pub fn run() {
             crate::proto_shift::handle(&ctx, request)
         })
         .setup(|app| {
+            // 窗口形态：CEF 构建不创建主窗口（彻底脱钩）；WebKit 构建照旧。
+            // SHIFT_WEBKIT_UI=1 可强制要回主界面（对比/回退）。
+            let cef_only =
+                cfg!(feature = "cef-engine") && std::env::var("SHIFT_WEBKIT_UI").is_err();
+            if !cef_only {
+                crate::bootstrap::create_main_window(app)?;
+            }
             // R2-1b（2026-09-24）：setup 启动装配已抽到 app/bootstrap.rs
             crate::bootstrap::setup(app)?;
             // CEF 引擎（换核实验）：初始化失败不阻断主流程，只记录

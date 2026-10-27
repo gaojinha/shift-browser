@@ -10,22 +10,7 @@
     "beforeBuildCommand": "npm run build && bash scripts/build-extension.sh"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Shift Browser",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
-        "resizable": true,
-        "fullscreen": false,
-        "center": true,
-        "decorations": false,
-        "transparent": true,
-        "url": "shift://main",
-        "visible": false
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": {
         "default": "default-src 'self' shift: data:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:; media-src 'self' https: http:; frame-src 'self' https: http:; object-src 'none'; base-uri 'self'",
@@ -36,7 +21,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb"],
+    "targets": [
+      "deb"
+    ],
     "resources": [
       "resources/libshift_web_extension.so"
     ],

@@ -42,6 +42,27 @@ fn show_fatal_dialog(_app: &tauri::AppHandle, msg: &str) {
 /// setup 闭包体（R2-1b 从 lib.rs 整体迁入）。
 ///
 /// 返回 Err 会中止启动（数据库是全应用硬依赖，初始化失败必须立即终止）。
+/// 创建主窗口（仅 WebKit 模式；CEF 模式彻底不创建，不是 hide）。
+///
+/// 2026-10-27 高哥拍板：旧的主界面项目要停掉，CEF 构建只留单栈窗口。
+/// 之前用 `visible:false + hide()` 只是藏起来，X11 窗口仍 mapped（xwininfo 可见），
+/// 所以改成从 `tauri.conf.json` 删窗口声明、这里按模式创建。
+pub(crate) fn create_main_window(
+    app: &mut tauri::App,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let url = tauri::Url::parse("shift://main")?;
+    tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::CustomProtocol(url))
+        .title("Shift Browser")
+        .inner_size(1280.0, 800.0)
+        .min_inner_size(800.0, 600.0)
+        .resizable(true)
+        .center()
+        .decorations(false)
+        .transparent(true)
+        .build()?;
+    Ok(())
+}
+
 pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // 安全（#1 · 2026-09-22）：敏感文件（cookie 库/WAL）启动即加固到 0600，
     // 并每 120s 重扫一次——WebKit 运行时会按 umask 重建这些文件。
@@ -249,6 +270,16 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
             if let Some(w) = app_win.get_window("main") {
                 if !webkit_ui {
                     crate::log_if_err!("window", w.hide());
+                    // Tauri 的 hide() 在 GTK 下只改逻辑状态，X11 窗口仍 mapped
+                    // （2026-10-27 实测：is_visible=false 但 xwininfo 仍 IsViewable）。
+                    // 再走 GTK 层 hide 一次，确保真的不显示。
+                    #[cfg(target_os = "linux")]
+                    {
+                        use gtk::prelude::*;
+                        if let Ok(gtk_win) = w.gtk_window() {
+                            gtk_win.hide();
+                        }
+                    }
                     log::info!(
                         "[ShiftBrowser] CEF 模式：主窗口 hide 后 visible={:?}",
                         w.is_visible()
