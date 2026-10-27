@@ -30,10 +30,15 @@ pub async fn create_tab_group(
 /// 获取所有标签分组
 #[tauri::command]
 pub async fn get_tab_groups(db: tauri::State<'_, Db>) -> DbResult<Vec<TabGroup>> {
+    list_tab_groups_inner(&db.pool).await
+}
+
+/// 获取所有标签分组核心逻辑（pool 级，便于测试；CEF 分组面板共用，F-CEF-27）
+pub async fn list_tab_groups_inner(pool: &sqlx::SqlitePool) -> DbResult<Vec<TabGroup>> {
     let rows = sqlx::query_as::<_, (i64, String, String, i64, String)>(
         "SELECT id, name, color, collapsed, created_at FROM tab_groups ORDER BY id",
     )
-    .fetch_all(&db.pool)
+    .fetch_all(pool)
     .await?;
 
     Ok(rows
@@ -199,6 +204,32 @@ mod tests {
             .await
             .unwrap()
             .last_insert_rowid()
+    }
+
+    #[tokio::test]
+    async fn list_groups_empty_db_returns_empty() {
+        let (_dir, pool) = temp_pool().await;
+        let groups = super::list_tab_groups_inner(&pool).await.unwrap();
+        assert!(groups.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_groups_reads_all_fields() {
+        let (_dir, pool) = temp_pool().await;
+        let id = insert_group(&pool, "工作").await;
+        // 折叠位回读为 true
+        sqlx::query("UPDATE tab_groups SET color = '#ff0000', collapsed = 1 WHERE id = ?")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let groups = super::list_tab_groups_inner(&pool).await.unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, id);
+        assert_eq!(groups[0].name, "工作");
+        assert_eq!(groups[0].color, "#ff0000");
+        assert!(groups[0].collapsed);
+        assert!(!groups[0].created_at.is_empty());
     }
 
     #[tokio::test]

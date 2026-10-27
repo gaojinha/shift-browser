@@ -27,10 +27,15 @@ pub async fn create_workspace(db: tauri::State<'_, Db>, name: String) -> DbResul
 /// 获取所有工作区
 #[tauri::command]
 pub async fn get_workspaces(db: tauri::State<'_, Db>) -> DbResult<Vec<Workspace>> {
+    list_workspaces_inner(&db.pool).await
+}
+
+/// 获取所有工作区核心逻辑（pool 级，便于测试；CEF 分组/工作区面板共用，F-CEF-27）
+pub async fn list_workspaces_inner(pool: &sqlx::SqlitePool) -> DbResult<Vec<Workspace>> {
     let rows = sqlx::query_as::<_, (i64, String, String, i64, String)>(
         "SELECT id, name, color, sort_order, created_at FROM workspaces ORDER BY sort_order, id",
     )
-    .fetch_all(&db.pool)
+    .fetch_all(pool)
     .await?;
 
     Ok(rows
@@ -160,6 +165,36 @@ mod tests {
         .await
         .unwrap();
         (dir, pool)
+    }
+
+    #[tokio::test]
+    async fn list_workspaces_empty_db_returns_empty() {
+        let (_dir, pool) = temp_pool().await;
+        let workspaces = super::list_workspaces_inner(&pool).await.unwrap();
+        assert!(workspaces.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_workspaces_reads_fields_and_sorts() {
+        let (_dir, pool) = temp_pool().await;
+        // 插反顺序：sort_order 0/2/1，期望按 sort_order 排序回读
+        for (name, order) in [("默认", 0), ("工作", 2), ("生活", 1)] {
+            sqlx::query("INSERT INTO workspaces (name, sort_order, color) VALUES (?, ?, ?)")
+                .bind(name)
+                .bind(order)
+                .bind(if name == "生活" { "#12ab34" } else { "" })
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        let workspaces = super::list_workspaces_inner(&pool).await.unwrap();
+        assert_eq!(
+            workspaces.iter().map(|w| w.name.as_str()).collect::<Vec<_>>(),
+            vec!["默认", "生活", "工作"]
+        );
+        assert_eq!(workspaces[1].color, "#12ab34");
+        assert_eq!(workspaces[1].sort_order, 1);
+        assert!(!workspaces[1].created_at.is_empty());
     }
 
     #[tokio::test]
