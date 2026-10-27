@@ -193,8 +193,9 @@ pub async fn record(pool: &SqlitePool, info: &CertInfo) -> Option<&'static str> 
     }
 }
 
-/// 列出监测中的证书（临期优先）
-pub async fn list(pool: &SqlitePool) -> Result<Vec<CertRecord>, sqlx::Error> {
+/// 列出监测中的证书（临期优先）。
+/// F-CEF-21：Tauri 命令与 CEF 面板共用的唯一 SQL 实现，两侧不许复制 SQL。
+pub async fn list_certificates(pool: &SqlitePool) -> Result<Vec<CertRecord>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT *, CAST(julianday(not_after) - julianday('now') AS INTEGER) AS days_left
          FROM certificates
@@ -571,7 +572,7 @@ mod tests {
         assert_eq!(got4[0].host, "expired.com");
 
         // list()：5 行全量、最临期在前、无到期信息恒排最后
-        let all = list(&pool).await.unwrap();
+        let all = list_certificates(&pool).await.unwrap();
         assert_eq!(all.len(), 5);
         assert_eq!(all[0].host, "expired.com");
         assert_eq!(all[4].host, "forever.com");
@@ -620,5 +621,90 @@ mod tests {
             1,
             "list 不过滤过期（展示归 UI）"
         );
+    }
+
+    // ---- F-CEF-21：list_certificates（Tauri 命令与 CEF 面板共用）----
+
+    #[tokio::test]
+    async fn list_certificates_empty_db_returns_empty() {
+        let (_dir, pool) = test_pool().await;
+        assert!(
+            list_certificates(&pool).await.unwrap().is_empty(),
+            "空库应返回空数组（CEF 面板空态依赖）"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_certificates_orders_by_days_then_host() {
+        let (_dir, pool) = test_pool().await;
+        // not_after 用 SQL 的 datetime('now', ...) 生成，与查询同钟源；
+        // 档位间隔 ≥4 天，CAST 截断 ±1 不会重排
+        for (host, port, fp, delta) in [
+            ("z.com", 443, "fp-z", "+30 days"),
+            ("a.com", 443, "fp-a", "+5 days"),
+            ("m.com", 443, "fp-m", "+30 days"),
+            ("a.com", 8443, "fp-a8", "+10 days"),
+        ] {
+            let na: String =
+                sqlx::query_scalar(&format!("SELECT datetime('now', '{delta}')"))
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            record(&pool, &info(host, port, fp, Some(&na))).await;
+        }
+        let got = list_certificates(&pool).await.unwrap();
+        let keys: Vec<String> = got.iter().map(|r| format!("{}:{}", r.host, r.port)).collect();
+        assert_eq!(
+            keys,
+            vec![
+                "a.com:443".to_string(),
+                "a.com:8443".to_string(),
+                "m.com:443".to_string(),
+                "z.com:443".to_string(),
+            ],
+            "days_left 升序（5/10/30）；days_left 相同时 host 升序兜底（m < z）"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_certificates_field_roundtrip() {
+        let (_dir, pool) = test_pool().await;
+        let na: String = sqlx::query_scalar("SELECT datetime('now', '+66 days')")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO certificates
+             (host, port, fingerprint_sha256, subject, issuer, not_before, not_after,
+              dns_names, ip_addresses, errors, first_seen, last_seen, change_count)
+             VALUES ('rt.example', 8443, 'fp-rt', 'CN=rt.example', 'CN=test-ca',
+                     '2026-01-01 00:00:00', ?,
+                     'rt.example, www.rt.example', '203.0.113.7', 3,
+                     '2026-01-02 03:04:05', '2026-01-03 06:07:08', 2)",
+        )
+        .bind(&na)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let got = list_certificates(&pool).await.unwrap();
+        assert_eq!(got.len(), 1);
+        let r = &got[0];
+        assert_eq!(r.host, "rt.example");
+        assert_eq!(r.port, 8443);
+        assert_eq!(r.fingerprint_sha256, "fp-rt");
+        assert_eq!(r.subject.as_deref(), Some("CN=rt.example"));
+        assert_eq!(r.issuer.as_deref(), Some("CN=test-ca"));
+        assert_eq!(r.not_before.as_deref(), Some("2026-01-01 00:00:00"));
+        assert_eq!(r.dns_names.as_deref(), Some("rt.example, www.rt.example"));
+        assert_eq!(r.ip_addresses.as_deref(), Some("203.0.113.7"));
+        assert_eq!(r.errors, 3);
+        assert_eq!(r.first_seen, "2026-01-02 03:04:05");
+        assert_eq!(r.last_seen, "2026-01-03 06:07:08");
+        assert_eq!(r.change_count, 2);
+        // days_left：not_after = now+66d 同钟源 → 查询时刻恒略晚于插入，取值 {65,66}
+        let dl = r
+            .days_left
+            .expect("days_left 应解码成功（not_after 非 NULL，F-66 后不吞错）");
+        assert!((65..=66).contains(&dl), "not_after +66 天 → days_left 应为 65~66（实际 {dl}）");
     }
 }

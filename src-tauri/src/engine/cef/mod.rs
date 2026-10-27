@@ -13,6 +13,7 @@
 
 pub mod app;
 pub mod browser;
+pub mod certificates_ui;
 pub mod newtab;
 pub mod passwords_ui;
 pub mod shell;

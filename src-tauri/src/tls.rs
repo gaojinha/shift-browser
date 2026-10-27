@@ -158,7 +158,7 @@ async fn read_webview_tls(
 pub async fn list_certificates(
     db: tauri::State<'_, crate::db::Db>,
 ) -> CommandResult<Vec<crate::db::certificates::CertRecord>> {
-    crate::db::certificates::list(&db.pool)
+    crate::db::certificates::list_certificates(&db.pool)
         .await
         .map_err(|e| AppError::db(e.to_string()).into())
 }
