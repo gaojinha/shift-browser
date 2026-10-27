@@ -239,6 +239,17 @@ pub async fn delete_download(db: tauri::State<'_, Db>, id: i64) -> DbResult<()> 
     Ok(())
 }
 
+/// 清空已结束（非 in_progress）的下载记录，返回删除行数。
+/// in_progress 活动记录不碰——同 insert_download 的清理排除口径。
+/// CEF 面板 dlclear 用；默认构建无调用方，feature 条件下允许 dead_code。
+#[cfg_attr(not(feature = "cef-engine"), allow(dead_code))]
+pub async fn clear_finished(pool: &SqlitePool) -> DbResult<u64> {
+    let res = sqlx::query("DELETE FROM downloads WHERE state != 'in_progress'")
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,5 +415,39 @@ mod tests {
         assert_eq!(list[0].filename, "c.bin");
         assert_eq!(list[0].total_bytes, 30);
         assert_eq!(list[0].path.as_deref(), Some("/tmp/c"));
+    }
+
+    #[tokio::test]
+    async fn test_clear_finished_only_removes_non_in_progress() {
+        let (_dir, pool) = temp_pool().await;
+        // 混合状态：in_progress ×2 + completed/failed/cancelled/interrupted 各一
+        let p1 = insert_download(&pool, "p1.bin", None, None, 10).await.unwrap();
+        let p2 = insert_download(&pool, "p2.bin", None, None, 10).await.unwrap();
+        let c1 = insert_download(&pool, "c1.bin", None, None, 10).await.unwrap();
+        let f1 = insert_download(&pool, "f1.bin", None, None, 10).await.unwrap();
+        let x1 = insert_download(&pool, "x1.bin", None, None, 10).await.unwrap();
+        let i1 = insert_download(&pool, "i1.bin", None, None, 10).await.unwrap();
+        update_download_state(&pool, c1, "completed", Some(10)).await.unwrap();
+        update_download_state(&pool, f1, "failed", Some(10)).await.unwrap();
+        update_download_state(&pool, x1, "cancelled", Some(10)).await.unwrap();
+        update_download_state(&pool, i1, "interrupted", Some(10)).await.unwrap();
+
+        let n = clear_finished(&pool).await.unwrap();
+        assert_eq!(n, 4, "只删 4 条非进行中");
+
+        let list = list_downloads(&pool).await.unwrap();
+        assert_eq!(list.len(), 2, "只剩 2 条 in_progress");
+        assert!(list.iter().all(|d| d.state == "in_progress"));
+        let ids: Vec<i64> = list.iter().map(|d| d.id).collect();
+        assert!(ids.contains(&p1) && ids.contains(&p2), "活动记录不能碰");
+
+        // 幂等：再清一次返回 0
+        assert_eq!(clear_finished(&pool).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_clear_finished_empty_db_returns_zero() {
+        let (_dir, pool) = temp_pool().await;
+        assert_eq!(clear_finished(&pool).await.unwrap(), 0);
     }
 }
