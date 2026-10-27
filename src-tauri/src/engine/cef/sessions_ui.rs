@@ -81,7 +81,18 @@ pub fn handle(cmd: &str, arg: &str) -> bool {
         // 接线时替换为：
         //   "sesspanel" => { super::shell::set_session_panel(arg == "1"); if arg == "1" { super::shell::push_sessions(); } true }
         //   "sessrefresh" => { super::shell::push_sessions(); true }
-        "sesspanel" | "sessrefresh" => {
+        "sesspanel" => {
+            super::shell::set_session_panel(arg == "1");
+            if arg == "1" {
+                super::shell::push_sessions();
+            }
+            true
+        }
+        "sessrefresh" => {
+            super::shell::push_sessions();
+            true
+        }
+        "sesspanel_old" => {
             log::warn!("[cef] {cmd} 待接线：shell.rs 无 set_session_panel/push_sessions（F-CEF-26 先交付后接线）");
             true
         }

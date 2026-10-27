@@ -369,6 +369,25 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     height: 24px; background: #202124; border: 1px solid #3c4043; border-radius: 4px;
     color: #e8eaed; font-size: 12px; max-width: 180px;
   }
+  /* 会话面板（F-CEF-26） */
+  html.sess-open, html.sess-open body { height: 100vh; }
+  #sesspanel {
+    display: none; position: absolute; left: 0; right: 0; top: 88px; bottom: 0;
+    background: #292a2d; border-top: 1px solid #3c4043; padding: 8px 12px;
+    flex-direction: column; gap: 6px; z-index: 10; font-size: 12px;
+  }
+  html.sess-open #sesspanel { display: flex; }
+  html:not(.bookmarks-hidden) #sesspanel { top: 122px; }
+  .sess-head { display: flex; align-items: center; }
+  .sess-title { flex: 1; color: #e8eaed; }
+  #sesslist { flex: 1; overflow-y: auto; }
+  .sess-row { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 6px; border-radius: 6px; }
+  .sess-row:hover { background: #3c4043; }
+  .sess-row .s-name { flex: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sess-row .s-time { flex: 1; color: #9aa0a6; }
+  .sess-row .s-count { flex: 0 0 70px; color: #9aa0a6; }
+  .sess-row .s-del { flex: 0 0 auto; color: #f28b82; padding: 0 8px; }
+  .sess-empty { color: #9aa0a6; padding: 12px 6px; }
   /* 证书面板（F-CEF-21） */
   html.cert-open, html.cert-open body { height: 100vh; }
   #certpanel {
@@ -643,6 +662,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <div class="menu-item disabled">打印<span class="menu-key">待补</span></div>
     <div class="menu-item" data-act="findopen">查找<span class="menu-key">Ctrl+F</span></div>
     <div class="menu-sep"></div>
+    <div class="menu-item" data-panel="sess">会话<span class="menu-key"></span></div>
     <div class="menu-item" data-panel="cert">证书<span class="menu-key"></span></div>
     <div class="menu-item" data-panel="us">用户脚本<span class="menu-key"></span></div>
     <div class="menu-item" data-panel="settings">设置<span class="menu-key"></span></div>
@@ -674,6 +694,10 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       <div id="bmmtree"></div>
       <div id="bmmlist"></div>
     </div>
+  </div>
+  <div id="sesspanel">
+    <div class="sess-head"><span class="sess-title">已保存的会话</span><span id="sessclose" class="bmm-btn">关闭</span></div>
+    <div id="sesslist"></div>
   </div>
   <div id="certpanel">
     <div class="cert-head">
@@ -1715,6 +1739,59 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     }
   });
 
+  // ---- 会话面板（F-CEF-26）----
+  let sessList = [];
+  function renderSessions(list) {
+    sessList = Array.isArray(list) ? list : [];
+    const box = document.getElementById('sesslist');
+    if (!box) return;
+    box.innerHTML = '';
+    if (sessList.length === 0) {
+      const e = document.createElement('div');
+      e.className = 'sess-empty';
+      e.textContent = '还没有保存的会话';
+      box.appendChild(e);
+      return;
+    }
+    sessList.forEach((s) => {
+      const row = document.createElement('div');
+      row.className = 'sess-row';
+      const name = document.createElement('span');
+      name.className = 's-name';
+      name.textContent = s.name || ('会话 ' + s.id);
+      const time = document.createElement('span');
+      time.className = 's-time';
+      time.textContent = (s.created_at || '').slice(0, 16);
+      const count = document.createElement('span');
+      count.className = 's-count';
+      count.textContent = (s.tab_count != null ? s.tab_count : '?') + ' 个标签';
+      const del = document.createElement('span');
+      del.className = 's-del';
+      del.textContent = '删除';
+      del.addEventListener('click', () => {
+        if (del.dataset.armed === '1') {
+          act('sessdel|' + s.id);
+          sessList = sessList.filter((x) => x.id !== s.id);
+          renderSessions(sessList);
+        } else {
+          del.dataset.armed = '1';
+          del.textContent = '确认';
+          setTimeout(() => { del.dataset.armed = ''; del.textContent = '删除'; }, 3000);
+        }
+      });
+      row.append(name, time, count, del);
+      box.appendChild(row);
+    });
+  }
+  window.__shiftSessions = renderSessions;
+  function setSessPanel(open) {
+    document.documentElement.classList.toggle('sess-open', open);
+    if (open) removePanelClasses('sess-open');
+    act('sesspanel|' + (open ? '1' : '0'));
+    if (open) renderSessions([]);
+  }
+  document.getElementById('sessclose')?.addEventListener('click', () => setSessPanel(false));
+
   // ---- 证书面板（F-CEF-21）----
   let certList = [];
   function renderCerts(list) {
@@ -1915,6 +1992,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     setMenuPanel(false);
     if (item.dataset.panel === 'bmmanage') { setBmManage(true); return; }
     if (item.dataset.panel === 'hist') { setHistPanel(true); return; }
+    if (item.dataset.panel === 'sess') { setSessPanel(true); return; }
     if (item.dataset.panel === 'cert') { setCertPanel(true); return; }
     if (item.dataset.panel === 'us') { setUsPanel(true); return; }
     if (item.dataset.panel === 'settings') { setSettingsPanel(true); return; }
@@ -2000,7 +2078,7 @@ mod tests {
 
     #[test]
     fn panel_registry_has_ten_unique_classes_and_matches_css() {
-        assert_eq!(Panel::ALL.len(), 10);
+        assert_eq!(Panel::ALL.len(), 11);
         let json = panel_classes_json();
         for p in Panel::ALL {
             assert_eq!(json.matches(&format!("\"{}\"", p.class())).count(), 1, "{:?}", p);
@@ -2011,7 +2089,7 @@ mod tests {
 
     #[test]
     fn every_js_setter_uses_registry_not_hand_lists() {
-        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 10);
+        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 11);
         for line in TOOLBAR_HTML.lines().filter(|l| l.contains("classList.remove(")) {
             assert!(line.matches("-open").count() <= 1, "残留手写互斥清单: {line}");
         }

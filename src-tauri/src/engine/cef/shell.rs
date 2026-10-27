@@ -48,6 +48,7 @@ fn toolbar_height() -> i32 {
         + BM_MANAGE_EXTRA_V.load(Ordering::Relaxed)
         + CERT_EXTRA.load(Ordering::Relaxed)
         + US_EXTRA.load(Ordering::Relaxed)
+        + SESSION_EXTRA.load(Ordering::Relaxed)
 }
 
 /// 8 个根类面板的注册表（F-CEF-21）：根 class 与撑高原子的唯一对应。
@@ -68,10 +69,11 @@ pub(crate) enum Panel {
     Find,
     Cert,
     Us,
+    Session,
 }
 
 impl Panel {
-    pub(crate) const ALL: [Panel; 10] = [
+    pub(crate) const ALL: [Panel; 11] = [
         Panel::Pw,
         Panel::Dl,
         Panel::Menu,
@@ -82,6 +84,7 @@ impl Panel {
         Panel::Find,
         Panel::Cert,
         Panel::Us,
+        Panel::Session,
     ];
 
     /// 对应 `html.<class>` 根类名（须与 `toolbar::PANEL_CLASSES` 同序同值，有单测钉住）
@@ -97,6 +100,7 @@ impl Panel {
             Panel::Find => "find-open",
             Panel::Cert => "cert-open",
             Panel::Us => "us-open",
+            Panel::Session => "sess-open",
         }
     }
 
@@ -112,6 +116,7 @@ impl Panel {
             Panel::Find => FIND_BAR_EXTRA,
             Panel::Cert => CERT_PANEL_EXTRA,
             Panel::Us => US_PANEL_EXTRA,
+            Panel::Session => SESSION_PANEL_EXTRA,
         }
     }
 
@@ -127,6 +132,7 @@ impl Panel {
             Panel::Find => &FIND_EXTRA,
             Panel::Cert => &CERT_EXTRA,
             Panel::Us => &US_EXTRA,
+            Panel::Session => &SESSION_EXTRA,
         }
     }
 }
@@ -227,6 +233,25 @@ static US_EXTRA: AtomicI32 = AtomicI32::new(0);
 pub fn set_userscript_panel(open: bool) {
     set_panel_extra(Panel::Us, open);
     apply_toolbar_height();
+}
+
+/// 会话面板（F-CEF-26）展开时工具栏视图额外加高的像素
+const SESSION_PANEL_EXTRA: i32 = 320;
+static SESSION_EXTRA: AtomicI32 = AtomicI32::new(0);
+
+/// 会话面板开合：与其它面板互斥（走统一 Panel 注册表）
+pub fn set_session_panel(open: bool) {
+    set_panel_extra(Panel::Session, open);
+    apply_toolbar_height();
+}
+
+/// 把会话列表推给工具栏面板（F-CEF-26）。
+pub(crate) fn push_sessions() {
+    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    let json = super::sessions_ui::sessions_json(app);
+    run_toolbar_js(&format!(
+        "window.__shiftSessions && window.__shiftSessions({json})"
+    ));
 }
 
 /// 把用户脚本列表推给工具栏面板（F-CEF-23，同 `push_certs` 模式）
@@ -2092,6 +2117,10 @@ fn handle_action(action: &str) {
     if super::certificates_ui::handle(cmd, arg) {
         return;
     }
+    // 会话面板动作（F-CEF-26）
+    if super::sessions_ui::handle(cmd, arg) {
+        return;
+    }
     // 用户脚本面板动作（F-CEF-23）
     if super::userscripts_ui::handle(cmd, arg) {
         return;
@@ -2465,6 +2494,7 @@ mod tests {
             (Panel::Find, "find-open", 44),
             (Panel::Cert, "cert-open", 360),
             (Panel::Us, "us-open", 360),
+            (Panel::Session, "sess-open", 320),
         ];
         assert_eq!(Panel::ALL.len(), want.len());
         for (p, c, px) in want {
@@ -2473,7 +2503,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_any_panel_zeroes_all_other_extras_90_pairs() {
+    fn opening_any_panel_zeroes_all_other_extras_110_pairs() {
         use super::{set_panel_extra, toolbar_height, Panel, BM_EXTRA, TOOLBAR_H};
         use std::sync::atomic::Ordering;
         let base = TOOLBAR_H.load(Ordering::Relaxed);
@@ -2497,7 +2527,7 @@ mod tests {
                 pairs += 1;
             }
         }
-        assert_eq!(pairs, 90);
+        assert_eq!(pairs, 110);
     }
 
     // ---- normalize_url：地址栏补全规则（P0 实测逻辑，防改坏）----
