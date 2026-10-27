@@ -81,7 +81,7 @@ pub fn initialize(resources_dir: &str, locales_dir: &str, cache_path: &str) -> R
         windowless_rendering_enabled: 0,
         // 不启用 CEF 自己的消息循环线程：由 GTK 主循环 + 定时泵驱动
         multi_threaded_message_loop: 0,
-        external_message_pump: 1,
+        external_message_pump: 0,
         // 调试端口（仅本地排查用；不设环境变量时关闭）
         remote_debugging_port: std::env::var("SHIFT_CEF_DEBUG_PORT")
             .ok()
@@ -181,6 +181,7 @@ wrap_app! {
                 Some(&CefString::from("enable-features")),
                 Some(&CefString::from("Vulkan")),
             );
+
             // 给 X11 窗口一个 WM_CLASS：Mutter 对没有 WM_CLASS 的窗口会当成
             // "待接管"状态（实测 WM_STATE=Iconic、永不映射）
             cmd.append_switch_with_value(
@@ -215,16 +216,5 @@ wrap_browser_process_handler! {
             }
         }
 
-        /// CEF 外部消息泵：CEF 告诉主循环「delay_ms 后需要泵一次」。
-        ///
-        /// 不实现它时 CEF 会在 GLib 里注册 X11 source 忙轮询（2026-10-27 实测
-        /// 主线程 98% CPU；perf 栈 gtk_main_iteration → xcb recvmsg →
-        /// libcef HasPendingResponses）。实现后改由 CEF 按需调度。
-        fn on_schedule_message_pump_work(&self, delay_ms: i64) {
-            let ms = delay_ms.clamp(16, 1000) as u64; // 最小 16ms，避免 CEF 请求 0ms 造成忙循环
-            gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(ms), || {
-                cef::do_message_loop_work();
-            });
-        }
     }
 }

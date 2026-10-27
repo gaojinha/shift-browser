@@ -771,6 +771,13 @@ wrap_window_delegate! {
             self.content.borrow_mut().take();
             self.toolbar.borrow_mut().take();
             log::info!("[cef] 单栈窗口已销毁");
+            // 单窗口模式：窗口关了就退出整个进程，不留后台（2026-10-27 实测
+            // 关窗后主进程仍挂着 5 分钟）。延迟到下一轮主循环，避免在 CEF
+            // 销毁回调栈里直接 exit 触发重入。
+            gtk::glib::idle_add_local_once(|| {
+                log::info!("[cef] 窗口已关闭，退出进程");
+                std::process::exit(0);
+            });
         }
 
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
