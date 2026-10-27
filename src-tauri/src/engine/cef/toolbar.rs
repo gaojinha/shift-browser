@@ -369,6 +369,22 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     height: 24px; background: #202124; border: 1px solid #3c4043; border-radius: 4px;
     color: #e8eaed; font-size: 12px; max-width: 180px;
   }
+  /* 分组/工作区面板（F-CEF-27） */
+  html.groups-open, html.groups-open body { height: 100vh; }
+  #groupspanel {
+    display: none; position: absolute; left: 0; right: 0; top: 88px; bottom: 0;
+    background: #292a2d; border-top: 1px solid #3c4043; padding: 8px 12px;
+    flex-direction: column; gap: 6px; z-index: 10; font-size: 12px;
+  }
+  html.groups-open #groupspanel { display: flex; }
+  html:not(.bookmarks-hidden) #groupspanel { top: 122px; }
+  #groupslist { flex: 1; overflow-y: auto; }
+  .g-row { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 6px; border-radius: 6px; }
+  .g-row:hover { background: #3c4043; }
+  .g-row .g-kind { flex: 0 0 60px; color: #9aa0a6; }
+  .g-row .g-name { flex: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .g-row .g-del { flex: 0 0 auto; color: #f28b82; padding: 0 8px; }
+  .g-empty { color: #9aa0a6; padding: 12px 6px; }
   /* 会话面板（F-CEF-26） */
   html.sess-open, html.sess-open body { height: 100vh; }
   #sesspanel {
@@ -662,6 +678,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <div class="menu-item disabled">打印<span class="menu-key">待补</span></div>
     <div class="menu-item" data-act="findopen">查找<span class="menu-key">Ctrl+F</span></div>
     <div class="menu-sep"></div>
+    <div class="menu-item" data-panel="groups">分组/工作区<span class="menu-key"></span></div>
     <div class="menu-item" data-panel="sess">会话<span class="menu-key"></span></div>
     <div class="menu-item" data-panel="cert">证书<span class="menu-key"></span></div>
     <div class="menu-item" data-panel="us">用户脚本<span class="menu-key"></span></div>
@@ -694,6 +711,10 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       <div id="bmmtree"></div>
       <div id="bmmlist"></div>
     </div>
+  </div>
+  <div id="groupspanel">
+    <div class="sess-head"><span class="sess-title">分组 / 工作区</span><span id="groupsclose" class="bmm-btn">关闭</span></div>
+    <div id="groupslist"></div>
   </div>
   <div id="sesspanel">
     <div class="sess-head"><span class="sess-title">已保存的会话</span><span id="sessclose" class="bmm-btn">关闭</span></div>
@@ -1739,6 +1760,57 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     }
   });
 
+  // ---- 分组/工作区面板（F-CEF-27）----
+  let groupsData = { groups: [], workspaces: [] };
+  function renderGroups(data) {
+    groupsData = data && typeof data === 'object' ? data : { groups: [], workspaces: [] };
+    const box = document.getElementById('groupslist');
+    if (!box) return;
+    box.innerHTML = '';
+    const rows = [];
+    (groupsData.groups || []).forEach((g) => rows.push({ kind: '分组', id: g.id, name: g.name, del: 'groupdel' }));
+    (groupsData.workspaces || []).forEach((w) => rows.push({ kind: '工作区', id: w.id, name: w.name, del: 'spacedel' }));
+    if (rows.length === 0) {
+      const e = document.createElement('div');
+      e.className = 'g-empty';
+      e.textContent = '还没有分组或工作区';
+      box.appendChild(e);
+      return;
+    }
+    rows.forEach((r) => {
+      const row = document.createElement('div');
+      row.className = 'g-row';
+      const kind = document.createElement('span');
+      kind.className = 'g-kind';
+      kind.textContent = r.kind;
+      const name = document.createElement('span');
+      name.className = 'g-name';
+      name.textContent = r.name || ('#' + r.id);
+      const del = document.createElement('span');
+      del.className = 'g-del';
+      del.textContent = '删除';
+      del.addEventListener('click', () => {
+        if (del.dataset.armed === '1') {
+          act(r.del + '|' + r.id);
+        } else {
+          del.dataset.armed = '1';
+          del.textContent = '确认';
+          setTimeout(() => { del.dataset.armed = ''; del.textContent = '删除'; }, 3000);
+        }
+      });
+      row.append(kind, name, del);
+      box.appendChild(row);
+    });
+  }
+  window.__shiftGroups = renderGroups;
+  function setGroupsPanel(open) {
+    document.documentElement.classList.toggle('groups-open', open);
+    if (open) removePanelClasses('groups-open');
+    act('groupspanel|' + (open ? '1' : '0'));
+    if (open) renderGroups({ groups: [], workspaces: [] });
+  }
+  document.getElementById('groupsclose')?.addEventListener('click', () => setGroupsPanel(false));
+
   // ---- 会话面板（F-CEF-26）----
   let sessList = [];
   function renderSessions(list) {
@@ -1992,6 +2064,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     setMenuPanel(false);
     if (item.dataset.panel === 'bmmanage') { setBmManage(true); return; }
     if (item.dataset.panel === 'hist') { setHistPanel(true); return; }
+    if (item.dataset.panel === 'groups') { setGroupsPanel(true); return; }
     if (item.dataset.panel === 'sess') { setSessPanel(true); return; }
     if (item.dataset.panel === 'cert') { setCertPanel(true); return; }
     if (item.dataset.panel === 'us') { setUsPanel(true); return; }
@@ -2078,7 +2151,7 @@ mod tests {
 
     #[test]
     fn panel_registry_has_ten_unique_classes_and_matches_css() {
-        assert_eq!(Panel::ALL.len(), 11);
+        assert_eq!(Panel::ALL.len(), 12);
         let json = panel_classes_json();
         for p in Panel::ALL {
             assert_eq!(json.matches(&format!("\"{}\"", p.class())).count(), 1, "{:?}", p);
@@ -2089,7 +2162,7 @@ mod tests {
 
     #[test]
     fn every_js_setter_uses_registry_not_hand_lists() {
-        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 11);
+        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 12);
         for line in TOOLBAR_HTML.lines().filter(|l| l.contains("classList.remove(")) {
             assert!(line.matches("-open").count() <= 1, "残留手写互斥清单: {line}");
         }

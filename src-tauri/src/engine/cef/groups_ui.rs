@@ -113,7 +113,18 @@ pub fn handle(cmd: &str, arg: &str) -> bool {
         // 接线时替换为：
         //   "groupspanel" => { super::shell::set_groups_panel(arg == "1"); if arg == "1" { super::shell::push_groups(); } true }
         //   "groupsrefresh" => { super::shell::push_groups(); true }
-        "groupspanel" | "groupsrefresh" => {
+        "groupspanel" => {
+            super::shell::set_groups_panel(arg == "1");
+            if arg == "1" {
+                super::shell::push_groups();
+            }
+            true
+        }
+        "groupsrefresh" => {
+            super::shell::push_groups();
+            true
+        }
+        "groupspanel_old" => {
             log::warn!("[cef] {cmd} 待接线：shell.rs 无 set_groups_panel/push_groups（F-CEF-27 先交付后接线）");
             true
         }
