@@ -81,7 +81,7 @@ pub fn initialize(resources_dir: &str, locales_dir: &str, cache_path: &str) -> R
         windowless_rendering_enabled: 0,
         // 不启用 CEF 自己的消息循环线程：由 GTK 主循环 + 定时泵驱动
         multi_threaded_message_loop: 0,
-        external_message_pump: 0,
+        external_message_pump: 1,
         // 调试端口（仅本地排查用；不设环境变量时关闭）
         remote_debugging_port: std::env::var("SHIFT_CEF_DEBUG_PORT")
             .ok()
