@@ -268,20 +268,69 @@ pub fn set_groups_panel(open: bool) {
 }
 
 /// 命令面板（F-CEF-29）开合：与其它面板互斥
-// TODO(F-CEF-29 接线)：palette_ui 交付后由它调用，届时删掉本行 allow。
-#[allow(dead_code)]
 pub fn set_palette_panel(open: bool) {
     set_panel_extra(Panel::Palette, open);
     apply_toolbar_height();
 }
 
 /// 把命令面板候选推给工具栏（F-CEF-29）
-// TODO(F-CEF-29 接线)：palette_ui 交付后由它调用，届时删掉本行 allow。
-#[allow(dead_code)]
 pub(crate) fn push_palette(json: &str) {
     run_toolbar_js(&format!(
         "window.__shiftPalette && window.__shiftPalette({json})"
     ));
+}
+
+/// 命令面板用：标签快照（id / title / url），按标签栏顺序
+pub(crate) fn tabs_snapshot() -> Vec<(String, String, String)> {
+    let t = lock_state(&SHELL_TABS);
+    t.iter()
+        .map(|x| (x.id.clone(), x.title.clone(), x.url.clone()))
+        .collect()
+}
+
+/// 命令面板用：按 tab_id 切到对应标签，返回是否找到
+pub(crate) fn switch_tab_by_id(id: &str) -> bool {
+    let idx = {
+        let t = lock_state(&SHELL_TABS);
+        t.iter().position(|x| x.id == id)
+    };
+    match idx {
+        Some(i) => {
+            switch_tab(i);
+            true
+        }
+        None => false,
+    }
+}
+
+/// 命令面板用：转执行一个已有动作（复用 `handle_action` 唯一实现）
+pub(crate) fn dispatch_action(action: &str) {
+    handle_action(action);
+}
+
+/// 命令面板用：打开页内查找栏
+pub(crate) fn open_find_bar_pub() {
+    open_find_bar();
+}
+
+/// 命令面板用：当前活动标签下标
+pub(crate) fn active_tab_index() -> usize {
+    ACTIVE_TAB.load(Ordering::Relaxed)
+}
+
+/// 恢复最近关闭的标签（Ctrl+Shift+T 与命令面板共用，单一实现）
+pub(crate) fn reopen_last_closed() -> bool {
+    let url = { let mut v = lock_state(&CLOSED_URLS); v.pop() };
+    match url {
+        Some(u) => match new_tab(&u) {
+            Ok(()) => true,
+            Err(e) => {
+                log::error!("[cef] 恢复标签失败: {e}");
+                false
+            }
+        },
+        None => false,
+    }
 }
 
 /// 把分组/工作区列表推给工具栏面板。
@@ -2213,6 +2262,10 @@ fn handle_action(action: &str) {
     if super::downloads_ui::handle(cmd, arg) {
         return;
     }
+    // 命令面板动作（F-CEF-29）
+    if super::palette_ui::handle(cmd, arg) {
+        return;
+    }
     // 用户脚本面板动作（F-CEF-23）
     if super::userscripts_ui::handle(cmd, arg) {
         return;
@@ -3124,12 +3177,7 @@ fn handle_shortcut(
     }
     // Ctrl+Shift+T 恢复最近关闭的标签
     if shift && ev.windows_key_code == 84 {
-        let url = { let mut v = lock_state(&CLOSED_URLS); v.pop() };
-        if let Some(u) = url {
-            if let Err(e) = new_tab(&u) {
-                log::error!("[cef] 恢复标签失败: {e}");
-            }
-        }
+        reopen_last_closed();
         if let Some(flag) = is_shortcut {
             *flag = 1;
         }
