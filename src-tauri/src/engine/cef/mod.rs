@@ -13,6 +13,7 @@
 
 pub mod app;
 pub mod browser;
+pub mod cef_ui;
 pub mod certificates_ui;
 pub mod downloads_ui;
 pub mod groups_ui;
