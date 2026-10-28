@@ -150,86 +150,130 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <title>新标签页</title>
+<meta name="description" content="Shift 新标签页：搜索、常用站点、最近访问与世界导航。">
 <style>
+  /* Hallmark Floor: colours and fonts come from tokens only */
+  :root {
+    --bg: #0e1116;
+    --bg-elev: #171b22;
+    --bg-elev-hover: #1f2530;
+    --border: #262d38;
+    --border-strong: #3a4453;
+    --text: #e6e8eb;
+    --text-dim: #9aa0a6;
+    --text-faint: #6b7482;
+    --accent: #8ab4f8;
+    --accent-strong: #5b8def;
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-pill: 24px;
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-6: 24px;
+    --sp-8: 32px;
+    --font-sans: -apple-system, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  }
   * { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0; height: 100%;
-    background:
-      radial-gradient(circle at 50% -10%, rgba(91,141,239,.13) 0%, transparent 55%),
-      radial-gradient(circle at 50% 0%, #1a212d 0%, #101318 65%);
-    color: #e6e8eb; font-family: -apple-system, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+    overflow-x: clip;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
     display: flex; align-items: center; justify-content: center;
     user-select: none;
   }
   .wrap { width: 720px; max-width: 88vw; text-align: center; }
   .brand {
-    font-size: 34px; font-weight: 600; letter-spacing: 2px;
-    color: #8ab4f8; margin-bottom: 6px;
+    font-size: 32px; font-weight: 600; letter-spacing: 2px;
+    color: var(--accent); margin-bottom: var(--sp-2);
   }
-  .sub { font-size: 13px; color: #7c8593; margin-bottom: 28px; }
+  .sub { font-size: 14px; color: var(--text-dim); margin-bottom: var(--sp-8); }
   .search {
-    display: flex; align-items: center; height: 46px;
-    background: #171b22; border: 1px solid #2f3742; border-radius: 23px;
-    padding: 0 18px; transition: border-color .15s, box-shadow .15s;
+    display: flex; align-items: center; height: 48px;
+    background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    padding: 0 var(--sp-4);
   }
   .search:focus-within {
-    border-color: #5b8def; box-shadow: 0 0 0 3px rgba(91,141,239,.18);
+    border-color: var(--accent-strong);
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 2px;
   }
-  .search svg { width: 17px; height: 17px; stroke: #6b7482; fill: none;
-    stroke-width: 2; stroke-linecap: round; margin-right: 10px; flex: 0 0 auto; }
+  .search svg { width: 16px; height: 16px; stroke: var(--text-faint); fill: none;
+    stroke-width: 2; stroke-linecap: round; margin-right: var(--sp-3); flex: 0 0 auto; }
   #q {
     flex: 1; height: 100%; border: 0; outline: 0; background: transparent;
-    color: #e6e8eb; font-size: 15px;
+    color: var(--text); font-size: 16px;
   }
-  #q::placeholder { color: #5d6674; }
+  #q::placeholder { color: var(--text-faint); }
   .links {
-    display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;
-    margin-top: 30px;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-3);
+    margin-top: var(--sp-8);
   }
   .link {
-    display: flex; align-items: center; gap: 7px;
-    height: 34px; padding: 0 14px; border-radius: 10px;
-    background: #171b22; border: 1px solid #262d38;
-    color: #b9c0cb; font-size: 13px; text-decoration: none;
-    transition: background .15s, border-color .15s, color .15s;
+    display: flex; align-items: center; gap: var(--sp-2);
+    height: 36px; padding: 0 var(--sp-4); border-radius: var(--radius-sm);
+    background: var(--bg-elev); border: 1px solid var(--border);
+    color: var(--text-dim); font-size: 14px; text-decoration: none;
+    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
   }
-  .link:hover { background: #1f2530; border-color: #3a4453; color: #e6e8eb; }
-  .link i { font-style: normal; font-size: 14px; }
-  /* 最近访问（F-CEF-17 配套）：3 列网格 */
+  .link:hover { background: var(--bg-elev-hover); border-color: var(--border-strong); color: var(--text); }
+  .link:active { background: var(--border); }
+  .link:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+  .link[aria-disabled="true"] { opacity: 0.55; pointer-events: none; }
+  .link .favicon { width: 16px; height: 16px; border-radius: 4px; flex: 0 0 auto; }
+  .link .initial {
+    width: 16px; height: 16px; border-radius: 4px; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 600; line-height: 1;
+    background: var(--bg-elev-hover); color: var(--text-dim);
+  }
   .recent {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
-    margin-top: 26px; text-align: left;
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3);
+    margin-top: var(--sp-6); text-align: left;
   }
   .recent-item {
-    display: flex; flex-direction: column; gap: 3px;
-    padding: 10px 12px; border-radius: 10px;
-    background: #171b22; border: 1px solid #262d38; text-decoration: none;
+    display: flex; flex-direction: column; gap: var(--sp-1);
+    padding: var(--sp-3); border-radius: var(--radius-md);
+    background: var(--bg-elev); border: 1px solid var(--border); text-decoration: none;
+    transition: background 120ms ease, border-color 120ms ease;
   }
-  .recent-item:hover { background: #1f2530; border-color: #3a4453; }
+  .recent-item:hover { background: var(--bg-elev-hover); border-color: var(--border-strong); }
+  .recent-item:active { background: var(--border); }
+  .recent-item:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
   .recent-item .r-title {
-    color: #d7dce4; font-size: 13px; overflow: hidden;
+    color: var(--text); font-size: 14px; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap;
   }
   .recent-item .r-url {
-    color: #5d6674; font-size: 11px; overflow: hidden;
+    color: var(--text-faint); font-size: 12px; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap;
   }
-  .hint { margin-top: 26px; font-size: 12px; color: #4d5563; }
-  /* 侧边栏（F-NEWTAB-01）：只放真在用的三个入口 */
+  .hint {
+    margin-top: var(--sp-6); font-size: 12px; color: var(--text-faint);
+    display: flex; gap: var(--sp-4); justify-content: center; flex-wrap: wrap;
+  }
   .sidebar {
-    position: fixed; left: 18px; top: 50%; transform: translateY(-50%);
-    display: flex; flex-direction: column; gap: 10px; z-index: 5;
+    position: fixed; left: var(--sp-4); top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: var(--sp-2); z-index: 5;
   }
   .sb-btn {
-    width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;
-    border-radius: 10px; background: #171b22CC; border: 1px solid #262d38;
-    color: #8b95a5; cursor: pointer; text-decoration: none; padding: 0;
-    transition: background .15s, border-color .15s, color .15s;
+    width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+    border-radius: var(--radius-sm); background: var(--bg-elev); border: 1px solid var(--border);
+    color: var(--text-dim); cursor: pointer; text-decoration: none; padding: 0;
+    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
   }
-  .sb-btn:hover { background: #1f2530; border-color: #3a4453; color: #8ab4f8; }
-  .sb-btn svg { width: 17px; height: 17px; fill: none; stroke: currentColor;
+  .sb-btn:hover { background: var(--bg-elev-hover); border-color: var(--border-strong); color: var(--accent); }
+  .sb-btn:active { background: var(--border); }
+  .sb-btn:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+  .sb-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor;
     stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-  .sb-btn.active { color: #8ab4f8; border-color: #5b8def; }
+  @media (prefers-reduced-motion: reduce) {
+    .link, .recent-item, .sb-btn { transition: none; }
+  }
 </style>
 </head>
 <body>
@@ -248,12 +292,16 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
   <div class="brand">Shift</div>
   <div class="sub">输入网址或搜索词，回车打开</div>
   <div class="search">
-    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
     <input id="q" type="text" spellcheck="false" placeholder="搜索或输入网址" autofocus>
   </div>
   <div class="links" id="links"></div>
   <div class="recent" id="recent"></div>
-  <div class="hint">Ctrl+T 新标签 · Ctrl+W 关闭 · Ctrl+Tab 切换</div>
+  <div class="hint">
+    <span>Ctrl+T 新标签</span>
+    <span>Ctrl+W 关闭</span>
+    <span>Ctrl+Tab 切换</span>
+  </div>
 </div>
 <script>
   // 搜索模板与快捷站点由 Rust 从 settings 注入（F-CEF-17 配套）
@@ -262,15 +310,35 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
   const q = document.getElementById('q');
   const linksEl = document.getElementById('links');
 
+  // 图标：favicon 优先，加载失败降级为站点首字母（不用 emoji 当图标）
+  function hostOf(u) { try { return new URL(u).hostname; } catch (e) { return ''; } }
+  function initialOf(name, url) {
+    var src = (name || hostOf(url) || '?').trim();
+    var span = document.createElement('span');
+    span.className = 'initial';
+    span.textContent = src.charAt(0).toUpperCase();
+    return span;
+  }
   (QUICK_SITES || []).forEach(function (s) {
     var a = document.createElement('a');
     a.className = 'link';
     a.href = s.url;
-    var icon = document.createElement('i');
-    icon.textContent = s.icon || '🔗';
+    var host = hostOf(s.url);
+    if (host) {
+      var img = document.createElement('img');
+      img.className = 'favicon';
+      img.alt = '';
+      img.src = 'https://favicon.im/' + host;
+      img.addEventListener('error', function () {
+        if (img.parentNode) img.replaceWith(initialOf(s.name, s.url));
+      });
+      a.appendChild(img);
+    } else {
+      a.appendChild(initialOf(s.name, s.url));
+    }
     var name = document.createElement('span');
     name.textContent = s.name || s.url;
-    a.append(icon, name);
+    a.appendChild(name);
     linksEl.appendChild(a);
   });
 

@@ -3,62 +3,163 @@
 <head>
 <meta charset="utf-8">
 <title>世界导航</title>
+<meta name="description" content="32 大类 721 个站点的离线导航页，按类别浏览、搜索与收藏。">
 <style>
-  :root { --bg2:rgba(255,255,255,0.05); --bg3:rgba(255,255,255,0.1); --fg:#e0e0e0; --muted:rgba(255,255,255,0.45); --accent:#4a9eff; --border:rgba(255,255,255,0.1); }
-  * { box-sizing:border-box; margin:0; padding:0; }
-  html,body { height:100%; }
-  body { background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%); color:var(--fg); font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; display:flex; flex-direction:column; border-radius:12px; overflow-x:hidden; }
-  .nav-header { display:flex; align-items:center; gap:16px; padding:12px 20px; background:rgba(255,255,255,0.05); border-bottom:1px solid var(--border); flex-shrink:0; }
-  .nav-title { font-size:17px; font-weight:600; white-space:nowrap; }
-  .nav-title a { color:var(--muted); text-decoration:none; font-size:13px; margin-left:10px; }
-  .nav-search { flex:1; max-width:420px; }
-  .nav-search input { width:100%; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:var(--fg); padding:8px 12px; font-size:13px; outline:none; }
-  .nav-search input:focus { border-color:var(--accent); }
-  .layout { flex:1; display:flex; overflow:hidden; }
-  .cat-tabs { width:150px; overflow-y:auto; background:rgba(255,255,255,0.05); border-right:1px solid var(--border); flex-shrink:0; padding:8px 6px; }
-  .cat-tab { display:flex; align-items:center; gap:8px; width:100%; padding:8px 10px; border:none; background:transparent; color:var(--fg); border-radius:8px; cursor:pointer; font-size:13px; text-align:left; margin-bottom:2px; }
-  .cat-tab span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .cat-tab:hover { background:rgba(255,255,255,0.1); }
-  .cat-tab.active { background:var(--accent); color:#fff; }
-  .main { flex:1; overflow-y:auto; padding:18px 22px; }
-  .cat-header { margin-bottom:14px; }
-  .cat-header .ch-icon { font-size:22px; margin-right:8px; }
-  .cat-header .ch-title { font-size:18px; font-weight:600; }
-  .cat-header .ch-desc { color:var(--muted); font-size:12px; margin-top:2px; }
-  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; }
-  .site-card { position:relative; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:14px; cursor:pointer; transition:border-color .12s,background .15s; }
-  .site-card:hover { border-color:var(--accent); background:rgba(255,255,255,0.08); }
-  .sc-icon { font-size:26px; margin-bottom:8px; }
-  .sc-name { font-size:14px; font-weight:600; margin-bottom:3px; }
-  .sc-desc { font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-bottom:8px; }
-  .sc-rating { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
-  .stars { position:relative; display:inline-block; font-size:12px; line-height:1; }
-  .stars-bg { color:rgba(255,255,255,0.2); }
-  .stars-fill { position:absolute; left:0; top:0; color:#f5a623; overflow:hidden; white-space:nowrap; }
-  .rating-num { font-size:12px; color:var(--muted); }
-  .sc-meta { font-size:11px; color:var(--muted); }
-  .sc-star { position:absolute; top:10px; right:10px; border:none; background:transparent; color:var(--muted); font-size:16px; cursor:pointer; }
-  .sc-star:hover { color:#f5a623; }
-  .sc-star.faved { color:#f5a623; }
-  .sc-remove { position:absolute; top:10px; right:34px; border:none; background:transparent; color:var(--muted); font-size:13px; cursor:pointer; display:none; }
-  .site-card:hover .sc-remove { display:block; }
-  .empty { color:var(--muted); text-align:center; padding:60px 0; }
-  .add-fav-btn { margin-bottom:14px; background:rgba(255,255,255,0.1); color:var(--accent); border:1px dashed var(--accent); border-radius:8px; padding:8px 16px; cursor:pointer; font-size:13px; }
-  .modal-mask { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50; align-items:center; justify-content:center; }
-  .modal-mask.show { display:flex; }
-  .modal-box { width:360px; background:#1e2a45; border:1px solid rgba(255,255,255,0.15); border-radius:12px; padding:18px; }
-  .modal-box h3 { font-size:15px; margin-bottom:12px; }
-  .modal-box input { width:100%; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); border-radius:8px; color:var(--fg); padding:8px 10px; font-size:13px; margin-bottom:10px; outline:none; }
-  .modal-box input:focus { border-color:var(--accent); }
-  .modal-actions { display:flex; justify-content:flex-end; gap:8px; }
-  .modal-btn { border:none; border-radius:8px; padding:7px 16px; cursor:pointer; font-size:13px; }
-  .modal-btn.cancel { background:rgba(255,255,255,0.1); color:var(--fg); }
-  .modal-btn.ok { background:var(--accent); color:#fff; }
+  /* Hallmark Floor: tokens only, 4px scale, contrast >= 4.5 */
+  :root {
+    --bg: #12151c;
+    --bg-elev: #1a1f29;
+    --bg-elev-2: #232935;
+    --border: #2a3140;
+    --border-strong: #3a4453;
+    --fg: #e6e8eb;
+    --muted: #9aa0a6;
+    --accent: #4a9eff;
+    --accent-fg: #0b1220;
+    --star: #f5a623;
+    --modal-bg: #1e2a45;
+    --input-bg: #0f1319;
+    --scrim: rgba(0, 0, 0, 0.55);
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 20px;
+    --sp-6: 24px;
+    --r-sm: 8px;
+    --r-md: 12px;
+    --font-sans: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow-x: clip; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 14px/1.5 var(--font-sans);
+    display: flex; flex-direction: column;
+    border-radius: var(--r-md);
+  }
+  .nav-header {
+    display: flex; align-items: center; gap: var(--sp-4);
+    padding: var(--sp-3) var(--sp-5);
+    background: var(--bg-elev); border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .nav-title { font-size: 17px; font-weight: 600; white-space: nowrap; }
+  .nav-title a {
+    color: var(--muted); text-decoration: none; font-size: 13px;
+    margin-left: var(--sp-3);
+  }
+  .nav-title a:hover { color: var(--fg); }
+  .nav-title a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .nav-search { flex: 1; max-width: 420px; }
+  .nav-search input {
+    width: 100%; background: var(--input-bg); border: 1px solid var(--border);
+    border-radius: var(--r-sm); color: var(--fg);
+    padding: var(--sp-2) var(--sp-3); font-size: 14px; outline: none;
+  }
+  .nav-search input:focus-visible { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
+  .layout { flex: 1; display: flex; overflow: hidden; }
+  .cat-tabs {
+    width: 160px; overflow-y: auto; background: var(--bg-elev);
+    border-right: 1px solid var(--border); flex-shrink: 0; padding: var(--sp-2);
+  }
+  .cat-tab {
+    display: flex; align-items: center; gap: var(--sp-2); width: 100%;
+    padding: var(--sp-2) var(--sp-3); border: none; background: transparent;
+    color: var(--fg); border-radius: var(--r-sm); cursor: pointer;
+    font-size: 13px; text-align: left; margin-bottom: var(--sp-1);
+    transition: background 120ms ease;
+  }
+  .cat-tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cat-tab:hover { background: var(--bg-elev-2); }
+  .cat-tab:active { background: var(--border); }
+  .cat-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .cat-tab.active { background: var(--accent); color: var(--accent-fg); }
+  .main { flex: 1; overflow-y: auto; padding: var(--sp-5) var(--sp-6); }
+  .cat-header { margin-bottom: var(--sp-4); }
+  .cat-header .ch-icon { font-size: 20px; margin-right: var(--sp-2); }
+  .cat-header .ch-title { font-size: 18px; font-weight: 600; }
+  .cat-header .ch-desc { color: var(--muted); font-size: 13px; margin-top: var(--sp-1); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-3); }
+  .site-card {
+    position: relative; background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border);
+    border-radius: var(--r-md); padding: var(--sp-4); cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  .site-card:hover { border-color: var(--accent); background: var(--bg-elev-2); }
+  .site-card:active { background: var(--border); }
+  .site-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sc-icon { font-size: 24px; margin-bottom: var(--sp-2); }
+  .sc-name { font-size: 14px; font-weight: 600; margin-bottom: var(--sp-1); }
+  .sc-desc {
+    font-size: 12px; color: var(--muted); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; margin-bottom: var(--sp-2);
+  }
+  .sc-rating { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-1); }
+  .stars { position: relative; display: inline-block; font-size: 12px; line-height: 1; }
+  .stars-bg { color: var(--border-strong); }
+  .stars-fill { position: absolute; left: 0; top: 0; color: var(--star); overflow: hidden; white-space: nowrap; }
+  .rating-num { font-size: 12px; color: var(--muted); }
+  .sc-meta { font-size: 12px; color: var(--muted); }
+  .sc-star {
+    position: absolute; top: var(--sp-2); right: var(--sp-2);
+    border: none; background: transparent; color: var(--muted);
+    font-size: 16px; cursor: pointer; padding: var(--sp-1);
+  }
+  .sc-star:hover { color: var(--star); }
+  .sc-star:active { transform: scale(0.92); }
+  .sc-star:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sc-star.faved { color: var(--star); }
+  .sc-remove {
+    position: absolute; top: var(--sp-2); right: var(--sp-6);
+    border: none; background: transparent; color: var(--muted);
+    font-size: 13px; cursor: pointer; display: none; padding: var(--sp-1);
+  }
+  .site-card:hover .sc-remove { display: block; }
+  .empty { color: var(--muted); text-align: center; padding: var(--sp-8) 0; }
+  .add-fav-btn {
+    margin-bottom: var(--sp-4); background: var(--bg-elev-2); color: var(--accent);
+    border: 1px dashed var(--accent); border-radius: var(--r-sm);
+    padding: var(--sp-2) var(--sp-4); cursor: pointer; font-size: 13px;
+  }
+  .add-fav-btn:active { background: var(--border); }
+  .add-fav-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .modal-mask {
+    display: none; position: fixed; inset: 0; background: var(--scrim);
+    z-index: 50; align-items: center; justify-content: center;
+  }
+  .modal-mask.show { display: flex; }
+  .modal-box {
+    width: 360px; background: var(--modal-bg); border: 1px solid var(--border-strong);
+    border-radius: var(--r-md); padding: var(--sp-5);
+  }
+  .modal-box h3 { font-size: 15px; margin-bottom: var(--sp-3); }
+  .modal-box input {
+    width: 100%; background: var(--input-bg); border: 1px solid var(--border);
+    border-radius: var(--r-sm); color: var(--fg);
+    padding: var(--sp-2) var(--sp-3); font-size: 14px;
+    margin-bottom: var(--sp-3); outline: none;
+  }
+  .modal-box input:focus-visible { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+  .modal-btn {
+    border: none; border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-4);
+    cursor: pointer; font-size: 13px;
+  }
+  .modal-btn.cancel { background: var(--bg-elev-2); color: var(--fg); }
+  .modal-btn.cancel:active { background: var(--border); }
+  .modal-btn.ok { background: var(--accent); color: var(--accent-fg); }
+  .modal-btn.ok:active { background: var(--accent-strong, var(--accent)); }
+  .modal-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .modal-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+  @media (prefers-reduced-motion: reduce) {
+    .cat-tab, .site-card { transition: none; }
+  }
 </style>
 </head>
 <body>
   <div class="nav-header">
-    <div class="nav-title">🌐 世界导航 <a href="index.html">← 返回新标签页</a></div>
+    <div class="nav-title">世界导航 <a href="index.html">返回新标签页</a></div>
     <div class="nav-search"><input id="searchInput" placeholder="搜索 721 个网站（名称 / 描述 / 域名）" autocomplete="off" spellcheck="false"></div>
   </div>
   <div class="layout">
@@ -70,7 +171,7 @@
       <h3>添加收藏</h3>
       <input id="favName" placeholder="名称（如：永济政府网）">
       <input id="favUrl" placeholder="网址（https://...）">
-      <input id="favIcon" placeholder="图标 emoji（可选，默认 ⭐）">
+      <input id="favIcon" placeholder="图标（可选）">
       <div class="modal-actions">
         <button class="modal-btn cancel" id="favCancel">取消</button>
         <button class="modal-btn ok" id="favOk">添加</button>
