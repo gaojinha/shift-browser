@@ -112,12 +112,19 @@ where
         // 接收端已放弃等待时丢弃结果（通道 Send 错误静默）。
         let _ = tx.send(r);
     }));
-    match rx.recv() {
+    // 超时兜底：CEF UI 线程若被 CEF 内部长时间占用，无限 recv 会让调用方
+    // （通常是 GTK 主线程）永久卡死，表面就是整窗「无响应」。
+    match rx.recv_timeout(std::time::Duration::from_secs(10)) {
         Ok(r) => r,
         // 所有发送端被 drop 且未回传 = post 未入队（CEF 未初始化/已销毁）。
         // 正常运行不走到这里；走到即调用方在 CEF 就绪前误用（编程错误）。
         // f 已移入投递闭包无法原地降级执行，只能显式失败。
-        Err(_) => panic!("cef_ui_call: 任务未被 CEF UI 线程执行（CEF 未初始化或已销毁）"),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            panic!("cef_ui_call: 等 CEF UI 线程超过 10s（线程被占用或已死锁）")
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("cef_ui_call: 任务未被 CEF UI 线程执行（CEF 未初始化或已销毁）")
+        }
     }
 }
 

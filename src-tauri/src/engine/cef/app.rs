@@ -176,17 +176,15 @@ wrap_app! {
             // （试过 `--use-gl=egl`：窗口正常但 WebGL 仍 null，缺 ANGLE 的 GL 前端库；
             //   要拿到与真 Chrome 完全相同的 renderer 字符串，需补 libEGL.so/libGLESv2.so
             //   后改 `--use-angle=gl`，见指纹报告 §8。）
+            // 2026-10-28 实测：Vulkan 后端在本机（Mesa/驱动组合）初始化失败——
+            // stdio.log 里 `Internal Vulkan error (-3)` + `EGL_NOT_INITIALIZED` +
+            // `GLDisplayEGL::Initialize failed`，随后导航到真实网站整窗卡死
+            // （GNOME 报「无响应」，退出码 137 = 用户强制退出）。
+            // 改用 ANGLE 自带的 SwiftShader 纯软件光栅：不依赖系统 GL/Vulkan，
+            // 代价是 WebGL 走 CPU（速度慢，但可用且稳定）。
             cmd.append_switch_with_value(
                 Some(&CefString::from("use-angle")),
-                Some(&CefString::from("vulkan")),
-            );
-            cmd.append_switch_with_value(
-                Some(&CefString::from("use-vulkan")),
                 Some(&CefString::from("swiftshader")),
-            );
-            cmd.append_switch_with_value(
-                Some(&CefString::from("enable-features")),
-                Some(&CefString::from("Vulkan")),
             );
 
             // 给 X11 窗口一个 WM_CLASS：Mutter 对没有 WM_CLASS 的窗口会当成
@@ -195,7 +193,7 @@ wrap_app! {
                 Some(&CefString::from("class")),
                 Some(&CefString::from("Shift")),
             );
-            log::info!("[cef] 命令行已追加 --ozone-platform=x11 + Vulkan/SwiftShader（试修 WebGL）");
+            log::info!("[cef] 命令行已追加 --ozone-platform=x11 + ANGLE SwiftShader（软件光栅）");
         }
     }
 }

@@ -444,6 +444,16 @@ pub(crate) fn lock_state<T>(m: &'static Mutex<T>) -> MutexGuard<'static, T> {
 /// （否则 glib 报 "default main context already acquired by another thread" panic）。
 /// `MainContext::invoke` 线程安全：已在主线程则原地执行，否则投递。
 pub(crate) fn gtk_ui(f: impl FnOnce() + Send + 'static) {
+    // `invoke` 线程安全（任意线程可调），但**会阻塞到 GTK 主线程执行完**。
+    //
+    // 约束（2026-10-28 两次踩坑后定）：
+    // 1. 只能从 tokio / 后台线程调（`set_bookmarks`、下载终态推送等）——
+    //    GTK 主线程不会反过来等这些线程，安全。
+    // 2. **CEF UI 线程禁止调**：GTK 主线程可能正阻塞在 `cef_ui_call` 等 CEF UI，
+    //    互等即死锁（整窗「无响应」）。CEF 回调里的延迟逻辑改用独立线程。
+    // 3. 不能用 `spawn_local` 替代——它只允许 MainContext 所属线程调用，
+    //    从 tokio 线程调会 panic（"Spawning local futures only allowed on the
+    //    thread owning the MainContext"），这是今晚卡死的直接原因。
     gtk::glib::MainContext::default().invoke(f);
 }
 
@@ -970,11 +980,11 @@ wrap_window_delegate! {
             // 单窗口模式：窗口关了就退出整个进程，不留后台（2026-10-27 实测
             // 关窗后主进程仍挂着 5 分钟）。延迟到下一轮主循环，避免在 CEF
             // 销毁回调栈里直接 exit 触发重入。
-            gtk_ui(|| {
-                gtk::glib::idle_add_local_once(|| {
-                    log::info!("[cef] 窗口已关闭，退出进程");
-                    std::process::exit(0);
-                });
+            // 延迟退出：独立线程 + sleep（CEF UI 线程不能同步投递 GTK 主线程）
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                log::info!("[cef] 窗口已关闭，退出进程");
+                std::process::exit(0);
             });
         }
 
@@ -1859,19 +1869,21 @@ fn close_tab(idx: usize) {
     // 关闭期间置标志，让 WindowDelegate::can_close 拦下 CEF 顺带的关窗请求；
     // close_browser 是异步的，200ms 后（且它已经发完关窗请求）再复位。
     TAB_CLOSING.store(true, Ordering::Relaxed);
-    gtk_ui(|| {
-        gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(200), || {
-            TAB_CLOSING.store(false, Ordering::Relaxed);
-        });
+    // 200ms 后复位：独立线程 + sleep，不碰 GTK 主线程
+    // （本函数在 CEF UI 线程执行，走 gtk_ui 会与 GTK 主线程互等）。
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        TAB_CLOSING.store(false, Ordering::Relaxed);
     });
-    { let m = lock_state(browsers()); {
-        if let Some(b) = m.get(&id) {
-            if let Some(h) = b.host() {
-                log::info!("[cef] 关闭标签 {id}：close_browser(0)");
-                h.close_browser(0);
-            }
-        }
-    } };
+    // 锁内只取 host；close_browser 在锁外调（CEF 调用可能触发回调再拿锁）
+    let host = {
+        let m = lock_state(browsers());
+        m.get(&id).and_then(|b| b.host())
+    };
+    if let Some(h) = host {
+        log::info!("[cef] 关闭标签 {id}：close_browser(0)");
+        h.close_browser(0);
+    }
     // 不调 remove_child_view：2026-10-26 实测它会把整个窗口一起销毁
     // （点 × 后 8 个进程还在但窗口消失）。改为只隐藏，视图随 browser 关闭由 CEF 回收；
     // 代价是短时间内留一个不可见视图，先保证不崩，M2 迭代里再找安全的移除时机。
@@ -2215,17 +2227,19 @@ pub fn refresh_tabbar() {
         "if (window.__shiftTabs) {{ window.__shiftTabs({}, {}); }}",
         list_json, active
     );
-    { let m = lock_state(browsers()); {
-        if let Some(b) = m.get(TOOLBAR_ID) {
-            if let Some(frame) = b.main_frame() {
-                frame.execute_java_script(
-                    Some(&CefString::from(code.as_str())),
-                    Some(&CefString::from("shift://tabs")),
-                    -1,
-                );
-            }
-        }
-    } };
+    // 锁内只取句柄；CEF 调用在锁外——execute_java_script 可能同步触发
+    // console 回调 → handle_action → run_toolbar_js → 再拿同一把锁 = 自死锁。
+    let frame = {
+        let m = lock_state(browsers());
+        m.get(TOOLBAR_ID).and_then(|b| b.main_frame())
+    };
+    if let Some(frame) = frame {
+        frame.execute_java_script(
+            Some(&CefString::from(code.as_str())),
+            Some(&CefString::from("shift://tabs")),
+            -1,
+        );
+    }
 }
 
 // ---- 缩放（F-CEF-18）----
@@ -2363,15 +2377,19 @@ fn handle_action(action: &str) {
         None => (action, ""),
     };
 
-    // F-CEF-31：导航到附件 URL 时提前分流到 start_download。
-    // 必须在下面 `lock_state(browsers())` 之前拦——那里持锁调 navigate 会自死锁。
+    // 导航一律走 `navigate()`（锁外）：
+    // 原来在下面 `lock_state(browsers())` 作用域内直接 `frame.load_url`，
+    // 而 load_url 会同步触发 `on_loading_state_change` → `run_toolbar_js`
+    // → 再拿同一把锁 = 同线程自死锁（整窗「无响应」，2026-10-28 抓栈确认）。
+    // 附件 URL 的分流也在这里一起做（F-CEF-31）。
     if cmd == "nav" {
         let url = normalize_url(arg);
-        if !url.is_empty() && looks_like_attachment(&url) {
-            log::info!("[cef] 工具栏导航(附件) -> {url}");
+        if !url.is_empty() {
+            log::info!("[cef] 工具栏导航 -> {url}");
             navigate(&url);
             return;
         }
+        return;
     }
 
     // 密码面板动作（F-CEF-12）
@@ -2716,17 +2734,7 @@ fn handle_action(action: &str) {
             return;
         };
         match cmd {
-            "nav" => {
-                let url = normalize_url(arg);
-                if url.is_empty() {
-                    return;
-                }
-                log::info!("[cef] 工具栏导航 -> {url}");
-                let Some(frame) = browser.main_frame() else {
-                    return;
-                };
-                frame.load_url(Some(&CefString::from(url.as_str())));
-            }
+            // "nav" 已在 handle_action 入口统一处理（走 navigate，锁外）
             "back" => browser.go_back(),
             "forward" => browser.go_forward(),
             "reload" => browser.reload(),
