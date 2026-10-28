@@ -792,7 +792,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 2.0.119",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -2530,7 +2530,19 @@ dependencies = [
  "html5ever 0.26.0",
  "markup5ever 0.11.0",
  "tendril 0.4.3",
- "xml5ever",
+ "xml5ever 0.17.0",
+]
+
+[[package]]
+name = "markup5ever_rcdom"
+version = "0.39.0+unofficial"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ac010f19d6c4af81eeb4018a39d7a115de9d285af45c126a4ac02e6fc5716b7"
+dependencies = [
+ "html5ever 0.39.0",
+ "markup5ever 0.39.0",
+ "tendril 0.5.1",
+ "xml5ever 0.39.0",
 ]
 
 [[package]]
@@ -3617,7 +3629,7 @@ checksum = "e56596e20a6d3cf715182d9b6829220621e6e985cec04d00410cee29821b4220"
 dependencies = [
  "html5ever 0.26.0",
  "lazy_static",
- "markup5ever_rcdom",
+ "markup5ever_rcdom 0.2.0",
  "regex",
  "url",
 ]
@@ -4220,7 +4232,7 @@ dependencies = [
  "ksni",
  "libc",
  "log",
- "markup5ever_rcdom",
+ "markup5ever_rcdom 0.39.0+unofficial",
  "pbkdf2",
  "rand 0.8.8",
  "readability",
@@ -4506,6 +4518,7 @@ dependencies = [
  "parking_lot",
  "phf_shared 0.13.1",
  "precomputed-hash",
+ "serde",
 ]
 
 [[package]]
@@ -5019,7 +5032,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -6519,6 +6532,16 @@ dependencies = [
  "log",
  "mac",
  "markup5ever 0.11.0",
+]
+
+[[package]]
+name = "xml5ever"
+version = "0.39.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ab627f34ff61b80d756180d556f9c68801d836d271b3b8c094504ceca69d221"
+dependencies = [
+ "log",
+ "markup5ever 0.39.0",
 ]
 
 [[package]]
