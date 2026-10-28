@@ -1152,6 +1152,39 @@ wrap_life_span_handler! {
     }
 
     impl LifeSpanHandler {
+        /// 拦截弹窗（F-CEF-36）：任何 `window.open` 都改在当前标签打开。
+        ///
+        /// **不实现的后果**（2026-10-28 实测）：CEF 会尝试创建一个新窗口，
+        /// 但本项目只有单栈窗口的 `WindowDelegate`，没有对应的窗口创建路径，
+        /// CEF 内部直接 abort —— 日志实录 `[crash] FATAL SIGABRT`，
+        /// 用户侧表现为「点一下就崩」。
+        fn on_before_popup(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _popup_id: ::std::os::raw::c_int,
+            target_url: Option<&CefString>,
+            _target_frame_name: Option<&CefString>,
+            _disposition: WindowOpenDisposition,
+            _user_gesture: ::std::os::raw::c_int,
+            _popup_features: Option<&PopupFeatures>,
+            _window_info: Option<&mut WindowInfo>,
+            _client: Option<&mut Option<Client>>,
+            _settings: Option<&mut BrowserSettings>,
+            _extra_info: Option<&mut Option<DictionaryValue>>,
+            _no_javascript_access: Option<&mut ::std::os::raw::c_int>,
+        ) -> ::std::os::raw::c_int {
+            if let Some(u) = target_url {
+                let url = u.to_string();
+                if !url.is_empty() {
+                    log::info!("[cef] 拦截弹窗 -> 当前标签打开: {url}");
+                    navigate(&url);
+                }
+            }
+            // 1 = 阻止默认弹窗行为
+            1
+        }
+
         fn on_after_created(&self, browser: Option<&mut Browser>) {
             let Some(b) = browser else { return };
             if let Some(h) = b.host() {
