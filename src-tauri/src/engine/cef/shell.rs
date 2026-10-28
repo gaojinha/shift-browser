@@ -318,6 +318,18 @@ pub(crate) fn active_tab_index() -> usize {
     ACTIVE_TAB.load(Ordering::Relaxed)
 }
 
+/// 会话恢复用：按 URL 列表依次开标签，返回成功数（F-CEF-32）
+pub(crate) fn open_tabs(urls: &[String]) -> usize {
+    let mut n = 0;
+    for u in urls {
+        match new_tab(u) {
+            Ok(()) => n += 1,
+            Err(e) => log::warn!("[cef] 恢复会话开标签失败 {u}: {e}"),
+        }
+    }
+    n
+}
+
 /// 恢复最近关闭的标签（Ctrl+Shift+T 与命令面板共用，单一实现）
 pub(crate) fn reopen_last_closed() -> bool {
     let url = { let mut v = lock_state(&CLOSED_URLS); v.pop() };

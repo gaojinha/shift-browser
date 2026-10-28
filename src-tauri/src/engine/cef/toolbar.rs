@@ -435,6 +435,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   .sess-row .s-time { flex: 1; color: #9aa0a6; }
   .sess-row .s-count { flex: 0 0 70px; color: #9aa0a6; }
   .sess-row .s-del { flex: 0 0 auto; color: #f28b82; padding: 0 8px; }
+  .sess-row .s-restore { flex: 0 0 auto; color: #8ab4f8; padding: 0 8px; }
   .sess-empty { color: #9aa0a6; padding: 12px 6px; }
   /* 证书面板（F-CEF-21） */
   html.cert-open, html.cert-open body { height: 100vh; }
@@ -1971,6 +1972,13 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       const count = document.createElement('span');
       count.className = 's-count';
       count.textContent = (s.tab_count != null ? s.tab_count : '?') + ' 个标签';
+      const restore = document.createElement('span');
+      restore.className = 's-restore';
+      restore.textContent = '恢复';
+      restore.addEventListener('click', () => {
+        act('sessrestore|' + s.id);
+        setSessPanel(false);
+      });
       const del = document.createElement('span');
       del.className = 's-del';
       del.textContent = '删除';
@@ -1985,7 +1993,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
           setTimeout(() => { del.dataset.armed = ''; del.textContent = '删除'; }, 3000);
         }
       });
-      row.append(name, time, count, del);
+      row.append(name, time, count, restore, del);
       box.appendChild(row);
     });
   }

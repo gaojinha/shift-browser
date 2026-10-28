@@ -87,9 +87,49 @@ pub fn handle(cmd: &str, arg: &str) -> bool {
             };
             true
         }
-        // restore：需主应用 TabManager，CEF 侧先不做（卡面明确留 TODO）
+        "sessrestore" => {
+            match parse_id(arg) {
+                Some(id) => restore_session(id),
+                None => log::warn!("[cef] sessrestore 参数无效: {arg}（应为 <id>）"),
+            };
+            true
+        }
         _ => false,
     }
+}
+
+/// 恢复会话：读出 `data` 里的 URL 列表，逐个开标签（F-CEF-32）。
+fn restore_session(id: i64) {
+    let Some(app) = APP.get() else { return };
+    let Some(db) = app.try_state::<crate::db::Db>() else { return };
+    let rows = match tauri::async_runtime::block_on(crate::db::sessions::list_sessions_inner(
+        &db.pool,
+    )) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("[cef] 恢复会话查库失败: {e}");
+            return;
+        }
+    };
+    let Some(s) = rows.into_iter().find(|x| x.id == id) else {
+        log::warn!("[cef] 恢复会话：id={id} 不存在");
+        return;
+    };
+    let urls: Vec<String> = serde_json::from_str::<Vec<serde_json::Value>>(&s.data)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|v| {
+            v.get("url")
+                .and_then(|u| u.as_str())
+                .map(|x| x.to_string())
+        })
+        .collect();
+    if urls.is_empty() {
+        log::warn!("[cef] 恢复会话 {id}：data 里没有可恢复的 URL");
+        return;
+    }
+    let n = super::shell::open_tabs(&urls);
+    log::info!("[cef] 已恢复会话 {id}：{n}/{} 个标签", urls.len());
 }
 
 fn delete_session(id: i64) {
