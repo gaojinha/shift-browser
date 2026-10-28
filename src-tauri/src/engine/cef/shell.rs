@@ -2534,6 +2534,32 @@ fn handle_action_inner(action: &str) {
         return;
     }
 
+    // 其余导航类动作（back/forward/reload/stop）同样必须在锁外调：
+    // 它们会同步触发 CEF 回调（on_loading_state_change 等）→ 回调里再拿
+    // `browsers()` 锁 = 同线程自死锁。2026-10-28 实测「一刷新就整窗无响应」。
+    if matches!(cmd, "back" | "forward" | "reload" | "stop") {
+        let active_id = {
+            let t = lock_state(&SHELL_TABS);
+            let i = ACTIVE_TAB.load(Ordering::Relaxed);
+            t.get(i).map(|x| x.id.clone())
+        };
+        let Some(active_id) = active_id else { return };
+        let browser = {
+            let m = lock_state(browsers());
+            m.get(&active_id).cloned()
+        };
+        let Some(browser) = browser else { return };
+        match cmd {
+            "back" => browser.go_back(),
+            "forward" => browser.go_forward(),
+            "reload" => browser.reload(),
+            "stop" => browser.stop_load(),
+            _ => unreachable!(),
+        }
+        log::info!("[cef] 导航动作 {cmd} 已执行（锁外）");
+        return;
+    }
+
     // 密码面板动作（F-CEF-12）
     if super::passwords_ui::handle(cmd, arg) {
         return;
@@ -2876,21 +2902,17 @@ fn handle_action_inner(action: &str) {
 
     { let m = lock_state(browsers()); {
         let map = m;
-        let Some(browser) = map.get(&active_id) else {
+        // 到这里只剩未实现的工具栏动作（nav/back/forward/reload/stop 都已在
+        // handle_action 入口按锁外处理，见上）。这里不再调任何 CEF 方法，
+        // 避免「持锁调 CEF → 同步回调再拿同一把锁」的自死锁。
+        if !map.contains_key(&active_id) {
             log::warn!(
                 "[cef] BROWSERS 查不到 active_id={active_id}，现有 key={:?}",
                 map.keys().collect::<Vec<_>>()
             );
             return;
-        };
-        match cmd {
-            // "nav" 已在 handle_action 入口统一处理（走 navigate，锁外）
-            "back" => browser.go_back(),
-            "forward" => browser.go_forward(),
-            "reload" => browser.reload(),
-            "stop" => browser.stop_load(),
-            other => log::warn!("[cef] 未知工具栏动作: {other}"),
         }
+        log::warn!("[cef] 未知工具栏动作: {cmd}");
     } };
 }
 
