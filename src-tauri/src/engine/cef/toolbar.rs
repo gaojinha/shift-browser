@@ -109,6 +109,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   .tab.active { background: #35363a; color: #e8eaed; }
   /* 固定标签（F-CEF-30）：只露图标、隐藏标题与关闭按钮 */
   .tab.pinned { min-width: 40px; max-width: 40px; padding: 0; justify-content: center; gap: 0; }
+  .tab.dragging { opacity: 0.4; }
+  .tab.drop-target { background: #3c4043; }
   .tab.pinned .t-title, .tab.pinned .t-close { display: none; }
   .tab .t-pin, .tab .t-mute { font-size: 11px; line-height: 1; }
   .tab .t-pin { display: none; }
@@ -947,6 +949,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   const tabs = document.getElementById('tabs');
 
   let tabData = [];
+  let dragFrom = null;
   window.__shiftTabs = function (tabs_, active) {
     if (!Array.isArray(tabs_)) return;
     tabData = tabs_;
@@ -973,6 +976,27 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       el.appendChild(mute);
       el.appendChild(title);
       el.appendChild(close);
+      el.draggable = true;
+      el.addEventListener('dragstart', (e) => {
+        dragFrom = i;
+        el.classList.add('dragging');
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+      });
+      el.addEventListener('dragend', () => {
+        el.classList.remove('dragging');
+        document.querySelectorAll('#tabbar .tab.drop-target').forEach((x) => x.classList.remove('drop-target'));
+      });
+      el.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (dragFrom !== null && dragFrom !== i) el.classList.add('drop-target');
+      });
+      el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
+      el.addEventListener('drop', (e) => {
+        e.preventDefault();
+        el.classList.remove('drop-target');
+        if (dragFrom !== null && dragFrom !== i) act('tabmove|' + dragFrom + ',' + i);
+        dragFrom = null;
+      });
       el.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         e.stopPropagation();

@@ -1729,6 +1729,34 @@ fn switch_tab(idx: usize) {
 }
 
 /// 关闭标签（至少保留一个；关闭后切到相邻标签）
+/// 拖动重排标签（F-CEF-33）：把 from 位置的标签移到 to 位置，活动索引跟随。
+fn move_tab(from: usize, to: usize) {
+    {
+        let mut tabs = lock_state(&SHELL_TABS);
+        if from >= tabs.len() || to >= tabs.len() || from == to {
+            return;
+        }
+        let tab = tabs.remove(from);
+        tabs.insert(to, tab);
+    }
+    // 活动索引跟随被移动/被顶开的标签：
+    // 移动的就是活动标签 → 跟着到新位置；
+    // 移动区间跨过活动标签 → 活动索引反向挪一格。
+    let active = ACTIVE_TAB.load(Ordering::Relaxed);
+    let new_active = if active == from {
+        to
+    } else if from < active && to >= active {
+        active - 1
+    } else if from > active && to <= active {
+        active + 1
+    } else {
+        active
+    };
+    ACTIVE_TAB.store(new_active, Ordering::Relaxed);
+    log::info!("[cef] 标签重排 {from} -> {to}（活动 {active} -> {new_active}）");
+    refresh_tabbar();
+}
+
 /// 固定/取消固定标签（F-CEF-30）。
 ///
 /// 只做视觉标记与关闭按钮隐藏，**不改排序**：标签表顺序即 idx，挪动会牵连
@@ -2522,6 +2550,14 @@ fn handle_action(action: &str) {
         "tabmute" => {
             if let Ok(idx) = arg.parse::<usize>() {
                 toggle_tab_mute(idx);
+            }
+            return;
+        }
+        "tabmove" => {
+            if let Some((f, t)) = arg.split_once(',') {
+                if let (Ok(f), Ok(t)) = (f.parse::<usize>(), t.parse::<usize>()) {
+                    move_tab(f, t);
+                }
             }
             return;
         }
