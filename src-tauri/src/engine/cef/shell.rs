@@ -1342,6 +1342,83 @@ fn escape_like(s: &str) -> String {
         .replace('_', "\\_")
 }
 
+/// 解析世界导航收藏命令（F-NEWTAB-03 P1）。
+///
+/// 负载是 JSON：`{"op":"add"|"del","name":"...","url":"..."}`。
+/// URL 只放行 http/https，名称限 64 字符；非法一律 None。
+fn parse_fav_command(body: &str) -> Option<(bool, String, String)> {
+    let v: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
+    let op = v.get("op")?.as_str()?;
+    let url = v.get("url")?.as_str()?.trim().to_string();
+    if !crate::newtab::quick_sites::is_safe_web_url(&url) {
+        return None;
+    }
+    let name = v
+        .get("name")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if name.is_empty() || name.chars().count() > 64 {
+        return None;
+    }
+    match op {
+        "add" => Some((true, name, url)),
+        "del" => Some((false, name, url)),
+        _ => None,
+    }
+}
+
+/// 在快捷站点数组上增删（纯函数）：add 去重后插到最前，上限 12；del 按 URL 移除。
+fn apply_fav(sites: &mut Vec<serde_json::Value>, add: bool, name: &str, url: &str) {
+    sites.retain(|s| {
+        s.get("url").and_then(|u| u.as_str()).map(str::trim) != Some(url)
+    });
+    if add {
+        sites.insert(
+            0,
+            serde_json::json!({"icon": "\u{2605}", "name": name, "url": url}),
+        );
+        sites.truncate(12);
+    }
+}
+
+/// 执行收藏命令：读 quick_sites → 增删 → 复用 save_quick_sites_inner 做规范化/落库。
+fn handle_fav_command(body: &str) -> bool {
+    let Some((add, name, url)) = parse_fav_command(body) else {
+        return false;
+    };
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return false;
+    };
+    let log_url = url.clone();
+    let res = tauri::async_runtime::block_on(async move {
+        let current: Option<String> =
+            sqlx::query_scalar("SELECT value FROM settings WHERE key = 'quick_sites'")
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten();
+        let mut sites: Vec<serde_json::Value> = current
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default();
+        apply_fav(&mut sites, add, &name, &url);
+        crate::newtab::save_quick_sites_inner(&pool, sites)
+            .await
+            .map_err(|e| e.to_string())
+    });
+    match res {
+        Ok(()) => {
+            log::info!("[cef] 收藏已同步快捷站点: add={add} {log_url}");
+            true
+        }
+        Err(e) => {
+            log::warn!("[cef] 收藏同步失败: {e}");
+            false
+        }
+    }
+}
+
 /// 地址栏下拉建议（F-CEF-17）：历史 + 书签各取 8 条，按 URL 去重（书签优先）。
 ///
 /// 查询在 tokio 线程，结果切回主线程推给工具栏页面。
@@ -1711,12 +1788,28 @@ wrap_display_handler! {
             _browser: Option<&mut Browser>,
             _level: LogSeverity,
             message: Option<&CefString>,
-            _source: Option<&CefString>,
+            source: Option<&CefString>,
             _line: std::os::raw::c_int,
         ) -> i32 {
             let Some(msg) = message else { return 0 };
             let text = msg.to_string();
             let trimmed = text.trim();
+
+            // 世界导航收藏 → 宿主（F-NEWTAB-03 P1）：只接受 world-nav.html 来源。
+            // 收藏写入 quick_sites，启动页下次生成时自然出现在快捷区。
+            if let Some(body) = trimmed.strip_prefix("SHIFT_FAV:") {
+                let from_worldnav = source
+                    .map(|s| s.to_string().contains("world-nav.html"))
+                    .unwrap_or(false);
+                if from_worldnav {
+                    if !handle_fav_command(body) {
+                        log::warn!("[cef] 收藏命令无效或写库失败: {body}");
+                    }
+                } else {
+                    log::warn!("[cef] 拒绝非世界导航来源的收藏写入");
+                }
+                return 1;
+            }
 
             // 启动页（内容页）→ 宿主动作通道（F-NEWTAB-01）：
             // 内容页不能直接调工具栏 JS，统一走 console 前缀，与 SHIFT_ACT 同机制。
@@ -4034,5 +4127,62 @@ mod lock_tests {
     fn lock_state_reentry_panics_instead_of_deadlock() {
         let _g1 = lock_state(&T_LOCK_A);
         let _g2 = lock_state(&T_LOCK_A); // 同一线程二次申请 → 应 panic
+    }
+}
+
+#[cfg(test)]
+mod fav_tests {
+    use super::{apply_fav, parse_fav_command};
+
+    #[test]
+    fn parse_accepts_add_and_del() {
+        assert_eq!(
+            parse_fav_command(r#"{"op":"add","name":"知乎","url":"https://www.zhihu.com"}"#),
+            Some((true, "知乎".to_string(), "https://www.zhihu.com".to_string()))
+        );
+        assert_eq!(
+            parse_fav_command(r#"{"op":"del","name":"知乎","url":"https://www.zhihu.com"}"#),
+            Some((false, "知乎".to_string(), "https://www.zhihu.com".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_rejects_bad_input() {
+        // 危险 scheme
+        assert!(parse_fav_command(r#"{"op":"add","name":"x","url":"javascript:alert(1)"}"#).is_none());
+        // 缺名称
+        assert!(parse_fav_command(r#"{"op":"add","name":"","url":"https://a.com"}"#).is_none());
+        // 名称超长
+        let long = "名".repeat(65);
+        assert!(parse_fav_command(&format!(r#"{{"op":"add","name":"{long}","url":"https://a.com"}}"#)).is_none());
+        // 未知操作
+        assert!(parse_fav_command(r#"{"op":"toggle","name":"x","url":"https://a.com"}"#).is_none());
+        // 非法 JSON
+        assert!(parse_fav_command("not json").is_none());
+    }
+
+    #[test]
+    fn apply_add_dedups_and_caps() {
+        let mut sites: Vec<serde_json::Value> = (0..12)
+            .map(|i| serde_json::json!({"name": format!("s{i}"), "url": format!("https://s{i}.com")}))
+            .collect();
+        apply_fav(&mut sites, true, "新站", "https://new.com");
+        assert_eq!(sites.len(), 12);
+        assert_eq!(sites[0]["url"], "https://new.com");
+        // 已存在的 URL 再 add：去重后仍在首位，数量不变
+        apply_fav(&mut sites, true, "新站", "https://new.com");
+        assert_eq!(sites.len(), 12);
+        assert_eq!(sites.iter().filter(|s| s["url"] == "https://new.com").count(), 1);
+    }
+
+    #[test]
+    fn apply_del_removes_url() {
+        let mut sites = vec![
+            serde_json::json!({"name":"a","url":"https://a.com"}),
+            serde_json::json!({"name":"b","url":"https://b.com"}),
+        ];
+        apply_fav(&mut sites, false, "a", "https://a.com");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0]["url"], "https://b.com");
     }
 }

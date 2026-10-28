@@ -348,12 +348,16 @@
   function isFaved(url) {
     return loadFavs().some(function (f) { return f.url === url; });
   }
+  // 收藏双写：localStorage 管本页显示，console 桥让宿主写 quick_sites，启动页下次生成时出现。
+  function notifyFav(op, name, url) {
+    try { console.log('SHIFT_FAV:' + JSON.stringify({ op: op, name: name, url: url })); } catch (e) {}
+  }
   function toggleFav(url, name) {
     var list = loadFavs();
     var i = -1;
     for (var k = 0; k < list.length; k++) if (list[k].url === url) { i = k; break; }
-    if (i >= 0) list.splice(i, 1);
-    else list.unshift({ name: name, url: url, icon: '\u2605' });
+    if (i >= 0) { list.splice(i, 1); notifyFav('del', name, url); }
+    else { list.unshift({ name: name, url: url, icon: '\u2605' }); notifyFav('add', name, url); }
     saveFavs(list);
   }
   function favItems() {

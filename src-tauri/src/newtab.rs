@@ -287,7 +287,7 @@ pub async fn save_quick_sites(
 /// 保存快捷访问核心（吃连接池，便于测试）：URL scheme 校验/规范化 + upsert。
 /// P2：新标签页是带 IPC 桥（invoke_key）的特权页面，若允许 javascript: 等
 /// scheme 渲染成 <a href>，点击即在特权上下文执行任意命令。
-async fn save_quick_sites_inner(
+pub(crate) async fn save_quick_sites_inner(
     pool: &sqlx::SqlitePool,
     sites: Vec<serde_json::Value>,
 ) -> Result<(), AppError> {
