@@ -773,19 +773,45 @@ pub fn window_begin_drag() {
 /// 让内容页导航（工具栏 JS 经 shell_msg 调 "nav" 时实际走 CefShellMsgHandler，本函数为
 /// 命令式入口预留，P2 外部导航 API 用）。
 #[allow(dead_code)]
+/// 常见附件后缀：地址栏直输时直接走 `start_download`。
+///
+/// F-CEF-31：`load_url` 打到 attachment 响应上会让 CEF UI 线程卡死
+/// （工具栏 CDP 无响应、`on_before_download` 都不进），改前版本同样如此。
+/// 这里用后缀启发式绕过——命中就直接起下载，其余照常导航。
+const DOWNLOAD_EXTS: &[&str] = &[
+    "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "exe", "msi", "dmg", "pkg", "apk",
+    "iso", "deb", "rpm",
+];
+
+/// URL 是否像附件（查扩展名，忽略 query/fragment）
+fn looks_like_attachment(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    DOWNLOAD_EXTS.contains(&ext.as_str())
+}
+
 pub fn navigate(url: &str) {
     // F-CEF-24c：句柄方法一律在 CEF UI 线程调（GTK 主线程入口靠 cef_ui 投递）
-    let frame = {
-        let m = lock_state(browsers());
-        m.get(CONTENT_ID).and_then(|b| b.main_frame())
-    };
-    let Some(frame) = frame else {
-        log::warn!("[cef] navigate：内容浏览器还没创建好");
-        return;
-    };
     let url = url.to_string();
     cef_ui(move || {
-        frame.load_url(Some(&CefString::from(url.as_str())));
+        let (frame, host) = {
+            let m = lock_state(browsers());
+            match m.get(CONTENT_ID) {
+                Some(b) => (b.main_frame(), b.host()),
+                None => (None, None),
+            }
+        };
+        if looks_like_attachment(&url) {
+            if let Some(host) = host {
+                log::info!("[cef] 附件 URL -> start_download: {url}");
+                host.start_download(Some(&CefString::from(url.as_str())));
+                return;
+            }
+        }
+        match frame {
+            Some(frame) => frame.load_url(Some(&CefString::from(url.as_str()))),
+            None => log::warn!("[cef] navigate：内容浏览器还没创建好"),
+        }
     });
 }
 
@@ -2336,6 +2362,17 @@ fn handle_action(action: &str) {
         Some((c, a)) => (c, a),
         None => (action, ""),
     };
+
+    // F-CEF-31：导航到附件 URL 时提前分流到 start_download。
+    // 必须在下面 `lock_state(browsers())` 之前拦——那里持锁调 navigate 会自死锁。
+    if cmd == "nav" {
+        let url = normalize_url(arg);
+        if !url.is_empty() && looks_like_attachment(&url) {
+            log::info!("[cef] 工具栏导航(附件) -> {url}");
+            navigate(&url);
+            return;
+        }
+    }
 
     // 密码面板动作（F-CEF-12）
     if super::passwords_ui::handle(cmd, arg) {
