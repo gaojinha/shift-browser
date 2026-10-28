@@ -1644,7 +1644,25 @@ wrap_display_handler! {
         ) -> i32 {
             let Some(msg) = message else { return 0 };
             let text = msg.to_string();
-            match text.trim() {
+            let trimmed = text.trim();
+
+            // 启动页（内容页）→ 宿主动作通道（F-NEWTAB-01）：
+            // 内容页不能直接调工具栏 JS，统一走 console 前缀，与 SHIFT_ACT 同机制。
+            if let Some(cmd) = trimmed.strip_prefix("SHIFT_NEWTAB:") {
+                match cmd {
+                    "settings" => run_toolbar_js("setSettingsPanel(true)"),
+                    "profile" => {
+                        log::info!("[cef] 启动页「我的」：账号系统尚未接入（F-NEWTAB-02）");
+                        run_toolbar_js(
+                            "window.__shiftToast && window.__shiftToast('个人中心开发中')",
+                        );
+                    }
+                    other => log::warn!("[cef] 未知启动页动作: {other}"),
+                }
+                return 1;
+            }
+
+            match trimmed {
                 "SHIFT_ACT:ctxback" => handle_action("back"),
                 "SHIFT_ACT:ctxforward" => handle_action("forward"),
                 "SHIFT_ACT:ctxreload" => handle_action("reload"),

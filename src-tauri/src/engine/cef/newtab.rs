@@ -31,7 +31,25 @@ pub fn ensure_newtab_html(shell_dir: &Path) -> Result<String, String> {
     let html = render_newtab_html(&search_url, &sites, &recent);
     let path = dir.join("cef-newtab.html");
     std::fs::write(&path, html).map_err(|e| format!("写启动页失败: {e}"))?;
+    // 世界导航页（F-NEWTAB-01）：模板与 721 站数据都在仓库 resources/ 里，
+    // 每次生成启动页时一并落盘，保证侧边栏链接永远可用（离线可用）。
+    ensure_worldnav_html(dir)?;
     Ok(format!("file://{}", path.display()))
+}
+
+/// 生成世界导航页（32 大类 / 721 站）。
+///
+/// 模板里占位符是 `__WORLDAV_DATA__`（历史拼写，勿改）。
+fn ensure_worldnav_html(dir: &Path) -> Result<(), String> {
+    const TPL: &str = include_str!("../../../resources/newtab/world-nav.html");
+    const DATA: &str = include_str!("../../../resources/worldnav.json");
+    // 内嵌 JSON 防提前闭合 script
+    let data = DATA.replace("</", "<\\/");
+    let html = TPL.replace("__WORLDAV_DATA__", &data);
+    let path = dir.join("world-nav.html");
+    std::fs::write(&path, html).map_err(|e| format!("写世界导航页失败: {e}"))?;
+    log::info!("[cef] 世界导航页已生成: {}", path.display());
+    Ok(())
 }
 
 /// 读主应用设置与最近历史（同步：开窗时只跑一次，几十毫秒可接受）。
@@ -197,9 +215,35 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
     text-overflow: ellipsis; white-space: nowrap;
   }
   .hint { margin-top: 26px; font-size: 12px; color: #4d5563; }
+  /* 侧边栏（F-NEWTAB-01）：只放真在用的三个入口 */
+  .sidebar {
+    position: fixed; left: 18px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 10px; z-index: 5;
+  }
+  .sb-btn {
+    width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;
+    border-radius: 10px; background: #171b22CC; border: 1px solid #262d38;
+    color: #8b95a5; cursor: pointer; text-decoration: none; padding: 0;
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  .sb-btn:hover { background: #1f2530; border-color: #3a4453; color: #8ab4f8; }
+  .sb-btn svg { width: 17px; height: 17px; fill: none; stroke: currentColor;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .sb-btn.active { color: #8ab4f8; border-color: #5b8def; }
 </style>
 </head>
 <body>
+<nav class="sidebar">
+  <a class="sb-btn" id="sb-nav" href="world-nav.html" title="世界导航" aria-label="世界导航">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg>
+  </a>
+  <button class="sb-btn" id="sb-profile" title="我的" aria-label="我的">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a7 7 0 0 1 14 0v1"/></svg>
+  </button>
+  <button class="sb-btn" id="sb-settings" title="设置" aria-label="设置">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  </button>
+</nav>
 <div class="wrap">
   <div class="brand">Shift</div>
   <div class="sub">输入网址或搜索词，回车打开</div>
@@ -265,6 +309,15 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
   q.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') go();
     else if (e.key === 'Escape') q.blur();
+  });
+
+  // 侧边栏（F-NEWTAB-01）：设置走 console 桥通知宿主（内容页无法直接调工具栏）
+  document.getElementById('sb-settings')?.addEventListener('click', function () {
+    console.log('SHIFT_NEWTAB:settings');
+  });
+  // 「我的」第一版：提示尚未接入账号（后续版本接 db/users）
+  document.getElementById('sb-profile')?.addEventListener('click', function () {
+    console.log('SHIFT_NEWTAB:profile');
   });
 
   q.focus();
