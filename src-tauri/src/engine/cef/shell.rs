@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use super::browser::browsers;
+use super::cef_ui::{cef_ui, cef_ui_call};
 
 /// 内容页的固定 tab id（导航命令按这个取句柄）
 pub const CONTENT_ID: &str = "shell-content";
@@ -483,18 +484,24 @@ pub fn open(content_url: &str, toolbar_url: &str) -> Result<(), String> {
 /// 必须在回调返回后（主循环下一轮）再调一次。调用方用 glib 定时器触发。
 pub fn force_show() {
     log::info!("[cef] force_show 被调用");
-    { let w = lock_state(&SHELL_WINDOW); {
-        if let Some(window) = w.as_ref() {
-            log::info!("[cef] force_show: 调 window.show() 之前");
-            window.show();
-            // 焦点兜底走 X11（CEF 的 Window 没有 set_focus；主窗口不创建后
-            // 必须自己拿焦点，否则 getactivewindow 为空、点不了）。
-            log::info!("[cef] force_show: window.show() 已返回");
-            // 兜底：CEF 的 show() 在 X11 + 无 GPU 组合下只登记不映射，
-            // 直接用 X11 把窗口 map 出来（窗口句柄由 CEF 提供，同一连接由 CEF 持有）
-            let handle = window.window_handle();
-            log::info!("[cef] 延迟 show() 已执行，window_handle=0x{handle:x}");
-            if handle > 1 {
+    // F-CEF-24c：`Window::show` 是句柄方法，必须在 CEF UI 线程调；X11 腿留 GTK 主线程。
+    // 锁内只 clone 句柄 + 取 window_handle，锁外投递。
+    let (win_for_show, handle) = {
+        let w = lock_state(&SHELL_WINDOW);
+        match w.as_ref() {
+            Some(window) => (Some(window.clone()), window.window_handle()),
+            None => (None, 0),
+        }
+    };
+    if let Some(win) = win_for_show {
+        log::info!("[cef] force_show: 投递 window.show()");
+        cef_ui_call(move || win.show());
+        log::info!("[cef] force_show: window.show() 已返回");
+    } else {
+        log::warn!("[cef] force_show：没有窗口句柄");
+    }
+    log::info!("[cef] 延迟 show() 已执行，window_handle=0x{handle:x}");
+    if handle > 1 {
                 let dpy = cef::get_xdisplay();
                 if !dpy.is_null() {
                     unsafe {
@@ -579,10 +586,6 @@ pub fn force_show() {
                     log::info!("[cef] XSetClassHint + XMapRaised 已调用");
                 }
             }
-        } else {
-            log::warn!("[cef] force_show：没有窗口句柄");
-        }
-    } };
 }
 
 /// 窗口控制：最小化 / 最大化切换 / 关闭（标签栏右侧按钮走这里）。
@@ -673,17 +676,19 @@ pub fn window_begin_drag() {
 /// 命令式入口预留，P2 外部导航 API 用）。
 #[allow(dead_code)]
 pub fn navigate(url: &str) {
-    { let m = lock_state(browsers()); {
-        let map = m;
-        let Some(browser) = map.get(CONTENT_ID) else {
-            log::warn!("[cef] navigate：内容浏览器还没创建好");
-            return;
-        };
-        let Some(frame) = browser.main_frame() else {
-            return;
-        };
-        frame.load_url(Some(&CefString::from(url)));
-    } };
+    // F-CEF-24c：句柄方法一律在 CEF UI 线程调（GTK 主线程入口靠 cef_ui 投递）
+    let frame = {
+        let m = lock_state(browsers());
+        m.get(CONTENT_ID).and_then(|b| b.main_frame())
+    };
+    let Some(frame) = frame else {
+        log::warn!("[cef] navigate：内容浏览器还没创建好");
+        return;
+    };
+    let url = url.to_string();
+    cef_ui(move || {
+        frame.load_url(Some(&CefString::from(url.as_str())));
+    });
 }
 
 // ============================================================
@@ -1878,17 +1883,22 @@ pub fn refresh_bookmarks_ui() {
 
 /// 在工具栏页面里执行一段 JS（地址栏/加载态等 UI 更新统一走这里）
 pub(crate) fn run_toolbar_js(code: &str) {
-    { let m = lock_state(browsers()); {
-        if let Some(b) = m.get(TOOLBAR_ID) {
-            if let Some(frame) = b.main_frame() {
-                frame.execute_java_script(
-                    Some(&CefString::from(code)),
-                    Some(&CefString::from("shift://ui")),
-                    -1,
-                );
-            }
+    // F-CEF-24c：本函数自身对调用方线程安全（20+ 调用点零改动）——
+    // 已在 CEF UI 线程则原地执行，否则投递；句柄查找也在 UI 线程内做。
+    let code = code.to_string();
+    cef_ui(move || {
+        let frame = {
+            let m = lock_state(browsers());
+            m.get(TOOLBAR_ID).and_then(|b| b.main_frame())
+        };
+        if let Some(frame) = frame {
+            frame.execute_java_script(
+                Some(&CefString::from(code.as_str())),
+                Some(&CefString::from("shift://ui")),
+                -1,
+            );
         }
-    } };
+    });
 }
 
 /// 书签栏开关（F-CEF-09，Ctrl+Shift+B）：翻转高度态（122↔88）→ 同步 DOM 显隐

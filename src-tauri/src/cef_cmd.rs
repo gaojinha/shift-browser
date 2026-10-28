@@ -24,6 +24,7 @@ use crate::engine::cef::{
 };
 use cef_browser::CefEvent;
 use cef_shell::lock_state;
+use crate::engine::cef::cef_ui::{cef_ui, cef_ui_call};
 
 /// 全局事件发送端（CEF 回调线程 → Tauri 侧）
 static EVENT_TX: OnceLock<Sender<(String, CefEvent)>> = OnceLock::new();
@@ -421,7 +422,12 @@ fn open_shell_on_main(app: &AppHandle, url: Option<&str>) -> Result<(), String> 
         Some(u) if !u.trim().is_empty() => u.to_string(),
         _ => crate::engine::cef::newtab::ensure_newtab_html(&cache.join("shell"))?,
     };
-    cef_shell::open(&content_url, &toolbar_url)?;
+    // F-CEF-24c：open 里的 browser_view_create 是 CEF 调用，投递到 CEF UI 线程并取回结果
+    {
+        let cu = content_url.clone();
+        let tu = toolbar_url.clone();
+        cef_ui_call(move || cef_shell::open(&cu, &tu))?;
+    }
 
     // 窗口创建回调里调 show() 会卡死；出回调后立刻用 X11 直接映射
     cef_shell::force_show();
@@ -454,14 +460,16 @@ pub fn cef_open_shell(app: AppHandle, url: String) -> Result<(), String> {
 #[tauri::command]
 pub fn cef_navigate(app: AppHandle, tab_id: String, url: String) -> Result<(), String> {
     app.run_on_main_thread(move || {
-        { let tabs = lock_state(cef_browser::browsers()); {
-            if let Some(browser) = tabs.get(&tab_id) {
-                if let Some(frame) = browser.main_frame() {
-                    let u = cef::CefString::from(url.as_str());
-                    frame.load_url(Some(&u));
-                }
+        // F-CEF-24c：句柄方法投递到 CEF UI 线程（已在则原地）
+        cef_ui(move || {
+            let frame = {
+                let tabs = lock_state(cef_browser::browsers());
+                tabs.get(&tab_id).and_then(|b| b.main_frame())
+            };
+            if let Some(frame) = frame {
+                frame.load_url(Some(&cef::CefString::from(url.as_str())));
             }
-        } };
+        });
     })
     .map_err(|e| format!("投递主线程失败: {e}"))
 }
@@ -470,9 +478,10 @@ pub fn cef_navigate(app: AppHandle, tab_id: String, url: String) -> Result<(), S
 #[tauri::command]
 pub fn cef_close_window(app: AppHandle, tab_id: String) -> Result<(), String> {
     app.run_on_main_thread(move || {
+        // F-CEF-24c：句柄方法投递到 CEF UI 线程（remove 是纯数据，可在当前线程做）
         let browser = { let mut tabs = lock_state(cef_browser::browsers()); tabs.remove(&tab_id) };
         if let Some(b) = browser {
-            cef_browser::close(&b, false);
+            cef_ui(move || cef_browser::close(&b, false));
         }
     })
     .map_err(|e| format!("投递主线程失败: {e}"))

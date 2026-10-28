@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::sync::{Mutex, OnceLock};
 
+use super::cef_ui::{cef_ui, cef_ui_call};
 use super::shell::lock_state;
 
 /// 已创建的浏览器句柄（按 tab_id 索引）。**句柄方法只能在 CEF UI 线程调用**，
@@ -86,6 +87,19 @@ pub fn create_browser(
     bounds: (i32, i32, i32, i32),
     tx: Sender<(String, CefEvent)>,
 ) -> bool {
+    // F-CEF-24c：`browser_host_create_browser` 是 CEF 调用，统一在 CEF UI 线程执行。
+    // 同步拿 bool（调用方在 GTK 主线程，recv 阻塞安全；已在 UI 线程则短路原地跑）。
+    let url = url.to_string();
+    cef_ui_call(move || create_browser_inner(tab_id, &url, parent_xid, bounds, tx))
+}
+
+fn create_browser_inner(
+    tab_id: String,
+    url: &str,
+    parent_xid: u64,
+    bounds: (i32, i32, i32, i32),
+    tx: Sender<(String, CefEvent)>,
+) -> bool {
     { let mut m = lock_state(pending_size()); {
         m.insert(tab_id.clone(), (bounds.2, bounds.3));
     } };
@@ -153,7 +167,8 @@ pub fn resize(browser: &Browser, width: i32, height: i32) {
     }
 
     // 显示器切换 / 缩放变化时让 screenX/Y、devicePixelRatio 正确
-    host.notify_screen_info_changed();
+    // F-CEF-24c：句柄方法须在 CEF UI 线程（X11 腿留调用线程）
+    cef_ui(move || host.notify_screen_info_changed());
 }
 
 /// 让浏览器获得焦点（地址栏 ↔ 页面切换时调用）
@@ -237,8 +252,10 @@ pub fn eval_js(browser: &Browser, script: &str) {
 
 /// 关闭浏览器（异步，`do_close` 生效）
 pub fn close(browser: &Browser, force: bool) {
-    if let Some(host) = browser.host() {
-        host.close_browser(if force { 1 } else { 0 });
+    // F-CEF-24c：`close_browser` 是句柄方法，投递到 CEF UI 线程
+    let host = browser.host();
+    if let Some(host) = host {
+        cef_ui(move || host.close_browser(if force { 1 } else { 0 }));
     }
 }
 
