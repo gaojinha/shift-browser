@@ -4,22 +4,13 @@
 //! id/name/created_at/标签数；**不输出** `data` 全量——标签快照可能很大，不进工具栏 HTML）。
 //! 删除走 `SHIFT_ACT:sessdel|<id>`（sessions 表自增 id 即唯一标识，二次确认在页面侧）。
 //!
-//! 接线说明（协调器接线时补，本模块不改 shell.rs / toolbar.rs / cef_cmd.rs）：
-//! - `shell.rs::handle_action` 在用户脚本分支之后同模式路由：`super::sessions_ui::handle(cmd, arg)`；
-//! - 面板开合/视图加高：shell.rs 注册表（`enum Panel`）加 `Session` 变体
-//!   （`class()`/`extra_px()`/`atom()` + `Panel::ALL`，**别再造手写清单**），
-//!   并加 `set_session_panel(open)`（同 `set_userscript_panel` 模式）+ `push_sessions()`（同 `push_userscripts` 模式）；
-//!   接通后删掉本文件 `sesspanel`/`sessrefresh` 两个 TODO 分支里的 warn，改为真实调用；
-//! - `sessdel` 删除成功后经 `push_sessions()` 重渲染列表（下方 `delete_session` 内的 TODO）；
-//! - 工具栏 HTML 生成处（cef_cmd.rs 的 `userscripts_ui::init/userscripts_json` 旁）加
-//!   `sessions_ui::init(app)` + `sessions_json(app)` 内嵌；
-//! - 工具栏 JS 加 `__shiftSessions` 渲染函数（列表 + 标签数 + 删除二次确认，页面侧）；
-//! - 恢复会话（restore）：需主应用 TabManager，CEF 侧先不做（卡面明确留 TODO，接线时再评估）。
+//! 接线状态（F-CEF-26，2026-10-27 已接线）：`shell.rs::handle_action` 路由
+//! `super::sessions_ui::handle`；面板注册走 `Panel::Session`（注册表四处齐）；
+//! `set_session_panel` / `push_sessions` 已实现；cef_cmd 已 `init` + HTML 内嵌
+//! `sessions_json`；工具栏 JS 有 `__shiftSessions`。
 //!
-//! 本模块先交付后接线：协调器接 `shell.rs::handle_action` 与 cef_cmd.rs HTML 内嵌之前
-//! （本卡禁改这几文件），整模块暂无业务引用——scoped dead_code 豁免（同
-//! `certificates_ui.rs`），**接线完成后删掉下一行 `#![allow]`**。
-#![allow(dead_code)]
+//! 未做：恢复会话（restore）需主应用 TabManager，CEF 侧留待 M2。
+
 
 use std::sync::OnceLock;
 use tauri::{AppHandle, Manager};
@@ -77,10 +68,7 @@ fn parse_id(arg: &str) -> Option<i64> {
 /// 处理工具栏动作。返回 true = 已处理。必须在 GTK 主线程调用（handle_action 本就在主线程）。
 pub fn handle(cmd: &str, arg: &str) -> bool {
     match cmd {
-        // TODO(接线，二狗补)：shell.rs 尚无 set_session_panel/push_sessions（本卡禁改 shell.rs）。
-        // 接线时替换为：
-        //   "sesspanel" => { super::shell::set_session_panel(arg == "1"); if arg == "1" { super::shell::push_sessions(); } true }
-        //   "sessrefresh" => { super::shell::push_sessions(); true }
+        // 已接线（F-CEF-26）：面板开合走 shell::set_session_panel，列表推送走 push_sessions。
         "sesspanel" => {
             super::shell::set_session_panel(arg == "1");
             if arg == "1" {
@@ -90,10 +78,6 @@ pub fn handle(cmd: &str, arg: &str) -> bool {
         }
         "sessrefresh" => {
             super::shell::push_sessions();
-            true
-        }
-        "sesspanel_old" => {
-            log::warn!("[cef] {cmd} 待接线：shell.rs 无 set_session_panel/push_sessions（F-CEF-26 先交付后接线）");
             true
         }
         "sessdel" => {
