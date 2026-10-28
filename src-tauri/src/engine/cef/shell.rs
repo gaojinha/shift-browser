@@ -3516,6 +3516,22 @@ fn track_download(it: &mut DownloadItem) {
         ""
     };
 
+    // 下载面板开着时同步刷新进度（F-CEF-30a）：
+    // 非终态直接用已有 500ms 节流；终态等 300ms 再推——写库是异步 spawn，
+    // 立刻推会读到旧状态，UI 会停在「进行中」。
+    if DL_EXTRA.load(Ordering::Relaxed) > 0 {
+        if is_final {
+            gtk_ui(|| {
+                gtk::glib::timeout_add_local_once(
+                    std::time::Duration::from_millis(300),
+                    request_downloads_refresh,
+                );
+            });
+        } else {
+            request_downloads_refresh();
+        }
+    }
+
     if let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() {
         let state = state.to_string();
         tauri::async_runtime::spawn(async move {
