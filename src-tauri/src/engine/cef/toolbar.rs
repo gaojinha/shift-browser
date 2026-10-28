@@ -239,6 +239,28 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   html:not(.bookmarks-hidden) #dlpanel { top: 122px; }
   #dllist { flex: 1; overflow-y: auto; }
   .dl-head { display: flex; align-items: center; gap: 8px; }
+  /* 命令面板（F-CEF-29） */
+  #palettepanel {
+    display: none; position: absolute; left: 0; right: 0; top: 88px; bottom: 0;
+    background: #292a2d; border-top: 1px solid #3c4043; padding: 8px 12px;
+    flex-direction: column; gap: 6px; z-index: 12;
+  }
+  html.palette-open #palettepanel { display: flex; }
+  html:not(.bookmarks-hidden) #palettepanel { top: 122px; }
+  #paletteinput {
+    height: 32px; border-radius: 6px; border: 1px solid #5f6368; background: #202124;
+    color: #e8eaed; padding: 0 10px; font-size: 13px; outline: none;
+  }
+  #paletteinput:focus { border-color: #8ab4f8; }
+  #palettelist { flex: 1; overflow-y: auto; }
+  .pl-group { color: #9aa0a6; font-size: 11px; margin: 6px 4px 2px; }
+  .pl-item {
+    display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px;
+    border-radius: 4px; color: #e8eaed; font-size: 12px; cursor: pointer;
+  }
+  .pl-item.sel { background: #3c4043; }
+  .pl-item .pl-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pl-item .pl-hint { color: #9aa0a6; font-size: 11px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dl-head .dl-title { flex: 1; color: #e8eaed; font-size: 12px; }
   .dl-row {
     display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 6px;
@@ -668,6 +690,10 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   <div id="dlpanel">
     <div class="dl-head"><span class="dl-title">下载记录</span><span id="dlclear" class="bmm-btn">清空已结束</span><span id="dlclose" class="bmm-btn">关闭</span></div>
     <div id="dllist"></div>
+  </div>
+  <div id="palettepanel">
+    <input id="paletteinput" type="text" spellcheck="false" placeholder="搜索标签、历史、书签，或输入命令（↑↓ 选择，回车执行，Esc 关闭）">
+    <div id="palettelist"></div>
   </div>
   <div id="menupanel">
     <div class="menu-item" data-act="tabnew">新标签页<span class="menu-key">Ctrl+T</span></div>
@@ -1443,6 +1469,82 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     });
   }
 
+  // ---- 命令面板（F-CEF-29）----
+  let plData = { tabs: [], history: [], bookmarks: [], commands: [] };
+  let plSel = 0;
+  function plEsc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+  function plFlat() {
+    const out = [];
+    for (const g of ['tabs', 'history', 'bookmarks', 'commands']) {
+      for (const it of (plData[g] || [])) out.push({ it, g });
+    }
+    return out;
+  }
+  function plRender() {
+    const list = document.getElementById('palettelist');
+    if (!list) return;
+    const groups = { tabs: '标签页', history: '历史记录', bookmarks: '书签', commands: '命令' };
+    let html = '', idx = 0;
+    for (const g of Object.keys(groups)) {
+      const items = plData[g] || [];
+      if (!items.length) continue;
+      html += '<div class="pl-group">' + groups[g] + '</div>';
+      for (const it of items) {
+        const title = it.title || it.label || it.url || '';
+        const hint = it.hint || (it.url || '');
+        html += '<div class="pl-item' + (idx === plSel ? ' sel' : '') + '" data-i="' + idx + '">'
+          + '<span class="pl-title">' + plEsc(title) + '</span>'
+          + '<span class="pl-hint">' + plEsc(String(hint).slice(0, 36)) + '</span></div>';
+        idx++;
+      }
+    }
+    list.innerHTML = html || '<div class="pl-group">无匹配结果</div>';
+    const sel = list.querySelector('.pl-item.sel');
+    if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' });
+  }
+  window.__shiftPalette = function (d) { plData = d || {}; plSel = 0; plRender(); };
+  function plExec(it, g) {
+    let arg;
+    if (g === 'commands') arg = 'cmd:' + it.id;
+    else if (g === 'tabs') arg = 'tab:' + it.id;
+    else arg = 'url:' + (it.url || '');
+    act('paletteexec|' + arg);
+    setPalettePanel(false);
+  }
+  function setPalettePanel(open) {
+    document.documentElement.classList.toggle('palette-open', open);
+    if (open) {
+      removePanelClasses('palette-open');
+      act('palette|1');
+      const inp = document.getElementById('paletteinput');
+      if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 0); }
+      act('palettequery|');
+    } else {
+      act('palette|0');
+    }
+  }
+  document.getElementById('paletteinput')?.addEventListener('input', (e) => {
+    act('palettequery|' + e.target.value);
+  });
+  document.getElementById('paletteinput')?.addEventListener('keydown', (e) => {
+    const flat = plFlat();
+    if (e.key === 'ArrowDown') { plSel = Math.min(plSel + 1, flat.length - 1); plRender(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { plSel = Math.max(plSel - 1, 0); plRender(); e.preventDefault(); }
+    else if (e.key === 'Enter') { const f = flat[plSel]; if (f) plExec(f.it, f.g); e.preventDefault(); }
+    else if (e.key === 'Escape') { setPalettePanel(false); e.preventDefault(); }
+  });
+  document.getElementById('palettelist')?.addEventListener('click', (e) => {
+    const el = e.target.closest('.pl-item');
+    if (!el) return;
+    const flat = plFlat();
+    const f = flat[+el.dataset.i];
+    if (f) plExec(f.it, f.g);
+  });
+
   function setDlPanel(open) {
     document.documentElement.classList.toggle('dl-open', open);
     if (open) removePanelClasses('dl-open');
@@ -2159,8 +2261,8 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn panel_registry_has_ten_unique_classes_and_matches_css() {
-        assert_eq!(Panel::ALL.len(), 12);
+    fn panel_registry_has_thirteen_unique_classes_and_matches_css() {
+        assert_eq!(Panel::ALL.len(), 13);
         let json = panel_classes_json();
         for p in Panel::ALL {
             assert_eq!(json.matches(&format!("\"{}\"", p.class())).count(), 1, "{:?}", p);
@@ -2171,7 +2273,7 @@ mod tests {
 
     #[test]
     fn every_js_setter_uses_registry_not_hand_lists() {
-        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 12);
+        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 13);
         for line in TOOLBAR_HTML.lines().filter(|l| l.contains("classList.remove(")) {
             assert!(line.matches("-open").count() <= 1, "残留手写互斥清单: {line}");
         }

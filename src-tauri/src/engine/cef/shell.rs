@@ -37,21 +37,16 @@ pub const TOOLBAR_HEIGHT_COLLAPSED: i32 = 88;
 static TOOLBAR_H: AtomicI32 = AtomicI32::new(122);
 
 /// 当前应使用的工具栏高度（书签栏展开或收起，F-CEF-09）。
+///
+/// 面板撑高走 `Panel::ALL` 遍历（单一来源）：新增面板只改注册表，这里不用动。
+/// `BM_EXTRA`（书签文件夹下拉）不在注册表内，单独加。
 fn toolbar_height() -> i32 {
     TOOLBAR_H.load(Ordering::Relaxed)
-        + PW_EXTRA.load(Ordering::Relaxed)
+        + Panel::ALL
+            .iter()
+            .map(|p| p.atom().load(Ordering::Relaxed))
+            .sum::<i32>()
         + BM_EXTRA.load(Ordering::Relaxed)
-        + DL_EXTRA.load(Ordering::Relaxed)
-        + MENU_EXTRA.load(Ordering::Relaxed)
-        + FIND_EXTRA.load(Ordering::Relaxed)
-        + HIST_EXTRA.load(Ordering::Relaxed)
-        + SITE_EXTRA.load(Ordering::Relaxed)
-        + SETTINGS_EXTRA.load(Ordering::Relaxed)
-        + BM_MANAGE_EXTRA_V.load(Ordering::Relaxed)
-        + CERT_EXTRA.load(Ordering::Relaxed)
-        + US_EXTRA.load(Ordering::Relaxed)
-        + SESSION_EXTRA.load(Ordering::Relaxed)
-        + GROUPS_EXTRA.load(Ordering::Relaxed)
 }
 
 /// 8 个根类面板的注册表（F-CEF-21）：根 class 与撑高原子的唯一对应。
@@ -74,10 +69,11 @@ pub(crate) enum Panel {
     Us,
     Session,
     Groups,
+    Palette,
 }
 
 impl Panel {
-    pub(crate) const ALL: [Panel; 12] = [
+    pub(crate) const ALL: [Panel; 13] = [
         Panel::Pw,
         Panel::Dl,
         Panel::Menu,
@@ -90,6 +86,7 @@ impl Panel {
         Panel::Us,
         Panel::Session,
         Panel::Groups,
+        Panel::Palette,
     ];
 
     /// 对应 `html.<class>` 根类名（须与 `toolbar::PANEL_CLASSES` 同序同值，有单测钉住）
@@ -107,6 +104,7 @@ impl Panel {
             Panel::Us => "us-open",
             Panel::Session => "sess-open",
             Panel::Groups => "groups-open",
+            Panel::Palette => "palette-open",
         }
     }
 
@@ -124,6 +122,7 @@ impl Panel {
             Panel::Us => US_PANEL_EXTRA,
             Panel::Session => SESSION_PANEL_EXTRA,
             Panel::Groups => GROUPS_PANEL_EXTRA,
+            Panel::Palette => PALETTE_PANEL_EXTRA,
         }
     }
 
@@ -141,6 +140,7 @@ impl Panel {
             Panel::Us => &US_EXTRA,
             Panel::Session => &SESSION_EXTRA,
             Panel::Groups => &GROUPS_EXTRA,
+            Panel::Palette => &PALETTE_EXTRA,
         }
     }
 }
@@ -257,10 +257,31 @@ pub fn set_session_panel(open: bool) {
 const GROUPS_PANEL_EXTRA: i32 = 360;
 static GROUPS_EXTRA: AtomicI32 = AtomicI32::new(0);
 
+/// 命令面板（F-CEF-29）展开时工具栏额外加高：输入行 + 8 条候选
+const PALETTE_PANEL_EXTRA: i32 = 340;
+static PALETTE_EXTRA: AtomicI32 = AtomicI32::new(0);
+
 /// 分组/工作区面板开合
 pub fn set_groups_panel(open: bool) {
     set_panel_extra(Panel::Groups, open);
     apply_toolbar_height();
+}
+
+/// 命令面板（F-CEF-29）开合：与其它面板互斥
+// TODO(F-CEF-29 接线)：palette_ui 交付后由它调用，届时删掉本行 allow。
+#[allow(dead_code)]
+pub fn set_palette_panel(open: bool) {
+    set_panel_extra(Panel::Palette, open);
+    apply_toolbar_height();
+}
+
+/// 把命令面板候选推给工具栏（F-CEF-29）
+// TODO(F-CEF-29 接线)：palette_ui 交付后由它调用，届时删掉本行 allow。
+#[allow(dead_code)]
+pub(crate) fn push_palette(json: &str) {
+    run_toolbar_js(&format!(
+        "window.__shiftPalette && window.__shiftPalette({json})"
+    ));
 }
 
 /// 把分组/工作区列表推给工具栏面板。
@@ -2567,6 +2588,7 @@ mod tests {
             (Panel::Us, "us-open", 360),
             (Panel::Session, "sess-open", 320),
             (Panel::Groups, "groups-open", 360),
+            (Panel::Palette, "palette-open", 340),
         ];
         assert_eq!(Panel::ALL.len(), want.len());
         for (p, c, px) in want {
@@ -2575,7 +2597,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_any_panel_zeroes_all_other_extras_132_pairs() {
+    fn opening_any_panel_zeroes_all_other_extras_156_pairs() {
         use super::{set_panel_extra, toolbar_height, Panel, BM_EXTRA, TOOLBAR_H};
         use std::sync::atomic::Ordering;
         let base = TOOLBAR_H.load(Ordering::Relaxed);
@@ -2599,7 +2621,7 @@ mod tests {
                 pairs += 1;
             }
         }
-        assert_eq!(pairs, 132);
+        assert_eq!(pairs, 156);
     }
 
     // ---- normalize_url：地址栏补全规则（P0 实测逻辑，防改坏）----
@@ -3184,6 +3206,11 @@ fn handle_shortcut(
         // Ctrl+F 页内查找（F-CEF-18）
         70 => {
             open_find_bar();
+            1
+        }
+        // Ctrl+K 命令面板（F-CEF-29；K = 0x4B = 75）
+        75 => {
+            run_toolbar_js("setPalettePanel(true)");
             1
         }
         // Ctrl++（不按 Shift 是 Ctrl+=；windows_key_code 两者同为 187，
