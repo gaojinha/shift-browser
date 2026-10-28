@@ -213,9 +213,25 @@ pub fn run() {
         // 多余插件只增加攻击面与二进制体积（安全最小化原则）
         .plugin(
             tauri_plugin_log::Builder::default()
-                .level(log::LevelFilter::Info)
+                // 排查用：SHIFT_LOG_LEVEL=debug|trace 提级，默认 info
+                .level(
+                    std::env::var("SHIFT_LOG_LEVEL")
+                        .ok()
+                        .and_then(|v| match v.to_ascii_lowercase().as_str() {
+                            "trace" => Some(log::LevelFilter::Trace),
+                            "debug" => Some(log::LevelFilter::Debug),
+                            "warn" => Some(log::LevelFilter::Warn),
+                            "error" => Some(log::LevelFilter::Error),
+                            "info" => Some(log::LevelFilter::Info),
+                            _ => None,
+                        })
+                        .unwrap_or(log::LevelFilter::Info),
+                )
                 // 并发写 SQLite 时 sqlx 慢语句 WARN 刷屏，降到 Error
                 .level_for("sqlx::query", log::LevelFilter::Error)
+                // 单文件 10MB，留 3 份历史（原默认 KeepOne 只有一份，崩溃前后容易滚掉）
+                .max_file_size(10 * 1024 * 1024)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![

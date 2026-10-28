@@ -126,6 +126,11 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
     let _ = EVENT_TX.set(tx);
     *EVENT_RX.lock().unwrap_or_else(|e| e.into_inner()) = Some(rx);
 
+    // 3.5) 重装崩溃信号处理器：Chromium 初始化时会按自己的 crashpad 覆盖
+    // SIGSEGV/SIGABRT，导致进程静默消失、crash.log 永远空（2026-10-28 实测）。
+    // 这里在 CEF 初始化完再装回来，崩溃至少能落一行信号记录。
+    crate::crash_signal::install();
+
     // 4) 消息泵：F-CEF-24d 起由 CEF 自己跑（multi_threaded_message_loop=1），
     // 不再挂 GTK 定时器——旧固定泵是 CPU 64–85% 的根因（GLib X11 source 忙轮询）。
 

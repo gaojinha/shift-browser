@@ -99,6 +99,9 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     let _ = crate::PANIC_LOG_DIR.set(app_data_dir.clone());
     // 原生崩溃信号兜底（2026-10-19）：crash.log 与本目录同级，信号处理器直接写 fd
     crate::crash_signal::set_log_dir(&app_data_dir);
+    // F-CEF-34：stdout/stderr 落盘。CEF（Chromium）的 CHECK 失败、渲染进程崩溃、
+    // GPU 报错全走 stderr，GUI 启动时终端不可见——不重定向就一条都留不下。
+    redirect_stdio_to_file(&app_data_dir);
 
     // 数据库是全应用硬依赖（TabManager/API/AI/设置全部 state::<Db>()），
     // 初始化失败必须**立即终止启动**——旧实现只记日志后继续，
@@ -405,4 +408,37 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     }
 
     Ok(())
+}
+
+/// 把 stdout/stderr 重定向到 `<app_data>/logs/stdio.log`（追加，超 5MB 轮转一份 .1）。
+///
+/// 必须在 CEF 初始化**之前**调用：CEF 子进程继承 stderr，Chromium 的崩溃线索
+/// （CHECK failed / renderer crash / GPU fallback）都从这里出来。
+fn redirect_stdio_to_file(app_data_dir: &std::path::Path) {
+    use std::os::fd::IntoRawFd;
+
+    let dir = app_data_dir.join("logs");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("stdio.log");
+    // 简易轮转：只留一份上一版，避免无限增长
+    if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > 5 * 1024 * 1024 {
+        let _ = std::fs::rename(&path, dir.join("stdio.log.1"));
+    }
+    let Ok(f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    else {
+        return;
+    };
+    let fd = f.into_raw_fd();
+    // SAFETY: dup2 是异步信号安全的系统调用；成功后 fd 已复制，原 fd 可关。
+    unsafe {
+        libc::dup2(fd, libc::STDOUT_FILENO);
+        libc::dup2(fd, libc::STDERR_FILENO);
+        libc::close(fd);
+    }
+    log::info!("[ShiftBrowser] stdout/stderr 已落盘: {path:?}");
 }
