@@ -86,3 +86,29 @@
 - 卡面全对：list_sessions_inner 共用（IPC 名不变）、delete_session_inner 复用、sessions_json 只给 id/name/created_at/tabCount 不含 data 全量、坏快照 tabCount=0、三命令 + restore TODO 照卡面、禁改文件零触碰
 - 次记不纠：回执「关口跑在共树 0b5c4ff 之上」口径成立；双 test 数字对账已如上
 - **F-CEF-26 通过，接线（Panel::Sess、sesspanel/sessrefresh/sessdel、11 面板 110 对矩阵）归二狗线；真机验收归接线后**
+
+## 2026-10-27 19:58 — F-CEF-27 分组/工作区后端：复核通过（二狗）
+
+- 提交 `2586a69` 实查为真（5 文件：tab_groups.rs +33 / workspaces.rs +37 / groups_ui.rs 200 新 / mod.rs +1 / 回执；无夹带）
+- 关口二狗主树独立复跑（19:50–19:58）：**clippy 双配置 0 警告；test 默认 664 / cef 700**——与回执逐项一致（基线 660/693，净增 +4/+7：db 两表各 +2 双配置 + groups_ui 3 个 cef 纯函数）
+- 卡面全对：两 inner 共用（Tauri 命令改调、IPC 名不变）；groups_json 只给展示字段（分组 id/name/color/collapsed、工作区 +sort_order/session_count，session_count 走库内精确计数）；四命令 groupspanel/groupsrefresh 留接线 TODO、groupdel/spacedel 已实现、删除后刷新留 TODO；禁改文件零触碰
+- **F-CEF-27 通过，接线（Panel::Groups、groupdel/spacedel 后刷新、12 面板 132 对矩阵）归二狗线；真机验收归接线后**
+
+## 2026-10-27 22:15 — F-CEF-28 下载清空后端：复核通过（二狗）
+
+- 提交 `cd0d5d0` 实查为真（4 文件：downloads.rs +45 / downloads_ui.rs 74 新 / mod.rs +1 / 回执；无夹带、无 git add -A 痕迹）
+- 关口二狗主树独立复跑（22:05–22:15）：**clippy 双配置 0 警告；test 默认 666 / cef 704**（f27 基线 664/700，净增 +2/+4）
+- 数据勘误：回执报 667/705（+3/+5），**实际多算 1 个**——回执自列"默认/cef 各较新增数多出 +1 待核"未查根因；二狗复跑实数 666/704，根因＝downloads_ui.rs 2 个纯函数单测被 `#![allow(dead_code)]` 模块级 cfg（cef-only）门掉，默认构建该模块不存在，故 default 只 +2、cef +4。回执方向保守（报多不报少），且自列待核不阻塞，**二狗不纠数据，只勘误**
+- 卡面全对：`clear_finished(pool)` 删 `state != 'in_progress'`、返回行数、cfg_attr 豁免；单测混合 4 删 2 留 2、幂等再清 0、空库 0 三断言全在；`delete_all_downloads` 可选项未做（回执如实）；downloads_ui 74 行（init/handle/dlclear/2 纯函数/allow(dead_code)）与卡面"照 sessions_ui 范式"全对；mod.rs +1 无夹带；禁改 shell/toolbar/cef_cmd/bootstrap 零触碰
+- 超窗 44min：回执自述"21:37 代码+关口、跨压缩中断没交、21:49 高哥'完了吗'才醒补收口"，如实，**二狗不纠时间**
+- 待接线 4 处归二狗（回执自列已核）：shell.rs handle_action 路由 / Panel::Download 注册表 / 删 dlclear TODO 接 push_downloads / cef_cmd init + 工具栏「清空已结束」按钮。真机验收归接线后
+- **F-CEF-28 通过；atomcode 转空闲待命**
+
+## 2026-10-28 02:25 — F-CEF-28 下载清空接线（6066c84）：二狗自验通过（非独立第三方复核）
+
+- 提交 `6066c84` 实查为真（4 文件：cef_cmd.rs +1 / downloads_ui.rs 删 TODO / shell.rs handle_action 路由 + request_downloads_refresh 转 pub(crate) / toolbar.rs「下载记录」行加「清空已结束」按钮 +9，无夹带）
+- 关口二狗主树独立复跑（02:20–02:25）：**clippy 双配置 0 警告；test 默认 666 / cef 704**（与 `cd0d5d0` 关口持平，接线零净增用例；132 对矩阵元测试 `opening_any_panel_zeroes_all_other_extras_132_pairs` 在 6066c84 前已入 shell.rs:2540）
+- 接线 4 处全对：shell.rs handle_action 路由 downloads_ui::handle（dlclear 删 TODO 后走 request_downloads_refresh 刷新列表）/ cef_cmd.rs init / toolbar.rs 按钮 + 页面侧二次确认 / 注册表 Panel::Download 早在 8 面板基线内，本次未动
+- **注意**：6066c84 是二狗自己动手的接线提交，本行系**自验、非独立第三方复核**（按 10-27 临时调整口径：主力执行＝二狗，自跑自验须标注）
+- dlclear 验证完的残留实例（PID 227169，user-data-dir=/tmp/cef-dlclear）二狗已杀
+- 真机全表验收（13 面板 156 对矩阵）并入 F-CEF-21 收口一起跑，不单独立
