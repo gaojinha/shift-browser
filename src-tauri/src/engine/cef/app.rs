@@ -79,8 +79,11 @@ pub fn initialize(resources_dir: &str, locales_dir: &str, cache_path: &str) -> R
         no_sandbox: 1,
         // 不做离屏渲染：我们用 windowed 模式（X11 子窗口）
         windowless_rendering_enabled: 0,
-        // 不启用 CEF 自己的消息循环线程：由 GTK 主循环 + 定时泵驱动
-        multi_threaded_message_loop: 0,
+        // F-CEF-24d：CEF 自跑消息循环（独立 UI 线程）。
+        // 旧的固定 50ms 泵（GTK 主循环驱动）会让 CEF 的 GLib X11 source 忙轮询，
+        // 主进程 CPU 64–85%；自跑后实测降到个位数。线程安全前提见
+        // F-CEF-24b（状态全局锁）+ 24c（句柄调用投递 CEF UI 线程）。
+        multi_threaded_message_loop: 1,
         external_message_pump: 0,
         // 调试端口（仅本地排查用；不设环境变量时关闭）
         remote_debugging_port: std::env::var("SHIFT_CEF_DEBUG_PORT")

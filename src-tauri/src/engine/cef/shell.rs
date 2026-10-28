@@ -351,6 +351,16 @@ pub(crate) fn lock_state<T>(m: &'static Mutex<T>) -> MutexGuard<'static, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// 投递到 GTK 主线程。
+///
+/// F-CEF-24d：`multi_threaded_message_loop=1` 后 CEF 回调跑在 CEF 自己的 UI 线程，
+/// **不再是 GTK 主线程**——而 `glib::*_add_local` / GTK widget 操作只能在 GTK 主线程做
+/// （否则 glib 报 "default main context already acquired by another thread" panic）。
+/// `MainContext::invoke` 线程安全：已在主线程则原地执行，否则投递。
+pub(crate) fn gtk_ui(f: impl FnOnce() + Send + 'static) {
+    gtk::glib::MainContext::default().invoke(f);
+}
+
 /// Client 保活：CEF 在浏览器存活期间会引用 client，提前释放会崩
 static SHELL_CLIENTS: Mutex<Vec<Client>> = Mutex::new(Vec::new());
 
@@ -846,9 +856,11 @@ wrap_window_delegate! {
             // 单窗口模式：窗口关了就退出整个进程，不留后台（2026-10-27 实测
             // 关窗后主进程仍挂着 5 分钟）。延迟到下一轮主循环，避免在 CEF
             // 销毁回调栈里直接 exit 触发重入。
-            gtk::glib::idle_add_local_once(|| {
-                log::info!("[cef] 窗口已关闭，退出进程");
-                std::process::exit(0);
+            gtk_ui(|| {
+                gtk::glib::idle_add_local_once(|| {
+                    log::info!("[cef] 窗口已关闭，退出进程");
+                    std::process::exit(0);
+                });
             });
         }
 
@@ -1658,8 +1670,10 @@ fn close_tab(idx: usize) {
     // 关闭期间置标志，让 WindowDelegate::can_close 拦下 CEF 顺带的关窗请求；
     // close_browser 是异步的，200ms 后（且它已经发完关窗请求）再复位。
     TAB_CLOSING.store(true, Ordering::Relaxed);
-    gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(200), || {
-        TAB_CLOSING.store(false, Ordering::Relaxed);
+    gtk_ui(|| {
+        gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(200), || {
+            TAB_CLOSING.store(false, Ordering::Relaxed);
+        });
     });
     { let m = lock_state(browsers()); {
         if let Some(b) = m.get(&id) {
@@ -1686,7 +1700,7 @@ fn close_tab(idx: usize) {
 pub fn set_bookmarks(rows: Vec<(String, String)>) {
     log::info!("[cef] 书签已加载 {} 条", rows.len());
     { let mut b = lock_state(&BOOKMARKS); *b = rows };
-    gtk::glib::idle_add_local_once(refresh_bookmarks_ui);
+    gtk_ui(refresh_bookmarks_ui);
 }
 
 /// 从库重查书签并推给页面（操作增删改后调用）。

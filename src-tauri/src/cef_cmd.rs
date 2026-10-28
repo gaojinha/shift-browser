@@ -126,12 +126,8 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
     let _ = EVENT_TX.set(tx);
     *EVENT_RX.lock().unwrap_or_else(|e| e.into_inner()) = Some(rx);
 
-    // 4) 消息泵：固定 50ms（2026-10-27 实测 10ms 也 100% CPU，根因是 CEF 的 GLib
-    // X11 source 忙轮询，单独立卡优化；这里先保证窗口/输入可用）。
-    gtk::glib::timeout_add_local(std::time::Duration::from_millis(50), || {
-        cef_app::pump();
-        gtk::glib::ControlFlow::Continue
-    });
+    // 4) 消息泵：F-CEF-24d 起由 CEF 自己跑（multi_threaded_message_loop=1），
+    // 不再挂 GTK 定时器——旧固定泵是 CPU 64–85% 的根因（GLib X11 source 忙轮询）。
 
     log::info!("[cef] 初始化完成，资源目录 {resources}");
 
