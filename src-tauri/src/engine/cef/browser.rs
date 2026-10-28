@@ -8,26 +8,37 @@
 //! 实测（2026-10-20）：CEF 窗口会作为 X11 子窗口挂在指定坐标，尺寸与 rect 一致。
 
 use cef::*;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
+use std::sync::{Mutex, OnceLock};
 
-thread_local! {
-    /// 已创建的浏览器句柄（按 tab_id 索引）。**只能在 UI 线程访问。**
-    ///
-    /// 用异步创建（`browser_host_create_browser`）时，句柄在
-    /// `LifeSpanHandler::on_after_created` 里才能拿到，因此统一放这里，
-    /// 由 Tauri 侧按 tab_id 取用。
-    pub static BROWSERS: RefCell<HashMap<String, Browser>> = RefCell::new(HashMap::new());
+use super::shell::lock_state;
 
-    /// 保活：CEF 在浏览器生命周期内会引用 client，这里持有一份防止提前释放
-    static CLIENTS_ALIVE: RefCell<Vec<Client>> = const { RefCell::new(Vec::new()) };
+/// 已创建的浏览器句柄（按 tab_id 索引）。**句柄方法只能在 CEF UI 线程调用**，
+/// 存储本身跨线程安全（F-CEF-24b：thread_local → 全局 Mutex）。
+///
+/// 用异步创建（`browser_host_create_browser`）时，句柄在
+/// `LifeSpanHandler::on_after_created` 里才能拿到，因此统一放这里，
+/// 由 Tauri 侧按 tab_id 取用。
+static BROWSERS: OnceLock<Mutex<HashMap<String, Browser>>> = OnceLock::new();
 
-    /// 待应用的初始尺寸（tab_id → (宽, 高)）。
-    ///
-    /// X11 后端下 `set_as_child()` 的 bounds 不生效（实测创建出来是 0×0），
-    /// 必须等 `on_after_created` 拿到 `window_handle` 后主动 `XMoveResizeWindow`。
-    static PENDING_SIZE: RefCell<HashMap<String, (i32, i32)>> = RefCell::new(HashMap::new());
+/// 浏览器句柄表访问器（HashMap 非 const 构造，走 OnceLock 惰性初始化）
+pub fn browsers() -> &'static Mutex<HashMap<String, Browser>> {
+    BROWSERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 保活：CEF 在浏览器生命周期内会引用 client，这里持有一份防止提前释放
+static CLIENTS_ALIVE: Mutex<Vec<Client>> = Mutex::new(Vec::new());
+
+/// 待应用的初始尺寸（tab_id → (宽, 高)）。
+///
+/// X11 后端下 `set_as_child()` 的 bounds 不生效（实测创建出来是 0×0），
+/// 必须等 `on_after_created` 拿到 `window_handle` 后主动 `XMoveResizeWindow`。
+static PENDING_SIZE: OnceLock<Mutex<HashMap<String, (i32, i32)>>> = OnceLock::new();
+
+/// 待应用尺寸表访问器（HashMap 非 const 构造，走 OnceLock 惰性初始化）
+fn pending_size() -> &'static Mutex<HashMap<String, (i32, i32)>> {
+    PENDING_SIZE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// 标签页事件：从 CEF 回调发出，交给 Tauri 侧消费
@@ -75,9 +86,9 @@ pub fn create_browser(
     bounds: (i32, i32, i32, i32),
     tx: Sender<(String, CefEvent)>,
 ) -> bool {
-    PENDING_SIZE.with(|m| {
-        m.borrow_mut().insert(tab_id.clone(), (bounds.2, bounds.3));
-    });
+    { let mut m = lock_state(pending_size()); {
+        m.insert(tab_id.clone(), (bounds.2, bounds.3));
+    } };
 
     let client: Client = CefTabClient::new(tab_id, tx);
 
@@ -93,7 +104,7 @@ pub fn create_browser(
 
     let mut client = client;
     // 保活一份：CEF 在浏览器存活期间会引用 client
-    CLIENTS_ALIVE.with(|v| v.borrow_mut().push(client.clone()));
+    { let mut v = lock_state(&CLIENTS_ALIVE); v.push(client.clone()) };
 
     let ret = browser_host_create_browser(
         Some(&window_info),
@@ -276,14 +287,14 @@ wrap_life_span_handler! {
 
                 // X11 下 set_as_child 的 bounds 不生效，创建出来是 0×0，
                 // 句柄此时才可用，立刻按登记尺寸补一刀
-                let pending = PENDING_SIZE.with(|m| m.borrow_mut().remove(&self.tab_id));
+                let pending = { let mut m = lock_state(pending_size()); m.remove(&self.tab_id) };
                 if let Some((w, h)) = pending {
                     log::info!("[cef] 应用初始尺寸 {w}x{h}");
                     resize(b, w, h);
                 }
 
                 let b = b.clone();
-                BROWSERS.with(|m| m.borrow_mut().insert(self.tab_id.clone(), b));
+                { let mut m = lock_state(browsers()); m.insert(self.tab_id.clone(), b) };
             }
             let _ = self.tx.send((self.tab_id.clone(), CefEvent::AfterCreated));
         }

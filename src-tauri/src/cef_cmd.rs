@@ -23,6 +23,7 @@ use crate::engine::cef::{
     app as cef_app, browser as cef_browser, shell as cef_shell, toolbar as cef_toolbar,
 };
 use cef_browser::CefEvent;
+use cef_shell::lock_state;
 
 /// 全局事件发送端（CEF 回调线程 → Tauri 侧）
 static EVENT_TX: OnceLock<Sender<(String, CefEvent)>> = OnceLock::new();
@@ -283,11 +284,11 @@ fn create_gtk_cef_window(tab_id: &str, url: &str) -> Result<(), String> {
         // 让 DrawingArea 跟着窗口走（否则 CEF 子窗口会被裁剪）
         area_for_resize.set_size_request(w, h);
 
-        cef_browser::BROWSERS.with(|tabs| {
-            if let Some(b) = tabs.borrow().get(&id_resize) {
+        { let tabs = lock_state(cef_browser::browsers()); {
+            if let Some(b) = tabs.get(&id_resize) {
                 cef_browser::resize(b, w, h);
             }
-        });
+        } };
     });
 
     // ---- 测试用：SHIFT_CEF_TEST_RESIZE=900x560，8 秒后主动调 GTK resize ----
@@ -297,13 +298,13 @@ fn create_gtk_cef_window(tab_id: &str, url: &str) -> Result<(), String> {
                 let id = tab_id.to_string();
                 gtk::glib::timeout_add_seconds_local_once(8, move || {
                     log::info!("[cef] 测试：直接 resize CEF 到 {w}x{h}");
-                    cef_browser::BROWSERS.with(|tabs| {
-                        if let Some(b) = tabs.borrow().get(&id) {
+                    { let tabs = lock_state(cef_browser::browsers()); {
+                        if let Some(b) = tabs.get(&id) {
                             cef_browser::resize(b, w, h);
                         } else {
                             log::warn!("[cef] 测试 resize：BROWSERS 里没有该标签");
                         }
-                    });
+                    } };
                 });
             }
         }
@@ -312,7 +313,7 @@ fn create_gtk_cef_window(tab_id: &str, url: &str) -> Result<(), String> {
     // ---- 关闭清理：窗口关掉时销毁 CEF 浏览器，避免句柄残留 ----
     let id_close = tab_id.to_string();
     window.connect_delete_event(move |_, _| {
-        let browser = cef_browser::BROWSERS.with(|tabs| tabs.borrow_mut().remove(&id_close));
+        let browser = { let mut tabs = lock_state(cef_browser::browsers()); tabs.remove(&id_close) };
         if let Some(b) = browser {
             cef_browser::close(&b, true);
         }
@@ -453,14 +454,14 @@ pub fn cef_open_shell(app: AppHandle, url: String) -> Result<(), String> {
 #[tauri::command]
 pub fn cef_navigate(app: AppHandle, tab_id: String, url: String) -> Result<(), String> {
     app.run_on_main_thread(move || {
-        cef_browser::BROWSERS.with(|tabs| {
-            if let Some(browser) = tabs.borrow().get(&tab_id) {
+        { let tabs = lock_state(cef_browser::browsers()); {
+            if let Some(browser) = tabs.get(&tab_id) {
                 if let Some(frame) = browser.main_frame() {
                     let u = cef::CefString::from(url.as_str());
                     frame.load_url(Some(&u));
                 }
             }
-        });
+        } };
     })
     .map_err(|e| format!("投递主线程失败: {e}"))
 }
@@ -469,7 +470,7 @@ pub fn cef_navigate(app: AppHandle, tab_id: String, url: String) -> Result<(), S
 #[tauri::command]
 pub fn cef_close_window(app: AppHandle, tab_id: String) -> Result<(), String> {
     app.run_on_main_thread(move || {
-        let browser = cef_browser::BROWSERS.with(|tabs| tabs.borrow_mut().remove(&tab_id));
+        let browser = { let mut tabs = lock_state(cef_browser::browsers()); tabs.remove(&tab_id) };
         if let Some(b) = browser {
             cef_browser::close(&b, false);
         }
