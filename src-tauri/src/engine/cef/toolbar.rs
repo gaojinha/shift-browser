@@ -107,6 +107,14 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   }
   .tab:hover { background: #2a2b2e; color: #e8eaed; }
   .tab.active { background: #35363a; color: #e8eaed; }
+  /* 固定标签（F-CEF-30）：只露图标、隐藏标题与关闭按钮 */
+  .tab.pinned { min-width: 40px; max-width: 40px; padding: 0; justify-content: center; gap: 0; }
+  .tab.pinned .t-title, .tab.pinned .t-close { display: none; }
+  .tab .t-pin, .tab .t-mute { font-size: 11px; line-height: 1; }
+  .tab .t-pin { display: none; }
+  .tab.pinned .t-pin { display: inline; }
+  .tab .t-mute { display: none; }
+  .tab.muted .t-mute { display: inline; }
   /* 标签之间的分隔线（Chrome 非激活标签右侧一道细线，激活/相邻时隐藏） */
   .tab + .tab::before {
     content: ''; position: absolute; left: -1px; top: 10px; bottom: 10px;
@@ -900,8 +908,11 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       d.addEventListener('click', () => { act(cmd + '|' + idx); closeTabMenu(); });
       tabMenuEl.appendChild(d);
     };
+    const cur = tabData[idx] || {};
     mk('重新加载', 'tabreload');
     mk('复制标签', 'tabdup');
+    mk(cur.pinned ? '取消固定' : '固定标签', 'tabpin');
+    mk(cur.muted ? '取消静音' : '静音标签', 'tabmute');
     mk('关闭标签', 'tabclose');
     mk('关闭其他标签', 'tabcloseothers');
     mk('关闭右侧标签', 'tabcloseright');
@@ -934,13 +945,22 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   const tabbar = document.getElementById('tabbar');
   const tabs = document.getElementById('tabs');
 
+  let tabData = [];
   window.__shiftTabs = function (tabs_, active) {
     if (!Array.isArray(tabs_)) return;
+    tabData = tabs_;
     tabs.innerHTML = '';
     tabs_.forEach((t, i) => {
       const el = document.createElement('div');
-      el.className = 'tab' + (i === active ? ' active' : '');
+      el.className = 'tab' + (i === active ? ' active' : '')
+        + (t.pinned ? ' pinned' : '') + (t.muted ? ' muted' : '');
       el.dataset.idx = String(i);
+      const pin = document.createElement('span');
+      pin.className = 't-pin';
+      pin.textContent = '📌';
+      const mute = document.createElement('span');
+      mute.className = 't-mute';
+      mute.textContent = '🔇';
       const title = document.createElement('span');
       title.className = 't-title';
       title.textContent = t.title || '新标签页';
@@ -948,6 +968,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       close.className = 't-close';
       close.title = '关闭标签';
       close.textContent = '×';
+      el.appendChild(pin);
+      el.appendChild(mute);
       el.appendChild(title);
       el.appendChild(close);
       el.addEventListener('contextmenu', (e) => {

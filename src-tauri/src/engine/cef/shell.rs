@@ -410,6 +410,10 @@ struct ShellTab {
     title: String,
     /// 最近一次地址（on_address_change 维护），关闭时进恢复栈
     url: String,
+    /// 固定标签（F-CEF-30）：只做视觉标记 + 隐藏关闭按钮，不改排序（动了 idx 会牵连 active）
+    pinned: bool,
+    /// 静音标签：调 CEF `set_audio_muted`，状态记在这里供标签栏显示
+    muted: bool,
 }
 
 /// 全局状态锁辅助：中毒即恢复内部数据（项目铁律：不 panic、不 unwrap 遮羞）。
@@ -540,6 +544,8 @@ pub fn open(content_url: &str, toolbar_url: &str) -> Result<(), String> {
             view: first_view,
             title: "新标签页".to_string(),
             url: content_url.to_string(),
+            pinned: false,
+            muted: false,
         });
     } };
     ACTIVE_TAB.store(0, Ordering::Relaxed);
@@ -1628,6 +1634,8 @@ fn new_tab(url: &str) -> Result<(), String> {
             view,
             title: "新标签页".to_string(),
             url: url.to_string(),
+            pinned: false,
+            muted: false,
         });
         tabs.len() - 1
     } };
@@ -1709,6 +1717,48 @@ fn switch_tab(idx: usize) {
 }
 
 /// 关闭标签（至少保留一个；关闭后切到相邻标签）
+/// 固定/取消固定标签（F-CEF-30）。
+///
+/// 只做视觉标记与关闭按钮隐藏，**不改排序**：标签表顺序即 idx，挪动会牵连
+/// `ACTIVE_TAB` 与正在进行的操作，先保简单可预测。
+fn toggle_tab_pin(idx: usize) {
+    let pinned = {
+        let mut t = lock_state(&SHELL_TABS);
+        let Some(tab) = t.get_mut(idx) else {
+            log::warn!("[cef] tabpin 越界: {idx}");
+            return;
+        };
+        tab.pinned = !tab.pinned;
+        tab.pinned
+    };
+    log::info!("[cef] 标签 {idx} 固定={pinned}");
+    refresh_tabbar();
+}
+
+/// 静音/取消静音标签：状态记在 `ShellTab.muted`，句柄调用投递到 CEF UI 线程。
+fn toggle_tab_mute(idx: usize) {
+    let (id, muted) = {
+        let mut t = lock_state(&SHELL_TABS);
+        let Some(tab) = t.get_mut(idx) else {
+            log::warn!("[cef] tabmute 越界: {idx}");
+            return;
+        };
+        tab.muted = !tab.muted;
+        (tab.id.clone(), tab.muted)
+    };
+    {
+        let m = lock_state(browsers());
+        if let Some(b) = m.get(&id) {
+            if let Some(host) = b.host() {
+                let flag = if muted { 1 } else { 0 };
+                cef_ui(move || host.set_audio_muted(flag));
+            }
+        }
+    }
+    log::info!("[cef] 标签 {idx}（{id}）静音={muted}");
+    refresh_tabbar();
+}
+
 fn close_tab(idx: usize) {
     let len = { let t = lock_state(&SHELL_TABS); t.len() };
     if idx >= len {
@@ -2083,7 +2133,12 @@ pub fn refresh_tabbar() {
         let tabs = t;
         let list: Vec<serde_json::Value> = tabs
             .iter()
-            .map(|tab| serde_json::json!({ "title": tab.title, "id": tab.id }))
+            .map(|tab| serde_json::json!({
+                "title": tab.title,
+                "id": tab.id,
+                "pinned": tab.pinned,
+                "muted": tab.muted,
+            }))
             .collect();
         (
             serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string()),
@@ -2443,6 +2498,18 @@ fn handle_action(action: &str) {
         "tabclose" => {
             if let Ok(idx) = arg.parse::<usize>() {
                 close_tab(idx);
+            }
+            return;
+        }
+        "tabpin" => {
+            if let Ok(idx) = arg.parse::<usize>() {
+                toggle_tab_pin(idx);
+            }
+            return;
+        }
+        "tabmute" => {
+            if let Ok(idx) = arg.parse::<usize>() {
+                toggle_tab_mute(idx);
             }
             return;
         }
