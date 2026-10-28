@@ -1595,6 +1595,10 @@ fn switch_tab(idx: usize) {
             }
         }
     } };
+    // 先记下切走前的活动索引：下面的「停旧标签查找」要用它，
+    // 必须在 store(idx) 之前读，否则 prev 恒等于 idx、条件永假
+    // （2026-10-28 修：原先先 store 后读，导致切标签时查找栏永不收起）。
+    let prev = ACTIVE_TAB.load(Ordering::Relaxed);
     ACTIVE_TAB.store(idx, Ordering::Relaxed);
     // 切标签后活动视图换了，按当前书签栏态重排一次（收起态下内容视图 y 仍是新高度）
     apply_toolbar_height();
@@ -1610,7 +1614,6 @@ fn switch_tab(idx: usize) {
     }
     // 页内查找是标签级状态（F-CEF-18）：切走时停旧标签的查找并收起查找栏，
     // 否则旧计数会留在工具栏上
-    let prev = ACTIVE_TAB.load(Ordering::Relaxed);
     if prev != idx && FIND_EXTRA.load(Ordering::Relaxed) != 0 {
         let prev_id = { let t = lock_state(&SHELL_TABS); t.get(prev).map(|x| x.id.clone()) };
         if let Some(pid) = prev_id {
