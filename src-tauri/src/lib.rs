@@ -98,6 +98,9 @@ mod panic_hook;
 // 原生崩溃信号兜底（2026-10-19）：panic hook 抓不到 GTK/WebKit 段错误
 #[path = "app/crash_signal.rs"]
 pub(crate) mod crash_signal;
+/// 统一错误上报（F-ERR-01）：errors.log + 环形缓冲 + FFI 边界 panic 防护
+#[path = "app/err_report.rs"]
+pub(crate) mod err_report;
 #[cfg(unix)]
 pub use harden::harden_sensitive_files;
 pub(crate) use panic_hook::PANIC_LOG_DIR;

@@ -99,6 +99,8 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     let _ = crate::PANIC_LOG_DIR.set(app_data_dir.clone());
     // 原生崩溃信号兜底（2026-10-19）：crash.log 与本目录同级，信号处理器直接写 fd
     crate::crash_signal::set_log_dir(&app_data_dir);
+    // 统一错误上报（F-ERR-01）：errors.log 与 panic.log 同目录
+    crate::err_report::set_log_dir(&app_data_dir);
     // F-CEF-34：stdout/stderr 落盘。CEF（Chromium）的 CHECK 失败、渲染进程崩溃、
     // GPU 报错全走 stderr，GUI 启动时终端不可见——不重定向就一条都留不下。
     redirect_stdio_to_file(&app_data_dir);

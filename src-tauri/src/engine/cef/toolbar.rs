@@ -724,6 +724,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     <div class="menu-item" data-panel="cert">证书<span class="menu-key"></span></div>
     <div class="menu-item" data-panel="us">用户脚本<span class="menu-key"></span></div>
     <div class="menu-item" data-panel="settings">设置<span class="menu-key"></span></div>
+    <div class="menu-item" data-act="diag">诊断信息<span class="menu-key">写日志目录</span></div>
     <div class="menu-item disabled">关于 Shift<span class="menu-key">待补</span></div>
     <div class="menu-sep"></div>
     <div class="menu-item" data-act="winclose">退出<span class="menu-key"></span></div>

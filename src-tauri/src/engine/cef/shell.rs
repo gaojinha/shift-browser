@@ -433,8 +433,76 @@ struct ShellTab {
 /// F-CEF-24b：下列状态由 `thread_local!` 迁至全局 `Mutex`/`Atomic`，
 /// 为 `multi_threaded_message_loop=1` 做准备——否则同一批 `thread_local`
 /// 会被 GTK 主线程与 CEF UI 线程各持一份独立副本（写一边读另一边恒空）。
-pub(crate) fn lock_state<T>(m: &'static Mutex<T>) -> MutexGuard<'static, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
+pub(crate) fn lock_state<T: 'static>(m: &'static Mutex<T>) -> TrackedGuard<T> {
+    let name = std::any::type_name::<T>();
+    match m.try_lock() {
+        Ok(inner) => TrackedGuard {
+            inner,
+            lock_name: name,
+            since: std::time::Instant::now(),
+        },
+        Err(std::sync::TryLockError::Poisoned(e)) => TrackedGuard {
+            inner: e.into_inner(),
+            lock_name: name,
+            since: std::time::Instant::now(),
+        },
+        Err(std::sync::TryLockError::WouldBlock) => {
+            // 锁被占：记下等了多久、谁在等。死锁时这条是唯一线索。
+            let t0 = std::time::Instant::now();
+            let inner = m.lock().unwrap_or_else(|e| e.into_inner());
+            let ms = t0.elapsed().as_millis();
+            if ms >= 30 {
+                log::warn!(
+                    "[lock] 等锁 {ms}ms：{}（线程 {}）",
+                    name,
+                    std::thread::current().name().unwrap_or("?")
+                );
+            }
+            TrackedGuard {
+                inner,
+                lock_name: name,
+                since: std::time::Instant::now(),
+            }
+        }
+    }
+}
+
+/// 带持锁时长检测的 guard。
+///
+/// **动机**（2026-10-28 死锁事故）：`handle_action` 持着 `BROWSERS` 锁调
+/// `frame.load_url`，CEF 同步回调里又要同一把锁 → 同线程自死锁，整窗无响应。
+/// 只要持锁超过 100ms 就打警告，把「持锁调外部代码」这类前兆暴露出来，
+/// 不用等用户卡死才发现。
+pub(crate) struct TrackedGuard<T: 'static> {
+    inner: MutexGuard<'static, T>,
+    lock_name: &'static str,
+    since: std::time::Instant,
+}
+
+impl<T: 'static> Drop for TrackedGuard<T> {
+    fn drop(&mut self) {
+        let ms = self.since.elapsed().as_millis();
+        if ms >= 100 {
+            log::warn!(
+                "[lock] 持锁 {ms}ms：{}（线程 {}；持锁调 CEF/GTK 是死锁前兆）",
+                self.lock_name,
+                std::thread::current().name().unwrap_or("?")
+            );
+        }
+    }
+}
+
+impl<T: 'static> std::ops::Deref for TrackedGuard<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.inner
+    }
+}
+
+impl<T: 'static> std::ops::DerefMut for TrackedGuard<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.inner
+    }
 }
 
 /// 投递到 GTK 主线程。
@@ -2371,7 +2439,22 @@ fn do_find(text: &str, forward: i32, find_next: i32) {
 }
 
 /// 执行工具栏动作
+/// 工具栏动作入口：**所有动作的 panic 都在这里被拦截**。
+///
+/// CEF 回调是 `extern "C"`，panic 穿过去是 UB（进程静默消失、无栈）。
+/// 这里包一层 `err_report::guard`：真炸了也能在 errors.log 里看到模块与动作名，
+/// 而且不会拖死整个浏览器。
 fn handle_action(action: &str) {
+    let action = action.to_string();
+    crate::err_report::guard(
+        "cef.action",
+        "handle_action",
+        move || handle_action_inner(&action),
+        (),
+    );
+}
+
+fn handle_action_inner(action: &str) {
     let (cmd, arg) = match action.split_once('|') {
         Some((c, a)) => (c, a),
         None => (action, ""),
@@ -2605,6 +2688,14 @@ fn handle_action(action: &str) {
         "tabmute" => {
             if let Ok(idx) = arg.parse::<usize>() {
                 toggle_tab_mute(idx);
+            }
+            return;
+        }
+        "diag" => {
+            // 诊断快照：错误计数 + 最近错误，落到 app_data/diagnostics.txt
+            match crate::err_report::write_diagnostics() {
+                Some(p) => log::info!("[cef] 诊断快照已写入 {p:?}"),
+                None => log::warn!("[cef] 诊断快照写入失败（日志目录未注入）"),
             }
             return;
         }
