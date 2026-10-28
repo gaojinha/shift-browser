@@ -114,6 +114,10 @@ pub fn initialize(resources_dir: &str, locales_dir: &str, cache_path: &str) -> R
 /// 消息泵：由调用方在 GTK 主循环里定时调用（建议 10ms 一次）。
 ///
 /// 必须从 **UI 线程** 调用。
+///
+/// F-CEF-24d 起 `multi_threaded_message_loop=1`（CEF 自跑消息循环），本函数**无调用方**，
+/// 保留供回退用：回退时把 `multi_threaded_message_loop` 改回 0，并在 cef_cmd 的 init
+/// 里重新挂 50ms 定时器调它。`dead_code` 豁免是有意的。
 #[allow(dead_code)]
 pub fn pump() {
     if !CONTEXT_READY.load(Ordering::SeqCst) {
