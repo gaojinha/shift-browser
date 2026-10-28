@@ -70,11 +70,10 @@ pub(crate) enum Panel {
     Session,
     Groups,
     Palette,
-    TabMenu,
 }
 
 impl Panel {
-    pub(crate) const ALL: [Panel; 14] = [
+    pub(crate) const ALL: [Panel; 13] = [
         Panel::Pw,
         Panel::Dl,
         Panel::Menu,
@@ -88,7 +87,6 @@ impl Panel {
         Panel::Session,
         Panel::Groups,
         Panel::Palette,
-        Panel::TabMenu,
     ];
 
     /// 对应 `html.<class>` 根类名（须与 `toolbar::PANEL_CLASSES` 同序同值，有单测钉住）
@@ -107,7 +105,6 @@ impl Panel {
             Panel::Session => "sess-open",
             Panel::Groups => "groups-open",
             Panel::Palette => "palette-open",
-            Panel::TabMenu => "tabmenu-open",
         }
     }
 
@@ -126,7 +123,6 @@ impl Panel {
             Panel::Session => SESSION_PANEL_EXTRA,
             Panel::Groups => GROUPS_PANEL_EXTRA,
             Panel::Palette => PALETTE_PANEL_EXTRA,
-            Panel::TabMenu => TAB_MENU_EXTRA,
         }
     }
 
@@ -145,7 +141,6 @@ impl Panel {
             Panel::Session => &SESSION_EXTRA,
             Panel::Groups => &GROUPS_EXTRA,
             Panel::Palette => &PALETTE_EXTRA,
-            Panel::TabMenu => &TAB_MENU_EXTRA_V,
         }
     }
 }
@@ -266,11 +261,6 @@ static GROUPS_EXTRA: AtomicI32 = AtomicI32::new(0);
 const PALETTE_PANEL_EXTRA: i32 = 340;
 static PALETTE_EXTRA: AtomicI32 = AtomicI32::new(0);
 
-/// 标签右键菜单展开时的额外高度（F-CEF-38）。
-/// 菜单 7 项约 200px，而工具栏视图只有 122px —— 不撑高就会被裁掉，
-/// 露出来的是一大块菜单背景（2026-10-28 用户反馈「右键一大块灰色」）。
-const TAB_MENU_EXTRA: i32 = 200;
-static TAB_MENU_EXTRA_V: AtomicI32 = AtomicI32::new(0);
 
 /// 分组/工作区面板开合
 pub fn set_groups_panel(open: bool) {
@@ -281,12 +271,6 @@ pub fn set_groups_panel(open: bool) {
 /// 命令面板（F-CEF-29）开合：与其它面板互斥
 pub fn set_palette_panel(open: bool) {
     set_panel_extra(Panel::Palette, open);
-    apply_toolbar_height();
-}
-
-/// 标签右键菜单开合（F-CEF-38）：撑高工具栏，避免菜单被 122px 视口裁掉
-pub fn set_tab_menu(open: bool) {
-    set_panel_extra(Panel::TabMenu, open);
     apply_toolbar_height();
 }
 
@@ -2825,10 +2809,6 @@ fn handle_action_inner(action: &str) {
             }
             return;
         }
-        "tabmenu" => {
-            set_tab_menu(arg != "0");
-            return;
-        }
         "diag" => {
             // 诊断快照：错误计数 + 最近错误，落到 app_data/diagnostics.txt
             match crate::err_report::write_diagnostics() {
@@ -3027,7 +3007,6 @@ mod tests {
             (Panel::Session, "sess-open", 320),
             (Panel::Groups, "groups-open", 360),
             (Panel::Palette, "palette-open", 340),
-            (Panel::TabMenu, "tabmenu-open", 200),
         ];
         assert_eq!(Panel::ALL.len(), want.len());
         for (p, c, px) in want {
@@ -3036,7 +3015,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_any_panel_zeroes_all_other_extras_182_pairs() {
+    fn opening_any_panel_zeroes_all_other_extras_156_pairs() {
         use super::{set_panel_extra, toolbar_height, Panel, BM_EXTRA, TOOLBAR_H};
         use std::sync::atomic::Ordering;
         let base = TOOLBAR_H.load(Ordering::Relaxed);
@@ -3060,7 +3039,7 @@ mod tests {
                 pairs += 1;
             }
         }
-        assert_eq!(pairs, 182);
+        assert_eq!(pairs, 156);
     }
 
     // ---- normalize_url：地址栏补全规则（P0 实测逻辑，防改坏）----

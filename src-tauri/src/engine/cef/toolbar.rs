@@ -334,13 +334,18 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   .hist-empty { color: #9aa0a6; padding: 12px 6px; font-size: 12px; }
   /* 标签右键菜单（F-CEF-21） */
   #tabmenu {
-    display: none; position: absolute; z-index: 30; min-width: 160px;
+    display: none; position: absolute; z-index: 30; min-width: 150px;
     background: #292a2d; border: 1px solid #3c4043; border-radius: 8px;
-    padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.5); font-size: 12px;
+    padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.5); font-size: 11px;
+    /* 工具栏视图只有 122px：菜单必须落在视口内，超出部分自己滚动，
+       否则会被裁掉、露出一大块菜单背景（F-CEF-38）。 */
+    max-height: calc(100vh - 8px);
+    overflow-y: auto;
   }
-  html.tabmenu-open #tabmenu.open { display: block; }
+  #tabmenu.open { display: block; }
   #tabmenu .tm-item {
-    padding: 6px 10px; border-radius: 4px; color: #e8eaed; cursor: default;
+    padding: 4px 8px; border-radius: 4px; color: #e8eaed; cursor: default;
+    line-height: 1.4;
   }
   #tabmenu .tm-item:hover { background: #3c4043; }
   #tabmenu .tm-item.danger { color: #f28b82; }
@@ -903,10 +908,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   // 标签右键菜单（F-CEF-21）：复用现有 tab* 动作
   const tabMenuEl = document.getElementById('tabmenu');
   function closeTabMenu() {
-    if (!tabMenuEl.classList.contains('open')) return;
     tabMenuEl.classList.remove('open');
     tabMenuEl.innerHTML = '';
-    act('tabmenu|0');   // 恢复工具栏高度
   }
   function showTabMenu(e, idx) {
     tabMenuEl.innerHTML = '';
@@ -929,9 +932,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     // 不再用 innerHeight 算（撑高是异步的，算出来的 top 会基于旧视口而跑到视口外，
     // 2026-10-28 用户看到「右键一大块灰色」就是前几项被裁到上面去了）。
     tabMenuEl.style.left = Math.min(e.clientX, window.innerWidth - 180) + 'px';
-    tabMenuEl.style.top = '40px';
+    tabMenuEl.style.top = '4px';
     tabMenuEl.classList.add('open');
-    act('tabmenu|1');   // 撑高工具栏，否则 7 项菜单会被 122px 视口裁掉
   }
   document.addEventListener('click', closeTabMenu);
 
@@ -2327,8 +2329,8 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn panel_registry_has_fourteen_unique_classes_and_matches_css() {
-        assert_eq!(Panel::ALL.len(), 14);
+    fn panel_registry_has_thirteen_unique_classes_and_matches_css() {
+        assert_eq!(Panel::ALL.len(), 13);
         let json = panel_classes_json();
         for p in Panel::ALL {
             assert_eq!(json.matches(&format!("\"{}\"", p.class())).count(), 1, "{:?}", p);
@@ -2339,8 +2341,6 @@ mod tests {
 
     #[test]
     fn every_js_setter_uses_registry_not_hand_lists() {
-        // TabMenu 是右键菜单、走 show/hide（showTabMenu），不经 JS 面板 setter，
-        // 所以带 removePanelClasses 的 setter 仍是 13 个（14 个 Panel 里有 1 个例外）。
         assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 13);
         for line in TOOLBAR_HTML.lines().filter(|l| l.contains("classList.remove(")) {
             assert!(line.matches("-open").count() <= 1, "残留手写互斥清单: {line}");
