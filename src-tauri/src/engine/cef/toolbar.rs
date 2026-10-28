@@ -697,6 +697,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   </div>
   <div id="menupanel">
     <div class="menu-item" data-act="tabnew">新标签页<span class="menu-key">Ctrl+T</span></div>
+    <div class="menu-item" data-panel="palette">命令面板<span class="menu-key">Ctrl+K</span></div>
     <div class="menu-sep"></div>
     <div class="menu-item" data-panel="hist">历史记录<span class="menu-key">Ctrl+H</span></div>
     <div class="menu-item" data-panel="dl">下载内容<span class="menu-key">Ctrl+J</span></div>
@@ -2182,6 +2183,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (item.dataset.panel === 'settings') { setSettingsPanel(true); return; }
     if (item.dataset.panel === 'dl') { setDlPanel(true); return; }
     if (item.dataset.panel === 'pw') { setPwPanel(true); return; }
+    if (item.dataset.panel === 'palette') { setPalettePanel(true); return; }
     act(item.dataset.act);
   });
   document.addEventListener('click', (e) => {
