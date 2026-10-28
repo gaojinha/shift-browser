@@ -25,7 +25,8 @@ TMP=$(mktemp -d)
 mkdir -p "$TMP/app"
 # 日志：tauri-plugin-log 主日志 + 轮转、stdio 重定向、panic、崩溃信号
 for f in "$APP_DIR"/logs/*.log "$APP_DIR"/logs/*.log.* \
-         "$APP_DIR"/panic.log "$APP_DIR"/crash.log "$APP_DIR"/crash-signal.log; do
+         "$APP_DIR"/panic.log "$APP_DIR"/crash.log "$APP_DIR"/crash-signal.log \
+         "$APP_DIR"/errors.log "$APP_DIR"/diagnostics.txt; do
   [ -f "$f" ] && cp "$f" "$TMP/app/" 2>/dev/null
 done
 
@@ -51,4 +52,7 @@ echo "已生成：$OUT"
 ls -lh "$OUT"
 echo
 echo "把这个文件发给二狗即可。"
-echo "提示：排查时用 SHIFT_LOG_LEVEL=debug shift-browser 启动，日志会详细得多。"
+echo "提示："
+echo "  · 排查时用 SHIFT_LOG_LEVEL=debug shift-browser 启动，日志会详细得多"
+echo "  · 菜单「诊断信息」会生成 diagnostics.txt（错误计数 + 最近 30 条）"
+echo "  · errors.log 是结构化错误流水（module=... detail=... ctx{...}）"
