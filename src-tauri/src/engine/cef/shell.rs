@@ -428,6 +428,17 @@ struct ShellTab {
     muted: bool,
 }
 
+thread_local! {
+    /// 当前线程已持有的锁（按类型名）。
+    ///
+    /// 用于**自死锁检测**：Rust 的 `Mutex` 不可重入，同一线程再次申请同一把锁
+    /// 会永久阻塞（表现为整窗「无响应」，没有任何日志）。这里在申请前查表，
+    /// 命中就直接 panic —— panic 会被 `err_report::guard` 捕获并记录线程与位置，
+    /// 比卡死好查一万倍。2026-10-28 三次事故（导航/刷新/关窗）都是这一类。
+    static HELD_LOCKS: std::cell::RefCell<std::collections::HashSet<&'static str>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
 /// 全局状态锁辅助：中毒即恢复内部数据（项目铁律：不 panic、不 unwrap 遮羞）。
 ///
 /// F-CEF-24b：下列状态由 `thread_local!` 迁至全局 `Mutex`/`Atomic`，
@@ -435,6 +446,18 @@ struct ShellTab {
 /// 会被 GTK 主线程与 CEF UI 线程各持一份独立副本（写一边读另一边恒空）。
 pub(crate) fn lock_state<T: 'static>(m: &'static Mutex<T>) -> TrackedGuard<T> {
     let name = std::any::type_name::<T>();
+    // 自死锁检测：本线程已持有同名锁 → 立即 panic（带线程名与锁类型）
+    HELD_LOCKS.with(|h| {
+        let mut held = h.borrow_mut();
+        if held.contains(name) {
+            drop(held);
+            panic!(
+                "[lock] 自死锁：线程 {:?} 已持有 {name}，又申请同一把锁（锁内禁止再取同锁 / 调可能回调的 CEF 接口）",
+                std::thread::current().name().unwrap_or("?")
+            );
+        }
+        held.insert(name);
+    });
     match m.try_lock() {
         Ok(inner) => TrackedGuard {
             inner,
@@ -481,6 +504,13 @@ pub(crate) struct TrackedGuard<T: 'static> {
 
 impl<T: 'static> Drop for TrackedGuard<T> {
     fn drop(&mut self) {
+        // 先从持锁表移除（try_borrow 兜底：检测 panic 展开时也能安全 drop）
+        let name = self.lock_name;
+        HELD_LOCKS.with(|h| {
+            if let Ok(mut held) = h.try_borrow_mut() {
+                held.remove(name);
+            }
+        });
         let ms = self.since.elapsed().as_millis();
         if ms >= 100 {
             log::warn!(
@@ -2554,9 +2584,11 @@ fn handle_action_inner(action: &str) {
             "forward" => browser.go_forward(),
             "reload" => browser.reload(),
             "stop" => browser.stop_load(),
-            _ => unreachable!(),
+            // 理论上 matches! 已排除其他值；留日志而不是 unreachable!，
+            // 免得真出现边界值时 panic（2026-10-28 实测触发过一次，原因待查）
+            other => log::warn!("[cef] 导航动作命中 but 未匹配分支: {other:?}"),
         }
-        log::info!("[cef] 导航动作 {cmd} 已执行（锁外）");
+        log::info!("[cef] 导航动作 {cmd:?} 已执行（锁外）");
         return;
     }
 
@@ -3975,5 +4007,31 @@ fn sanitize_filename(name: &str) -> String {
         "download".to_string()
     } else {
         trimmed
+    }
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::lock_state;
+    use std::sync::Mutex;
+
+    static T_LOCK_A: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+
+    #[test]
+    fn lock_state_works_normally() {
+        {
+            let mut g = lock_state(&T_LOCK_A);
+            g.push(1);
+        }
+        // 释放后可再次获取
+        let g = lock_state(&T_LOCK_A);
+        assert_eq!(*g, vec![1]);
+    }
+
+    #[test]
+    #[should_panic(expected = "自死锁")]
+    fn lock_state_reentry_panics_instead_of_deadlock() {
+        let _g1 = lock_state(&T_LOCK_A);
+        let _g2 = lock_state(&T_LOCK_A); // 同一线程二次申请 → 应 panic
     }
 }
