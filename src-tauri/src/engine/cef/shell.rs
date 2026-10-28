@@ -1048,11 +1048,19 @@ wrap_window_delegate! {
             // 单窗口模式：窗口关了就退出整个进程，不留后台（2026-10-27 实测
             // 关窗后主进程仍挂着 5 分钟）。延迟到下一轮主循环，避免在 CEF
             // 销毁回调栈里直接 exit 触发重入。
-            // 延迟退出：独立线程 + sleep（CEF UI 线程不能同步投递 GTK 主线程）
+            // 关窗退出：必须先让 CEF 自己关掉，再退进程。
+            //
+            // 2026-10-28 实测：原来 sleep 100ms 直接 exit(0)，CEF 还在销毁
+            // Browser/释放资源时被强杀 → 日志 `[crash] FATAL SIGABRT`。
+            // `cef::shutdown()` 必须在初始化 CEF 的线程（GTK 主线程）调，
+            // 而回调在 CEF UI 线程 —— 所以起独立线程等待，再经 gtk_ui 投递。
             std::thread::spawn(|| {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                log::info!("[cef] 窗口已关闭，退出进程");
-                std::process::exit(0);
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                log::info!("[cef] 窗口已关闭，关闭 CEF 后退出");
+                gtk_ui(|| {
+                    crate::engine::cef::app::shutdown();
+                    std::process::exit(0);
+                });
             });
         }
 
