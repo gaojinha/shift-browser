@@ -76,7 +76,17 @@ for _ in 1 2 3; do
 done
 [ "$MIN" -le 10 ] && ok "主进程 CPU ${MIN}%（目标 ≤10%）" || bad "主进程 CPU ${MIN}%（>10%，未达标）"
 
-echo "7) 关窗退出"
+echo "7) 命令面板（F-CEF-29）"
+EV "setPalettePanel(true); 'ok'" >/dev/null
+sleep 1
+PL=$(EV "JSON.stringify({open:document.documentElement.classList.contains('palette-open'),h:window.innerHeight,items:document.querySelectorAll('.pl-item').length})")
+echo "     $PL"
+echo "$PL" | grep -q '"open":true' && ok "面板打开" || bad "面板未打开（$PL）"
+echo "$PL" | grep -qE '"h":4[0-9][0-9]' && ok "高度已撑高" || bad "高度未撑高（$PL）"
+echo "$PL" | grep -qE '"items":[1-9]' && ok "候选已渲染" || bad "候选为空（$PL）"
+EV "setPalettePanel(false); 'ok'" >/dev/null
+
+echo "8) 关窗退出"
 W=$(wmctrl -l | grep -i Shift | head -1 | awk '{print $1}')
 wmctrl -ic "$W"
 sleep 4
