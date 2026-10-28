@@ -193,6 +193,8 @@ pub(super) fn render_worldnav_html() -> String {
             .map(|v| json_script_safe(&v))
             .unwrap_or_else(|_| "[]".to_string()),
     )
+    // WebKit 版不接最近访问（CEF 版由 ensure_worldnav_html 注入），给空数组保证占位符必替换
+    .replace("__WORLD_CONTEXT__", "{\"recent\":[]}")
 }
 
 #[cfg(test)]
@@ -262,6 +264,8 @@ mod tests {
     fn render_worldnav_html_embeds_data_without_placeholder() {
         let html = render_worldnav_html();
         assert!(!html.contains("__WORLDAV_DATA__"));
+        assert!(!html.contains("__WORLD_CONTEXT__"));
+        assert!(html.contains("\"recent\":[]"));
         assert!(!WORLDNAV_JSON.is_empty() && html.len() > WORLDNAV_TPL.len());
     }
 

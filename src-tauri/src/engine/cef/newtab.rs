@@ -45,11 +45,40 @@ fn ensure_worldnav_html(dir: &Path) -> Result<(), String> {
     const DATA: &str = include_str!("../../../resources/worldnav.json");
     // 内嵌 JSON 防提前闭合 script
     let data = DATA.replace("</", "<\\/");
-    let html = TPL.replace("__WORLDAV_DATA__", &data);
+    let context = serde_json::json!({ "recent": load_recent_for_worldnav() })
+        .to_string()
+        .replace("</", "<\\/");
+    let html = TPL
+        .replace("__WORLDAV_DATA__", &data)
+        .replace("__WORLD_CONTEXT__", &context);
     let path = dir.join("world-nav.html");
     std::fs::write(&path, html).map_err(|e| format!("写世界导航页失败: {e}"))?;
     log::info!("[cef] 世界导航页已生成: {}", path.display());
     Ok(())
+}
+
+/// 世界导航「最近访问」：history 最近 8 条，只放行 http/https。
+fn load_recent_for_worldnav() -> Vec<serde_json::Value> {
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return Vec::new();
+    };
+    let rows = tauri::async_runtime::block_on(async move {
+        sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT url, title FROM history ORDER BY last_visit_at DESC LIMIT 8",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default()
+    });
+    rows.into_iter()
+        .filter(|(url, _)| crate::newtab::quick_sites::is_safe_web_url(url))
+        .map(|(url, title)| {
+            serde_json::json!({
+                "url": url,
+                "title": title.unwrap_or_default(),
+            })
+        })
+        .collect()
 }
 
 /// 读主应用设置与最近历史（同步：开窗时只跑一次，几十毫秒可接受）。

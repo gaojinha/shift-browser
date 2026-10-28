@@ -283,6 +283,7 @@
   'use strict';
 
   var CATS = __WORLDAV_DATA__;
+  var CONTEXT = __WORLD_CONTEXT__;
   var FAV_KEY = 'sb_user_favs';
   var LIMIT = 100;
 
@@ -447,6 +448,25 @@
     '</div>';
   }
 
+  // 最近访问（宿主注入 history top 8；WebKit 版注入空数组）
+  function recentItems() {
+    var list = (CONTEXT && CONTEXT.recent) || [];
+    return list.filter(function (x) {
+      return x && /^https?:\/\//i.test(String(x.url || ''));
+    });
+  }
+  function recentHtml() {
+    var items = recentItems();
+    if (!items.length) return '';
+    return '<section class="block">' +
+      '<div class="block-head"><h2>最近访问</h2><span class="count">' + items.length + ' 个</span></div>' +
+      '<div class="fav-row">' + items.slice(0, 8).map(function (it) {
+        var label = it.title && String(it.title).trim() ? it.title : hostOf(it.url);
+        return '<span class="chip"><a class="chip-link" href="' + esc(safeUrl(it.url)) + '" target="_blank" rel="noopener noreferrer" title="' + esc(label) + '">' + esc(label) + '</a></span>';
+      }).join('') + '</div>' +
+    '</section>';
+  }
+
   function homeHtml() {
     var favs = favItems();
     var html = '';
@@ -464,6 +484,8 @@
           }).join('') + '</div>'
         : '<div class="empty"><p>还没有收藏。</p><p>点站点右侧的星标收藏，收藏会同步到新标签页。</p></div>') +
     '</section>';
+
+    html += recentHtml();
 
     html += '<section class="block">' +
       '<div class="block-head"><h2>全部类别</h2><span class="count">' + CATS.length + ' 类</span></div>' +
