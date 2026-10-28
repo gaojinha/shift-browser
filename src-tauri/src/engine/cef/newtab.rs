@@ -186,9 +186,9 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
     user-select: none;
   }
   .wrap { width: 720px; max-width: 88vw; text-align: center; }
-  .brand {
-    font-size: 32px; font-weight: 600; letter-spacing: 2px;
-    color: var(--accent); margin-bottom: var(--sp-2);
+  h1.brand {
+    font-size: 28px; font-weight: 600; letter-spacing: 2px;
+    color: var(--accent); margin: 0 0 var(--sp-2);
   }
   .sub { font-size: 14px; color: var(--text-dim); margin-bottom: var(--sp-8); }
   .search {
@@ -249,11 +249,11 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
     text-overflow: ellipsis; white-space: nowrap;
   }
   .recent-item .r-url {
-    color: var(--text-faint); font-size: 12px; overflow: hidden;
+    color: var(--text-dim); font-size: 13px; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap;
   }
   .hint {
-    margin-top: var(--sp-6); font-size: 12px; color: var(--text-faint);
+    margin-top: var(--sp-6); font-size: 13px; color: var(--text-dim);
     display: flex; gap: var(--sp-4); justify-content: center; flex-wrap: wrap;
   }
   .sidebar {
@@ -262,11 +262,11 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
   }
   .sb-btn {
     width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
-    border-radius: var(--radius-sm); background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: transparent; border: 1px solid transparent;
     color: var(--text-dim); cursor: pointer; text-decoration: none; padding: 0;
     transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
   }
-  .sb-btn:hover { background: var(--bg-elev-hover); border-color: var(--border-strong); color: var(--accent); }
+  .sb-btn:hover { background: var(--bg-elev); border-color: var(--border); color: var(--accent); }
   .sb-btn:active { background: var(--border); }
   .sb-btn:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
   .sb-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor;
@@ -289,7 +289,7 @@ const NEWTAB_HTML: &str = r#"<!DOCTYPE html>
   </button>
 </nav>
 <div class="wrap">
-  <div class="brand">Shift</div>
+  <h1 class="brand">Shift</h1>
   <div class="sub">输入网址或搜索词，回车打开</div>
   <div class="search">
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
