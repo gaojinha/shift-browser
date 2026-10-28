@@ -71,7 +71,7 @@ fn copy_password(id: i64) {
     let res = tauri::async_runtime::block_on(
         crate::db::passwords::get_password_plain_trusted_inner(&db, id),
     );
-    let mut plain = match res {
+    let plain = match res {
         Ok(Some(p)) => p,
         Ok(None) => {
             log::warn!("[cef] 复制密码：id={id} 不存在");
@@ -83,25 +83,31 @@ fn copy_password(id: i64) {
         }
     };
     let digest = Sha256::digest(plain.as_bytes());
-    let clip = gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD);
-    clip.set_text(&plain);
-    plain.zeroize();
-    log::info!("[cef] 密码 id={id} 已复制到剪贴板，{CLIPBOARD_CLEAR_SECS}s 后自动清空");
+    // F-CEF-24d：`gtk::Clipboard` 与 `glib::*_add_local` 只能在 GTK 主线程，
+    // 而本函数由 `handle_action`（CEF UI 线程）进入——必须经 gtk_ui 投递，
+    // 否则 multi_threaded=1 下 glib 报 "main context already acquired" panic。
+    super::shell::gtk_ui(move || {
+        let mut plain = plain;
+        let clip = gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD);
+        clip.set_text(&plain);
+        plain.zeroize();
+        log::info!("[cef] 密码 id={id} 已复制到剪贴板，{CLIPBOARD_CLEAR_SECS}s 后自动清空");
 
-    gtk::glib::timeout_add_local_once(
-        std::time::Duration::from_secs(CLIPBOARD_CLEAR_SECS),
-        move || {
-            let clip = gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD);
-            let still_ours = clip
-                .wait_for_text()
-                .map(|t| Sha256::digest(t.as_bytes()) == digest)
-                .unwrap_or(false);
-            if still_ours {
-                clip.clear();
-                log::info!("[cef] 剪贴板中的密码已自动清空");
-            }
-        },
-    );
+        gtk::glib::timeout_add_local_once(
+            std::time::Duration::from_secs(CLIPBOARD_CLEAR_SECS),
+            move || {
+                let clip = gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD);
+                let still_ours = clip
+                    .wait_for_text()
+                    .map(|t| Sha256::digest(t.as_bytes()) == digest)
+                    .unwrap_or(false);
+                if still_ours {
+                    clip.clear();
+                    log::info!("[cef] 剪贴板中的密码已自动清空");
+                }
+            },
+        );
+    });
 }
 
 fn delete_password(id: i64) {
