@@ -494,8 +494,6 @@ struct ShellTab {
     pinned: bool,
     /// 静音标签：调 CEF `set_audio_muted`，状态记在这里供标签栏显示
     muted: bool,
-    /// 标签组 id（Chrome 式标签组；None = 未分组）
-    group_id: Option<i64>,
 }
 
 thread_local! {
@@ -730,7 +728,6 @@ pub fn open(content_url: &str, toolbar_url: &str) -> Result<(), String> {
     let first_view = View::from(&content_view);
     { let mut t = lock_state(&SHELL_TABS); {
         t.push(ShellTab {
-            group_id: None,
             id: CONTENT_ID.to_string(),
             view: first_view,
             title: "新标签页".to_string(),
@@ -1627,52 +1624,6 @@ fn refresh_star_state(url: &str) {
 
 /// 设置面板数据（F-CEF-19）：只推工具栏需要的四项。
 /// 打开设置页（F-CEF-40）：生成 settings.html 并新开标签，不再加高工具栏。
-/// 把标签加入一个新标签组（F-CEF-40）：建 DB 组 + 设 group_id + 重绘。
-fn create_group_for_tab(idx: usize) {
-    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
-        return;
-    };
-    let new_id = tauri::async_runtime::block_on(async move {
-        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tab_groups")
-            .fetch_one(&pool)
-            .await
-            .unwrap_or(0);
-        let colors = ["#4a9eff", "#f28b82", "#fdd663", "#81c995", "#c58af9"];
-        let color = colors[(n as usize) % colors.len()];
-        sqlx::query("INSERT INTO tab_groups (name, color) VALUES (?, ?)")
-            .bind(format!("分组 {}", n + 1))
-            .bind(color)
-            .execute(&pool)
-            .await
-            .map(|r| r.last_insert_rowid())
-            .ok()
-    });
-    let Some(gid) = new_id else {
-        log::warn!("[cef] 新建标签组失败");
-        return;
-    };
-    {
-        let mut t = lock_state(&SHELL_TABS);
-        if let Some(tab) = t.get_mut(idx) {
-            tab.group_id = Some(gid);
-        }
-    }
-    log::info!("[cef] 标签 {idx} 已加入新组 {gid}");
-    push_groups();
-    refresh_tabbar();
-}
-
-/// 从标签组移除（F-CEF-40）。
-fn leave_tab_group(idx: usize) {
-    {
-        let mut t = lock_state(&SHELL_TABS);
-        if let Some(tab) = t.get_mut(idx) {
-            tab.group_id = None;
-        }
-    }
-    refresh_tabbar();
-}
-
 /// 标签页下拉列表（F-CEF-40）：GTK 原生菜单列出全部标签，点击切换。
 fn popup_tab_list() {
     let tabs: Vec<String> = {
@@ -1709,9 +1660,9 @@ fn popup_tab_menu(idx: usize) {
     };
     let state = {
         let t = lock_state(&SHELL_TABS);
-        t.get(idx).map(|x| (x.pinned, x.muted, x.group_id))
+        t.get(idx).map(|x| (x.pinned, x.muted))
     };
-    let Some((pinned, muted, group_id)) = state else {
+    let Some((pinned, muted)) = state else {
         return;
     };
     let _ = app.run_on_main_thread(move || {
@@ -1732,10 +1683,6 @@ fn popup_tab_menu(idx: usize) {
         add("关闭标签", format!("tabclose|{idx}"));
         add("关闭其他标签", format!("tabcloseothers|{idx}"));
         add("关闭右侧标签", format!("tabcloseright|{idx}"));
-        if group_id.is_some() {
-            add("从组中移除", format!("tabgroupdel|{idx}"));
-        }
-        add("添加到新标签组", format!("tabgroupnew|{idx}"));
         popup_gtk_menu_at_pointer(&menu);
     });
 }
@@ -2263,7 +2210,6 @@ fn new_tab(url: &str) -> Result<(), String> {
     let idx = { let t = lock_state(&SHELL_TABS); {
         let mut tabs = t;
         tabs.push(ShellTab {
-            group_id: None,
             id: id.clone(),
             view,
             title: "新标签页".to_string(),
@@ -2802,7 +2748,6 @@ pub fn refresh_tabbar() {
                 "id": tab.id,
                 "pinned": tab.pinned,
                 "muted": tab.muted,
-                "groupId": tab.group_id,
             }))
             .collect();
         (
@@ -3072,18 +3017,6 @@ fn handle_action_inner(action: &str) {
         }
         "tablist" => {
             popup_tab_list();
-            return;
-        }
-        "tabgroupnew" => {
-            if let Ok(idx) = arg.parse::<usize>() {
-                create_group_for_tab(idx);
-            }
-            return;
-        }
-        "tabgroupdel" => {
-            if let Ok(idx) = arg.parse::<usize>() {
-                leave_tab_group(idx);
-            }
             return;
         }
         "bmfoldermenu" => {
