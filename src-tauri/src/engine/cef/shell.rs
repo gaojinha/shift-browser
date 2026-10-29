@@ -183,6 +183,36 @@ const MENU_PANEL_EXTRA: i32 = 340;
 static MENU_EXTRA: AtomicI32 = AtomicI32::new(0);
 
 /// 主菜单开合：同样与其它面板互斥
+/// 在指针正下方弹出 GTK 菜单（左边缘对齐点击点）。
+///
+/// `popup_easy(0,0)` 会按 GTK 默认偏移弹到指针右上/右下，用户看到的位置偏了；
+/// 这里显式用 root window 的矩形锚点：菜单左上角对齐点击点左下角。
+fn popup_gtk_menu_at_pointer(menu: &gtk::Menu) {
+    use gtk::prelude::*;
+    // 对齐 Chrome 书签下拉的宽度（GTK 默认按文字宽度，会窄得像个条）
+    menu.set_size_request(320, -1);
+    menu.show_all();
+    if let Some(display) = gtk::gdk::Display::default() {
+        if let Some(seat) = display.default_seat() {
+            if let Some(pointer) = seat.pointer() {
+                let (screen, x, y) = pointer.position();
+                if let Some(root) = screen.root_window() {
+                    let rect = gtk::gdk::Rectangle::new(x, y, 1, 1);
+                    menu.popup_at_rect(
+                        &root,
+                        &rect,
+                        gtk::gdk::Gravity::SouthWest,
+                        gtk::gdk::Gravity::NorthWest,
+                        None,
+                    );
+                    return;
+                }
+            }
+        }
+    }
+    menu.popup_easy(0, 0);
+}
+
 /// 主菜单（F-CEF-40）：GTK 原生弹出菜单，浮在内容页之上。
 ///
 /// 不再加高工具栏视图：菜单是独立 popup window，不推挤内容，也不会
@@ -1595,6 +1625,138 @@ fn refresh_star_state(url: &str) {
 
 /// 设置面板数据（F-CEF-19）：只推工具栏需要的四项。
 /// 打开设置页（F-CEF-40）：生成 settings.html 并新开标签，不再加高工具栏。
+/// 标签右键菜单（F-CEF-40）：GTK 原生弹出，浮在内容页上，
+/// 不再困在 122px 的工具栏视口里（旧方案右侧会露出一整片工具栏背景）。
+fn popup_tab_menu(idx: usize) {
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
+    let state = {
+        let t = lock_state(&SHELL_TABS);
+        t.get(idx).map(|x| (x.pinned, x.muted))
+    };
+    let Some((pinned, muted)) = state else {
+        return;
+    };
+    let _ = app.run_on_main_thread(move || {
+        use gtk::prelude::*;
+        let menu = gtk::Menu::new();
+        let add = |label: &str, action: String| {
+            let item = gtk::MenuItem::with_label(label);
+            item.connect_activate(move |_| {
+                let act = action.clone();
+                cef_ui(move || handle_action(&act));
+            });
+            menu.append(&item);
+        };
+        add("重新加载", format!("tabreload|{idx}"));
+        add("复制标签", format!("tabdup|{idx}"));
+        add(if pinned { "取消固定" } else { "固定标签" }, format!("tabpin|{idx}"));
+        add(if muted { "取消静音" } else { "静音标签" }, format!("tabmute|{idx}"));
+        add("关闭标签", format!("tabclose|{idx}"));
+        add("关闭其他标签", format!("tabcloseothers|{idx}"));
+        add("关闭右侧标签", format!("tabcloseright|{idx}"));
+        popup_gtk_menu_at_pointer(&menu);
+    });
+}
+
+/// 书签文件夹下拉（F-CEF-40）：GTK 原生菜单，子文件夹递归成子菜单。
+///
+/// 旧实现把 `#bmfolders` 放在 122px 工具栏里再 `bmfoldopen` 加高，
+/// 加高区会横跨整个窗口，用户看到的就是「一整片背景」。
+fn popup_bookmark_folder_menu(fid: i64, rel_x: i32, rel_y: i32) {
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
+    let (bms, fds) = tauri::async_runtime::block_on(async move {
+        let bms = sqlx::query_as::<_, (i64, String, String, Option<i64>)>(
+            "SELECT id, title, url, folder_id FROM bookmarks ORDER BY sort_order, id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default();
+        let fds = sqlx::query_as::<_, (i64, String, Option<i64>)>(
+            "SELECT id, name, parent_id FROM bookmark_folders ORDER BY sort_order, id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default();
+        (bms, fds)
+    });
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
+    // 窗口在屏幕上的位置（CEF 线程取，GTK 闭包只读结果）
+    let (win_x, win_y) = {
+        let w = lock_state(&SHELL_WINDOW);
+        w.as_ref()
+            .map(|w| {
+                let b = w.bounds();
+                (b.x, b.y)
+            })
+            .unwrap_or((0, 0))
+    };
+    log::info!("[cef] 书签菜单锚点 win=({win_x},{win_y}) rel=({rel_x},{rel_y})");
+    let _ = app.run_on_main_thread(move || {
+        use gtk::prelude::*;
+        fn build(
+            fid: i64,
+            bms: &[(i64, String, String, Option<i64>)],
+            fds: &[(i64, String, Option<i64>)],
+            depth: usize,
+        ) -> gtk::Menu {
+            let menu = gtk::Menu::new();
+            if depth > 3 {
+                return menu;
+            }
+            for (id, name, parent) in fds {
+                if *parent == Some(fid) {
+                    let item = gtk::MenuItem::with_label(name);
+                    let sub = build(*id, bms, fds, depth + 1);
+                    item.set_submenu(Some(&sub));
+                    menu.append(&item);
+                }
+            }
+            for (_id, title, url, folder) in bms {
+                if *folder == Some(fid) {
+                    let label = if title.trim().is_empty() { url } else { title };
+                    let item = gtk::MenuItem::with_label(label);
+                    let u = url.clone();
+                    item.connect_activate(move |_| {
+                        let u = u.clone();
+                        cef_ui(move || handle_action(&format!("nav|{u}")));
+                    });
+                    menu.append(&item);
+                }
+            }
+            if menu.children().is_empty() {
+                let item = gtk::MenuItem::with_label("这个文件夹是空的");
+                item.set_sensitive(false);
+                menu.append(&item);
+            }
+            menu
+        }
+        let menu = build(fid, &bms, &fds, 0);
+        menu.set_size_request(320, -1);
+        menu.show_all();
+        // 锚点 = 窗口位置 + 点击项左下角，菜单左上角对齐该点
+        let root = gtk::gdk::Display::default()
+            .and_then(|d| d.default_screen().root_window());
+        if let Some(root) = root {
+            let rect = gtk::gdk::Rectangle::new(win_x + rel_x, win_y + rel_y, 1, 1);
+            menu.popup_at_rect(
+                &root,
+                &rect,
+                gtk::gdk::Gravity::SouthWest,
+                gtk::gdk::Gravity::NorthWest,
+                None,
+            );
+        } else {
+            menu.popup_easy(0, 0);
+        }
+    });
+}
+
 pub(crate) fn open_settings_page() {
     let dir = { let d = lock_state(&SHELL_CACHE_DIR); d.clone() };
     let Some(dir) = dir else {
@@ -2818,6 +2980,21 @@ fn handle_action_inner(action: &str) {
         "menupanel" => {
             if arg == "1" {
                 popup_main_menu();
+            }
+            return;
+        }
+        "tabmenu" => {
+            if let Ok(idx) = arg.parse::<usize>() {
+                popup_tab_menu(idx);
+            }
+            return;
+        }
+        "bmfoldermenu" => {
+            let mut it = arg.split(',');
+            if let Some(fid) = it.next().and_then(|v| v.parse::<i64>().ok()) {
+                let x = it.next().and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
+                let y = it.next().and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
+                popup_bookmark_folder_menu(fid, x, y);
             }
             return;
         }

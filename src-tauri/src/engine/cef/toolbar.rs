@@ -332,23 +332,6 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   }
   .hist-row .h-del:hover { background: #4a4d51; }
   .hist-empty { color: #9aa0a6; padding: 12px 6px; font-size: 12px; }
-  /* 标签右键菜单（F-CEF-21） */
-  #tabmenu {
-    display: none; position: absolute; z-index: 30; min-width: 150px;
-    background: #292a2d; border: 1px solid #3c4043; border-radius: 8px;
-    padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.5); font-size: 11px;
-    /* 工具栏视图只有 122px：菜单必须落在视口内，超出部分自己滚动，
-       否则会被裁掉、露出一大块菜单背景（F-CEF-38）。 */
-    max-height: calc(100vh - 8px);
-    overflow-y: auto;
-  }
-  #tabmenu.open { display: block; }
-  #tabmenu .tm-item {
-    padding: 4px 8px; border-radius: 4px; color: #e8eaed; cursor: default;
-    line-height: 1.4;
-  }
-  #tabmenu .tm-item:hover { background: #3c4043; }
-  #tabmenu .tm-item.danger { color: #f28b82; }
   /* 书签管理面板（F-CEF-20） */
   html.bmmanage-open, html.bmmanage-open body { height: 100vh; }
   #bmmanage {
@@ -628,7 +611,6 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       <button class="close" title="关闭" data-act="winclose">✕</button>
     </div>
   </div>
-  <div id="tabmenu"></div>
   <div class="bar">
     <span class="brand">Shift</span>
 
@@ -873,37 +855,6 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   addr.addEventListener('blur', () => setTimeout(closeOmni, 150));
   starBtn.addEventListener('click', () => act('startoggle'));
 
-  // 标签右键菜单（F-CEF-21）：复用现有 tab* 动作
-  const tabMenuEl = document.getElementById('tabmenu');
-  function closeTabMenu() {
-    tabMenuEl.classList.remove('open');
-    tabMenuEl.innerHTML = '';
-  }
-  function showTabMenu(e, idx) {
-    tabMenuEl.innerHTML = '';
-    const mk = (label, cmd, danger) => {
-      const d = document.createElement('div');
-      d.className = 'tm-item' + (danger ? ' danger' : '');
-      d.textContent = label;
-      d.addEventListener('click', () => { act(cmd + '|' + idx); closeTabMenu(); });
-      tabMenuEl.appendChild(d);
-    };
-    const cur = tabData[idx] || {};
-    mk('重新加载', 'tabreload');
-    mk('复制标签', 'tabdup');
-    mk(cur.pinned ? '取消固定' : '固定标签', 'tabpin');
-    mk(cur.muted ? '取消静音' : '静音标签', 'tabmute');
-    mk('关闭标签', 'tabclose');
-    mk('关闭其他标签', 'tabcloseothers');
-    mk('关闭右侧标签', 'tabcloseright');
-    // 位置：横向跟随鼠标、纵向固定在标签栏下方。
-    // 不再用 innerHeight 算（撑高是异步的，算出来的 top 会基于旧视口而跑到视口外，
-    // 2026-10-28 用户看到「右键一大块灰色」就是前几项被裁到上面去了）。
-    tabMenuEl.style.left = Math.min(e.clientX, window.innerWidth - 180) + 'px';
-    tabMenuEl.style.top = '4px';
-    tabMenuEl.classList.add('open');
-  }
-  document.addEventListener('click', closeTabMenu);
 
   addr.addEventListener('focus', () => addr.select());
 
@@ -980,7 +931,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       el.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        showTabMenu(e, i);
+        // F-CEF-40：标签右键菜单交给 GTK 原生弹出，不再困在 122px 工具栏里。
+        act('tabmenu|' + i);
       });
       tabs.appendChild(el);
     });
@@ -1288,44 +1240,11 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     });
   }
 
+  // F-CEF-40：文件夹下拉改 GTK 原生菜单，浮在内容上，不再加高工具栏。
+  // 把点击项的左下角坐标一起传给宿主，宿主按窗口位置精确落点。
   function showFolderMenu(folder, anchorEl) {
-    // 递归收集该文件夹及子文件夹里的书签
-    const ids = new Set([folder.id]);
-    let grew = true;
-    while (grew) {
-      grew = false;
-      (bmData.folders || []).forEach((f) => {
-        if (f.parentId && ids.has(f.parentId) && !ids.has(f.id)) { ids.add(f.id); grew = true; }
-      });
-    }
-    const items = (bmData.bookmarks || []).filter((b) => ids.has(b.folderId));
-    bmfolders.innerHTML = '';
-    const head = document.createElement('div');
-    head.className = 'fd-title';
-    head.textContent = folder.name + '（' + items.length + '）';
-    bmfolders.appendChild(head);
-    if (items.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'fd-empty';
-      empty.textContent = '这个文件夹是空的';
-      bmfolders.appendChild(empty);
-    }
-    items.forEach((b) => {
-      const d = document.createElement('div');
-      d.className = 'fd-item';
-      d.textContent = b.title || b.url || '书签';
-      d.title = b.url || '';
-      d.addEventListener('click', () => { hideFolderMenu(); act('nav|' + b.url); });
-      bmfolders.appendChild(d);
-    });
-    // 按文件夹元素定位（不依赖事件坐标：程序化点击时 clientX/Y 都是 0）
-    const rc = anchorEl ? anchorEl.getBoundingClientRect() : { left: 0, bottom: 122 };
-    bmfolders.style.left = Math.max(4, Math.min(rc.left, window.innerWidth - 330)) + 'px';
-    bmfolders.style.top = (rc.bottom + 4) + 'px';
-    bmfolders.classList.add('open');
-    // 工具栏视图临时加高（下拉是独立视图，不撑高就被 122px 视口裁掉）。
-    // 加高值按下拉实际高度算，短文件夹就不会顶出一大块空白。
-    act('bmfoldopen|' + (Math.min(bmfolders.scrollHeight, 300) + 20));
+    const rc = anchorEl ? anchorEl.getBoundingClientRect() : { left: 0, bottom: 0 };
+    act('bmfoldermenu|' + folder.id + ',' + Math.round(rc.left) + ',' + Math.round(rc.bottom + 4));
   }
 
   document.addEventListener('click', (e) => {
