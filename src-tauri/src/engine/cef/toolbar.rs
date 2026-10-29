@@ -121,6 +121,15 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   }
   .tab.active::before, .tab.active + .tab::before { display: none; }
   .tab:hover::before, .tab:hover + .tab::before { display: none; }
+  /* Chrome 式标签组条：组内第一个标签前一条彩色圆角条 */
+  .tab-groupbar {
+    display: flex; align-items: center; height: 22px; padding: 0 8px;
+    border-radius: 11px; margin: 0 4px 6px 0; flex: 0 0 auto;
+    font-size: 11px; color: #fff; max-width: 110px;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    opacity: .9; cursor: default;
+  }
+  .tab[data-group] { border-left: 2px solid var(--tab-group-color, transparent); }
   .tab .t-title {
     flex: 1; overflow: hidden; text-overflow: ellipsis;
   }
@@ -142,6 +151,14 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     color: #9aa0a6; margin: 0 2px 4px 0; cursor: default;
   }
   .tab-search:hover { background: #3c4043; color: #e8eaed; }
+  .bookmarks .tab-group {
+    width: 26px; height: 26px; border-radius: 50%; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    color: #9aa0a6; margin: 0 4px 0 0; cursor: default;
+    background: transparent; border: 0; padding: 0;
+  }
+  .bookmarks .tab-group:hover { background: #3c4043; color: #e8eaed; }
+  .bookmarks .tab-group svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; }
   .tab-search svg, .tab-group svg {
     width: 16px; height: 16px; fill: none; stroke: currentColor;
     stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
@@ -900,12 +917,32 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   window.__shiftTabs = function (tabs_, active) {
     if (!Array.isArray(tabs_)) return;
     tabData = tabs_;
+    window.__activeTab = active;
     tabs.innerHTML = '';
+    const meta = window.__shiftGroupMeta || [];
+    let lastGroup = null;
     tabs_.forEach((t, i) => {
+      const gid = t.groupId || null;
+      if (gid && gid !== lastGroup) {
+        const metaItem = meta.find((g) => g.id === gid);
+        const bar = document.createElement('div');
+        bar.className = 'tab-groupbar';
+        bar.textContent = (metaItem && metaItem.name) || '分组';
+        bar.style.background = (metaItem && metaItem.color) || '#4a9eff';
+        bar.dataset.group = String(gid);
+        bar.addEventListener('click', () => act('tabgroupmenu|' + gid));
+        tabs.appendChild(bar);
+      }
+      lastGroup = gid;
       const el = document.createElement('div');
       el.className = 'tab' + (i === active ? ' active' : '')
         + (t.pinned ? ' pinned' : '') + (t.muted ? ' muted' : '');
       el.dataset.idx = String(i);
+      if (gid) {
+        const metaItem = meta.find((g) => g.id === gid);
+        el.dataset.group = String(gid);
+        el.style.setProperty('--tab-group-color', (metaItem && metaItem.color) || '#4a9eff');
+      }
       const pin = document.createElement('span');
       pin.className = 't-pin';
       pin.textContent = '📌';
@@ -1231,6 +1268,14 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (!bar || !data || !Array.isArray(data.bookmarks)) return;
     bmData = data;
     bar.innerHTML = '';
+    // F-CEF-40：标签页分组按钮固定在书签栏最前（书签栏会整体重绘，必须每次重建）
+    const groupBtn = document.createElement('button');
+    groupBtn.className = 'tab-group';
+    groupBtn.id = 'tabgroup';
+    groupBtn.title = '标签页分组';
+    groupBtn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/></svg>';
+    groupBtn.addEventListener('click', () => act('tabgroupnew|' + (window.__activeTab || 0)));
+    bar.appendChild(groupBtn);
     const topFolders = (data.folders || []).filter((f) => f.parentId === null || f.parentId === undefined);
     // 所有层级的文件夹 id：子文件夹里的书签也只在下拉里出现，不平铺
     const allFolderIds = new Set((data.folders || []).map((f) => f.id));
