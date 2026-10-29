@@ -121,6 +121,15 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   }
   .tab.active::before, .tab.active + .tab::before { display: none; }
   .tab:hover::before, .tab:hover + .tab::before { display: none; }
+  /* Chrome 式标签组条：组内第一个标签前一条彩色圆角条 */
+  .tab-groupbar {
+    display: flex; align-items: center; height: 22px; padding: 0 8px;
+    border-radius: 11px; margin: 0 4px 6px 0; flex: 0 0 auto;
+    font-size: 11px; color: #fff; max-width: 110px;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    opacity: .9; cursor: default;
+  }
+  .tab[data-group] { border-left: 2px solid var(--tab-group-color, transparent); }
   .tab .t-title {
     flex: 1; overflow: hidden; text-overflow: ellipsis;
   }
@@ -909,11 +918,30 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (!Array.isArray(tabs_)) return;
     tabData = tabs_;
     tabs.innerHTML = '';
+    const meta = window.__shiftGroupMeta || [];
+    let lastGroup = null;
     tabs_.forEach((t, i) => {
+      const gid = t.groupId || null;
+      if (gid && gid !== lastGroup) {
+        const metaItem = meta.find((g) => g.id === gid);
+        const bar = document.createElement('div');
+        bar.className = 'tab-groupbar';
+        bar.textContent = (metaItem && metaItem.name) || '分组';
+        bar.style.background = (metaItem && metaItem.color) || '#4a9eff';
+        bar.dataset.group = String(gid);
+        bar.addEventListener('click', () => act('tabgroupmenu|' + gid));
+        tabs.appendChild(bar);
+      }
+      lastGroup = gid;
       const el = document.createElement('div');
       el.className = 'tab' + (i === active ? ' active' : '')
         + (t.pinned ? ' pinned' : '') + (t.muted ? ' muted' : '');
       el.dataset.idx = String(i);
+      if (gid) {
+        const metaItem = meta.find((g) => g.id === gid);
+        el.dataset.group = String(gid);
+        el.style.setProperty('--tab-group-color', (metaItem && metaItem.color) || '#4a9eff');
+      }
       const pin = document.createElement('span');
       pin.className = 't-pin';
       pin.textContent = '📌';
@@ -1853,6 +1881,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   // ---- 分组/工作区面板（F-CEF-27）----
   let groupsData = { groups: [], workspaces: [] };
   function renderGroups(data) {
+    window.__shiftGroupMeta = (data && data.groups) || [];
     groupsData = data && typeof data === 'object' ? data : { groups: [], workspaces: [] };
     const box = document.getElementById('groupslist');
     if (!box) return;
