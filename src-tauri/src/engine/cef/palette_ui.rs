@@ -183,7 +183,7 @@ fn exec(arg: &str) {
         "bookmarks" => super::shell::run_toolbar_js("setBmManage(true)"),
         "history" => super::shell::run_toolbar_js("setHistPanel(true)"),
         "downloads" => super::shell::run_toolbar_js("setDlPanel(true)"),
-        "settings" => super::shell::run_toolbar_js("setSettingsPanel(true)"),
+        "settings" => super::shell::open_settings_page(),
         _ => log::warn!("[cef] paletteexec 未知命令: {id}"),
     }
 }

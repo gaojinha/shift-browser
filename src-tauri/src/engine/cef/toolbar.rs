@@ -498,28 +498,6 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   .us-row .us-del { flex: 0 0 auto; color: #f28b82; padding: 0 8px; height: 22px; line-height: 22px; border-radius: 11px; }
   .us-row .us-del:hover { background: #4a4d51; }
   .us-empty { color: #9aa0a6; padding: 12px 6px; }
-  /* 设置面板（F-CEF-19） */
-  html.settings-open, html.settings-open body { height: 100vh; }
-  #settingspanel {
-    display: none; position: absolute; left: 0; right: 0; top: 88px; bottom: 0;
-    background: #292a2d; border-top: 1px solid #3c4043; padding: 10px 12px;
-    flex-direction: column; gap: 8px; z-index: 10; font-size: 12px;
-  }
-  html.settings-open #settingspanel { display: flex; }
-  html:not(.bookmarks-hidden) #settingspanel { top: 122px; }
-  .set-row { display: flex; align-items: center; gap: 10px; color: #e8eaed; }
-  .set-row select, .set-row input[type=text] {
-    height: 26px; background: #202124; border: 1px solid #3c4043; border-radius: 6px;
-    color: #e8eaed; padding: 0 8px; font-size: 12px;
-  }
-  .set-row input[type=text] { flex: 1; }
-  .set-foot { display: flex; align-items: center; }
-  .set-save {
-    color: #8ab4f8; cursor: default; padding: 0 10px; height: 24px;
-    line-height: 24px; border-radius: 12px;
-  }
-  .set-save:hover { background: #4a4d51; }
-  .set-msg { color: #9aa0a6; margin-left: 10px; }
   /* 站点信息（F-CEF-19）：点地址栏锁图标弹出 */
   html.site-open, html.site-open body { height: 100vh; }
   #sitepanel {
@@ -781,17 +759,6 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
       <span id="usclose" class="bmm-btn">关闭</span>
     </div>
     <div id="uslist"></div>
-  </div>
-  <div id="settingspanel">
-    <label class="set-row">搜索引擎
-      <select id="set-engine"><option value="bing">必应</option><option value="baidu">百度</option><option value="google">谷歌</option></select>
-    </label>
-    <label class="set-row">下载目录
-      <input id="set-download" type="text" spellcheck="false" placeholder="空=系统默认">
-    </label>
-    <label class="set-row"><input id="set-adblock" type="checkbox"> 广告拦截</label>
-    <label class="set-row"><input id="set-gpc" type="checkbox"> 发送 Sec-GPC（与普通 Chrome 不同）</label>
-    <div class="set-foot"><span id="set-save" class="set-save">保存</span><span id="set-msg" class="set-msg"></span></div>
   </div>
   <script id="bm-data" type="application/json">__SHIFT_BOOKMARKS_JSON__</script>
   <script id="pw-data" type="application/json">__SHIFT_PASSWORDS_JSON__</script>
@@ -2169,32 +2136,6 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   document.getElementById('usclose')?.addEventListener('click', () => setUsPanel(false));
   document.getElementById('ussearch')?.addEventListener('input', () => renderUs(usList));
 
-  // ---- 设置面板（F-CEF-19）----
-  const settingsPanel = document.getElementById('settingspanel');
-  function setSettingsPanel(open) {
-    document.documentElement.classList.toggle('settings-open', open);
-    if (open) removePanelClasses('settings-open');
-    act('settingspanel|' + (open ? '1' : '0'));
-  }
-  window.__shiftSettings = function (d) {
-    if (!d) return;
-    document.getElementById('set-engine').value = d.search_engine || 'bing';
-    document.getElementById('set-download').value = d.download_dir || '';
-    document.getElementById('set-adblock').checked = d.adblock_enabled !== 'false';
-    document.getElementById('set-gpc').checked = d.gpc_header === 'true';
-  };
-  window.__shiftSettingsSaved = function (m) {
-    document.getElementById('set-msg').textContent = m || '';
-  };
-  document.getElementById('set-save').addEventListener('click', () => {
-    const d = {
-      search_engine: document.getElementById('set-engine').value,
-      download_dir: document.getElementById('set-download').value.trim(),
-      adblock_enabled: document.getElementById('set-adblock').checked ? 'true' : 'false',
-      gpc_header: document.getElementById('set-gpc').checked ? 'true' : 'false',
-    };
-    act('settingssave|' + JSON.stringify(d));
-  });
 
   // ---- 站点信息（F-CEF-19）----
   const lockBtn = document.getElementById('lockbtn');
@@ -2248,7 +2189,6 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (item.dataset.panel === 'sess') { setSessPanel(true); return; }
     if (item.dataset.panel === 'cert') { setCertPanel(true); return; }
     if (item.dataset.panel === 'us') { setUsPanel(true); return; }
-    if (item.dataset.panel === 'settings') { setSettingsPanel(true); return; }
     if (item.dataset.panel === 'dl') { setDlPanel(true); return; }
     if (item.dataset.panel === 'pw') { setPwPanel(true); return; }
     if (item.dataset.panel === 'palette') { setPalettePanel(true); return; }
@@ -2331,8 +2271,8 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn panel_registry_has_thirteen_unique_classes_and_matches_css() {
-        assert_eq!(Panel::ALL.len(), 13);
+    fn panel_registry_has_twelve_unique_classes_and_matches_css() {
+        assert_eq!(Panel::ALL.len(), 12);
         let json = panel_classes_json();
         for p in Panel::ALL {
             assert_eq!(json.matches(&format!("\"{}\"", p.class())).count(), 1, "{:?}", p);
@@ -2343,9 +2283,9 @@ mod tests {
 
     #[test]
     fn every_js_setter_uses_registry_not_hand_lists() {
-        // F-CEF-40：Menu 已改 GTK 原生弹出（setMenuPanel 只发 act，不再清类），
-        // 其余 12 个面板仍必须走同一份 removePanelClasses 注册表。
-        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 12);
+        // F-CEF-40：Menu 改 GTK 原生、Settings 改独立标签页，两者不再走 JS setter；
+        // 其余 11 个面板仍必须走同一份 removePanelClasses 注册表。
+        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 11);
         for line in TOOLBAR_HTML.lines().filter(|l| l.contains("classList.remove(")) {
             assert!(line.matches("-open").count() <= 1, "残留手写互斥清单: {line}");
         }

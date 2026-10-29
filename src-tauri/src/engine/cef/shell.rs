@@ -62,7 +62,6 @@ pub(crate) enum Panel {
     Menu,
     Hist,
     Site,
-    Settings,
     BmManage,
     Find,
     Cert,
@@ -73,13 +72,12 @@ pub(crate) enum Panel {
 }
 
 impl Panel {
-    pub(crate) const ALL: [Panel; 13] = [
+    pub(crate) const ALL: [Panel; 12] = [
         Panel::Pw,
         Panel::Dl,
         Panel::Menu,
         Panel::Hist,
         Panel::Site,
-        Panel::Settings,
         Panel::BmManage,
         Panel::Find,
         Panel::Cert,
@@ -97,7 +95,6 @@ impl Panel {
             Panel::Menu => "menu-open",
             Panel::Hist => "hist-open",
             Panel::Site => "site-open",
-            Panel::Settings => "settings-open",
             Panel::BmManage => "bmmanage-open",
             Panel::Find => "find-open",
             Panel::Cert => "cert-open",
@@ -115,7 +112,6 @@ impl Panel {
             Panel::Menu => MENU_PANEL_EXTRA,
             Panel::Hist => HIST_PANEL_EXTRA,
             Panel::Site => SITE_PANEL_EXTRA,
-            Panel::Settings => SETTINGS_PANEL_EXTRA,
             Panel::BmManage => BM_MANAGE_PANEL_EXTRA,
             Panel::Find => FIND_BAR_EXTRA,
             Panel::Cert => CERT_PANEL_EXTRA,
@@ -133,7 +129,6 @@ impl Panel {
             Panel::Menu => &MENU_EXTRA,
             Panel::Hist => &HIST_EXTRA,
             Panel::Site => &SITE_EXTRA,
-            Panel::Settings => &SETTINGS_EXTRA,
             Panel::BmManage => &BM_MANAGE_EXTRA_V,
             Panel::Find => &FIND_EXTRA,
             Panel::Cert => &CERT_EXTRA,
@@ -264,16 +259,6 @@ static SITE_EXTRA: AtomicI32 = AtomicI32::new(0);
 /// 站点信息面板开合：与其它面板互斥
 pub fn set_site_panel(open: bool) {
     set_panel_extra(Panel::Site, open);
-    apply_toolbar_height();
-}
-
-/// 设置面板（F-CEF-19）展开时工具栏视图额外加高的像素
-const SETTINGS_PANEL_EXTRA: i32 = 320;
-static SETTINGS_EXTRA: AtomicI32 = AtomicI32::new(0);
-
-/// 设置面板开合：与其它面板互斥
-pub fn set_settings_panel(open: bool) {
-    set_panel_extra(Panel::Settings, open);
     apply_toolbar_height();
 }
 
@@ -1610,7 +1595,7 @@ fn refresh_star_state(url: &str) {
 
 /// 设置面板数据（F-CEF-19）：只推工具栏需要的四项。
 /// 打开设置页（F-CEF-40）：生成 settings.html 并新开标签，不再加高工具栏。
-fn open_settings_page() {
+pub(crate) fn open_settings_page() {
     let dir = { let d = lock_state(&SHELL_CACHE_DIR); d.clone() };
     let Some(dir) = dir else {
         log::warn!("[cef] 设置页：shell 目录尚未就绪");
@@ -2855,17 +2840,6 @@ fn handle_action_inner(action: &str) {
             }
             return;
         }
-        "settingspanel" => {
-            set_settings_panel(arg == "1");
-            if arg == "1" {
-                send_settings();
-            }
-            return;
-        }
-        "settingssave" => {
-            save_settings(arg);
-            return;
-        }
         "siteinfo" => {
             send_site_info();
             return;
@@ -3207,7 +3181,6 @@ mod tests {
             (Panel::Menu, "menu-open", 340),
             (Panel::Hist, "hist-open", 340),
             (Panel::Site, "site-open", 150),
-            (Panel::Settings, "settings-open", 320),
             (Panel::BmManage, "bmmanage-open", 380),
             (Panel::Find, "find-open", 44),
             (Panel::Cert, "cert-open", 360),
@@ -3223,7 +3196,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_any_panel_zeroes_all_other_extras_156_pairs() {
+    fn opening_any_panel_zeroes_all_other_extras_132_pairs() {
         use super::{set_panel_extra, toolbar_height, Panel, BM_EXTRA, TOOLBAR_H};
         use std::sync::atomic::Ordering;
         let base = TOOLBAR_H.load(Ordering::Relaxed);
@@ -3247,7 +3220,7 @@ mod tests {
                 pairs += 1;
             }
         }
-        assert_eq!(pairs, 156);
+        assert_eq!(pairs, 132);
     }
 
     // ---- normalize_url：地址栏补全规则（P0 实测逻辑，防改坏）----
