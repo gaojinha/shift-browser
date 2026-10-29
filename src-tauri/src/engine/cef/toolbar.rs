@@ -1245,7 +1245,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     groupBtn.id = 'tabgroup';
     groupBtn.title = '标签页分组';
     groupBtn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/></svg>';
-    groupBtn.addEventListener('click', () => act('groupspanel|1'));
+    groupBtn.addEventListener('click', () => setGroupsPanel(true));
     bar.appendChild(groupBtn);
     const topFolders = (data.folders || []).filter((f) => f.parentId === null || f.parentId === undefined);
     // 所有层级的文件夹 id：子文件夹里的书签也只在下拉里出现，不平铺
