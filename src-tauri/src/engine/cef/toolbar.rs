@@ -144,9 +144,10 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     display: flex; align-items: center; justify-content: center;
     color: #e8eaed; font-size: 18px; line-height: 1; margin: 0 0 4px 4px;
   }
-  /* Chrome 标签栏左侧：标签页下拉 + 标签分组 */
+  /* Chrome 标签栏左侧：标签页下拉 + 标签分组
+     hover 背景对齐 Chrome 图标按钮：圆角方形（8px），不是圆形 */
   .tab-search {
-    width: 28px; height: 28px; border-radius: 50%; flex: 0 0 auto;
+    width: 28px; height: 28px; border-radius: 8px; flex: 0 0 auto;
     display: flex; align-items: center; justify-content: center;
     color: #9aa0a6; margin: 0 2px 4px 0; cursor: default;
   }
