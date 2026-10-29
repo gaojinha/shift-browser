@@ -189,8 +189,6 @@ static MENU_EXTRA: AtomicI32 = AtomicI32::new(0);
 /// 这里显式用 root window 的矩形锚点：菜单左上角对齐点击点左下角。
 fn popup_gtk_menu_at_pointer(menu: &gtk::Menu) {
     use gtk::prelude::*;
-    // 对齐 Chrome 书签下拉的宽度（GTK 默认按文字宽度，会窄得像个条）
-    menu.set_size_request(320, -1);
     menu.show_all();
     if let Some(display) = gtk::gdk::Display::default() {
         if let Some(seat) = display.default_seat() {
@@ -1737,7 +1735,6 @@ fn popup_bookmark_folder_menu(fid: i64, rel_x: i32, rel_y: i32) {
             menu
         }
         let menu = build(fid, &bms, &fds, 0);
-        menu.set_size_request(320, -1);
         menu.show_all();
         // 锚点 = 窗口位置 + 点击项左下角，菜单左上角对齐该点
         let root = gtk::gdk::Display::default()
