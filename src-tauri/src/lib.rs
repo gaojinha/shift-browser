@@ -145,6 +145,19 @@ pub fn run() {
     // 原生崩溃兜底：GTK/WebKit 段错误时 panic hook 轮不到，信号处理器留信号+调用栈
     crash_signal::install();
 
+    // GTK 初始化兜底：某些启动路径（尤其强制 Wayland / 无 DISPLAY）下，
+    // WebKitGTK 的 WebContext 可能在 setup 前就被触发；未 init 会直接 panic。
+    #[cfg(target_os = "linux")]
+    {
+        match gtk::init() {
+            Ok(()) => {
+                // logger 此时尚未初始化，用 eprintln 保证可见
+                eprintln!("[ShiftBrowser] gtk::init 已完成（run 开头）");
+            }
+            Err(e) => eprintln!("[ShiftBrowser] gtk::init 失败（run 开头）: {e}"),
+        }
+    }
+
     // 启动环境变量与平台初始化（DMA-BUF 兜底 / 视频解码降级 / Cookie 持久化），
     // 必须在任何 GTK/WebKit 初始化之前执行——实现见 app/env_setup.rs
     env_setup::apply();

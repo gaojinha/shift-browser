@@ -164,9 +164,15 @@ wrap_app! {
             let Some(cmd) = command_line else {
                 return;
             };
+            // Ozone 平台选择：默认 x11（维持现有 X11 子窗口嵌入），
+            // 允许通过环境变量试跑 wayland（用于验证圆角/合成器行为）。
+            // 注意：当前实现大量依赖 X11 XID（set_as_child/resize/window_handle），
+            // 切到 wayland 预计会导致嵌入失效或 window_handle=1。
+            let ozone = std::env::var("SHIFT_CEF_OZONE").unwrap_or_else(|_| "x11".to_string());
+            let ozone = if ozone == "wayland" { "wayland" } else { "x11" };
             cmd.append_switch_with_value(
                 Some(&CefString::from("ozone-platform")),
-                Some(&CefString::from("x11")),
+                Some(&CefString::from(ozone)),
             );
             // GPU：`--disable-gpu` 会让 WebGL 彻底不可用（2026-10-25 实测
             // canvas.getContext('webgl') 返回 null），而真 Chrome 有 WebGL，
@@ -193,7 +199,10 @@ wrap_app! {
                 Some(&CefString::from("class")),
                 Some(&CefString::from("Shift")),
             );
-            log::info!("[cef] 命令行已追加 --ozone-platform=x11 + ANGLE SwiftShader（软件光栅）");
+            log::info!(
+                "[cef] 命令行已追加 --ozone-platform={} + ANGLE SwiftShader（软件光栅）",
+                ozone
+            );
         }
     }
 }

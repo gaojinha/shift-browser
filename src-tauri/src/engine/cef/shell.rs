@@ -755,6 +755,226 @@ pub fn open(content_url: &str, toolbar_url: &str) -> Result<(), String> {
     Ok(())
 }
 
+// ===== 窗口外形圆角（XShape）=====
+//
+// 背景（2026-10-29）：Chrome 的窗口圆角是**自己画**的（ARGB + 自绘阴影），
+// 不是合成器给的；CEF 的 Views 顶层窗口只画矩形，Mutter 对无装饰的
+// XWayland 窗口也不做圆角裁剪——所以四角一直是直角。
+//
+// 方案：用 X11 Shape 扩展把顶层窗口的 Bounding/Input 区域裁成圆角矩形。
+// 这是 X11 侧最接近「真实窗口外形圆角」的做法：合成器按裁剪后的形状
+// 合成，圆角外直接透出桌面；输入区域同步裁剪，圆角外不吃点击。
+// 局限：Shape 是 1 位掩码，边缘没有抗锯齿（Chrome 的有），10px 半径下
+// 肉眼基本看不出差别。
+#[cfg(target_os = "linux")]
+mod xshape {
+    use x11::xlib::{Display, Region, Window};
+
+    /// 0 = ShapeBounding（窗口外形），2 = ShapeInput（可点击区域）
+    pub const SHAPE_BOUNDING: i32 = 0;
+    pub const SHAPE_INPUT: i32 = 2;
+    /// 0 = ShapeSet（整体替换）
+    pub const SHAPE_SET: i32 = 0;
+    /// 0 = Unsorted（矩形不排序，XShape 内部自行处理）
+    pub const UNSORTED: i32 = 0;
+
+    // x11 crate 2.x 没带 xshape 模块，这里直接声明（Xext 在桌面系统必装）
+    #[link(name = "Xext")]
+    extern "C" {
+        #[allow(dead_code)]
+        pub fn XShapeCombineRegion(
+            dpy: *mut Display,
+            window: Window,
+            dest_kind: i32,
+            x_off: i32,
+            y_off: i32,
+            region: Region,
+            op: i32,
+        );
+        pub fn XShapeCombineRectangles(
+            dpy: *mut Display,
+            window: Window,
+            dest_kind: i32,
+            x_off: i32,
+            y_off: i32,
+            rectangles: *mut x11::xlib::XRectangle,
+            n_rects: i32,
+            op: i32,
+            ordering: i32,
+        );
+        /// 查询窗口是否已有外形裁剪（用于「圆角守护」低成本轮询）
+        pub fn XShapeQueryExtents(
+            dpy: *mut Display,
+            window: Window,
+            bounding_shaped: *mut i32,
+            x_bounding: *mut i32,
+            y_bounding: *mut i32,
+            w_bounding: *mut i32,
+            h_bounding: *mut i32,
+            clip_shaped: *mut i32,
+            x_clip: *mut i32,
+            y_clip: *mut i32,
+            w_clip: *mut i32,
+            h_clip: *mut i32,
+        ) -> i32;
+    }
+}
+
+/// 窗口圆角半径（像素，逻辑像素；与 Chrome Linux 版视觉接近）。
+#[cfg(target_os = "linux")]
+const WINDOW_CORNER_RADIUS: i32 = 10;
+
+/// 圆角矩形第 `y` 行（0 起）左右各需内缩的像素数。
+/// `h` 为窗口总高，`r` 为半径；不合法输入返回 0（不裁）。
+/// 用像素中心取样圆方程：圆心 (r, r)/(r, h-r)，行中心 y+0.5。
+#[cfg(target_os = "linux")]
+fn rounded_row_inset(y: i32, h: i32, r: i32) -> i32 {
+    if r <= 0 || h <= 0 || y < 0 || y >= h {
+        return 0;
+    }
+    // dy：像素中心到圆心的垂直距离；中部行直接返回 0
+    let dy = if y < r {
+        (r - 1 - y) as f64
+    } else if y >= h - r {
+        (y - (h - r)) as f64
+    } else {
+        return 0;
+    };
+    let r_f = r as f64;
+    let inside = r_f * r_f - dy * dy;
+    if inside <= 0.0 {
+        return r; // 圆外：整行裁掉（理论上不会到这里）
+    }
+    (r_f - inside.sqrt()).ceil() as i32
+}
+
+/// 给顶层 X11 窗口套圆角裁剪（外形 + 输入区域）。
+///
+/// 调用时机：窗口 map 之后、尺寸变化之后（最大化/还原）。
+/// `dpy`/`xwin` 必须有效且在同一线程调用（Xlib 非线程安全，本项目统一在 CEF UI 线程）。
+#[cfg(target_os = "linux")]
+unsafe fn apply_window_rounding(dpy: *mut x11::xlib::Display, xwin: x11::xlib::Window) {
+    if dpy.is_null() || xwin <= 1 {
+        return;
+    }
+    let mut attrs: x11::xlib::XWindowAttributes = std::mem::zeroed();
+    if x11::xlib::XGetWindowAttributes(dpy, xwin, &mut attrs) == 0 {
+        log::warn!("[cef] 圆角：XGetWindowAttributes 失败");
+        return;
+    }
+    let (w, h) = (attrs.width, attrs.height);
+    if w <= 0 || h <= 0 {
+        return;
+    }
+    let r = WINDOW_CORNER_RADIUS.min(w / 2).min(h / 2);
+    if r <= 0 {
+        return;
+    }
+    // 矩形列表只覆盖两侧圆角行 + 中间整条，2r+1 个矩形（不是 h 个），
+    // 这样「圆角守护」每 200ms 轮询补刀时开销可以忽略。
+    // 早前用 XUnionRectWithRegion(rect, region, region) 源/目标同区，
+    // 实测 shape 没生效（xwininfo -shape 报 No window shape defined），故改矩形列表。
+    let mut rects: Vec<x11::xlib::XRectangle> = Vec::with_capacity((2 * r + 1) as usize);
+    let push_row = |rects: &mut Vec<x11::xlib::XRectangle>, y: i32| {
+        let inset = rounded_row_inset(y, h, r);
+        let rect = x11::xlib::XRectangle {
+            x: inset as i16,
+            y: y as i16,
+            width: (w - 2 * inset).max(0) as u16,
+            height: 1,
+        };
+        if rect.width > 0 {
+            rects.push(rect);
+        }
+    };
+    for y in 0..r {
+        push_row(&mut rects, y);
+    }
+    if h > 2 * r {
+        rects.push(x11::xlib::XRectangle {
+            x: 0,
+            y: r as i16,
+            width: w as u16,
+            height: (h - 2 * r) as u16,
+        });
+    }
+    for y in (h - r)..h {
+        push_row(&mut rects, y);
+    }
+    if rects.is_empty() {
+        return;
+    }
+    let n = rects.len() as i32;
+    xshape::XShapeCombineRectangles(
+        dpy,
+        xwin,
+        xshape::SHAPE_BOUNDING,
+        0,
+        0,
+        rects.as_mut_ptr(),
+        n,
+        xshape::SHAPE_SET,
+        xshape::UNSORTED,
+    );
+    xshape::XShapeCombineRectangles(
+        dpy,
+        xwin,
+        xshape::SHAPE_INPUT,
+        0,
+        0,
+        rects.as_mut_ptr(),
+        n,
+        xshape::SHAPE_SET,
+        xshape::UNSORTED,
+    );
+    x11::xlib::XFlush(dpy);
+    log::info!("[cef] 已应用窗口圆角裁剪: win=0x{xwin:x} {w}x{h} r={r} 矩形数={n}");
+}
+
+/// 窗口当前是否已有外形裁剪（只查询，不下发设置请求）。
+#[cfg(target_os = "linux")]
+unsafe fn window_shape_present(dpy: *mut x11::xlib::Display, xwin: x11::xlib::Window) -> bool {
+    if dpy.is_null() || xwin <= 1 {
+        return false;
+    }
+    let mut bounding_shaped: i32 = 0;
+    let (mut x, mut y, mut w, mut h) = (0i32, 0i32, 0i32, 0i32);
+    let (mut cx, mut cy, mut cw, mut ch) = (0i32, 0i32, 0i32, 0i32);
+    let mut clip_shaped: i32 = 0;
+    xshape::XShapeQueryExtents(
+        dpy,
+        xwin,
+        &mut bounding_shaped,
+        &mut x,
+        &mut y,
+        &mut w,
+        &mut h,
+        &mut clip_shaped,
+        &mut cx,
+        &mut cy,
+        &mut cw,
+        &mut ch,
+    );
+    bounding_shaped != 0
+}
+
+/// 圆角守护：形状缺失就补。
+///
+/// 为什么需要：CEF 在我们设好形状后，会在窗口移动/尺寸稳定/重绘时
+/// 把顶层窗口外形重置回矩形（实测：拖动过程中是圆角、松手变直角，
+/// xwininfo 轮询也看到 extents 时有时无）。这里每 200ms 查一次，
+/// 只查不设，正常情况零开销。
+#[cfg(target_os = "linux")]
+unsafe fn ensure_window_rounding(dpy: *mut x11::xlib::Display, xwin: x11::xlib::Window) {
+    if dpy.is_null() || xwin <= 1 {
+        return;
+    }
+    if window_shape_present(dpy, xwin) {
+        return;
+    }
+    apply_window_rounding(dpy, xwin);
+}
+
 /// 延迟映射窗口。
 ///
 /// 实测：在 `on_window_created` 回调栈内调用 `show()` 不会真正 map，
@@ -829,9 +1049,14 @@ pub fn force_show() {
                         };
                         x11::xlib::XSetWMHints(dpy, xwin, &mut wh);
                     }
+                    // 窗口底色设成界面深色（#202124）：形状被 CEF 重置的那一瞬间
+                    // 不露出默认白底（用户实测拖动时四角闪白）。
+                    x11::xlib::XSetWindowBackground(dpy, xwin, 0x0020_2124);
                     x11::xlib::XUnmapWindow(dpy, xwin);
                     x11::xlib::XMapRaised(dpy, xwin);
                     x11::xlib::XFlush(dpy);
+                    // 窗口已 map：套圆角裁剪（Chrome 式外形圆角）
+                    apply_window_rounding(dpy, xwin);
                 }
                 log::info!("[cef] XSetClassHint + 去装饰 + XMapRaised 已调用");
             } else {
@@ -842,6 +1067,48 @@ pub fn force_show() {
     });
     log::info!("[cef] 延迟 show() 已执行，window_handle=0x{handle:x}");
     if handle > 1 {
+        // 圆角裁剪补刀：show() 之后 CEF 自己还会做一轮窗口设置，紧接着设置的
+        // shape 会被覆盖（实测 11:10 那次：日志打了「已应用」，xwininfo 却是
+        // No window shape defined；同一窗口从外部 XShape 施加则立即生效且持久）。
+        // 因此延迟再补两次，确保最终生效。
+        for delay in [250u64, 1200] {
+            gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(delay), move || {
+                cef_ui_call(move || {
+                    let dpy = cef::get_xdisplay();
+                    if !dpy.is_null() {
+                        unsafe {
+                            ensure_window_rounding(
+                                dpy as *mut x11::xlib::Display,
+                                handle as x11::xlib::Window,
+                            )
+                        };
+                    }
+                });
+            });
+        }
+
+        // 圆角守护：CEF 会在窗口移动/尺寸稳定/重绘后把窗口外形重置成矩形——
+        // 用户实测「拖动时有圆角、松手变直角」，xwininfo 轮询也看到 extents
+        // 时有时无。每 50ms 查一次，缺了立刻补（只查不设，开销可忽略）。
+        // 用 cef_ui（不等结果）投递，避免阻塞 GTK 主线程。
+        // 只注册一次，避免每次 force_show 叠加定时器。
+        static ROUNDING_GUARD_STARTED: AtomicBool = AtomicBool::new(false);
+        if !ROUNDING_GUARD_STARTED.swap(true, Ordering::SeqCst) {
+            gtk::glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+                cef_ui(move || {
+                    let dpy = cef::get_xdisplay();
+                    if !dpy.is_null() {
+                        unsafe {
+                            ensure_window_rounding(
+                                dpy as *mut x11::xlib::Display,
+                                handle as x11::xlib::Window,
+                            )
+                        };
+                    }
+                });
+                gtk::glib::ControlFlow::Continue
+            });
+        }
         // 窗口映射后补推一次书签与标签栏：cef_cmd 的数据库查询
         // 可能在窗口创建之前就完成了，那一次 execute_java_script
         // 会打到还不存在的页面上（实测：库里 64 条，UI 仍是静态兜底 7 条）。
@@ -1058,6 +1325,30 @@ wrap_window_delegate! {
 
         fn can_resize(&self, _window: Option<&mut Window>) -> std::os::raw::c_int {
             1
+        }
+
+        // 尺寸变化（最大化/还原/拖边）后窗口外形变了，圆角裁剪区要重算，
+        // 否则放大会残留旧的裁剪形状、还原后角落被切掉一块。
+        fn on_window_bounds_changed(&self, window: Option<&mut Window>, new_bounds: Option<&Rect>) {
+            let (Some(win), Some(bounds)) = (window, new_bounds) else {
+                return;
+            };
+            log::info!(
+                "[cef] window bounds 变化: {}x{}",
+                bounds.width,
+                bounds.height
+            );
+            let handle = win.window_handle();
+            if handle <= 1 {
+                return;
+            }
+            let dpy = cef::get_xdisplay();
+            if dpy.is_null() {
+                return;
+            }
+            unsafe {
+                apply_window_rounding(dpy as *mut x11::xlib::Display, handle as x11::xlib::Window)
+            };
         }
 
 
@@ -4460,6 +4751,42 @@ fn sanitize_filename(name: &str) -> String {
         "download".to_string()
     } else {
         trimmed
+    }
+}
+
+#[cfg(test)]
+mod rounded_tests {
+    use super::rounded_row_inset;
+
+    #[test]
+    fn middle_rows_not_inset() {
+        // 半径 10、高 100：10..90 行是直边，不裁
+        for y in 10..90 {
+            assert_eq!(rounded_row_inset(y, 100, 10), 0, "y={y}");
+        }
+    }
+
+    #[test]
+    fn corner_rows_are_inset_and_symmetric() {
+        // 顶部第 0 行内缩最多，越往下越小；顶部与底部镜像
+        let first = rounded_row_inset(0, 100, 10);
+        let last = rounded_row_inset(99, 100, 10);
+        assert_eq!(first, last);
+        assert!(first > 0 && first < 10, "first={first}");
+        let prev = rounded_row_inset(0, 100, 10);
+        let next = rounded_row_inset(1, 100, 10);
+        assert!(next <= prev);
+        // 圆角最后一行与直边衔接：内缩 0
+        assert_eq!(rounded_row_inset(9, 100, 10), 0);
+        assert_eq!(rounded_row_inset(90, 100, 10), 0);
+    }
+
+    #[test]
+    fn invalid_input_is_noop() {
+        assert_eq!(rounded_row_inset(0, 0, 10), 0);
+        assert_eq!(rounded_row_inset(-1, 100, 10), 0);
+        assert_eq!(rounded_row_inset(100, 100, 10), 0);
+        assert_eq!(rounded_row_inset(0, 100, 0), 0);
     }
 }
 

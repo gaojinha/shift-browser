@@ -50,6 +50,19 @@ fn read_setting_bool(key: &str, default: bool) -> bool {
 
 /// 应用启动环境默认值 + Cookie 持久化。必须在 Builder 构建前调用。
 pub(crate) fn apply() {
+    // ===== GTK 初始化兜底 =====
+    // 2026-10-29：在某些启动方式（例如强制 Wayland 且无 DISPLAY）下，
+    // env_setup 阶段会提前触发 WebKitGTK 的 WebContext 路径（Cookie 持久化/内存治理等），
+    // 若 GTK 未初始化会直接 panic："GTK has not been initialized. Call gtk::init first."。
+    // 这里最早 best-effort init，一次兜住后续所有 WebKit/GTK 调用。
+    #[cfg(target_os = "linux")]
+    {
+        match gtk::init() {
+            Ok(()) => eprintln!("[ShiftBrowser] gtk::init 已完成（env_setup）"),
+            Err(e) => eprintln!("[ShiftBrowser] gtk::init 失败（env_setup）: {e}"),
+        }
+    }
+
     // ===== WebKit DMA-BUF 线性格式兜底（P0-7，2026-09-24）=====
     // WEBKIT_DMABUF_RENDERER_BUFFER_FORMAT=XR24:0 用于规避 WebKitGTK 2.42+
     // AcceleratedBackingStore 竞态空指针崩溃（见 HANDOFF-2026-09-23 全记录）。

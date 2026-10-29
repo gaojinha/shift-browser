@@ -100,7 +100,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     background: transparent; color: #9aa0a6; cursor: default;
     font-size: 12px; white-space: nowrap; flex: 0 1 auto;
     position: relative;
-    border-radius: 10px 10px 0 0;
+    border-radius: 10px;
   }
   .tab:hover { background: #2a2b2e; color: #e8eaed; }
   .tab.active { background: #35363a; color: #e8eaed; }
