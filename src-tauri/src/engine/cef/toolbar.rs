@@ -136,12 +136,20 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     color: #e8eaed; font-size: 18px; line-height: 1; margin: 0 0 4px 4px;
   }
   /* Chrome 标签栏左侧：标签页下拉 + 标签分组 */
-  .tab-search, .tab-group {
+  .tab-search {
     width: 28px; height: 28px; border-radius: 50%; flex: 0 0 auto;
     display: flex; align-items: center; justify-content: center;
     color: #9aa0a6; margin: 0 2px 4px 0; cursor: default;
   }
-  .tab-search:hover, .tab-group:hover { background: #3c4043; color: #e8eaed; }
+  .tab-search:hover { background: #3c4043; color: #e8eaed; }
+  .bookmarks .tab-group {
+    width: 26px; height: 26px; border-radius: 50%; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    color: #9aa0a6; margin: 0 4px 0 0; cursor: default;
+    background: transparent; border: 0; padding: 0;
+  }
+  .bookmarks .tab-group:hover { background: #3c4043; color: #e8eaed; }
+  .bookmarks .tab-group svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; }
   .tab-search svg, .tab-group svg {
     width: 16px; height: 16px; fill: none; stroke: currentColor;
     stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
@@ -608,9 +616,6 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 </head>
 <body>
   <div class="tabbar" id="tabbar">
-    <button class="tab-group" id="tabgroup" title="标签页分组">
-      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/></svg>
-    </button>
     <button class="tab-search" id="tabsearch" title="搜索标签页">
       <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
     </button>
@@ -895,9 +900,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   // 点击/关闭/新建通过 console.log SHIFT_ACT 回传，与地址栏同一套桥。
   const tabbar = document.getElementById('tabbar');
   const tabs = document.getElementById('tabs');
-  // Chrome 标签栏左侧：标签页下拉 / 标签分组
+  // Chrome 标签栏左侧：标签页下拉（分组按钮在书签栏，renderBookmarks 里动态绑定）
   document.getElementById('tabsearch').addEventListener('click', () => act('tablist'));
-  document.getElementById('tabgroup').addEventListener('click', () => act('groupspanel|1'));
 
   let tabData = [];
   let dragFrom = null;
@@ -1235,6 +1239,14 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     if (!bar || !data || !Array.isArray(data.bookmarks)) return;
     bmData = data;
     bar.innerHTML = '';
+    // F-CEF-40：标签页分组按钮固定在书签栏最前（书签栏会整体重绘，必须每次重建）
+    const groupBtn = document.createElement('button');
+    groupBtn.className = 'tab-group';
+    groupBtn.id = 'tabgroup';
+    groupBtn.title = '标签页分组';
+    groupBtn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/></svg>';
+    groupBtn.addEventListener('click', () => act('groupspanel|1'));
+    bar.appendChild(groupBtn);
     const topFolders = (data.folders || []).filter((f) => f.parentId === null || f.parentId === undefined);
     // 所有层级的文件夹 id：子文件夹里的书签也只在下拉里出现，不平铺
     const allFolderIds = new Set((data.folders || []).map((f) => f.id));
