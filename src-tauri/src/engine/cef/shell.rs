@@ -807,8 +807,9 @@ pub fn force_show() {
                                 c"_MOTIF_WM_HINTS".as_ptr(),
                                 0,
                             );
-                            // X11 的 32 位属性在 64 位平台上用 long 数组承载（只读低 32 位）
-                            let hints: [std::os::raw::c_long; 5] = [0, 0, 0, 0, 0]; // 实验：先不抢装饰，验证输入
+                            // XChangeProperty(format=32) 按 4 字节步进读；必须用 u32 数组。
+                            // 之前用 c_long（8 字节）全 0 看不出，非 0 时会错位导致 WM 忽略。
+                            let hints: [u32; 5] = [2, 0, 0, 0, 0]; // flags=2 装饰，decorations=0 无标题栏
                             x11::xlib::XChangeProperty(
                                 dpy,
                                 win,
@@ -1623,6 +1624,34 @@ fn refresh_star_state(url: &str) {
 
 /// 设置面板数据（F-CEF-19）：只推工具栏需要的四项。
 /// 打开设置页（F-CEF-40）：生成 settings.html 并新开标签，不再加高工具栏。
+/// 标签页下拉列表（F-CEF-40）：GTK 原生菜单列出全部标签，点击切换。
+fn popup_tab_list() {
+    let tabs: Vec<String> = {
+        let t = lock_state(&SHELL_TABS);
+        t.iter().map(|x| x.title.clone()).collect()
+    };
+    if tabs.is_empty() {
+        return;
+    }
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
+    let _ = app.run_on_main_thread(move || {
+        use gtk::prelude::*;
+        let menu = gtk::Menu::new();
+        for (i, title) in tabs.iter().enumerate() {
+            let label = if title.trim().is_empty() { "新标签页" } else { title };
+            let item = gtk::MenuItem::with_label(label);
+            item.connect_activate(move |_| {
+                let act = format!("tab|{i}");
+                cef_ui(move || handle_action(&act));
+            });
+            menu.append(&item);
+        }
+        popup_gtk_menu_at_pointer(&menu);
+    });
+}
+
 /// 标签右键菜单（F-CEF-40）：GTK 原生弹出，浮在内容页上，
 /// 不再困在 122px 的工具栏视口里（旧方案右侧会露出一整片工具栏背景）。
 fn popup_tab_menu(idx: usize) {
@@ -2984,6 +3013,10 @@ fn handle_action_inner(action: &str) {
             if let Ok(idx) = arg.parse::<usize>() {
                 popup_tab_menu(idx);
             }
+            return;
+        }
+        "tablist" => {
+            popup_tab_list();
             return;
         }
         "bmfoldermenu" => {

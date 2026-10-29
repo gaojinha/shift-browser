@@ -100,8 +100,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     background: transparent; color: #9aa0a6; cursor: default;
     font-size: 12px; white-space: nowrap; flex: 0 1 auto;
     position: relative;
-    /* Chrome 标签的圆角梯形：顶部 10px 斜角、底部方角 */
-    clip-path: polygon(0 100%, 0 10px, 10px 0, calc(100% - 10px) 0, 100% 10px, 100% 100%);
+    border-radius: 10px 10px 0 0;
   }
   .tab:hover { background: #2a2b2e; color: #e8eaed; }
   .tab.active { background: #35363a; color: #e8eaed; }
@@ -135,6 +134,17 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     width: 28px; height: 28px; border-radius: 50%; flex: 0 0 auto;
     display: flex; align-items: center; justify-content: center;
     color: #e8eaed; font-size: 18px; line-height: 1; margin: 0 0 4px 4px;
+  }
+  /* Chrome 标签栏左侧：标签页下拉 + 标签分组 */
+  .tab-search, .tab-group {
+    width: 28px; height: 28px; border-radius: 50%; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    color: #9aa0a6; margin: 0 2px 4px 0; cursor: default;
+  }
+  .tab-search:hover, .tab-group:hover { background: #3c4043; color: #e8eaed; }
+  .tab-search svg, .tab-group svg {
+    width: 16px; height: 16px; fill: none; stroke: currentColor;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
   }
   .tab-new:hover { background: #3c4043; }
   /* 文件夹项与下拉 */
@@ -598,6 +608,12 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 </head>
 <body>
   <div class="tabbar" id="tabbar">
+    <button class="tab-group" id="tabgroup" title="标签页分组">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/></svg>
+    </button>
+    <button class="tab-search" id="tabsearch" title="搜索标签页">
+      <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
     <div class="tabs" id="tabs">
       <div class="tab active" data-idx="0">
         <span class="t-title">新标签页</span>
@@ -879,6 +895,9 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   // 点击/关闭/新建通过 console.log SHIFT_ACT 回传，与地址栏同一套桥。
   const tabbar = document.getElementById('tabbar');
   const tabs = document.getElementById('tabs');
+  // Chrome 标签栏左侧：标签页下拉 / 标签分组
+  document.getElementById('tabsearch').addEventListener('click', () => act('tablist'));
+  document.getElementById('tabgroup').addEventListener('click', () => act('groupspanel|1'));
 
   let tabData = [];
   let dragFrom = null;
