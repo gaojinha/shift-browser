@@ -761,193 +761,186 @@ pub fn open(content_url: &str, toolbar_url: &str) -> Result<(), String> {
 /// 必须在回调返回后（主循环下一轮）再调一次。调用方用 glib 定时器触发。
 pub fn force_show() {
     log::info!("[cef] force_show 被调用");
-    // F-CEF-24c：`Window::show` 是句柄方法，必须在 CEF UI 线程调；X11 腿留 GTK 主线程。
-    // 锁内只 clone 句柄 + 取 window_handle，锁外投递。
-    let (win_for_show, handle) = {
+    // `Window::show` / `Window::window_handle` 与 `cef::get_xdisplay` 必须在 CEF UI 线程调用：
+    // multi_threaded_message_loop=1 时在 GTK 线程调 window_handle() 恒返回 0（2026-10-29 实测确诊），
+    // 之前 X11 整段（WM_CLASS、映射、去装饰）因此从未执行。
+    // 锁内只 clone 句柄，锁外同步投递到 UI 线程。
+    let win_for_show = {
         let w = lock_state(&SHELL_WINDOW);
-        match w.as_ref() {
-            Some(window) => (Some(window.clone()), window.window_handle()),
-            None => (None, 0),
-        }
+        w.as_ref().cloned()
     };
-    if let Some(win) = win_for_show {
-        log::info!("[cef] force_show: 投递 window.show()");
-        cef_ui_call(move || win.show());
-        log::info!("[cef] force_show: window.show() 已返回");
-    } else {
+    let Some(win) = win_for_show else {
         log::warn!("[cef] force_show：没有窗口句柄");
-    }
+        return;
+    };
+    let handle = cef_ui_call(move || {
+        win.show();
+        let handle = win.window_handle();
+        if handle > 1 {
+            let dpy = cef::get_xdisplay();
+            if !dpy.is_null() {
+                unsafe {
+                    let dpy = dpy as *mut x11::xlib::Display;
+                    let xwin = handle as x11::xlib::Window;
+
+                    // Mutter 对没有 WM_CLASS 的 X11 窗口会停在 Iconic 状态不映射，
+                    // CEF 自己又不设，只能这里补上
+                    let mut name = b"shift\0".to_vec();
+                    let mut class = b"Shift\0".to_vec();
+                    let mut hint = x11::xlib::XClassHint {
+                        res_name: name.as_mut_ptr() as *mut std::os::raw::c_char,
+                        res_class: class.as_mut_ptr() as *mut std::os::raw::c_char,
+                    };
+                    x11::xlib::XSetClassHint(dpy, xwin, &mut hint);
+                    // X11 层兜底：直接给输入焦点（CEF 的 set_focus 不一定同步到 X）
+                    x11::xlib::XSetInputFocus(
+                        dpy,
+                        xwin,
+                        x11::xlib::RevertToParent,
+                        x11::xlib::CurrentTime,
+                    );
+
+                    // 去掉系统标题栏：Chrome 的窗口按钮画在标签栏里，没有独立标题栏。
+                    // _MOTIF_WM_HINTS = { flags=2(装饰), decorations=0 }；
+                    // 属性由 on_window_created 写好，这里 remap 让 WM 重建 frame。
+                    // 无装饰窗口要显式声明「接受键盘焦点」，否则 Mutter 会把
+                    // windowfocus 请求转给别的窗口。
+                    let motif = x11::xlib::XInternAtom(dpy, c"_MOTIF_WM_HINTS".as_ptr(), 0);
+                    {
+                        // X11 的 32 位属性在 64 位平台上必须用 c_long（8 字节）数组承载
+                        //（Xlib 按 sizeof(long) 步进读 5 个元素 = 40 字节，用 u32 会栈越界读成 1）
+                        let hints: [std::os::raw::c_long; 5] = [2, 0, 0, 0, 0];
+                        x11::xlib::XChangeProperty(
+                            dpy,
+                            xwin,
+                            motif,
+                            motif, // 类型也用 motif atom（用 XA_ATOM 会被 xprop 按 atom 名解析）
+                            32,
+                            0, // PropModeReplace
+                            hints.as_ptr() as *const u8,
+                            5,
+                        );
+                    }
+                    {
+                        let mut wh = x11::xlib::XWMHints {
+                            flags: x11::xlib::InputHint,
+                            input: 1,
+                            ..std::mem::zeroed()
+                        };
+                        x11::xlib::XSetWMHints(dpy, xwin, &mut wh);
+                    }
+                    x11::xlib::XUnmapWindow(dpy, xwin);
+                    x11::xlib::XMapRaised(dpy, xwin);
+                    x11::xlib::XFlush(dpy);
+                }
+                log::info!("[cef] XSetClassHint + 去装饰 + XMapRaised 已调用");
+            } else {
+                log::warn!("[cef] get_xdisplay 返回空，跳过 X11 映射");
+            }
+        }
+        handle
+    });
     log::info!("[cef] 延迟 show() 已执行，window_handle=0x{handle:x}");
     if handle > 1 {
-                let dpy = cef::get_xdisplay();
-                if !dpy.is_null() {
-                    unsafe {
-                        let dpy = dpy as *mut x11::xlib::Display;
-                        let win = handle as x11::xlib::Window;
+        // 窗口映射后补推一次书签与标签栏：cef_cmd 的数据库查询
+        // 可能在窗口创建之前就完成了，那一次 execute_java_script
+        // 会打到还不存在的页面上（实测：库里 64 条，UI 仍是静态兜底 7 条）。
+        // 推三轮：工具栏页面（file://）加载时机不定，单次推送容易
+        // 打在脚本还没就绪的窗口期。定时器只能在 GTK 线程注册。
+        for delay in [800u64, 2000, 4000] {
+            gtk::glib::timeout_add_local_once(
+                std::time::Duration::from_millis(delay),
+                || {
+                    refresh_bookmarks_ui();
+                    refresh_tabbar();
+                },
+            );
+        }
+    }
+}
 
-                        // Mutter 对没有 WM_CLASS 的 X11 窗口会停在 Iconic 状态不映射，
-                        // CEF 自己又不设，只能这里补上
-                        let mut name = b"shift\0".to_vec();
-                        let mut class = b"Shift\0".to_vec();
-                        let mut hint = x11::xlib::XClassHint {
-                            res_name: name.as_mut_ptr() as *mut std::os::raw::c_char,
-                            res_class: class.as_mut_ptr() as *mut std::os::raw::c_char,
-                        };
-                        x11::xlib::XSetClassHint(dpy, win, &mut hint);
-                        // X11 层兜底：直接给输入焦点（CEF 的 set_focus 不一定同步到 X）
-                        x11::xlib::XSetInputFocus(
-                            dpy,
-                            win,
-                            x11::xlib::RevertToParent,
-                            x11::xlib::CurrentTime,
-                        );
-
-                        // 去掉系统标题栏（2026-10-26）：Chrome 的窗口按钮画在标签栏里，
-                        // 没有独立标题栏。_MOTIF_WM_HINTS = { flags=2(装饰), decorations=0 }
-                        {
-                            let atom = x11::xlib::XInternAtom(
-                                dpy,
-                                c"_MOTIF_WM_HINTS".as_ptr(),
-                                0,
-                            );
-                            // XChangeProperty(format=32) 按 4 字节步进读；必须用 u32 数组。
-                            // 之前用 c_long（8 字节）全 0 看不出，非 0 时会错位导致 WM 忽略。
-                            let hints: [u32; 5] = [2, 0, 0, 0, 0]; // flags=2 装饰，decorations=0 无标题栏
-                            x11::xlib::XChangeProperty(
-                                dpy,
-                                win,
-                                atom,
-                                atom, // 类型也用 motif atom（用 XA_ATOM 会被 xprop 按 atom 名解析）
-                                32,
-                                0, // PropModeReplace
-                                hints.as_ptr() as *const u8,
-                                5,
-                            );
-                            // 只写属性；unmap/remap 放到 force_show 里做——
-                            // 在 on_window_created 里做会等 WM 响应而阻塞，
-                            // 导致 open() 不返回、后续 force_show 与书签推送全不执行。
-                            x11::xlib::XFlush(dpy);
-                        }
-
-                        // 无装饰窗口要显式声明「接受键盘焦点」，否则 Mutter 会把
-                        // windowfocus 请求转给别的窗口（实测焦点被踢回 0x600003）。
-                        {
-                            let mut wh = x11::xlib::XWMHints {
-                                flags: x11::xlib::InputHint,
-                                input: 1,
-                                ..std::mem::zeroed()
-                            };
-                            x11::xlib::XSetWMHints(dpy, win, &mut wh);
-                        }
-
-                        // 去掉系统装饰需要 remap 一次（属性已在 on_window_created 写好）
-                        x11::xlib::XUnmapWindow(dpy, win);
-                        x11::xlib::XMapRaised(dpy, win);
-                        x11::xlib::XFlush(dpy);
-
-                        // 窗口映射后补推一次书签与标签栏：cef_cmd 的数据库查询
-                        // 可能在窗口创建之前就完成了，那一次 execute_java_script
-                        // 会打到还不存在的页面上（实测：库里 64 条，UI 仍是静态兜底 7 条）。
-                        // 推三轮：工具栏页面（file://）加载时机不定，单次推送容易
-                        // 打在脚本还没就绪的窗口期（实测 800ms 一次时 __shiftBookmarks
-                        // 已存在但 UI 未更新，说明推送早于脚本执行）。
-                        for delay in [800u64, 2000, 4000] {
-                            gtk::glib::timeout_add_local_once(
-                                std::time::Duration::from_millis(delay),
-                                || {
-                                    refresh_bookmarks_ui();
-                                    refresh_tabbar();
-                                },
-                            );
-                        }
-                    }
-                    log::info!("[cef] XSetClassHint + XMapRaised 已调用");
-                }
-            }
+/// 取一份窗口句柄的 clone（锁内只 clone，锁外再投递到 CEF UI 线程）。
+fn shell_window_clone() -> Option<Window> {
+    let w = lock_state(&SHELL_WINDOW);
+    w.as_ref().cloned()
 }
 
 /// 窗口控制：最小化 / 最大化切换 / 关闭（标签栏右侧按钮走这里）。
+/// `Window` 的方法必须在 CEF UI 线程调用，故统一经 `cef_ui_call` 投递。
 pub fn window_minimize() {
-    { let w = lock_state(&SHELL_WINDOW); {
-        if let Some(win) = w.as_ref() {
-            win.minimize();
-        }
-    } };
+    let Some(win) = shell_window_clone() else { return };
+    cef_ui_call(move || win.minimize());
 }
 
 pub fn window_toggle_maximize() {
-    { let w = lock_state(&SHELL_WINDOW); {
-        if let Some(win) = w.as_ref() {
-            // CEF 没有 is_maximized 查询，用窗口尺寸对比近似的做法不可靠；
-            // 这里统一走 maximize()，连续点两下由 WM 自己处理（多数 WM 会 toggle）。
-            win.maximize();
-        }
-    } };
+    let Some(win) = shell_window_clone() else { return };
+    // CEF 没有 is_maximized 查询，用窗口尺寸对比近似的做法不可靠；
+    // 这里统一走 maximize()，连续点两下由 WM 自己处理（多数 WM 会 toggle）。
+    cef_ui_call(move || win.maximize());
 }
 
 pub fn window_close() {
-    { let w = lock_state(&SHELL_WINDOW); {
-        if let Some(win) = w.as_ref() {
-            win.close();
-        }
-    } };
+    let Some(win) = shell_window_clone() else { return };
+    cef_ui_call(move || win.close());
 }
 
 /// 拖动窗口：发 `_NET_WM_MOVERESIZE` 给窗口管理器，由 WM 接管拖动
 /// （比自己在 Rust 里跟鼠标稳，GTK/Qt 都这么做）。
+/// `window_handle` / `get_xdisplay` 只能在 CEF UI 线程取，GTK 线程取到的是 0，
+/// 2026-10-29 实测：旧实现在 GTK 线程直接 return，标签栏空白处拖不动窗口。
 pub fn window_begin_drag() {
-    let handle = { let w = lock_state(&SHELL_WINDOW); w.as_ref().map(|x| x.window_handle()) };
-    let Some(handle) = handle else { return };
-    if handle <= 1 {
-        return;
-    }
-    let dpy = cef::get_xdisplay();
-    if dpy.is_null() {
-        return;
-    }
-    unsafe {
-        let dpy = dpy as *mut x11::xlib::Display;
-        let win = handle as x11::xlib::Window;
-        let root = x11::xlib::XDefaultRootWindow(dpy);
+    let Some(win) = shell_window_clone() else { return };
+    cef_ui_call(move || {
+        let handle = win.window_handle();
+        if handle <= 1 {
+            return;
+        }
+        let dpy = cef::get_xdisplay();
+        if dpy.is_null() {
+            return;
+        }
+        unsafe {
+            let dpy = dpy as *mut x11::xlib::Display;
+            let xwin = handle as x11::xlib::Window;
+            let root = x11::xlib::XDefaultRootWindow(dpy);
 
-        // 取当前指针位置（_NET_WM_MOVERESIZE 要求 root 坐标）
-        let mut rx = 0;
-        let mut ry = 0;
-        let mut wx = 0;
-        let mut wy = 0;
-        let mut mask = 0;
-        let mut child: x11::xlib::Window = 0;
-        x11::xlib::XQueryPointer(
-            dpy, root, &mut root.clone(), &mut child, &mut rx, &mut ry, &mut wx, &mut wy, &mut mask,
-        );
+            // 取当前指针位置（_NET_WM_MOVERESIZE 要求 root 坐标）
+            let mut rx = 0;
+            let mut ry = 0;
+            let mut wx = 0;
+            let mut wy = 0;
+            let mut mask = 0;
+            let mut child: x11::xlib::Window = 0;
+            x11::xlib::XQueryPointer(
+                dpy, root, &mut root.clone(), &mut child, &mut rx, &mut ry, &mut wx, &mut wy, &mut mask,
+            );
 
-        let atom = x11::xlib::XInternAtom(
-            dpy,
-            c"_NET_WM_MOVERESIZE".as_ptr(),
-            0,
-        );
-        let mut ev = x11::xlib::XEvent {
-            client_message: x11::xlib::XClientMessageEvent {
-                type_: x11::xlib::ClientMessage,
-                serial: 0,
-                send_event: 1,
-                display: dpy,
-                window: win,
-                message_type: atom,
-                format: 32,
-                data: x11::xlib::ClientMessageData::from([rx as i64, ry as i64, 8, 1, 1]),
-            },
-        };
-        x11::xlib::XSendEvent(
-            dpy,
-            root,
-            0,
-            (1 << 20) | (1 << 19), // SubstructureRedirectMask | SubstructureNotifyMask
-            &mut ev,
-        );
-        x11::xlib::XFlush(dpy);
-    }
-    log::info!("[cef] 已请求窗口管理器接管拖动");
+            // CEF 在鼠标按下时会做隐式指针抓取，WM 的移动操作抢不到指针，先释放
+            x11::xlib::XUngrabPointer(dpy, x11::xlib::CurrentTime);
+            let atom = x11::xlib::XInternAtom(dpy, c"_NET_WM_MOVERESIZE".as_ptr(), 0);
+            let mut ev = x11::xlib::XEvent {
+                client_message: x11::xlib::XClientMessageEvent {
+                    type_: x11::xlib::ClientMessage,
+                    serial: 0,
+                    send_event: 1,
+                    display: dpy,
+                    window: xwin,
+                    message_type: atom,
+                    format: 32,
+                    data: x11::xlib::ClientMessageData::from([rx as i64, ry as i64, 8, 1, 1]),
+                },
+            };
+            x11::xlib::XSendEvent(
+                dpy,
+                root,
+                0,
+                (1 << 20) | (1 << 19), // SubstructureRedirectMask | SubstructureNotifyMask
+                &mut ev,
+            );
+            x11::xlib::XFlush(dpy);
+        }
+        log::info!("[cef] 已请求窗口管理器接管拖动");
+    });
 }
 
 /// 让内容页导航（工具栏 JS 经 shell_msg 调 "nav" 时实际走 CefShellMsgHandler，本函数为
@@ -1049,6 +1042,10 @@ wrap_window_delegate! {
     impl PanelDelegate {}
 
     impl WindowDelegate {
+        fn is_frameless(&self, _window: Option<&mut Window>) -> std::os::raw::c_int {
+            1
+        }
+
         // 窗口按钮（2026-10-26）：不显式声明时 CEF 的 Linux 顶层窗口只给
         // 最小化 + 关闭，没有最大化。三个能力都返回 1，交给窗口管理器画齐。
         fn can_maximize(&self, _window: Option<&mut Window>) -> std::os::raw::c_int {
