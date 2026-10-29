@@ -34,6 +34,7 @@ pub fn ensure_newtab_html(shell_dir: &Path) -> Result<String, String> {
     // 世界导航页（F-NEWTAB-01）：模板与 721 站数据都在仓库 resources/ 里，
     // 每次生成启动页时一并落盘，保证侧边栏链接永远可用（离线可用）。
     ensure_worldnav_html(dir)?;
+    ensure_settings_html(dir)?;
     Ok(format!("file://{}", path.display()))
 }
 
@@ -79,6 +80,14 @@ fn load_recent_for_worldnav() -> Vec<serde_json::Value> {
             })
         })
         .collect()
+}
+
+/// 生成设置页（F-CEF-40：设置改独立标签页，不再加高工具栏）。
+pub(crate) fn ensure_settings_html(dir: &Path) -> Result<String, String> {
+    const TPL: &str = include_str!("../../../resources/newtab/settings.html");
+    let path = dir.join("settings.html");
+    std::fs::write(&path, TPL).map_err(|e| format!("写设置页失败: {e}"))?;
+    Ok(format!("file://{}", path.display()))
 }
 
 /// 读主应用设置与最近历史（同步：开窗时只跑一次，几十毫秒可接受）。

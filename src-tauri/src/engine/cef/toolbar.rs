@@ -542,7 +542,8 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     background: #292a2d; border: 1px solid #3c4043; border-radius: 8px;
     padding: 6px; z-index: 20; box-shadow: 0 8px 24px rgba(0,0,0,.5);
   }
-  html.menu-open #menupanel { display: block; }
+  /* F-CEF-40：主菜单改走 GTK 原生弹出菜单，页面内不再显示 */
+  html.menu-open #menupanel { display: none !important; }
   html:not(.bookmarks-hidden) #menupanel { top: 122px; }
   .menu-item {
     display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px;
@@ -2227,14 +2228,15 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   });
 
   // ---- 主菜单（F-CEF-16）----
+  // F-CEF-40：菜单改 GTK 原生弹出，由 Rust 管理开合；
+  // 页面只发「弹一下」，不保留 menu-open 状态（否则隔次点击会被 toggle 成关闭）。
   function setMenuPanel(open) {
-    document.documentElement.classList.toggle('menu-open', open);
-    if (open) removePanelClasses('menu-open');
-    act('menupanel|' + (open ? '1' : '0'));
+    document.documentElement.classList.remove('menu-open');
+    if (open) act('menupanel|1');
   }
   document.getElementById('menubtn').addEventListener('click', (e) => {
     e.stopPropagation();
-    setMenuPanel(!document.documentElement.classList.contains('menu-open'));
+    act('menupanel|1');
   });
   document.getElementById('menupanel').addEventListener('click', (e) => {
     const item = e.target.closest('.menu-item');
@@ -2341,7 +2343,9 @@ mod tests {
 
     #[test]
     fn every_js_setter_uses_registry_not_hand_lists() {
-        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 13);
+        // F-CEF-40：Menu 已改 GTK 原生弹出（setMenuPanel 只发 act，不再清类），
+        // 其余 12 个面板仍必须走同一份 removePanelClasses 注册表。
+        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 12);
         for line in TOOLBAR_HTML.lines().filter(|l| l.contains("classList.remove(")) {
             assert!(line.matches("-open").count() <= 1, "残留手写互斥清单: {line}");
         }

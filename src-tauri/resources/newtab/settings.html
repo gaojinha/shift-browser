@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设置</title>
+<style>
+  :root {
+    --ground: #0b0d10;
+    --surface: #14171c;
+    --raised: #1e2228;
+    --border: #23272e;
+    --text: #f2f4f7;
+    --muted: #b0b6bf;
+    --faint: #8b919a;
+    --accent: #5b8cff;
+    --font: "PingFang SC", "Microsoft YaHei", -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { overflow-x: clip; }
+  body {
+    margin: 0; background: var(--ground); color: var(--text);
+    font: 14px/1.5 var(--font); -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  .topbar { height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 24px; }
+  .brand { font-weight: 600; }
+  .sep, .current { color: var(--faint); font-size: 13px; }
+  .shell { max-width: 720px; margin: 0 auto; padding: 32px 24px 64px; }
+  h1 { margin: 0 0 6px; font-size: 24px; font-weight: 600; letter-spacing: -.01em; }
+  .lede { margin: 0 0 24px; color: var(--muted); font-size: 13px; }
+  .card {
+    background: var(--surface); border-radius: 12px; padding: 8px 20px 20px;
+  }
+  .row {
+    display: flex; align-items: center; gap: 16px;
+    min-height: 56px; border-bottom: 1px solid var(--border);
+  }
+  .row:last-of-type { border-bottom: 0; }
+  .row > span:first-child { flex: 0 0 120px; color: var(--muted); font-size: 13px; }
+  .row select, .row input[type="text"] {
+    flex: 1; height: 36px; padding: 0 12px;
+    background: var(--ground); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); font: 14px var(--font); outline: none;
+  }
+  .row select:focus-visible, .row input:focus-visible {
+    border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .row.check { gap: 10px; }
+  .row.check input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .row.check span { flex: 1; color: var(--text); }
+  .foot { display: flex; align-items: center; gap: 14px; margin-top: 20px; }
+  button {
+    height: 36px; padding: 0 18px; border: 0; border-radius: 8px;
+    background: var(--text); color: var(--ground); font: 500 13px var(--font);
+    cursor: pointer;
+  }
+  button:hover { opacity: .9; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .msg { color: var(--faint); font-size: 12px; }
+  .note { margin: 24px 0 0; color: var(--faint); font-size: 12px; }
+  .note a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="cef-newtab.html">Shift</a>
+    <span class="sep" aria-hidden="true">/</span>
+    <span class="current">设置</span>
+  </header>
+
+  <main class="shell">
+    <h1>设置</h1>
+    <p class="lede">改动点保存。广告拦截与 Sec-GPC 需要重开窗口生效。</p>
+
+    <section class="card">
+      <label class="row"><span>搜索引擎</span>
+        <select id="engine">
+          <option value="bing">必应</option>
+          <option value="baidu">百度</option>
+          <option value="google">谷歌</option>
+        </select>
+      </label>
+      <label class="row"><span>下载目录</span>
+        <input id="download" type="text" spellcheck="false" placeholder="空 = 系统默认">
+      </label>
+      <label class="row check"><input id="adblock" type="checkbox"><span>广告拦截</span></label>
+      <label class="row check"><input id="gpc" type="checkbox"><span>发送 Sec-GPC（与普通 Chrome 不同）</span></label>
+      <div class="foot">
+        <button id="save" type="button">保存</button>
+        <span class="msg" id="msg"></span>
+      </div>
+    </section>
+
+    <p class="note">其他面板（历史、下载、书签、密码等）仍在右上角菜单里。返回 <a href="cef-newtab.html">新标签页</a>。</p>
+  </main>
+
+<script>
+(function () {
+  'use strict';
+  function post(msg) { try { console.log(msg); } catch (e) {} }
+
+  window.__shiftSettings = function (d) {
+    if (!d) return;
+    var engine = document.getElementById('engine');
+    if (engine && d.search_engine) engine.value = d.search_engine;
+    document.getElementById('download').value = d.download_dir || '';
+    document.getElementById('adblock').checked = d.adblock_enabled !== 'false';
+    document.getElementById('gpc').checked = d.gpc_header === 'true';
+  };
+  window.__shiftSettingsSaved = function (m) {
+    document.getElementById('msg').textContent = m || '';
+  };
+
+  document.getElementById('save').addEventListener('click', function () {
+    post('SHIFT_SET:save|' + JSON.stringify({
+      search_engine: document.getElementById('engine').value,
+      download_dir: document.getElementById('download').value.trim(),
+      adblock_enabled: document.getElementById('adblock').checked ? 'true' : 'false',
+      gpc_header: document.getElementById('gpc').checked ? 'true' : 'false'
+    }));
+  });
+
+  post('SHIFT_SET:get');
+})();
+</script>
+</body>
+</html>

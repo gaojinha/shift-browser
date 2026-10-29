@@ -188,9 +188,63 @@ const MENU_PANEL_EXTRA: i32 = 340;
 static MENU_EXTRA: AtomicI32 = AtomicI32::new(0);
 
 /// 主菜单开合：同样与其它面板互斥
-pub fn set_menu_panel(open: bool) {
-    set_panel_extra(Panel::Menu, open);
-    apply_toolbar_height();
+/// 主菜单（F-CEF-40）：GTK 原生弹出菜单，浮在内容页之上。
+///
+/// 不再加高工具栏视图：菜单是独立 popup window，不推挤内容，也不会
+/// 在菜单背后露出一整块工具栏背景（F-CEF-38 遗留的观感问题）。
+/// 菜单项与旧 toolbar.html 的 `#menupanel` 一一对应，动作仍走 handle_action。
+fn popup_main_menu() {
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        log::warn!("[cef] 主菜单：拿不到 AppHandle");
+        return;
+    };
+    // CEF 模式没有 Tauri 窗口（create_main_window 只给 WebKit 建），
+    // GTK 菜单不需要父窗口，但必须在 GTK 主线程创建/弹出。
+    let _ = app.run_on_main_thread(|| {
+        use gtk::prelude::*;
+        let menu = gtk::Menu::new();
+        let add = |label: &str, action: &str| {
+            let item = gtk::MenuItem::with_label(label);
+            let act = action.to_string();
+            // GTK 主线程 ≠ CEF UI 线程：动作必须投回 CEF UI 线程，
+            // 否则 browser_view_create / 布局等 CEF 调用静默无效。
+            item.connect_activate(move |_| {
+                let act = act.clone();
+                cef_ui(move || handle_action(&act));
+            });
+            menu.append(&item);
+        };
+        let sep = || {
+            let line = gtk::SeparatorMenuItem::new();
+            menu.append(&line);
+        };
+
+        add("新标签页", "tabnew");
+        add("命令面板", "palette|1");
+        sep();
+        add("历史记录", "histpanel|1");
+        add("下载内容", "dlpanel|1");
+        add("书签栏", "bmtoggle");
+        add("书签管理器", "bmmanage|1");
+        add("密码", "pwpanel|1");
+        sep();
+        add("查找", "findopen");
+        sep();
+        add("分组 / 工作区", "groupspanel|1");
+        add("会话", "sesspanel|1");
+        add("证书", "certpanel|1");
+        add("用户脚本", "uspanel|1");
+        add("设置", "settingspage");
+        add("诊断信息", "diag");
+        sep();
+        add("退出", "winclose");
+
+        menu.show_all();
+        log::info!("[cef] 弹出 GTK 主菜单（{} 项）", menu.children().len());
+        // popup_at_pointer 在 run_on_main_thread 的异步闭包里会丢事件时间，
+        // 菜单弹出即关；popup_easy(0, 0) 用 CurrentTime 直接弹在鼠标位置。
+        menu.popup_easy(0, 0);
+    });
 }
 
 /// 历史面板（F-CEF-19）展开时工具栏视图额外加高的像素
@@ -1555,6 +1609,43 @@ fn refresh_star_state(url: &str) {
 }
 
 /// 设置面板数据（F-CEF-19）：只推工具栏需要的四项。
+/// 打开设置页（F-CEF-40）：生成 settings.html 并新开标签，不再加高工具栏。
+fn open_settings_page() {
+    let dir = { let d = lock_state(&SHELL_CACHE_DIR); d.clone() };
+    let Some(dir) = dir else {
+        log::warn!("[cef] 设置页：shell 目录尚未就绪");
+        return;
+    };
+    match super::newtab::ensure_settings_html(std::path::Path::new(&dir)) {
+        Ok(url) => {
+            if let Err(e) = new_tab(&url) {
+                log::warn!("[cef] 打开设置页失败: {e}");
+            }
+        }
+        Err(e) => log::warn!("[cef] 生成设置页失败: {e}"),
+    }
+}
+
+/// 向活动标签页注入 JS（设置页用；锁外执行，避免 CEF 同步回调再取锁）。
+fn eval_active_js(js: &str) {
+    let id = {
+        let t = lock_state(&SHELL_TABS);
+        t.get(ACTIVE_TAB.load(Ordering::Relaxed))
+            .map(|x| x.id.clone())
+    };
+    let frame = {
+        let m = lock_state(browsers());
+        id.and_then(|id| m.get(&id).and_then(|b| b.main_frame()))
+    };
+    if let Some(frame) = frame {
+        frame.execute_java_script(
+            Some(&CefString::from(js)),
+            Some(&CefString::from("shift://settings")),
+            -1,
+        );
+    }
+}
+
 fn send_settings() {
     let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
     let Some(app) = crate::cef_cmd::app_handle() else { return };
@@ -1572,7 +1663,7 @@ fn send_settings() {
         }
         let json = serde_json::Value::Object(map).to_string();
         let _ = app.run_on_main_thread(move || {
-            run_toolbar_js(&format!(
+            eval_active_js(&format!(
                 "window.__shiftSettings && window.__shiftSettings({json})"
             ));
         });
@@ -1608,7 +1699,7 @@ fn save_settings(json: &str) {
         };
         let json_msg = serde_json::to_string(&msg).unwrap_or_else(|_| "\"\"".to_string());
         let _ = app.run_on_main_thread(move || {
-            run_toolbar_js(&format!(
+            eval_active_js(&format!(
                 "window.__shiftSettingsSaved && window.__shiftSettingsSaved({json_msg})"
             ));
         });
@@ -1794,6 +1885,23 @@ wrap_display_handler! {
             let Some(msg) = message else { return 0 };
             let text = msg.to_string();
             let trimmed = text.trim();
+
+            // 设置页 → 宿主（F-CEF-40）：只接受 settings.html 来源。
+            if let Some(cmd) = trimmed.strip_prefix("SHIFT_SET:") {
+                let from_settings = source
+                    .map(|s| s.to_string().contains("settings.html"))
+                    .unwrap_or(false);
+                if !from_settings {
+                    log::warn!("[cef] 拒绝非设置页来源的设置命令");
+                    return 1;
+                }
+                if cmd == "get" {
+                    send_settings();
+                } else if let Some(json) = cmd.strip_prefix("save|") {
+                    save_settings(json);
+                }
+                return 1;
+            }
 
             // 世界导航收藏 → 宿主（F-NEWTAB-03 P1）：只接受 world-nav.html 来源。
             // 收藏写入 quick_sites，启动页下次生成时自然出现在快捷区。
@@ -2648,6 +2756,11 @@ fn handle_action_inner(action: &str) {
     // 而 load_url 会同步触发 `on_loading_state_change` → `run_toolbar_js`
     // → 再拿同一把锁 = 同线程自死锁（整窗「无响应」，2026-10-28 抓栈确认）。
     // 附件 URL 的分流也在这里一起做（F-CEF-31）。
+    if cmd == "settingspage" {
+        open_settings_page();
+        return;
+    }
+
     if cmd == "nav" {
         let url = normalize_url(arg);
         if !url.is_empty() {
@@ -2718,7 +2831,9 @@ fn handle_action_inner(action: &str) {
     // 下载面板动作（F-CEF-15）：面板开合 / 打开目录 / 重新下载 / 删记录
     match cmd {
         "menupanel" => {
-            set_menu_panel(arg == "1");
+            if arg == "1" {
+                popup_main_menu();
+            }
             return;
         }
         "bmtoggle" => {
