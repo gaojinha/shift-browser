@@ -61,10 +61,6 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     height: 48px; padding: 0 8px;
     background: #35363a;
   }
-  .brand {
-    font-weight: 600; letter-spacing: .3px; color: #8ab4f8;
-    padding: 0 6px 0 2px; white-space: nowrap; font-size: 13px;
-  }
   button {
     width: 28px; height: 28px; border: 0; border-radius: 50%;
     background: transparent; color: #e8eaed; cursor: default;
@@ -99,11 +95,13 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   .win-ctrl button.close:hover { background: #e81123; color: #fff; }
   .tab {
     display: flex; align-items: center; gap: 8px;
-    min-width: 32px; max-width: 240px; height: 36px;
-    padding: 0 6px 0 12px; border-radius: 8px 8px 0 0;
+    min-width: 200px; max-width: 240px; height: 36px;
+    padding: 0 6px 0 12px;
     background: transparent; color: #9aa0a6; cursor: default;
     font-size: 12px; white-space: nowrap; flex: 0 1 auto;
     position: relative;
+    /* Chrome 标签的圆角梯形：顶部 10px 斜角、底部方角 */
+    clip-path: polygon(0 100%, 0 10px, 10px 0, calc(100% - 10px) 0, 100% 10px, 100% 100%);
   }
   .tab:hover { background: #2a2b2e; color: #e8eaed; }
   .tab.active { background: #35363a; color: #e8eaed; }
@@ -515,9 +513,9 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   .menu-item .menu-key { margin-left: auto; color: #9aa0a6; font-size: 11px; }
   .menu-sep { height: 1px; background: #3c4043; margin: 6px 0; }
   .addr-wrap {
-    flex: 1; display: flex; align-items: center; height: 32px;
-    background: #202124; border: 1px solid transparent; border-radius: 16px;
-    padding: 0 12px; min-width: 0; margin: 0 4px; position: relative;
+    flex: 1; display: flex; align-items: center; height: 34px;
+    background: #202124; border: 1px solid transparent; border-radius: 17px;
+    padding: 0 10px; min-width: 0; margin: 0 6px; position: relative;
   }
   .addr-wrap:hover { background: #292a2d; }
   .addr-wrap:focus-within { background: #202124; border-color: #8ab4f8; }
@@ -562,9 +560,11 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     color: #9aa0a6;
   }
   .lock { width: 14px; height: 14px; margin-right: 8px; color: #8b93a1; flex: none; }
+  /* Chrome 地址栏右侧只留星标/扩展/菜单，密码收进菜单 */
+  #pwbtn { display: none; }
   /* 缩放控件（F-CEF-18）：− / 百分比 / +，放地址栏右侧 */
   .zoomctl {
-    display: flex; align-items: center; flex: 0 0 auto;
+    display: none; align-items: center; flex: 0 0 auto;
     height: 28px; background: #202124; border-radius: 14px; padding: 0 2px; margin: 0 2px;
   }
   .zoomctl button {
@@ -612,8 +612,6 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     </div>
   </div>
   <div class="bar">
-    <span class="brand">Shift</span>
-
     <button title="后退" onclick="act('back')">
       <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
@@ -631,7 +629,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
           <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
         </svg>
       </button>
-      <input id="addr" type="text" spellcheck="false" placeholder="输入网址或搜索词，回车打开">
+      <input id="addr" type="text" spellcheck="false" placeholder="搜索或输入网址">
       <button class="star" id="starbtn" title="收藏此页">☆</button>
       <div id="omni"></div>
     </div>
@@ -871,6 +869,9 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   const zoomval = document.getElementById('zoomval');
   window.__shiftZoom = function (pct) {
     zoomval.textContent = pct + '%';
+    // Chrome 只在非 100% 时显示缩放控件
+    const z = document.querySelector('.zoomctl');
+    if (z) z.style.display = (pct === '100%') ? 'none' : 'flex';
   };
 
   // ---- 标签栏（M2 独立开窗）----
