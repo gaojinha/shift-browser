@@ -453,6 +453,35 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   .sess-row .s-del { flex: 0 0 auto; color: #f28b82; padding: 0 8px; }
   .sess-row .s-restore { flex: 0 0 auto; color: #8ab4f8; padding: 0 8px; }
   .sess-empty { color: #9aa0a6; padding: 12px 6px; }
+  /* 标签列表面板（F-CEF-40） */
+  html.tablist-open, html.tablist-open body { height: 100vh; }
+  #tablistpanel {
+    display: none; position: absolute; left: 0; right: 0; top: 88px; bottom: 0;
+    background: #292a2d; border-top: 1px solid #3c4043; padding: 8px 12px;
+    flex-direction: column; gap: 4px; z-index: 10; font-size: 12px;
+  }
+  html.tablist-open #tablistpanel { display: flex; }
+  html:not(.bookmarks-hidden) #tablistpanel { top: 122px; }
+  #tablistlist { flex: 1; overflow-y: auto; }
+  .tablist-row {
+    display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 8px;
+    border-radius: 6px; cursor: default;
+  }
+  .tablist-row:hover { background: #3c4043; }
+  .tablist-row.active { background: #3c4043; }
+  .tablist-row .tl-title {
+    flex: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: #e8eaed;
+  }
+  .tablist-row .tl-title.dim { color: #9aa0a6; }
+  .tablist-row .tl-url {
+    flex: 3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: #5f6368; font-size: 11px;
+  }
+  .tablist-row .tl-icon {
+    flex: 0 0 auto; width: 16px; height: 16px; color: #9aa0a6;
+  }
+  .tablist-empty { color: #9aa0a6; padding: 12px 6px; }
   /* 证书面板（F-CEF-21） */
   html.cert-open, html.cert-open body { height: 100vh; }
   #certpanel {
@@ -626,7 +655,7 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
 </head>
 <body>
   <div class="tabbar" id="tabbar">
-    <button class="tab-search" id="tabsearch" title="搜索标签页">
+    <button class="tab-search" id="tabsearch" title="搜索标签页" onclick="act('tablist')">
       <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
     </button>
     <div class="tabs" id="tabs">
@@ -756,6 +785,10 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
   <div id="sesspanel">
     <div class="sess-head"><span class="sess-title">已保存的会话</span><span id="sessclose" class="bmm-btn">关闭</span></div>
     <div id="sesslist"></div>
+  </div>
+  <div id="tablistpanel">
+    <div class="sess-head"><span class="sess-title">标签页列表</span><span id="tablistclose" class="bmm-btn">关闭</span></div>
+    <div id="tablistlist"></div>
   </div>
   <div id="certpanel">
     <div class="cert-head">
@@ -1013,6 +1046,62 @@ const TOOLBAR_HTML: &str = r#"<!DOCTYPE html>
     const tab = e.target.closest('.tab');
     if (tab) act('tab|' + tab.dataset.idx);
   });
+
+  // ---- 标签列表面板（F-CEF-40） ----
+  let tabListData = [];
+  const tabListPanelEl = document.getElementById('tablistpanel');
+  const tabListListEl = document.getElementById('tablistlist');
+  window.__shiftTabList = function (list, active) {
+    tabListData = Array.isArray(list) ? list : [];
+    renderTabList(active || 0);
+  };
+  function renderTabList(active) {
+    tabListListEl.innerHTML = '';
+    if (tabListData.length === 0) {
+      const e = document.createElement('div');
+      e.className = 'tablist-empty';
+      e.textContent = '没有标签页';
+      tabListListEl.appendChild(e);
+      return;
+    }
+    tabListData.forEach((t, i) => {
+      const row = document.createElement('div');
+      row.className = 'tablist-row' + (i === active ? ' active' : '');
+      row.dataset.i = String(i);
+      const icon = document.createElement('span');
+      icon.className = 'tl-icon';
+      // 静音图标
+      if (t.muted) {
+        icon.textContent = '🔇';
+      } else if (t.pinned) {
+        icon.textContent = '📌';
+      } else {
+        icon.textContent = '⌄';
+      }
+      const title = document.createElement('span');
+      title.className = 'tl-title' + (i !== active ? ' dim' : '');
+      title.textContent = t.title || '新标签页';
+      const url = document.createElement('span');
+      url.className = 'tl-url';
+      url.textContent = t.url || '';
+      row.append(icon, title, url);
+      row.addEventListener('click', () => {
+        document.documentElement.classList.remove('tablist-open');
+        act('tablistclick|' + i);
+      });
+      tabListListEl.appendChild(row);
+    });
+  }
+  document.getElementById('tablistclose').addEventListener('click', () => setTabListPanel(false));
+  // 面板打开时互斥其他面板
+  function setTabListPanel(open) {
+    document.documentElement.classList.toggle('tablist-open', open);
+    if (open) removePanelClasses('tablist-open');
+    act('tablistpanel|' + (open ? '1' : '0'));
+    if (open) {
+      // Rust 侧 popup_tab_list() 会推送当前标签列表
+    }
+  }
 
   // 书签栏：Rust 侧读到数据库后整表刷新；未读到前保留 HTML 里的静态兜底
   window.__shiftBookmarks = function (data) {
@@ -2254,7 +2343,7 @@ mod tests {
 
     #[test]
     fn panel_registry_has_twelve_unique_classes_and_matches_css() {
-        assert_eq!(Panel::ALL.len(), 12);
+        assert_eq!(Panel::ALL.len(), 13);
         let json = panel_classes_json();
         for p in Panel::ALL {
             assert_eq!(json.matches(&format!("\"{}\"", p.class())).count(), 1, "{:?}", p);
@@ -2266,8 +2355,8 @@ mod tests {
     #[test]
     fn every_js_setter_uses_registry_not_hand_lists() {
         // F-CEF-40：Menu 改 GTK 原生、Settings 改独立标签页，两者不再走 JS setter；
-        // 其余 11 个面板仍必须走同一份 removePanelClasses 注册表。
-        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 11);
+        // 其余 12 个面板仍必须走同一份 removePanelClasses 注册表。
+        assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 12);
         for line in TOOLBAR_HTML.lines().filter(|l| l.contains("classList.remove(")) {
             assert!(line.matches("-open").count() <= 1, "残留手写互斥清单: {line}");
         }

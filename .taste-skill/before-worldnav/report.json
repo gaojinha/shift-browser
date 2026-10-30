@@ -1,0 +1,1287 @@
+{
+ "url": "/home/gao/.local/share/com.shiftbrowser.app/newtab/world-nav.html",
+ "at": "2026-10-28T10:20:56.568Z",
+ "allow": [],
+ "viewports": [
+  {
+   "width": 1440,
+   "height": 900,
+   "load": "load",
+   "screens": 1,
+   "filled": [
+    0.59
+   ],
+   "motion": {
+    "elements": 0,
+    "css": 0,
+    "transitions": 0,
+    "scripted": 0,
+    "videos": 0,
+    "playingVideos": 0
+   },
+   "metrics": {
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "page": {
+     "height": 900,
+     "screens": 1,
+     "words": 231,
+     "img": 0,
+     "video": 0,
+     "canvas": 0,
+     "svg": 0,
+     "sections": 0,
+     "horizontalOverflow": 0,
+     "overflowCulprits": [],
+     "uiFragments": 0,
+     "uiAbuse": false,
+     "realPictures": 0,
+     "videoCount": 0,
+     "uiPictures": 0,
+     "pictureSamples": [],
+     "blendText": 0,
+     "sideScrollers": 0,
+     "brokenImages": [],
+     "emoji": [
+      "💳",
+      "🗺",
+      "💻",
+      "📰",
+      "🏠",
+      "🎓",
+      "🎮",
+      "🛒",
+      "📱",
+      "💰"
+     ],
+     "videosNoPoster": 0
+    },
+    "hero": {
+     "text": "🌐",
+     "words": 1,
+     "chars": 2,
+     "lines": 1,
+     "size": 24,
+     "vw": 1.7,
+     "font": "-apple-system",
+     "weight": 400,
+     "tracking": 0,
+     "leading": 1.5,
+     "top": 219,
+     "tag": "div",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "h1": null,
+    "headings": [],
+    "headingSummary": {
+     "count": 0,
+     "maxLines": 0,
+     "over2Lines": 0,
+     "statements": 0,
+     "centered": 0,
+     "medianWords": null,
+     "mixedFontHeadings": 0
+    },
+    "type": {
+     "families": [
+      {
+       "family": "-apple-system",
+       "share": 0.69,
+       "mono": false
+      },
+      {
+       "family": "Arial",
+       "share": 0.31,
+       "mono": false
+      }
+     ],
+     "familyCount": 2,
+     "sizes": [
+      12,
+      13,
+      14,
+      16,
+      17,
+      18,
+      20,
+      24
+     ],
+     "sizeCount": 8,
+     "notLoaded": [],
+     "body": null,
+     "measureChars": null,
+     "max": {
+      "size": 24,
+      "vw": 1.7,
+      "font": "-apple-system",
+      "text": "🌐"
+     },
+     "monoShare": 0,
+     "monoProseShare": 0,
+     "monoFamilies": [],
+     "monoSamples": [],
+     "microLabels": 0,
+     "microLabelShare": 0,
+     "microSamples": [],
+     "upperShare": 0.02,
+     "centerShare": 0.03,
+     "smallText": 3
+    },
+    "eyebrows": [],
+    "numbered": [],
+    "color": {
+     "bodyBg": "#12151c",
+     "bodyBgHsl": {
+      "h": 222,
+      "s": 0.22,
+      "l": 0.09
+     },
+     "dark": true,
+     "sectionBgs": [],
+     "textColors": [
+      {
+       "color": "#e6e8eb",
+       "share": 0.42
+      },
+      {
+       "color": "#9aa0a6",
+       "share": 0.39
+      },
+      {
+       "color": "#3a4453",
+       "share": 0.09
+      },
+      {
+       "color": "#f5a623",
+       "share": 0.09
+      },
+      {
+       "color": "#4a9eff",
+       "share": 0.01
+      }
+     ],
+     "button": {
+      "bg": "#4a9eff",
+      "hsl": {
+       "h": 212,
+       "s": 1,
+       "l": 0.65
+      },
+      "fg": "#0b1220"
+     },
+     "lowContrast": [
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      }
+     ]
+    },
+    "buttons": {
+     "count": 2,
+     "inHero": 2,
+     "radius": 8,
+     "height": 35,
+     "withShadow": 0,
+     "withGradient": 0,
+     "mono": 0,
+     "upper": 0,
+     "heroLabels": [
+      "⭐ 收藏",
+      "＋ 添加收藏"
+     ]
+    },
+    "surfaces": {
+     "shadowStatic": 0,
+     "shadowOverlay": 0,
+     "shadowSamples": [],
+     "gradients": 0,
+     "scrims": 0,
+     "gradientSamples": [],
+     "gradientText": 0,
+     "hairlines": 2,
+     "hairlineSamples": [
+      "div.nav-header 1440px",
+      "div#catTabs.cat-tabs 160px"
+     ],
+     "outlinedBoxes": 12,
+     "dashed": 1,
+     "blurred": 0,
+     "roundedBoxes": 12,
+     "boxRadius": 12,
+     "squareMedia": 0,
+     "roundedMedia": 0,
+     "mediaRadius": 0,
+     "textShadow": 0,
+     "cardRows": [
+      {
+       "count": 12,
+       "iconTopped": false,
+       "rounded": true,
+       "top": 202
+      }
+     ]
+    },
+    "heroMedia": [],
+    "nav": null,
+    "fontsLoaded": []
+   },
+   "layout": {
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "pageH": 900,
+    "margins": {
+     "left": 8,
+     "right": 159
+    },
+    "sections": [],
+    "gaps": [],
+    "h1s": [],
+    "edgeText": [],
+    "edges": [],
+    "leftBlocks": 0,
+    "bodySize": 16,
+    "stage": false,
+    "explains": false,
+    "slivers": [],
+    "voidShare": 0.22,
+    "voidBox": {
+     "x": 660,
+     "y": 540,
+     "w": 780,
+     "h": 360
+    }
+   },
+   "app": {
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "dark": true,
+    "ground": "#12151c",
+    "sidebar": {
+     "w": 160,
+     "tag": "div",
+     "links": 32,
+     "share": 0.11
+    },
+    "topbar": {
+     "h": 59
+    },
+    "canvas": {
+     "left": 39,
+     "right": 149
+    },
+    "hero": {
+     "text": "🌐",
+     "words": 1,
+     "chars": 2,
+     "lines": 1,
+     "size": 24,
+     "vw": 1.7,
+     "font": "-apple-system",
+     "weight": 400,
+     "tracking": 0,
+     "leading": 1.5,
+     "top": 219,
+     "tag": "div",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "charts": 0,
+    "layout": {
+     "panels": 13,
+     "firstScreen": 13,
+     "ragged": [],
+     "voids": []
+    },
+    "tiles": 0,
+    "panels": {
+     "count": 13,
+     "radii": [
+      [
+       12,
+       12
+      ],
+      [
+       0,
+       1
+      ]
+     ],
+     "heavyBorders": 0,
+     "borderSamples": [],
+     "heavyShadows": 0,
+     "softShadows": 0,
+     "shadowSamples": [],
+     "glass": 0
+    },
+    "chips": {
+     "count": 0,
+     "hues": 0,
+     "samples": []
+    },
+    "numbers": {
+     "cells": 0,
+     "leftAligned": 0,
+     "figures": 12,
+     "tabularShare": 0,
+     "kpiMax": 12
+    },
+    "rows": null,
+    "chartHues": 0,
+    "placeholders": [],
+    "type": {
+     "under13": 0.52,
+     "tiny": 0,
+     "tinySamples": [],
+     "sizes": [
+      12,
+      13,
+      14,
+      15,
+      17,
+      18,
+      24
+     ]
+    },
+    "title": null,
+    "colourShare": 0.012
+   },
+   "consoleErrors": []
+  },
+  {
+   "width": 768,
+   "height": 1024,
+   "load": "load",
+   "screens": 1,
+   "filled": [
+    0.73
+   ],
+   "motion": {
+    "elements": 0,
+    "css": 0,
+    "transitions": 0,
+    "scripted": 0,
+    "videos": 0,
+    "playingVideos": 0
+   },
+   "metrics": {
+    "viewport": {
+     "w": 768,
+     "h": 1024
+    },
+    "page": {
+     "height": 1024,
+     "screens": 1,
+     "words": 231,
+     "img": 0,
+     "video": 0,
+     "canvas": 0,
+     "svg": 0,
+     "sections": 0,
+     "horizontalOverflow": 0,
+     "overflowCulprits": [],
+     "uiFragments": 0,
+     "uiAbuse": false,
+     "realPictures": 0,
+     "videoCount": 0,
+     "uiPictures": 0,
+     "pictureSamples": [],
+     "blendText": 0,
+     "sideScrollers": 0,
+     "brokenImages": [],
+     "emoji": [
+      "💳",
+      "🗺",
+      "💻",
+      "📰",
+      "🏠",
+      "🎓",
+      "🎮",
+      "🛒",
+      "📱",
+      "💰"
+     ],
+     "videosNoPoster": 0
+    },
+    "hero": {
+     "text": "🌐",
+     "words": 1,
+     "chars": 2,
+     "lines": 1,
+     "size": 24,
+     "vw": 3.1,
+     "font": "-apple-system",
+     "weight": 400,
+     "tracking": 0,
+     "leading": 1.5,
+     "top": 219,
+     "tag": "div",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "h1": null,
+    "headings": [],
+    "headingSummary": {
+     "count": 0,
+     "maxLines": 0,
+     "over2Lines": 0,
+     "statements": 0,
+     "centered": 0,
+     "medianWords": null,
+     "mixedFontHeadings": 0
+    },
+    "type": {
+     "families": [
+      {
+       "family": "-apple-system",
+       "share": 0.69,
+       "mono": false
+      },
+      {
+       "family": "Arial",
+       "share": 0.31,
+       "mono": false
+      }
+     ],
+     "familyCount": 2,
+     "sizes": [
+      12,
+      13,
+      14,
+      16,
+      17,
+      18,
+      20,
+      24
+     ],
+     "sizeCount": 8,
+     "notLoaded": [],
+     "body": null,
+     "measureChars": null,
+     "max": {
+      "size": 24,
+      "vw": 3.1,
+      "font": "-apple-system",
+      "text": "🌐"
+     },
+     "monoShare": 0,
+     "monoProseShare": 0,
+     "monoFamilies": [],
+     "monoSamples": [],
+     "microLabels": 0,
+     "microLabelShare": 0,
+     "microSamples": [],
+     "upperShare": 0.02,
+     "centerShare": 0.03,
+     "smallText": 3
+    },
+    "eyebrows": [],
+    "numbered": [],
+    "color": {
+     "bodyBg": "#12151c",
+     "bodyBgHsl": {
+      "h": 222,
+      "s": 0.22,
+      "l": 0.09
+     },
+     "dark": true,
+     "sectionBgs": [],
+     "textColors": [
+      {
+       "color": "#e6e8eb",
+       "share": 0.42
+      },
+      {
+       "color": "#9aa0a6",
+       "share": 0.39
+      },
+      {
+       "color": "#3a4453",
+       "share": 0.09
+      },
+      {
+       "color": "#f5a623",
+       "share": 0.09
+      },
+      {
+       "color": "#4a9eff",
+       "share": 0.01
+      }
+     ],
+     "button": {
+      "bg": "#4a9eff",
+      "hsl": {
+       "h": 212,
+       "s": 1,
+       "l": 0.65
+      },
+      "fg": "#0b1220"
+     },
+     "lowContrast": [
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      }
+     ]
+    },
+    "buttons": {
+     "count": 2,
+     "inHero": 2,
+     "radius": 8,
+     "height": 35,
+     "withShadow": 0,
+     "withGradient": 0,
+     "mono": 0,
+     "upper": 0,
+     "heroLabels": [
+      "⭐ 收藏",
+      "＋ 添加收藏"
+     ]
+    },
+    "surfaces": {
+     "shadowStatic": 0,
+     "shadowOverlay": 0,
+     "shadowSamples": [],
+     "gradients": 0,
+     "scrims": 0,
+     "gradientSamples": [],
+     "gradientText": 0,
+     "hairlines": 2,
+     "hairlineSamples": [
+      "div.nav-header 768px",
+      "div#catTabs.cat-tabs 160px"
+     ],
+     "outlinedBoxes": 12,
+     "dashed": 1,
+     "blurred": 0,
+     "roundedBoxes": 12,
+     "boxRadius": 12,
+     "squareMedia": 0,
+     "roundedMedia": 0,
+     "mediaRadius": 0,
+     "textShadow": 0,
+     "cardRows": [
+      {
+       "count": 12,
+       "iconTopped": false,
+       "rounded": true,
+       "top": 202
+      }
+     ]
+    },
+    "heroMedia": [],
+    "nav": null,
+    "fontsLoaded": []
+   },
+   "layout": {
+    "viewport": {
+     "w": 768,
+     "h": 1024
+    },
+    "pageH": 1024,
+    "margins": {
+     "left": 8,
+     "right": 33
+    },
+    "sections": [],
+    "gaps": [],
+    "h1s": [],
+    "edgeText": [],
+    "edges": [],
+    "leftBlocks": 0,
+    "bodySize": 16,
+    "stage": false,
+    "explains": false,
+    "slivers": [],
+    "voidShare": 0,
+    "voidBox": null
+   },
+   "app": {
+    "viewport": {
+     "w": 768,
+     "h": 1024
+    },
+    "dark": true,
+    "ground": "#12151c",
+    "sidebar": {
+     "w": 160,
+     "tag": "div",
+     "links": 32,
+     "share": 0.21
+    },
+    "topbar": {
+     "h": 59
+    },
+    "canvas": {
+     "left": 39,
+     "right": 33
+    },
+    "hero": {
+     "text": "🌐",
+     "words": 1,
+     "chars": 2,
+     "lines": 1,
+     "size": 24,
+     "vw": 3.1,
+     "font": "-apple-system",
+     "weight": 400,
+     "tracking": 0,
+     "leading": 1.5,
+     "top": 219,
+     "tag": "div",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "charts": 0,
+    "layout": {
+     "panels": 13,
+     "firstScreen": 11,
+     "ragged": [],
+     "voids": []
+    },
+    "tiles": 0,
+    "panels": {
+     "count": 13,
+     "radii": [
+      [
+       12,
+       12
+      ],
+      [
+       0,
+       1
+      ]
+     ],
+     "heavyBorders": 0,
+     "borderSamples": [],
+     "heavyShadows": 0,
+     "softShadows": 0,
+     "shadowSamples": [],
+     "glass": 0
+    },
+    "chips": {
+     "count": 0,
+     "hues": 0,
+     "samples": []
+    },
+    "numbers": {
+     "cells": 0,
+     "leftAligned": 0,
+     "figures": 12,
+     "tabularShare": 0,
+     "kpiMax": 12
+    },
+    "rows": null,
+    "chartHues": 0,
+    "placeholders": [],
+    "type": {
+     "under13": 0.52,
+     "tiny": 0,
+     "tinySamples": [],
+     "sizes": [
+      12,
+      13,
+      14,
+      15,
+      17,
+      18,
+      24
+     ]
+    },
+    "title": null,
+    "colourShare": 0.015
+   },
+   "consoleErrors": []
+  },
+  {
+   "width": 390,
+   "height": 844,
+   "load": "load",
+   "screens": 3,
+   "filled": [
+    0.43,
+    0.43,
+    0.43
+   ],
+   "motion": {
+    "elements": 0,
+    "css": 0,
+    "transitions": 0,
+    "scripted": 0,
+    "videos": 0,
+    "playingVideos": 0
+   },
+   "metrics": {
+    "viewport": {
+     "w": 980,
+     "h": 2121
+    },
+    "page": {
+     "height": 2121,
+     "screens": 1,
+     "words": 231,
+     "img": 0,
+     "video": 0,
+     "canvas": 0,
+     "svg": 0,
+     "sections": 0,
+     "horizontalOverflow": 0,
+     "overflowCulprits": [],
+     "uiFragments": 0,
+     "uiAbuse": false,
+     "realPictures": 0,
+     "videoCount": 0,
+     "uiPictures": 0,
+     "pictureSamples": [],
+     "blendText": 0,
+     "sideScrollers": 0,
+     "brokenImages": [],
+     "emoji": [
+      "💳",
+      "🗺",
+      "💻",
+      "📰",
+      "🏠",
+      "🎓",
+      "🎮",
+      "🛒",
+      "📱",
+      "💰"
+     ],
+     "videosNoPoster": 0
+    },
+    "hero": {
+     "text": "🌐",
+     "words": 1,
+     "chars": 2,
+     "lines": 1,
+     "size": 24,
+     "vw": 2.4,
+     "font": "-apple-system",
+     "weight": 400,
+     "tracking": 0,
+     "leading": 1.5,
+     "top": 219,
+     "tag": "div",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "h1": null,
+    "headings": [],
+    "headingSummary": {
+     "count": 0,
+     "maxLines": 0,
+     "over2Lines": 0,
+     "statements": 0,
+     "centered": 0,
+     "medianWords": null,
+     "mixedFontHeadings": 0
+    },
+    "type": {
+     "families": [
+      {
+       "family": "-apple-system",
+       "share": 0.69,
+       "mono": false
+      },
+      {
+       "family": "Arial",
+       "share": 0.31,
+       "mono": false
+      }
+     ],
+     "familyCount": 2,
+     "sizes": [
+      12,
+      13,
+      14,
+      16,
+      17,
+      18,
+      20,
+      24
+     ],
+     "sizeCount": 8,
+     "notLoaded": [],
+     "body": null,
+     "measureChars": null,
+     "max": {
+      "size": 24,
+      "vw": 2.4,
+      "font": "-apple-system",
+      "text": "🌐"
+     },
+     "monoShare": 0,
+     "monoProseShare": 0,
+     "monoFamilies": [],
+     "monoSamples": [],
+     "microLabels": 0,
+     "microLabelShare": 0,
+     "microSamples": [],
+     "upperShare": 0.02,
+     "centerShare": 0.03,
+     "smallText": 3
+    },
+    "eyebrows": [],
+    "numbered": [],
+    "color": {
+     "bodyBg": "#12151c",
+     "bodyBgHsl": {
+      "h": 222,
+      "s": 0.22,
+      "l": 0.09
+     },
+     "dark": true,
+     "sectionBgs": [],
+     "textColors": [
+      {
+       "color": "#e6e8eb",
+       "share": 0.42
+      },
+      {
+       "color": "#9aa0a6",
+       "share": 0.39
+      },
+      {
+       "color": "#3a4453",
+       "share": 0.09
+      },
+      {
+       "color": "#f5a623",
+       "share": 0.09
+      },
+      {
+       "color": "#4a9eff",
+       "share": 0.01
+      }
+     ],
+     "button": {
+      "bg": "#4a9eff",
+      "hsl": {
+       "h": 212,
+       "s": 1,
+       "l": 0.65
+      },
+      "fg": "#0b1220"
+     },
+     "lowContrast": [
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      },
+      {
+       "text": "★★★★★",
+       "ratio": 1.7,
+       "need": 4.5,
+       "size": 12,
+       "fg": "#3a4453",
+       "bg": "#1a1f29"
+      }
+     ]
+    },
+    "buttons": {
+     "count": 2,
+     "inHero": 2,
+     "radius": 8,
+     "height": 35,
+     "withShadow": 0,
+     "withGradient": 0,
+     "mono": 0,
+     "upper": 0,
+     "heroLabels": [
+      "⭐ 收藏",
+      "＋ 添加收藏"
+     ]
+    },
+    "surfaces": {
+     "shadowStatic": 0,
+     "shadowOverlay": 0,
+     "shadowSamples": [],
+     "gradients": 0,
+     "scrims": 0,
+     "gradientSamples": [],
+     "gradientText": 0,
+     "hairlines": 2,
+     "hairlineSamples": [
+      "div.nav-header 980px",
+      "div#catTabs.cat-tabs 160px"
+     ],
+     "outlinedBoxes": 12,
+     "dashed": 1,
+     "blurred": 0,
+     "roundedBoxes": 12,
+     "boxRadius": 12,
+     "squareMedia": 0,
+     "roundedMedia": 0,
+     "mediaRadius": 0,
+     "textShadow": 0,
+     "cardRows": [
+      {
+       "count": 12,
+       "iconTopped": false,
+       "rounded": true,
+       "top": 202
+      }
+     ]
+    },
+    "heroMedia": [],
+    "nav": null,
+    "fontsLoaded": []
+   },
+   "layout": {
+    "viewport": {
+     "w": 980,
+     "h": 2121
+    },
+    "pageH": 2121,
+    "margins": {
+     "left": 8,
+     "right": 161
+    },
+    "sections": [],
+    "gaps": [],
+    "h1s": [],
+    "edgeText": [],
+    "edges": [],
+    "leftBlocks": 0,
+    "bodySize": 16,
+    "stage": false,
+    "explains": false,
+    "slivers": [],
+    "voidShare": 0,
+    "voidBox": null
+   },
+   "app": {
+    "viewport": {
+     "w": 980,
+     "h": 2121
+    },
+    "dark": true,
+    "ground": "#12151c",
+    "sidebar": {
+     "w": 160,
+     "tag": "div",
+     "links": 32,
+     "share": 0.16
+    },
+    "topbar": {
+     "h": 59
+    },
+    "canvas": {
+     "left": 39,
+     "right": 33
+    },
+    "hero": {
+     "text": "🌐",
+     "words": 1,
+     "chars": 2,
+     "lines": 1,
+     "size": 24,
+     "vw": 2.4,
+     "font": "-apple-system",
+     "weight": 400,
+     "tracking": 0,
+     "leading": 1.5,
+     "top": 219,
+     "tag": "div",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "charts": 0,
+    "layout": {
+     "panels": 13,
+     "firstScreen": 13,
+     "ragged": [],
+     "voids": []
+    },
+    "tiles": 0,
+    "panels": {
+     "count": 13,
+     "radii": [
+      [
+       12,
+       12
+      ],
+      [
+       0,
+       1
+      ]
+     ],
+     "heavyBorders": 0,
+     "borderSamples": [],
+     "heavyShadows": 0,
+     "softShadows": 0,
+     "shadowSamples": [],
+     "glass": 0
+    },
+    "chips": {
+     "count": 0,
+     "hues": 0,
+     "samples": []
+    },
+    "numbers": {
+     "cells": 0,
+     "leftAligned": 0,
+     "figures": 12,
+     "tabularShare": 0,
+     "kpiMax": 12
+    },
+    "rows": null,
+    "chartHues": 0,
+    "placeholders": [],
+    "type": {
+     "under13": 0.52,
+     "tiny": 0,
+     "tinySamples": [],
+     "sizes": [
+      12,
+      13,
+      14,
+      15,
+      17,
+      18,
+      24
+     ]
+    },
+    "title": null,
+    "colourShare": 0.006
+   },
+   "consoleErrors": []
+  }
+ ],
+ "findings": [
+  {
+   "level": "FAIL",
+   "id": "emoji",
+   "width": 1440,
+   "message": "Emoji in the page: 💳 🗺 💻 📰 🏠 🎓 🎮 🛒 📱 💰",
+   "fix": "Remove. Use words or real imagery.",
+   "alsoAt": [
+    768,
+    390
+   ]
+  },
+  {
+   "level": "FAIL",
+   "id": "contrast",
+   "width": 1440,
+   "message": "Unreadable text: \"★★★★★\" 1.7:1 (#3a4453 on #1a1f29); \"★★★★★\" 1.7:1 (#3a4453 on #1a1f29); \"★★★★★\" 1.7:1 (#3a4453 on #1a1f29); \"★★★★★\" 1.7:1 (#3a4453 on #1a1f29)",
+   "fix": "Raise contrast to at least 4.5:1 for text, 3:1 for large display.",
+   "alsoAt": [
+    768,
+    390
+   ]
+  },
+  {
+   "level": "FAIL",
+   "id": "font-not-dealt",
+   "width": 1440,
+   "message": "The sheet dealt Inter, but the page renders -apple-system, Arial.",
+   "fix": "Load the dealt face (the link on the sheet) and put it first in font-family. A build that falls back to a default face lands on the default look."
+  },
+  {
+   "level": "WARN",
+   "id": "unused-canvas",
+   "width": 1440,
+   "message": "The content stops 149px short of the right edge while it starts 39px from the sidebar.",
+   "fix": "Let the grid fill the canvas (columns in fr units), or centre a capped canvas with equal margins. A dead strip on one side reads as unfinished."
+  },
+  {
+   "level": "WARN",
+   "id": "tabular",
+   "width": 1440,
+   "message": "Only 0% of the figures use tabular numerals.",
+   "fix": "Set font-variant-numeric: tabular-nums on tables, KPIs and anything that updates, so digits keep their width.",
+   "alsoAt": [
+    768,
+    390
+   ]
+  },
+  {
+   "level": "WARN",
+   "id": "tiny-text",
+   "width": 1440,
+   "message": "52% of the text is under 13px.",
+   "fix": "Data and labels read at 13–14px; keep 11–12px for sublines and axis ticks.",
+   "alsoAt": [
+    768,
+    390
+   ]
+  },
+  {
+   "level": "FAIL",
+   "id": "no-title",
+   "width": 1440,
+   "message": "The screen has no h1.",
+   "fix": "Name the screen in an h1 at the top of the canvas (18–28px): \"Overview\", \"Payouts\", the project's name.",
+   "alsoAt": [
+    768,
+    390
+   ]
+  }
+ ],
+ "images": [
+  {
+   "viewport": "desktop",
+   "width": 1440,
+   "fold": "/home/gao/shift-browser-cef-poc/.taste-skill/before-worldnav/desktop-fold.jpg",
+   "pages": [
+    "/home/gao/shift-browser-cef-poc/.taste-skill/before-worldnav/desktop-page-01.jpg"
+   ],
+   "film": []
+  },
+  {
+   "viewport": "tablet",
+   "width": 768,
+   "fold": "/home/gao/shift-browser-cef-poc/.taste-skill/before-worldnav/tablet-fold.jpg",
+   "pages": [
+    "/home/gao/shift-browser-cef-poc/.taste-skill/before-worldnav/tablet-page-01.jpg"
+   ],
+   "film": []
+  },
+  {
+   "viewport": "mobile",
+   "width": 390,
+   "fold": "/home/gao/shift-browser-cef-poc/.taste-skill/before-worldnav/mobile-fold.jpg",
+   "pages": [
+    "/home/gao/shift-browser-cef-poc/.taste-skill/before-worldnav/mobile-page-01.jpg"
+   ],
+   "film": []
+  }
+ ]
+}

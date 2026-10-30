@@ -69,10 +69,11 @@ pub(crate) enum Panel {
     Session,
     Groups,
     Palette,
+    TabList,
 }
 
 impl Panel {
-    pub(crate) const ALL: [Panel; 12] = [
+    pub(crate) const ALL: [Panel; 13] = [
         Panel::Pw,
         Panel::Dl,
         Panel::Menu,
@@ -85,6 +86,7 @@ impl Panel {
         Panel::Session,
         Panel::Groups,
         Panel::Palette,
+        Panel::TabList,
     ];
 
     /// 对应 `html.<class>` 根类名（须与 `toolbar::PANEL_CLASSES` 同序同值，有单测钉住）
@@ -102,6 +104,7 @@ impl Panel {
             Panel::Session => "sess-open",
             Panel::Groups => "groups-open",
             Panel::Palette => "palette-open",
+            Panel::TabList => "tablist-open",
         }
     }
 
@@ -119,6 +122,7 @@ impl Panel {
             Panel::Session => SESSION_PANEL_EXTRA,
             Panel::Groups => GROUPS_PANEL_EXTRA,
             Panel::Palette => PALETTE_PANEL_EXTRA,
+            Panel::TabList => TABLIST_PANEL_EXTRA,
         }
     }
 
@@ -136,6 +140,7 @@ impl Panel {
             Panel::Session => &SESSION_EXTRA,
             Panel::Groups => &GROUPS_EXTRA,
             Panel::Palette => &PALETTE_EXTRA,
+            Panel::TabList => &TABLIST_EXTRA,
         }
     }
 }
@@ -327,6 +332,16 @@ static GROUPS_EXTRA: AtomicI32 = AtomicI32::new(0);
 /// 命令面板（F-CEF-29）展开时工具栏额外加高：输入行 + 8 条候选
 const PALETTE_PANEL_EXTRA: i32 = 340;
 static PALETTE_EXTRA: AtomicI32 = AtomicI32::new(0);
+
+/// 标签列表面板（F-CEF-40）展开时工具栏额外加高
+const TABLIST_PANEL_EXTRA: i32 = 340;
+static TABLIST_EXTRA: AtomicI32 = AtomicI32::new(0);
+
+/// 标签列表面板开合
+pub fn set_tablist_panel(open: bool) {
+    set_panel_extra(Panel::TabList, open);
+    apply_toolbar_height();
+}
 
 
 /// 分组/工作区面板开合
@@ -639,6 +654,9 @@ static SHELL_TOOLBAR_VIEW: Mutex<Option<View>> = Mutex::new(None);
 
 /// 标签表（顺序即标签栏顺序）
 static SHELL_TABS: Mutex<Vec<ShellTab>> = Mutex::new(Vec::new());
+
+/// 标签列表面板当前是否打开
+static TABLIST_OPEN: AtomicBool = AtomicBool::new(false);
 
 /// 当前活动索引。独立 `AtomicUsize` 而非并入 `SHELL_TABS` 同一把锁：
 /// 并入后 18 处「已持 SHELL_TABS 锁再读 active」会自死锁。越界防护由
@@ -1961,32 +1979,68 @@ fn leave_tab_group(idx: usize) {
     refresh_tabbar();
 }
 
-/// 标签页下拉列表（F-CEF-40）：GTK 原生菜单列出全部标签，点击切换。
-fn popup_tab_list() {
-    let tabs: Vec<String> = {
-        let t = lock_state(&SHELL_TABS);
-        t.iter().map(|x| x.title.clone()).collect()
-    };
-    if tabs.is_empty() {
+/// 标签页下拉列表（F-CEF-40）：标签列表面板，打开/关闭时刷新内容
+pub fn popup_tab_list() {
+    let open = TABLIST_OPEN.load(Ordering::Relaxed);
+    let will_open = !open;
+    if !will_open {
+        // 关闭：通知 JS 移除 class 并清空内容
+        run_toolbar_js("document.documentElement.classList.remove('tablist-open');");
+        let _ = send_tab_list_js("[]", -1);
+        set_tablist_panel(false);
         return;
     }
-    let Some(app) = crate::cef_cmd::app_handle() else {
-        return;
+    // 打开：先通知 JS 添加 class，再推送数据
+    run_toolbar_js("document.documentElement.classList.add('tablist-open');");
+    set_tablist_panel(true);
+    // 推当前标签列表
+    let (list_json, active) = {
+        let t = lock_state(&SHELL_TABS);
+        let list: Vec<serde_json::Value> = t
+            .iter()
+            .map(|tab| serde_json::json!({
+                "title": tab.title,
+                "id": tab.id,
+                "pinned": tab.pinned,
+                "muted": tab.muted,
+                "groupId": tab.group_id,
+                "url": tab.url,
+            }))
+            .collect();
+        (
+            serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string()),
+            ACTIVE_TAB.load(Ordering::Relaxed) as i64,
+        )
     };
-    let _ = app.run_on_main_thread(move || {
-        use gtk::prelude::*;
-        let menu = gtk::Menu::new();
-        for (i, title) in tabs.iter().enumerate() {
-            let label = if title.trim().is_empty() { "新标签页" } else { title };
-            let item = gtk::MenuItem::with_label(label);
-            item.connect_activate(move |_| {
-                let act = format!("tab|{i}");
-                cef_ui(move || handle_action(&act));
-            });
-            menu.append(&item);
-        }
-        popup_gtk_menu_at_pointer(&menu);
-    });
+    let _ = send_tab_list(&list_json, active);
+    TABLIST_OPEN.store(true, Ordering::Relaxed);
+}
+
+/// 把标签表发到工具栏面板（tablist-open 时调用）
+fn send_tab_list(js: &str, active: i64) -> Result<(), String> {
+    let code = format!(
+        "if (window.__shiftTabList) {{ window.__shiftTabList({}, {}); }}",
+        js, active
+    );
+    let frame = {
+        let m = lock_state(browsers());
+        m.get(TOOLBAR_ID).and_then(|b| b.main_frame())
+    };
+    if let Some(frame) = frame {
+        frame.execute_java_script(
+            Some(&CefString::from(code.as_str())),
+            Some(&CefString::from("shift://tabs")),
+            -1,
+        );
+    } else {
+        return Err("找不到 toolbar 帧".to_string());
+    }
+    Ok(())
+}
+
+/// 把空列表发到工具栏（初始/关闭时用）
+fn send_tab_list_js(js: &str, active: i64) -> Result<(), String> {
+    send_tab_list(js, active)
 }
 
 /// 标签右键菜单（F-CEF-40）：GTK 原生弹出，浮在内容页上，
@@ -2636,6 +2690,28 @@ fn switch_tab(idx: usize) {
     }
     log::info!("[cef] 切换到标签 {idx}");
     refresh_tabbar();
+    // 标签列表面板打开时同步高亮
+    if TABLIST_OPEN.load(Ordering::Relaxed) {
+        let (list_json, _) = {
+            let t = lock_state(&SHELL_TABS);
+            let list: Vec<serde_json::Value> = t
+                .iter()
+                .map(|tab| serde_json::json!({
+                    "title": tab.title,
+                    "id": tab.id,
+                    "pinned": tab.pinned,
+                    "muted": tab.muted,
+                    "groupId": tab.group_id,
+                    "url": tab.url,
+                }))
+                .collect();
+            (
+                serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string()),
+                idx as i64,
+            )
+        };
+        let _ = send_tab_list(&list_json, idx as i64);
+    }
 }
 
 /// 关闭标签（至少保留一个；关闭后切到相邻标签）
@@ -3362,6 +3438,23 @@ fn handle_action_inner(action: &str) {
             popup_tab_list();
             return;
         }
+        "tablistpanel" => {
+            // JS 侧面板开合通知：面板自己调用 act('tablistpanel|0') 关闭
+            let open = arg == "1";
+            set_tablist_panel(open);
+            if !open {
+                TABLIST_OPEN.store(false, Ordering::Relaxed);
+            }
+            return;
+        }
+        "tablistclick" => {
+            if let Ok(idx) = arg.parse::<usize>() {
+                switch_tab(idx);
+                // 切标签后收起面板
+                set_tablist_panel(false);
+            }
+            return;
+        }
         "tabgroupnew" => {
             if let Ok(idx) = arg.parse::<usize>() {
                 create_group_for_tab(idx);
@@ -3750,6 +3843,7 @@ mod tests {
             (Panel::Session, "sess-open", 320),
             (Panel::Groups, "groups-open", 360),
             (Panel::Palette, "palette-open", 340),
+            (Panel::TabList, "tablist-open", 340),
         ];
         assert_eq!(Panel::ALL.len(), want.len());
         for (p, c, px) in want {
@@ -3782,7 +3876,7 @@ mod tests {
                 pairs += 1;
             }
         }
-        assert_eq!(pairs, 132);
+        assert_eq!(pairs, 156);
     }
 
     // ---- normalize_url：地址栏补全规则（P0 实测逻辑，防改坏）----
