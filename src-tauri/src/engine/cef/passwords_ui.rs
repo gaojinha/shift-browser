@@ -67,7 +67,9 @@ pub fn handle(cmd: &str, arg: &str) -> bool {
 
 fn copy_password(id: i64) {
     let Some(app) = APP.get() else { return };
-    let Some(db) = app.try_state::<crate::db::Db>() else { return };
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return;
+    };
     let res = tauri::async_runtime::block_on(
         crate::db::passwords::get_password_plain_trusted_inner(&db, id),
     );
@@ -112,7 +114,9 @@ fn copy_password(id: i64) {
 
 fn delete_password(id: i64) {
     let Some(app) = APP.get() else { return };
-    let Some(db) = app.try_state::<crate::db::Db>() else { return };
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return;
+    };
     match tauri::async_runtime::block_on(crate::db::passwords::delete_password_inner(&db, id)) {
         Ok(()) => log::info!("[cef] 已删除密码 id={id}"),
         Err(e) => log::warn!("[cef] 删除密码失败 id={id}: {e}"),

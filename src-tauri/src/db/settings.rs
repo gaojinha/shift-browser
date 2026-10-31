@@ -109,7 +109,11 @@ pub async fn set_setting(db: tauri::State<'_, Db>, key: String, value: String) -
 }
 
 /// 设置单个值（内部共用：Tauri 命令与 CEF 设置页走同一入口）。
-pub async fn set_setting_inner(pool: &sqlx::SqlitePool, key: &str, value: &str) -> Result<(), String> {
+pub async fn set_setting_inner(
+    pool: &sqlx::SqlitePool,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
     if is_sensitive(key) {
         return Err(format!("设置 {key} 受保护，不允许通过前端修改"));
     }

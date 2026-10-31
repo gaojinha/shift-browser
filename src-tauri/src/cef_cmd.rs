@@ -12,19 +12,26 @@
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Mutex, OnceLock};
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 // gtk-rs 的窗口方法（add/show_all/window/allocation）都在 prelude trait 里
 use gtk::prelude::*;
 // CEF 的 Browser/Frame 方法在 Impl* trait 里
-use cef::{ImplBrowser, ImplCommandLine, ImplFrame};
+use cef::{ImplBrowser, ImplFrame};
 
+use crate::engine::cef::cef_ui::{cef_ui, cef_ui_call};
 use crate::engine::cef::{
     app as cef_app, browser as cef_browser, shell as cef_shell, toolbar as cef_toolbar,
 };
 use cef_browser::CefEvent;
 use cef_shell::lock_state;
-use crate::engine::cef::cef_ui::{cef_ui, cef_ui_call};
+
+mod cef_boot;
+mod toolbar_data;
+
+use cef_boot::resolve_cef_cache_dir;
+pub use cef_boot::try_run_subprocess;
+use toolbar_data::{cef_bookmarks_json, cef_downloads_json};
 
 /// 全局事件发送端（CEF 回调线程 → Tauri 侧）
 static EVENT_TX: OnceLock<Sender<(String, CefEvent)>> = OnceLock::new();
@@ -40,55 +47,6 @@ static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 /// 取全局 AppHandle（未初始化时返回 None，调用方按"无人监听"降级，不 panic）。
 pub(crate) fn app_handle() -> Option<&'static AppHandle> {
     APP_HANDLE.get()
-}
-
-/// **子进程入口**：CEF 用 `/proc/self/exe` 拉起渲染/GPU/zygote 子进程，
-/// 子进程的命令行带 `--type=xxx`。命中时必须在这里跑完 CEF 子进程逻辑并**直接退出**，
-/// 绝不能再往下走 Tauri 初始化（否则就是无限套娃 + 单实例误判）。
-///
-/// 返回 `true` 表示当前进程是 CEF 子进程且已处理完毕，调用方应立即 return。
-pub fn try_run_subprocess() -> bool {
-    use cef::{args::Args, execute_process, CefString};
-
-    // 必须在任何 CEF 调用之前
-    let _ = cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
-
-    let args = Args::new();
-    let Some(cmd_line) = args.as_cmd_line() else {
-        return false;
-    };
-
-    let type_switch = CefString::from("type");
-    if cmd_line.has_switch(Some(&type_switch)) != 1 {
-        // 主进程
-        return false;
-    }
-
-    let ret = execute_process(Some(args.as_main_args()), None, std::ptr::null_mut());
-    // ret >= 0：子进程已跑完；< 0：类型未知，交给主流程
-    ret >= 0
-}
-
-/// CEF profile / 缓存根目录（**单一来源**）。
-///
-/// 优先级：`SHIFT_CEF_CACHE_DIR`（非空）→ 应用缓存目录下的 `cef/`。
-///
-/// 为什么必须是单一来源：CEF 的 Cookies/LocalStorage 落在这个目录里；工具栏页
-/// 与启动页也写在它的 `shell/` 子目录。2026-10-26 实测踩坑——`init` 读了 env、
-/// `open_shell_on_main` 自己又算了一次 `app_cache_dir()`，结果 profile 用了临时目录、
-/// 工具栏页仍读 `~/.cache/com.shiftbrowser.app/shell/toolbar.html`（旧页面/旧会话），
-/// 真机验证直接不可信。两个调用点从此只许调本函数。
-fn resolve_cef_cache_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = match std::env::var("SHIFT_CEF_CACHE_DIR") {
-        Ok(d) if !d.trim().is_empty() => std::path::PathBuf::from(d),
-        _ => app
-            .path()
-            .app_cache_dir()
-            .map(|p| p.join("cef"))
-            .map_err(|e| format!("拿不到缓存目录: {e}"))?,
-    };
-    std::fs::create_dir_all(&dir).map_err(|e| format!("建缓存目录失败: {e}"))?;
-    Ok(dir)
 }
 
 /// 初始化 CEF（应用启动时调用一次）
@@ -286,11 +244,14 @@ fn create_gtk_cef_window(tab_id: &str, url: &str) -> Result<(), String> {
         // 让 DrawingArea 跟着窗口走（否则 CEF 子窗口会被裁剪）
         area_for_resize.set_size_request(w, h);
 
-        { let tabs = lock_state(cef_browser::browsers()); {
-            if let Some(b) = tabs.get(&id_resize) {
-                cef_browser::resize(b, w, h);
+        {
+            let tabs = lock_state(cef_browser::browsers());
+            {
+                if let Some(b) = tabs.get(&id_resize) {
+                    cef_browser::resize(b, w, h);
+                }
             }
-        } };
+        };
     });
 
     // ---- 测试用：SHIFT_CEF_TEST_RESIZE=900x560，8 秒后主动调 GTK resize ----
@@ -300,13 +261,16 @@ fn create_gtk_cef_window(tab_id: &str, url: &str) -> Result<(), String> {
                 let id = tab_id.to_string();
                 gtk::glib::timeout_add_seconds_local_once(8, move || {
                     log::info!("[cef] 测试：直接 resize CEF 到 {w}x{h}");
-                    { let tabs = lock_state(cef_browser::browsers()); {
-                        if let Some(b) = tabs.get(&id) {
-                            cef_browser::resize(b, w, h);
-                        } else {
-                            log::warn!("[cef] 测试 resize：BROWSERS 里没有该标签");
+                    {
+                        let tabs = lock_state(cef_browser::browsers());
+                        {
+                            if let Some(b) = tabs.get(&id) {
+                                cef_browser::resize(b, w, h);
+                            } else {
+                                log::warn!("[cef] 测试 resize：BROWSERS 里没有该标签");
+                            }
                         }
-                    } };
+                    };
                 });
             }
         }
@@ -315,7 +279,10 @@ fn create_gtk_cef_window(tab_id: &str, url: &str) -> Result<(), String> {
     // ---- 关闭清理：窗口关掉时销毁 CEF 浏览器，避免句柄残留 ----
     let id_close = tab_id.to_string();
     window.connect_delete_event(move |_, _| {
-        let browser = { let mut tabs = lock_state(cef_browser::browsers()); tabs.remove(&id_close) };
+        let browser = {
+            let mut tabs = lock_state(cef_browser::browsers());
+            tabs.remove(&id_close)
+        };
         if let Some(b) = browser {
             cef_browser::close(&b, true);
         }
@@ -324,79 +291,6 @@ fn create_gtk_cef_window(tab_id: &str, url: &str) -> Result<(), String> {
 
     log::info!("[cef] 浏览器已嵌入标签页 {tab_id}");
     Ok(())
-}
-
-/// 打开单栈窗口（窗口、工具栏、内容页全在 CEF 内）。
-///
-/// 必须在主线程调用；`app` 只用来取缓存目录。
-/// 同步读书签（生成工具栏页面用）。
-///
-/// CEF 侧的异步推送实测不可靠（glib 定时器在回调链里不触发），
-/// 改成生成页面时同步查一次——阻塞几十毫秒可接受，换来确定性。
-fn cef_bookmarks_json(app: &AppHandle) -> String {
-    use tauri::Manager;
-    let Some(db) = app.try_state::<crate::db::Db>() else {
-        return "{\"folders\":[],\"bookmarks\":[]}".to_string();
-    };
-    let pool = db.pool.clone();
-    let data = tauri::async_runtime::block_on(async move {
-        let bms = sqlx::query_as::<_, (i64, String, String, Option<i64>)>(
-            "SELECT id, title, url, folder_id FROM bookmarks ORDER BY sort_order, id LIMIT 300",
-        )
-        .fetch_all(&pool)
-        .await?;
-        let folders = sqlx::query_as::<_, (i64, String, Option<i64>)>(
-            "SELECT id, name, parent_id FROM bookmark_folders ORDER BY sort_order, id",
-        )
-        .fetch_all(&pool)
-        .await?;
-        Ok::<_, sqlx::Error>((bms, folders))
-    });
-    match data {
-        Ok((bms, folders)) => {
-            log::info!(
-                "[cef] 书签同步读取 {} 条 + {} 个文件夹",
-                bms.len(),
-                folders.len()
-            );
-            let bm_json: Vec<serde_json::Value> = bms
-                .iter()
-                .map(|(id, t, u, f)| {
-                    serde_json::json!({ "id": id, "title": t, "url": u, "folderId": f })
-                })
-                .collect();
-            let f_json: Vec<serde_json::Value> = folders
-                .iter()
-                .map(|(id, n, p)| serde_json::json!({ "id": id, "name": n, "parentId": p }))
-                .collect();
-            serde_json::json!({ "folders": f_json, "bookmarks": bm_json }).to_string()
-        }
-        Err(e) => {
-            log::warn!("[cef] 读书签失败: {e}");
-            "{\"folders\":[],\"bookmarks\":[]}".to_string()
-        }
-    }
-}
-
-/// 读下载记录给工具栏下载面板（启动时嵌进页面；后续由 shell 侧推送刷新）。
-///
-/// 与书签同理：CEF 的推送时机不可靠，生成页面时同步查一次最稳。
-/// 阻塞几十毫秒可接受（只在开窗时执行一次）。
-fn cef_downloads_json(app: &AppHandle) -> String {
-    use tauri::Manager;
-    let Some(db) = app.try_state::<crate::db::Db>() else {
-        return "[]".to_string();
-    };
-    let pool = db.pool.clone();
-    match tauri::async_runtime::block_on(async move {
-        crate::db::downloads::list_downloads(&pool).await
-    }) {
-        Ok(list) => crate::engine::cef::shell::downloads_panel_json(&list),
-        Err(e) => {
-            log::warn!("[cef] 读下载列表失败: {e}");
-            "[]".to_string()
-        }
-    }
 }
 
 fn open_shell_on_main(app: &AppHandle, url: Option<&str>) -> Result<(), String> {
@@ -482,7 +376,10 @@ pub fn cef_navigate(app: AppHandle, tab_id: String, url: String) -> Result<(), S
 pub fn cef_close_window(app: AppHandle, tab_id: String) -> Result<(), String> {
     app.run_on_main_thread(move || {
         // F-CEF-24c：句柄方法投递到 CEF UI 线程（remove 是纯数据，可在当前线程做）
-        let browser = { let mut tabs = lock_state(cef_browser::browsers()); tabs.remove(&tab_id) };
+        let browser = {
+            let mut tabs = lock_state(cef_browser::browsers());
+            tabs.remove(&tab_id)
+        };
         if let Some(b) = browser {
             cef_ui(move || cef_browser::close(&b, false));
         }

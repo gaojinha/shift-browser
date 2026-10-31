@@ -10,21 +10,14 @@
 //! - 工作区 `session_count` 是库内精确值（sessions.workspace_id 计数）。
 //!
 //! 删除走 `SHIFT_ACT:groupdel|<id>` / `spacedel|<id>`（两表自增 id 即唯一标识，
-//! 二次确认在页面侧）。删除后刷新留 TODO，协调器接线时补（`push_groups`）。
+//! 二次确认在页面侧）。删除成功后调 `super::shell::push_groups()` 刷新面板。
 //!
-//! 接线说明（协调器接线时补，本模块不改 shell.rs / toolbar.rs / cef_cmd.rs）：
-//! - `shell.rs::handle_action` 在会话分支之后同模式路由：`super::groups_ui::handle(cmd, arg)`；
-//! - 面板开合/视图加高：shell.rs 注册表（`enum Panel`）加 `Groups` 变体
-//!   （`class()`/`extra_px()`/`atom()` + `Panel::ALL`，**别再造手写清单**），
-//!   并加 `set_groups_panel(open)`（同 `set_session_panel` 模式）+ `push_groups()`（同 `push_sessions` 模式）；
-//!   接通后删掉本文件 `groupspanel`/`groupsrefresh` TODO 分支里的 warn，改为真实调用，
-//!   并接通 `delete_group`/`delete_workspace` 内的删除后刷新 TODO；
-//! - 工具栏 HTML 生成处（cef_cmd.rs 的 `sessions_ui::init/sessions_json` 旁）加
-//!   `groups_ui::init(app)` + `groups_json(app)` 内嵌；
-//! - 工具栏 JS 加 `__shiftGroups` 渲染函数（分组/工作区两个列表 + 删除二次确认，页面侧）。
+//! 接线现状（2026-10-31 二狗核实，已全部接通）：
+//! - `shell.rs::handle_action` 已路由到本模块 `handle(cmd, arg)`；
+//! - `shell.rs` 面板注册表 `enum Panel` 已有 `Groups` 变体，`set_groups_panel`/`push_groups` 就绪；
+//! - 工具栏 HTML 由 `cef_cmd.rs` 内嵌 `groups_json`，页面侧 `__shiftGroups` 渲染。
 //!
-//! 本模块先交付后接线：协调器接 `shell.rs::handle_action` 与 cef_cmd.rs HTML 内嵌之前
-//! （本卡禁改这几文件），整模块暂无业务引用——scoped dead_code 豁免（同
+//! 本文件只负责动作处理与 JSON 生成，不再有"待接线"分支。
 
 use std::sync::OnceLock;
 use tauri::{AppHandle, Manager};
@@ -49,8 +42,9 @@ pub fn groups_json(app: &AppHandle) -> String {
         let groups = crate::db::tab_groups::list_tab_groups_inner(&pool).await?;
         let workspaces = crate::db::workspaces::list_workspaces_inner(&pool).await?;
         // 工作区会话数：只取 workspace_id 一列聚合，不拉 data 快照
-        let rows: Vec<(Option<i64>,)> =
-            sqlx::query_as("SELECT workspace_id FROM sessions").fetch_all(&pool).await?;
+        let rows: Vec<(Option<i64>,)> = sqlx::query_as("SELECT workspace_id FROM sessions")
+            .fetch_all(&pool)
+            .await?;
         let mut counts: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
         for (wid,) in rows {
             if let Some(w) = wid {
@@ -107,10 +101,7 @@ fn parse_id(arg: &str) -> Option<i64> {
 /// 处理工具栏动作。返回 true = 已处理。必须在 GTK 主线程调用（handle_action 本就在主线程）。
 pub fn handle(cmd: &str, arg: &str) -> bool {
     match cmd {
-        // TODO(接线，二狗补)：shell.rs 尚无 set_groups_panel/push_groups（本卡禁改 shell.rs）。
-        // 接线时替换为：
-        //   "groupspanel" => { super::shell::set_groups_panel(arg == "1"); if arg == "1" { super::shell::push_groups(); } true }
-        //   "groupsrefresh" => { super::shell::push_groups(); true }
+        // 面板开合与刷新：直接走 shell 的注册表 setter / 推送
         "groupspanel" => {
             super::shell::set_groups_panel(arg == "1");
             if arg == "1" {
@@ -120,10 +111,6 @@ pub fn handle(cmd: &str, arg: &str) -> bool {
         }
         "groupsrefresh" => {
             super::shell::push_groups();
-            true
-        }
-        "groupspanel_old" => {
-            log::warn!("[cef] {cmd} 待接线：shell.rs 无 set_groups_panel/push_groups（F-CEF-27 先交付后接线）");
             true
         }
         "groupdel" => {
@@ -146,9 +133,12 @@ pub fn handle(cmd: &str, arg: &str) -> bool {
 
 fn delete_group(id: i64) {
     let Some(app) = APP.get() else { return };
-    let Some(db) = app.try_state::<crate::db::Db>() else { return };
-    match tauri::async_runtime::block_on(crate::db::tab_groups::delete_tab_group_inner(&db.pool, id))
-    {
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return;
+    };
+    match tauri::async_runtime::block_on(crate::db::tab_groups::delete_tab_group_inner(
+        &db.pool, id,
+    )) {
         Ok(()) => {
             log::info!("[cef] 已删除分组 {id}");
             super::shell::push_groups();
@@ -159,9 +149,12 @@ fn delete_group(id: i64) {
 
 fn delete_workspace(id: i64) {
     let Some(app) = APP.get() else { return };
-    let Some(db) = app.try_state::<crate::db::Db>() else { return };
-    match tauri::async_runtime::block_on(crate::db::workspaces::delete_workspace_inner(&db.pool, id))
-    {
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return;
+    };
+    match tauri::async_runtime::block_on(crate::db::workspaces::delete_workspace_inner(
+        &db.pool, id,
+    )) {
         Ok(()) => {
             log::info!("[cef] 已删除工作区 {id}");
             super::shell::push_groups();
@@ -196,7 +189,7 @@ mod tests {
 
     #[test]
     fn own_cmds_swallowed() {
-        // groupspanel/groupsrefresh 走 TODO no-op 分支（warn 日志，不触 DB）；
+        // groupspanel/groupsrefresh 走 shell setter（APP 未初始化时静默返回，不触 DB）；
         // groupdel/spacedel 参数无效分支吞（warn 日志，不触 DB）
         assert!(handle("groupspanel", "1"));
         assert!(handle("groupspanel", "0"));

@@ -1,3 +1,6 @@
+// LINES-EXEMPT: CEF 单栈窗口的动作分发核心——99 个 SHIFT_ACT 分支 + 13 个面板注册表 +
+// CEF 回调（Load/Display/Request）；按动作域拆分需要先抽 ShellState 访问层，单独立项排期，
+// 详见 docs/工程全面分析_2026-10-31.md「大文件红线」一节。
 //! CEF Views 单栈外壳（2026-10-20 起，替代 GTK + CEF 子窗口方案）
 //!
 //! 结构：一个 **CEF 自己创建的顶层窗口**，内部用 BoxLayout 上下分两块：
@@ -157,7 +160,9 @@ fn clear_all_extras_except(keep: Panel) {
 
 /// 面板开合的撑高部分（不触发重排，便于单测）：开 = 自己置位且其余清零，关 = 自己归零
 fn set_panel_extra(panel: Panel, open: bool) {
-    panel.atom().store(if open { panel.extra_px() } else { 0 }, Ordering::Relaxed);
+    panel
+        .atom()
+        .store(if open { panel.extra_px() } else { 0 }, Ordering::Relaxed);
     if open {
         clear_all_extras_except(panel);
     }
@@ -343,7 +348,6 @@ pub fn set_tablist_panel(open: bool) {
     apply_toolbar_height();
 }
 
-
 /// 分组/工作区面板开合
 pub fn set_groups_panel(open: bool) {
     set_panel_extra(Panel::Groups, open);
@@ -415,7 +419,10 @@ pub(crate) fn open_tabs(urls: &[String]) -> usize {
 
 /// 恢复最近关闭的标签（Ctrl+Shift+T 与命令面板共用，单一实现）
 pub(crate) fn reopen_last_closed() -> bool {
-    let url = { let mut v = lock_state(&CLOSED_URLS); v.pop() };
+    let url = {
+        let mut v = lock_state(&CLOSED_URLS);
+        v.pop()
+    };
     match url {
         Some(u) => match new_tab(&u) {
             Ok(()) => true,
@@ -430,7 +437,9 @@ pub(crate) fn reopen_last_closed() -> bool {
 
 /// 把分组/工作区列表推给工具栏面板。
 pub(crate) fn push_groups() {
-    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
     let json = super::groups_ui::groups_json(app);
     run_toolbar_js(&format!(
         "window.__shiftGroups && window.__shiftGroups({json})"
@@ -439,7 +448,9 @@ pub(crate) fn push_groups() {
 
 /// 把会话列表推给工具栏面板（F-CEF-26）。
 pub(crate) fn push_sessions() {
-    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
     let json = super::sessions_ui::sessions_json(app);
     run_toolbar_js(&format!(
         "window.__shiftSessions && window.__shiftSessions({json})"
@@ -448,7 +459,9 @@ pub(crate) fn push_sessions() {
 
 /// 把用户脚本列表推给工具栏面板（F-CEF-23，同 `push_certs` 模式）
 pub(crate) fn push_userscripts() {
-    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
     let json = super::userscripts_ui::userscripts_json(app);
     run_toolbar_js(&format!(
         "window.__shiftUserscripts && window.__shiftUserscripts({json})"
@@ -696,7 +709,10 @@ pub fn open(content_url: &str, toolbar_url: &str) -> Result<(), String> {
     // 记下 shell 目录（启动页和工具栏同目录），供 Ctrl+T 新建标签时取
     if let Some(p) = toolbar_url.strip_prefix("file://") {
         if let Some(dir) = std::path::Path::new(p).parent() {
-            { let mut d = lock_state(&SHELL_CACHE_DIR); *d = Some(dir.to_string_lossy().into_owned()) };
+            {
+                let mut d = lock_state(&SHELL_CACHE_DIR);
+                *d = Some(dir.to_string_lossy().into_owned())
+            };
         }
     }
 
@@ -708,11 +724,14 @@ pub fn open(content_url: &str, toolbar_url: &str) -> Result<(), String> {
     let clone3 = content_client.clone();
     let clone4 = toolbar_client.clone();
     // 保活一份（之后每次创建 browser 时 CEF 还会再引用一次）
-    { let v = lock_state(&SHELL_CLIENTS); {
-        let mut v = v;
-        v.push(clone1);
-        v.push(clone2);
-    } };
+    {
+        let v = lock_state(&SHELL_CLIENTS);
+        {
+            let mut v = v;
+            v.push(clone1);
+            v.push(clone2);
+        }
+    };
 
     let mut content_client = clone3;
     let mut toolbar_client = clone4;
@@ -746,17 +765,20 @@ pub fn open(content_url: &str, toolbar_url: &str) -> Result<(), String> {
 
     // 首个标签登记进标签表（视图所有权仍在 ShellWindowDelegate，这里持一份引用）
     let first_view = View::from(&content_view);
-    { let mut t = lock_state(&SHELL_TABS); {
-        t.push(ShellTab {
-            group_id: None,
-            id: CONTENT_ID.to_string(),
-            view: first_view,
-            title: "新标签页".to_string(),
-            url: content_url.to_string(),
-            pinned: false,
-            muted: false,
-        });
-    } };
+    {
+        let mut t = lock_state(&SHELL_TABS);
+        {
+            t.push(ShellTab {
+                group_id: None,
+                id: CONTENT_ID.to_string(),
+                view: first_view,
+                title: "新标签页".to_string(),
+                url: content_url.to_string(),
+                pinned: false,
+                muted: false,
+            });
+        }
+    };
     ACTIVE_TAB.store(0, Ordering::Relaxed);
 
     let mut delegate = ShellWindowDelegate::new(
@@ -1133,13 +1155,10 @@ pub fn force_show() {
         // 推三轮：工具栏页面（file://）加载时机不定，单次推送容易
         // 打在脚本还没就绪的窗口期。定时器只能在 GTK 线程注册。
         for delay in [800u64, 2000, 4000] {
-            gtk::glib::timeout_add_local_once(
-                std::time::Duration::from_millis(delay),
-                || {
-                    refresh_bookmarks_ui();
-                    refresh_tabbar();
-                },
-            );
+            gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(delay), || {
+                refresh_bookmarks_ui();
+                refresh_tabbar();
+            });
         }
     }
 }
@@ -1153,19 +1172,25 @@ fn shell_window_clone() -> Option<Window> {
 /// 窗口控制：最小化 / 最大化切换 / 关闭（标签栏右侧按钮走这里）。
 /// `Window` 的方法必须在 CEF UI 线程调用，故统一经 `cef_ui_call` 投递。
 pub fn window_minimize() {
-    let Some(win) = shell_window_clone() else { return };
+    let Some(win) = shell_window_clone() else {
+        return;
+    };
     cef_ui_call(move || win.minimize());
 }
 
 pub fn window_toggle_maximize() {
-    let Some(win) = shell_window_clone() else { return };
+    let Some(win) = shell_window_clone() else {
+        return;
+    };
     // CEF 没有 is_maximized 查询，用窗口尺寸对比近似的做法不可靠；
     // 这里统一走 maximize()，连续点两下由 WM 自己处理（多数 WM 会 toggle）。
     cef_ui_call(move || win.maximize());
 }
 
 pub fn window_close() {
-    let Some(win) = shell_window_clone() else { return };
+    let Some(win) = shell_window_clone() else {
+        return;
+    };
     cef_ui_call(move || win.close());
 }
 
@@ -1174,7 +1199,9 @@ pub fn window_close() {
 /// `window_handle` / `get_xdisplay` 只能在 CEF UI 线程取，GTK 线程取到的是 0，
 /// 2026-10-29 实测：旧实现在 GTK 线程直接 return，标签栏空白处拖不动窗口。
 pub fn window_begin_drag() {
-    let Some(win) = shell_window_clone() else { return };
+    let Some(win) = shell_window_clone() else {
+        return;
+    };
     cef_ui_call(move || {
         let handle = win.window_handle();
         if handle <= 1 {
@@ -1197,7 +1224,15 @@ pub fn window_begin_drag() {
             let mut mask = 0;
             let mut child: x11::xlib::Window = 0;
             x11::xlib::XQueryPointer(
-                dpy, root, &mut root.clone(), &mut child, &mut rx, &mut ry, &mut wx, &mut wy, &mut mask,
+                dpy,
+                root,
+                &mut root.clone(),
+                &mut child,
+                &mut rx,
+                &mut ry,
+                &mut wx,
+                &mut wy,
+                &mut mask,
             );
 
             // CEF 在鼠标按下时会做隐式指针抓取，WM 的移动操作抢不到指针，先释放
@@ -1237,8 +1272,8 @@ pub fn window_begin_drag() {
 /// （工具栏 CDP 无响应、`on_before_download` 都不进），改前版本同样如此。
 /// 这里用后缀启发式绕过——命中就直接起下载，其余照常导航。
 const DOWNLOAD_EXTS: &[&str] = &[
-    "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "exe", "msi", "dmg", "pkg", "apk",
-    "iso", "deb", "rpm",
+    "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "exe", "msi", "dmg", "pkg", "apk", "iso",
+    "deb", "rpm",
 ];
 
 /// URL 是否像附件（查扩展名，忽略 query/fragment）
@@ -1688,28 +1723,38 @@ const CONTEXT_MENU_JS: &str = r#"
 
 /// 对当前活动标签的主 frame 执行一个动作（右键菜单用）。
 fn with_active_frame(f: impl FnOnce(&mut Frame)) {
-    let active_id = { let t = lock_state(&SHELL_TABS); {
-        let tabs = t;
-        tabs.get(ACTIVE_TAB.load(Ordering::Relaxed)).map(|x| x.id.clone())
-    } };
+    let active_id = {
+        let t = lock_state(&SHELL_TABS);
+        {
+            let tabs = t;
+            tabs.get(ACTIVE_TAB.load(Ordering::Relaxed))
+                .map(|x| x.id.clone())
+        }
+    };
     let Some(id) = active_id else { return };
-    { let m = lock_state(browsers()); {
-        if let Some(b) = m.get(&id) {
-            if let Some(mut frame) = b.main_frame() {
-                f(&mut frame);
+    {
+        let m = lock_state(browsers());
+        {
+            if let Some(b) = m.get(&id) {
+                if let Some(mut frame) = b.main_frame() {
+                    f(&mut frame);
+                }
             }
         }
-    } };
+    };
 }
 
 /// 当前活动标签的 (url, title)，取不到给空串。
 fn active_tab_url_title() -> (String, String) {
-    { let t = lock_state(&SHELL_TABS); {
-        let tabs = t;
-        tabs.get(ACTIVE_TAB.load(Ordering::Relaxed))
-            .map(|t| (t.url.clone(), t.title.clone()))
-            .unwrap_or_default()
-    } }
+    {
+        let t = lock_state(&SHELL_TABS);
+        {
+            let tabs = t;
+            tabs.get(ACTIVE_TAB.load(Ordering::Relaxed))
+                .map(|t| (t.url.clone(), t.title.clone()))
+                .unwrap_or_default()
+        }
+    }
 }
 
 /// LIKE 通配符转义：用户输入的 `%` / `_` / `\` 不能当通配符用。
@@ -1748,9 +1793,7 @@ fn parse_fav_command(body: &str) -> Option<(bool, String, String)> {
 
 /// 在快捷站点数组上增删（纯函数）：add 去重后插到最前，上限 12；del 按 URL 移除。
 fn apply_fav(sites: &mut Vec<serde_json::Value>, add: bool, name: &str, url: &str) {
-    sites.retain(|s| {
-        s.get("url").and_then(|u| u.as_str()).map(str::trim) != Some(url)
-    });
+    sites.retain(|s| s.get("url").and_then(|u| u.as_str()).map(str::trim) != Some(url));
     if add {
         sites.insert(
             0,
@@ -1849,9 +1892,7 @@ fn suggest_omni(query: &str) {
         }
         let json = serde_json::to_string(&out).unwrap_or_else(|_| "[]".to_string());
         let _ = app.run_on_main_thread(move || {
-            run_toolbar_js(&format!(
-                "window.__shiftOmni && window.__shiftOmni({json})"
-            ));
+            run_toolbar_js(&format!("window.__shiftOmni && window.__shiftOmni({json})"));
         });
     });
 }
@@ -1924,9 +1965,7 @@ fn refresh_star_state(url: &str) {
             .unwrap_or(0)
             > 0;
         let _ = app.run_on_main_thread(move || {
-            run_toolbar_js(&format!(
-                "window.__shiftStar && window.__shiftStar({on})"
-            ));
+            run_toolbar_js(&format!("window.__shiftStar && window.__shiftStar({on})"));
         });
     });
 }
@@ -1998,14 +2037,16 @@ pub fn popup_tab_list() {
         let t = lock_state(&SHELL_TABS);
         let list: Vec<serde_json::Value> = t
             .iter()
-            .map(|tab| serde_json::json!({
-                "title": tab.title,
-                "id": tab.id,
-                "pinned": tab.pinned,
-                "muted": tab.muted,
-                "groupId": tab.group_id,
-                "url": tab.url,
-            }))
+            .map(|tab| {
+                serde_json::json!({
+                    "title": tab.title,
+                    "id": tab.id,
+                    "pinned": tab.pinned,
+                    "muted": tab.muted,
+                    "groupId": tab.group_id,
+                    "url": tab.url,
+                })
+            })
             .collect();
         (
             serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string()),
@@ -2069,8 +2110,22 @@ fn popup_tab_menu(idx: usize) {
         };
         add("重新加载", format!("tabreload|{idx}"));
         add("复制标签", format!("tabdup|{idx}"));
-        add(if pinned { "取消固定" } else { "固定标签" }, format!("tabpin|{idx}"));
-        add(if muted { "取消静音" } else { "静音标签" }, format!("tabmute|{idx}"));
+        add(
+            if pinned {
+                "取消固定"
+            } else {
+                "固定标签"
+            },
+            format!("tabpin|{idx}"),
+        );
+        add(
+            if muted {
+                "取消静音"
+            } else {
+                "静音标签"
+            },
+            format!("tabmute|{idx}"),
+        );
         add("关闭标签", format!("tabclose|{idx}"));
         add("关闭其他标签", format!("tabcloseothers|{idx}"));
         add("关闭右侧标签", format!("tabcloseright|{idx}"));
@@ -2161,8 +2216,7 @@ fn popup_bookmark_folder_menu(fid: i64, rel_x: i32, rel_y: i32) {
         let menu = build(fid, &bms, &fds, 0);
         menu.show_all();
         // 锚点 = 窗口位置 + 点击项左下角，菜单左上角对齐该点
-        let root = gtk::gdk::Display::default()
-            .and_then(|d| d.default_screen().root_window());
+        let root = gtk::gdk::Display::default().and_then(|d| d.default_screen().root_window());
         if let Some(root) = root {
             let rect = gtk::gdk::Rectangle::new(win_x + rel_x, win_y + rel_y, 1, 1);
             menu.popup_at_rect(
@@ -2179,7 +2233,10 @@ fn popup_bookmark_folder_menu(fid: i64, rel_x: i32, rel_y: i32) {
 }
 
 pub(crate) fn open_settings_page() {
-    let dir = { let d = lock_state(&SHELL_CACHE_DIR); d.clone() };
+    let dir = {
+        let d = lock_state(&SHELL_CACHE_DIR);
+        d.clone()
+    };
     let Some(dir) = dir else {
         log::warn!("[cef] 设置页：shell 目录尚未就绪");
         return;
@@ -2215,19 +2272,30 @@ fn eval_active_js(js: &str) {
 }
 
 fn send_settings() {
-    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
-    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
     tauri::async_runtime::spawn(async move {
         let mut map = serde_json::Map::new();
-        for key in ["search_engine", "download_dir", "adblock_enabled", "gpc_header"] {
-            let v: Option<String> =
-                sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
-                    .bind(key)
-                    .fetch_optional(&pool)
-                    .await
-                    .ok()
-                    .flatten();
-            map.insert(key.to_string(), serde_json::Value::String(v.unwrap_or_default()));
+        for key in [
+            "search_engine",
+            "download_dir",
+            "adblock_enabled",
+            "gpc_header",
+        ] {
+            let v: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
+                .bind(key)
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten();
+            map.insert(
+                key.to_string(),
+                serde_json::Value::String(v.unwrap_or_default()),
+            );
         }
         let json = serde_json::Value::Object(map).to_string();
         let _ = app.run_on_main_thread(move || {
@@ -2243,16 +2311,25 @@ fn save_settings(json: &str) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
         return;
     };
-    let pairs: Vec<(String, String)> = ["search_engine", "download_dir", "adblock_enabled", "gpc_header"]
-        .iter()
-        .filter_map(|k| {
-            v.get(*k)
-                .and_then(|x| x.as_str())
-                .map(|s| (k.to_string(), s.to_string()))
-        })
-        .collect();
-    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
-    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    let pairs: Vec<(String, String)> = [
+        "search_engine",
+        "download_dir",
+        "adblock_enabled",
+        "gpc_header",
+    ]
+    .iter()
+    .filter_map(|k| {
+        v.get(*k)
+            .and_then(|x| x.as_str())
+            .map(|s| (k.to_string(), s.to_string()))
+    })
+    .collect();
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
     tauri::async_runtime::spawn(async move {
         let mut errs = Vec::new();
         for (k, val) in pairs {
@@ -2302,7 +2379,9 @@ fn send_site_info() {
 
 /// 把证书列表推给工具栏面板（F-CEF-21）。
 pub(crate) fn push_certs() {
-    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
     let json = super::certificates_ui::certificates_json(app);
     run_toolbar_js(&format!(
         "window.__shiftCerts && window.__shiftCerts({json})"
@@ -2546,14 +2625,17 @@ wrap_display_handler! {
 
 /// 启动页 URL（CEF 自包含版本；拿不到目录时回退 about:blank）
 fn newtab_url() -> String {
-    { let d = lock_state(&SHELL_CACHE_DIR); {
-        if let Some(dir) = d.as_ref() {
-            if let Ok(url) = super::newtab::ensure_newtab_html(std::path::Path::new(dir)) {
-                return url;
+    {
+        let d = lock_state(&SHELL_CACHE_DIR);
+        {
+            if let Some(dir) = d.as_ref() {
+                if let Ok(url) = super::newtab::ensure_newtab_html(std::path::Path::new(dir)) {
+                    return url;
+                }
             }
+            "about:blank".to_string()
         }
-        "about:blank".to_string()
-    } }
+    }
 }
 
 /// 新建标签页（视图隐藏加入布局，随后切换过去）。
@@ -2562,7 +2644,10 @@ fn new_tab(url: &str) -> Result<(), String> {
     let id = format!("shell-tab-{seq}");
 
     let client: Client = ShellClient::new(id.clone(), false);
-    { let mut v = lock_state(&SHELL_CLIENTS); v.push(client.clone()) };
+    {
+        let mut v = lock_state(&SHELL_CLIENTS);
+        v.push(client.clone())
+    };
     let mut client = client;
     let mut delegate = ShellViewDelegate::new(RuntimeStyle::ALLOY, 0);
     let browser_view = browser_view_create(
@@ -2579,42 +2664,54 @@ fn new_tab(url: &str) -> Result<(), String> {
     view.set_visible(0);
 
     let mut attached = false;
-    { let w = lock_state(&SHELL_WINDOW); {
-        if let Some(window) = w.as_ref() {
-            window.add_child_view(Some(&mut view));
-            attached = true;
+    {
+        let w = lock_state(&SHELL_WINDOW);
+        {
+            if let Some(window) = w.as_ref() {
+                window.add_child_view(Some(&mut view));
+                attached = true;
+            }
         }
-    } };
+    };
     if !attached {
         return Err("窗口尚未创建，无法加视图".to_string());
     }
-    { let l = lock_state(&SHELL_LAYOUT); {
-        if let Some(layout) = l.as_ref() {
-            layout.set_flex_for_view(Some(&mut view), 1);
+    {
+        let l = lock_state(&SHELL_LAYOUT);
+        {
+            if let Some(layout) = l.as_ref() {
+                layout.set_flex_for_view(Some(&mut view), 1);
+            }
         }
-    } };
+    };
     // 新视图加进来后必须让 BoxLayout 重算一次，否则它的 bounds 停在
     // 创建时的默认尺寸（实测约 630px 宽，右侧一片空白）——同 on_window_created
     // 里那次 window.layout() 的理由。
-    { let w = lock_state(&SHELL_WINDOW); {
-        if let Some(window) = w.as_ref() {
-            window.layout();
+    {
+        let w = lock_state(&SHELL_WINDOW);
+        {
+            if let Some(window) = w.as_ref() {
+                window.layout();
+            }
         }
-    } };
+    };
 
-    let idx = { let t = lock_state(&SHELL_TABS); {
-        let mut tabs = t;
-        tabs.push(ShellTab {
-            group_id: None,
-            id: id.clone(),
-            view,
-            title: "新标签页".to_string(),
-            url: url.to_string(),
-            pinned: false,
-            muted: false,
-        });
-        tabs.len() - 1
-    } };
+    let idx = {
+        let t = lock_state(&SHELL_TABS);
+        {
+            let mut tabs = t;
+            tabs.push(ShellTab {
+                group_id: None,
+                id: id.clone(),
+                view,
+                title: "新标签页".to_string(),
+                url: url.to_string(),
+                pinned: false,
+                muted: false,
+            });
+            tabs.len() - 1
+        }
+    };
 
     log::info!("[cef] 新标签已创建: {id} (idx={idx})");
     switch_tab(idx);
@@ -2624,31 +2721,37 @@ fn new_tab(url: &str) -> Result<(), String> {
 
 /// 切换活动标签（只改可见性，不动布局）
 fn switch_tab(idx: usize) {
-    let len = { let t = lock_state(&SHELL_TABS); t.len() };
+    let len = {
+        let t = lock_state(&SHELL_TABS);
+        t.len()
+    };
     if idx >= len {
         log::warn!("[cef] 切换标签越界: {idx} >= {len}");
         return;
     }
-    { let t = lock_state(&SHELL_TABS); {
-        let mut tabs = t;
-        for (i, tab) in tabs.iter_mut().enumerate() {
-            if i == idx {
-                tab.view.set_visible(1);
-                let v = tab.view.clone();
-                v.request_focus();
-            } else {
-                tab.view.set_visible(0);
-                // 关键：BoxLayout 按 flex 分配，隐藏视图仍占一份宽度（实测活动标签
-                // 只剩半屏）。把非活动视图的 bounds 压成 0，逼它不占位。
-                tab.view.set_bounds(Some(&Rect {
-                    x: 0,
-                    y: 0,
-                    width: 0,
-                    height: 0,
-                }));
+    {
+        let t = lock_state(&SHELL_TABS);
+        {
+            let mut tabs = t;
+            for (i, tab) in tabs.iter_mut().enumerate() {
+                if i == idx {
+                    tab.view.set_visible(1);
+                    let v = tab.view.clone();
+                    v.request_focus();
+                } else {
+                    tab.view.set_visible(0);
+                    // 关键：BoxLayout 按 flex 分配，隐藏视图仍占一份宽度（实测活动标签
+                    // 只剩半屏）。把非活动视图的 bounds 压成 0，逼它不占位。
+                    tab.view.set_bounds(Some(&Rect {
+                        x: 0,
+                        y: 0,
+                        width: 0,
+                        height: 0,
+                    }));
+                }
             }
         }
-    } };
+    };
     // 先记下切走前的活动索引：下面的「停旧标签查找」要用它，
     // 必须在 store(idx) 之前读，否则 prev 恒等于 idx、条件永假
     // （2026-10-28 修：原先先 store 后读，导致切标签时查找栏永不收起）。
@@ -2658,24 +2761,36 @@ fn switch_tab(idx: usize) {
     apply_toolbar_height();
     // View 层 request_focus ≠ 网页能收键盘：CEF 的 browser 还要单独 set_focus(1)。
     // 2026-10-26 实测：只 request_focus 时 document.hasFocus() 一直 false。
-    let active_id = { let t = lock_state(&SHELL_TABS); t.get(idx).map(|x| x.id.clone()) };
+    let active_id = {
+        let t = lock_state(&SHELL_TABS);
+        t.get(idx).map(|x| x.id.clone())
+    };
     if let Some(ref id) = active_id {
-        { let m = lock_state(browsers()); {
-            if let Some(b) = m.get(id) {
-                super::browser::focus(b);
+        {
+            let m = lock_state(browsers());
+            {
+                if let Some(b) = m.get(id) {
+                    super::browser::focus(b);
+                }
             }
-        } };
+        };
     }
     // 页内查找是标签级状态（F-CEF-18）：切走时停旧标签的查找并收起查找栏，
     // 否则旧计数会留在工具栏上
     if prev != idx && FIND_EXTRA.load(Ordering::Relaxed) != 0 {
-        let prev_id = { let t = lock_state(&SHELL_TABS); t.get(prev).map(|x| x.id.clone()) };
+        let prev_id = {
+            let t = lock_state(&SHELL_TABS);
+            t.get(prev).map(|x| x.id.clone())
+        };
         if let Some(pid) = prev_id {
-            { let m = lock_state(browsers()); {
-                if let Some(host) = m.get(&pid).and_then(|b| b.host()) {
-                    host.stop_finding(1);
+            {
+                let m = lock_state(browsers());
+                {
+                    if let Some(host) = m.get(&pid).and_then(|b| b.host()) {
+                        host.stop_finding(1);
+                    }
                 }
-            } };
+            };
         }
         *lock_state(&LAST_FIND_TEXT) = String::new();
         set_find_bar(false);
@@ -2683,7 +2798,8 @@ fn switch_tab(idx: usize) {
     }
     // 切标签后同步活动标签的缩放档位显示（缩放是标签级状态，自管表为准）
     let zoom_pct = active_id.and_then(|id| {
-        { let z = lock_state(zoom_levels()); z.get(&id).map(|l| zoom_pct_for_level(*l)) }
+        let z = lock_state(zoom_levels());
+        z.get(&id).map(|l| zoom_pct_for_level(*l))
     });
     if let Some(pct) = zoom_pct {
         run_toolbar_js(&format!("window.__shiftZoom && window.__shiftZoom({pct})"));
@@ -2696,14 +2812,16 @@ fn switch_tab(idx: usize) {
             let t = lock_state(&SHELL_TABS);
             let list: Vec<serde_json::Value> = t
                 .iter()
-                .map(|tab| serde_json::json!({
-                    "title": tab.title,
-                    "id": tab.id,
-                    "pinned": tab.pinned,
-                    "muted": tab.muted,
-                    "groupId": tab.group_id,
-                    "url": tab.url,
-                }))
+                .map(|tab| {
+                    serde_json::json!({
+                        "title": tab.title,
+                        "id": tab.id,
+                        "pinned": tab.pinned,
+                        "muted": tab.muted,
+                        "groupId": tab.group_id,
+                        "url": tab.url,
+                    })
+                })
                 .collect();
             (
                 serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string()),
@@ -2786,7 +2904,10 @@ fn toggle_tab_mute(idx: usize) {
 }
 
 fn close_tab(idx: usize) {
-    let len = { let t = lock_state(&SHELL_TABS); t.len() };
+    let len = {
+        let t = lock_state(&SHELL_TABS);
+        t.len()
+    };
     if idx >= len {
         return;
     }
@@ -2795,27 +2916,33 @@ fn close_tab(idx: usize) {
         return;
     }
     // 先记下这个标签的 URL（供 Ctrl+Shift+T 恢复），再摘表
-    let closing_url = { let t = lock_state(&SHELL_TABS); {
-        t
-            .get(idx)
-            .map(|x| x.url.clone())
-            .unwrap_or_default()
-    } };
+    let closing_url = {
+        let t = lock_state(&SHELL_TABS);
+        {
+            t.get(idx).map(|x| x.url.clone()).unwrap_or_default()
+        }
+    };
     if !closing_url.is_empty() && closing_url != "about:blank" {
-        { let v = lock_state(&CLOSED_URLS); {
-            let mut v = v;
-            v.push(closing_url);
-            if v.len() > 20 {
-                v.remove(0);
+        {
+            let v = lock_state(&CLOSED_URLS);
+            {
+                let mut v = v;
+                v.push(closing_url);
+                if v.len() > 20 {
+                    v.remove(0);
+                }
             }
-        } };
+        };
     }
 
-    let (id, view) = { let t = lock_state(&SHELL_TABS); {
-        let mut tabs = t;
-        let tab = tabs.remove(idx);
-        (tab.id, tab.view)
-    } };
+    let (id, view) = {
+        let t = lock_state(&SHELL_TABS);
+        {
+            let mut tabs = t;
+            let tab = tabs.remove(idx);
+            (tab.id, tab.view)
+        }
+    };
     // 关闭期间置标志，让 WindowDelegate::can_close 拦下 CEF 顺带的关窗请求；
     // close_browser 是异步的，200ms 后（且它已经发完关窗请求）再复位。
     TAB_CLOSING.store(true, Ordering::Relaxed);
@@ -2840,7 +2967,10 @@ fn close_tab(idx: usize) {
     view.set_visible(0);
 
     // 档位表随标签清理（CEF 侧没有 get_zoom_level，表是唯一事实源）
-    { let mut z = lock_state(zoom_levels()); z.remove(&id) };
+    {
+        let mut z = lock_state(zoom_levels());
+        z.remove(&id)
+    };
     let new_idx = idx.saturating_sub(1).min(len.saturating_sub(2));
     ACTIVE_TAB.store(new_idx, Ordering::Relaxed);
     switch_tab(new_idx);
@@ -2850,7 +2980,10 @@ fn close_tab(idx: usize) {
 /// 由 `cef_cmd` 在主线程之外查到书签后调用：存起来并派回主线程刷新 UI。
 pub fn set_bookmarks(rows: Vec<(String, String)>) {
     log::info!("[cef] 书签已加载 {} 条", rows.len());
-    { let mut b = lock_state(&BOOKMARKS); *b = rows };
+    {
+        let mut b = lock_state(&BOOKMARKS);
+        *b = rows
+    };
     gtk_ui(refresh_bookmarks_ui);
 }
 
@@ -2880,7 +3013,10 @@ fn reload_bookmarks_from_db() {
                 .iter()
                 .map(|(_, t, u, _)| (t.clone(), u.clone()))
                 .collect();
-            { let mut b = lock_state(&BOOKMARKS); *b = list };
+            {
+                let mut b = lock_state(&BOOKMARKS);
+                *b = list
+            };
             let bm_json: Vec<serde_json::Value> = bms
                 .iter()
                 .map(|(id, t, u, f)| serde_json::json!({ "id": id, "title": t, "url": u, "folderId": f }))
@@ -2893,7 +3029,11 @@ fn reload_bookmarks_from_db() {
             run_toolbar_js(&format!(
                 "if (window.__shiftBookmarks) {{ window.__shiftBookmarks({json}); }}"
             ));
-            log::info!("[cef] 书签已刷新：{} 条 / {} 个文件夹", bms.len(), folders.len());
+            log::info!(
+                "[cef] 书签已刷新：{} 条 / {} 个文件夹",
+                bms.len(),
+                folders.len()
+            );
         }
         Err(e) => log::warn!("[cef] 书签刷新失败: {e}"),
     }
@@ -2901,7 +3041,9 @@ fn reload_bookmarks_from_db() {
 
 /// 新建书签文件夹并刷新。`parent_id` 为 None 表示顶层。
 fn create_folder(name: &str, parent_id: Option<i64>) {
-    let Some(pool) = crate::db::GLOBAL_POOL.get() else { return };
+    let Some(pool) = crate::db::GLOBAL_POOL.get() else {
+        return;
+    };
     let pool = pool.clone();
     let name = name.to_string();
     let name_for_db = name.clone();
@@ -2917,7 +3059,10 @@ fn create_folder(name: &str, parent_id: Option<i64>) {
     });
     match res {
         Ok(r) => {
-            log::info!("[cef] 文件夹已创建「{name}」parent={parent_id:?}（{} 行）", r.rows_affected());
+            log::info!(
+                "[cef] 文件夹已创建「{name}」parent={parent_id:?}（{} 行）",
+                r.rows_affected()
+            );
             reload_bookmarks_from_db();
         }
         Err(e) => log::warn!("[cef] 新建文件夹失败: {e}"),
@@ -2926,7 +3071,9 @@ fn create_folder(name: &str, parent_id: Option<i64>) {
 
 /// 移动书签到文件夹（`folder_id` 为 None 表示移回书签栏）。
 fn move_bookmark(id: i64, folder_id: Option<i64>) {
-    let Some(pool) = crate::db::GLOBAL_POOL.get() else { return };
+    let Some(pool) = crate::db::GLOBAL_POOL.get() else {
+        return;
+    };
     let pool = pool.clone();
     let res = tauri::async_runtime::block_on(async move {
         sqlx::query("UPDATE bookmarks SET folder_id = ? WHERE id = ?")
@@ -2937,7 +3084,10 @@ fn move_bookmark(id: i64, folder_id: Option<i64>) {
     });
     match res {
         Ok(r) => {
-            log::info!("[cef] 书签已移动 id={id} -> folder={folder_id:?}（{} 行）", r.rows_affected());
+            log::info!(
+                "[cef] 书签已移动 id={id} -> folder={folder_id:?}（{} 行）",
+                r.rows_affected()
+            );
             reload_bookmarks_from_db();
         }
         Err(e) => log::warn!("[cef] 移动书签失败: {e}"),
@@ -2946,7 +3096,9 @@ fn move_bookmark(id: i64, folder_id: Option<i64>) {
 
 /// 改书签标题并刷新（右键菜单「编辑标题」）。
 fn update_bookmark_title(id: i64, title: &str) {
-    let Some(pool) = crate::db::GLOBAL_POOL.get() else { return };
+    let Some(pool) = crate::db::GLOBAL_POOL.get() else {
+        return;
+    };
     let pool = pool.clone();
     let title = title.to_string();
     let res = tauri::async_runtime::block_on(async move {
@@ -2967,7 +3119,9 @@ fn update_bookmark_title(id: i64, title: &str) {
 
 /// 删除书签并刷新（右键菜单「删除」）。
 fn delete_bookmark_and_refresh(id: i64) {
-    let Some(pool) = crate::db::GLOBAL_POOL.get() else { return };
+    let Some(pool) = crate::db::GLOBAL_POOL.get() else {
+        return;
+    };
     let pool = pool.clone();
     let res = tauri::async_runtime::block_on(async move {
         sqlx::query("DELETE FROM bookmarks WHERE id = ?")
@@ -3004,15 +3158,20 @@ fn delete_folder_and_refresh(id: i64) {
 }
 
 fn add_bookmark_from_current() {
-    let Some(pool) = crate::db::GLOBAL_POOL.get() else { return };
+    let Some(pool) = crate::db::GLOBAL_POOL.get() else {
+        return;
+    };
     // 取当前活动标签的 URL 与标题
-    let (url, title) = { let t = lock_state(&SHELL_TABS); {
-        let tabs = t;
-        let idx = ACTIVE_TAB.load(Ordering::Relaxed);
-        tabs.get(idx)
-            .map(|x| (x.url.clone(), x.title.clone()))
-            .unwrap_or_default()
-    } };
+    let (url, title) = {
+        let t = lock_state(&SHELL_TABS);
+        {
+            let tabs = t;
+            let idx = ACTIVE_TAB.load(Ordering::Relaxed);
+            tabs.get(idx)
+                .map(|x| (x.url.clone(), x.title.clone()))
+                .unwrap_or_default()
+        }
+    };
     if url.is_empty() || url.starts_with("file://") {
         log::info!("[cef] 当前页不可收藏: {url}");
         return;
@@ -3091,16 +3250,21 @@ fn toggle_bookmarks() {
 /// 非活动标签视图已被 switch_tab 压成 0，这里只搬工具栏与活动标签两块。
 fn apply_toolbar_height() {
     let h = toolbar_height();
-    let (win_w, win_h) = { let w = lock_state(&SHELL_WINDOW); {
-        w
-            .as_ref()
-            .map(|w| (w.bounds().width, w.bounds().height))
-            .unwrap_or((0, 0))
-    } };
+    let (win_w, win_h) = {
+        let w = lock_state(&SHELL_WINDOW);
+        {
+            w.as_ref()
+                .map(|w| (w.bounds().width, w.bounds().height))
+                .unwrap_or((0, 0))
+        }
+    };
     if (win_w, win_h) == (0, 0) {
         return;
     }
-    if let Some(tb) = { let v = lock_state(&SHELL_TOOLBAR_VIEW); v.clone() } {
+    if let Some(tb) = {
+        let v = lock_state(&SHELL_TOOLBAR_VIEW);
+        v.clone()
+    } {
         tb.set_bounds(Some(&Rect {
             x: 0,
             y: 0,
@@ -3109,45 +3273,68 @@ fn apply_toolbar_height() {
         }));
     }
     let active = ACTIVE_TAB.load(Ordering::Relaxed);
-    { let t = lock_state(&SHELL_TABS); {
-        let tabs = t;
-        if let Some(tab) = tabs.get(active) {
-            tab.view.set_bounds(Some(&Rect {
-                x: 0,
-                y: h,
-                width: win_w,
-                height: win_h - h,
-            }));
+    {
+        let t = lock_state(&SHELL_TABS);
+        {
+            let tabs = t;
+            if let Some(tab) = tabs.get(active) {
+                tab.view.set_bounds(Some(&Rect {
+                    x: 0,
+                    y: h,
+                    width: win_w,
+                    height: win_h - h,
+                }));
+            }
         }
-    } };
+    };
 }
 
 /// 关闭除 `keep` 之外的所有标签（右键菜单「关闭其他」）。
 /// 从大到小关，避免索引在删除过程中错位。
 fn close_other_tabs(keep: usize) {
-    let total = { let t = lock_state(&SHELL_TABS); t.len() };
+    let total = {
+        let t = lock_state(&SHELL_TABS);
+        t.len()
+    };
     if total <= 1 {
         return;
     }
     for idx in (0..total).rev() {
-        if idx != keep && idx < { let t = lock_state(&SHELL_TABS); t.len() } {
+        if idx != keep
+            && idx < {
+                let t = lock_state(&SHELL_TABS);
+                t.len()
+            }
+        {
             close_tab(idx);
         }
     }
     // 关完之后保留下来的那个可能已换位，切到它
-    let cur = keep.min({ let t = lock_state(&SHELL_TABS); t.len() }.saturating_sub(1));
+    let cur = keep.min(
+        {
+            let t = lock_state(&SHELL_TABS);
+            t.len()
+        }
+        .saturating_sub(1),
+    );
     switch_tab(cur);
     refresh_tabbar();
 }
 
 /// 关闭 `from` 右侧的所有标签（右键菜单「关闭右侧」）。
 fn close_tabs_right_of(from: usize) {
-    let total = { let t = lock_state(&SHELL_TABS); t.len() };
+    let total = {
+        let t = lock_state(&SHELL_TABS);
+        t.len()
+    };
     if from + 1 >= total {
         return;
     }
     for idx in (from + 1..total).rev() {
-        if idx < { let t = lock_state(&SHELL_TABS); t.len() } {
+        if idx < {
+            let t = lock_state(&SHELL_TABS);
+            t.len()
+        } {
             close_tab(idx);
         }
     }
@@ -3157,23 +3344,28 @@ fn close_tabs_right_of(from: usize) {
 
 /// 把标签表同步到工具栏页面的标签栏（调 `window.__shiftTabs(tabs, active)`）
 pub fn refresh_tabbar() {
-    let (list_json, active) = { let t = lock_state(&SHELL_TABS); {
-        let tabs = t;
-        let list: Vec<serde_json::Value> = tabs
-            .iter()
-            .map(|tab| serde_json::json!({
-                "title": tab.title,
-                "id": tab.id,
-                "pinned": tab.pinned,
-                "muted": tab.muted,
-                "groupId": tab.group_id,
-            }))
-            .collect();
-        (
-            serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string()),
-            ACTIVE_TAB.load(Ordering::Relaxed),
-        )
-    } };
+    let (list_json, active) = {
+        let t = lock_state(&SHELL_TABS);
+        {
+            let tabs = t;
+            let list: Vec<serde_json::Value> = tabs
+                .iter()
+                .map(|tab| {
+                    serde_json::json!({
+                        "title": tab.title,
+                        "id": tab.id,
+                        "pinned": tab.pinned,
+                        "muted": tab.muted,
+                        "groupId": tab.group_id,
+                    })
+                })
+                .collect();
+            (
+                serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string()),
+                ACTIVE_TAB.load(Ordering::Relaxed),
+            )
+        }
+    };
     let code = format!(
         "if (window.__shiftTabs) {{ window.__shiftTabs({}, {}); }}",
         list_json, active
@@ -3228,28 +3420,41 @@ fn zoom_step(level: f64, dir: i32) -> f64 {
 
 /// 对活动标签执行缩放，并把档位百分比推给工具栏显示。
 fn apply_zoom(dir: i32) {
-    let active_id = { let t = lock_state(&SHELL_TABS); {
-        let tabs = t;
-        tabs.get(ACTIVE_TAB.load(Ordering::Relaxed)).map(|tab| tab.id.clone())
-    } };
+    let active_id = {
+        let t = lock_state(&SHELL_TABS);
+        {
+            let tabs = t;
+            tabs.get(ACTIVE_TAB.load(Ordering::Relaxed))
+                .map(|tab| tab.id.clone())
+        }
+    };
     let Some(active_id) = active_id else {
         return;
     };
     // CEF 侧没有 get_zoom_level（154 C API 只有 setter），档位以自管表为准
-    let (cur, target) = { let z = lock_state(zoom_levels()); {
-        let map = z;
-        let cur = map.get(&active_id).copied().unwrap_or(0.0);
-        (cur, zoom_step(cur, dir))
-    } };
+    let (cur, target) = {
+        let z = lock_state(zoom_levels());
+        {
+            let map = z;
+            let cur = map.get(&active_id).copied().unwrap_or(0.0);
+            (cur, zoom_step(cur, dir))
+        }
+    };
     if target == cur {
         return;
     }
-    { let mut z = lock_state(zoom_levels()); z.insert(active_id.clone(), target) };
-    { let m = lock_state(browsers()); {
-        if let Some(host) = m.get(&active_id).and_then(|b| b.host()) {
-            host.set_zoom_level(target);
+    {
+        let mut z = lock_state(zoom_levels());
+        z.insert(active_id.clone(), target)
+    };
+    {
+        let m = lock_state(browsers());
+        {
+            if let Some(host) = m.get(&active_id).and_then(|b| b.host()) {
+                host.set_zoom_level(target);
+            }
         }
-    } };
+    };
     let pct = zoom_pct_for_level(target);
     log::info!("[cef] 缩放 dir={dir:+} level {cur} -> {target}（{pct}%）");
     run_toolbar_js(&format!("window.__shiftZoom && window.__shiftZoom({pct})"));
@@ -3268,25 +3473,35 @@ static LAST_FIND_TEXT: Mutex<String> = Mutex::new(String::new());
 fn open_find_bar() {
     set_find_bar(true);
     run_toolbar_js("window.__shiftFindOpen && window.__shiftFindOpen()");
-    { let m = lock_state(browsers()); {
-        if let Some(b) = m.get(TOOLBAR_ID) {
-            super::browser::focus(b);
+    {
+        let m = lock_state(browsers());
+        {
+            if let Some(b) = m.get(TOOLBAR_ID) {
+                super::browser::focus(b);
+            }
         }
-    } };
+    };
 }
 
 /// 关闭查找栏：停活动标签的查找（清高亮）、还原视图高度、收起工具栏浮层
 fn close_find_bar() {
-    let active_id = { let t = lock_state(&SHELL_TABS); {
-        let tabs = t;
-        tabs.get(ACTIVE_TAB.load(Ordering::Relaxed)).map(|tab| tab.id.clone())
-    } };
+    let active_id = {
+        let t = lock_state(&SHELL_TABS);
+        {
+            let tabs = t;
+            tabs.get(ACTIVE_TAB.load(Ordering::Relaxed))
+                .map(|tab| tab.id.clone())
+        }
+    };
     if let Some(id) = active_id {
-        { let m = lock_state(browsers()); {
-            if let Some(host) = m.get(&id).and_then(|b| b.host()) {
-                host.stop_finding(1);
+        {
+            let m = lock_state(browsers());
+            {
+                if let Some(host) = m.get(&id).and_then(|b| b.host()) {
+                    host.stop_finding(1);
+                }
             }
-        } };
+        };
     }
     *lock_state(&LAST_FIND_TEXT) = String::new();
     set_find_bar(false);
@@ -3298,27 +3513,34 @@ fn do_find(text: &str, forward: i32, find_next: i32) {
     if text.trim().is_empty() {
         return;
     }
-    let active_id = { let t = lock_state(&SHELL_TABS); {
-        let tabs = t;
-        tabs.get(ACTIVE_TAB.load(Ordering::Relaxed)).map(|tab| tab.id.clone())
-    } };
+    let active_id = {
+        let t = lock_state(&SHELL_TABS);
+        {
+            let tabs = t;
+            tabs.get(ACTIVE_TAB.load(Ordering::Relaxed))
+                .map(|tab| tab.id.clone())
+        }
+    };
     let Some(active_id) = active_id else {
         return;
     };
     *lock_state(&LAST_FIND_TEXT) = text.to_string();
-    { let m = lock_state(browsers()); {
-        let map = m;
-        match map.get(&active_id).and_then(|b| b.host()) {
-            Some(host) => {
-                host.find(Some(&CefString::from(text)), forward, 0, find_next);
-                log::info!(
-                    "[cef] 页内查找: {} 字, forward={forward}, find_next={find_next}",
-                    text.chars().count()
-                );
+    {
+        let m = lock_state(browsers());
+        {
+            let map = m;
+            match map.get(&active_id).and_then(|b| b.host()) {
+                Some(host) => {
+                    host.find(Some(&CefString::from(text)), forward, 0, find_next);
+                    log::info!(
+                        "[cef] 页内查找: {} 字, forward={forward}, find_next={find_next}",
+                        text.chars().count()
+                    );
+                }
+                None => log::warn!("[cef] 页内查找: 活动标签 {active_id} 无 host"),
             }
-            None => log::warn!("[cef] 页内查找: 活动标签 {active_id} 无 host"),
         }
-    } };
+    };
 }
 
 /// 执行工具栏动作
@@ -3606,7 +3828,10 @@ fn handle_action_inner(action: &str) {
         }
         "tabdup" => {
             if let Ok(idx) = arg.parse::<usize>() {
-                let url = { let t = lock_state(&SHELL_TABS); t.get(idx).map(|x| x.url.clone()) };
+                let url = {
+                    let t = lock_state(&SHELL_TABS);
+                    t.get(idx).map(|x| x.url.clone())
+                };
                 if let Some(u) = url {
                     if let Err(e) = new_tab(&u) {
                         log::error!("[cef] 复制标签失败: {e}");
@@ -3617,13 +3842,19 @@ fn handle_action_inner(action: &str) {
         }
         "tabreload" => {
             if let Ok(idx) = arg.parse::<usize>() {
-                let id = { let t = lock_state(&SHELL_TABS); t.get(idx).map(|x| x.id.clone()) };
+                let id = {
+                    let t = lock_state(&SHELL_TABS);
+                    t.get(idx).map(|x| x.id.clone())
+                };
                 if let Some(id) = id {
-                    { let m = lock_state(browsers()); {
-                        if let Some(b) = m.get(&id) {
-                            b.reload();
+                    {
+                        let m = lock_state(browsers());
+                        {
+                            if let Some(b) = m.get(&id) {
+                                b.reload();
+                            }
                         }
-                    } };
+                    };
                 }
             }
             return;
@@ -3760,30 +3991,36 @@ fn handle_action_inner(action: &str) {
         _ => {}
     }
 
-    let active_id = { let t = lock_state(&SHELL_TABS); {
-        let tabs = t;
-        let idx = ACTIVE_TAB.load(Ordering::Relaxed);
-        tabs.get(idx).map(|tab| tab.id.clone())
-    } };
+    let active_id = {
+        let t = lock_state(&SHELL_TABS);
+        {
+            let tabs = t;
+            let idx = ACTIVE_TAB.load(Ordering::Relaxed);
+            tabs.get(idx).map(|tab| tab.id.clone())
+        }
+    };
     let Some(active_id) = active_id else {
         log::warn!("[cef] 无活动标签，忽略动作 {cmd}");
         return;
     };
 
-    { let m = lock_state(browsers()); {
-        let map = m;
-        // 到这里只剩未实现的工具栏动作（nav/back/forward/reload/stop 都已在
-        // handle_action 入口按锁外处理，见上）。这里不再调任何 CEF 方法，
-        // 避免「持锁调 CEF → 同步回调再拿同一把锁」的自死锁。
-        if !map.contains_key(&active_id) {
-            log::warn!(
-                "[cef] BROWSERS 查不到 active_id={active_id}，现有 key={:?}",
-                map.keys().collect::<Vec<_>>()
-            );
-            return;
+    {
+        let m = lock_state(browsers());
+        {
+            let map = m;
+            // 到这里只剩未实现的工具栏动作（nav/back/forward/reload/stop 都已在
+            // handle_action 入口按锁外处理，见上）。这里不再调任何 CEF 方法，
+            // 避免「持锁调 CEF → 同步回调再拿同一把锁」的自死锁。
+            if !map.contains_key(&active_id) {
+                log::warn!(
+                    "[cef] BROWSERS 查不到 active_id={active_id}，现有 key={:?}",
+                    map.keys().collect::<Vec<_>>()
+                );
+                return;
+            }
+            log::warn!("[cef] 未知工具栏动作: {cmd}");
         }
-        log::warn!("[cef] 未知工具栏动作: {cmd}");
-    } };
+    };
 }
 
 /// 地址栏输入补全：没有 scheme 就补 https://
@@ -3867,9 +4104,17 @@ mod tests {
                 set_panel_extra(b, true);
                 for p in Panel::ALL {
                     let v = p.atom().load(Ordering::Relaxed);
-                    assert_eq!(v, if p == b { b.extra_px() } else { 0 }, "{a:?}->{b:?} 残留 {p:?}");
+                    assert_eq!(
+                        v,
+                        if p == b { b.extra_px() } else { 0 },
+                        "{a:?}->{b:?} 残留 {p:?}"
+                    );
                 }
-                assert_eq!(BM_EXTRA.load(Ordering::Relaxed), 0, "{a:?}->{b:?} 书签下拉未清");
+                assert_eq!(
+                    BM_EXTRA.load(Ordering::Relaxed),
+                    0,
+                    "{a:?}->{b:?} 书签下拉未清"
+                );
                 assert_eq!(toolbar_height(), base + b.extra_px(), "{a:?}->{b:?}");
                 set_panel_extra(b, false);
                 assert_eq!(toolbar_height(), base);
@@ -4424,7 +4669,10 @@ fn handle_shortcut(
         }
         9 => {
             // Ctrl+Tab 下一个标签
-            let len = { let t = lock_state(&SHELL_TABS); t.len() };
+            let len = {
+                let t = lock_state(&SHELL_TABS);
+                t.len()
+            };
             if len > 1 {
                 let cur = ACTIVE_TAB.load(Ordering::Relaxed);
                 switch_tab((cur + 1) % len);
@@ -4438,9 +4686,7 @@ fn handle_shortcut(
         }
         // Ctrl+L 聚焦地址栏
         76 => {
-            run_toolbar_js(
-                "const a=document.getElementById('addr'); if(a){a.focus();a.select();}",
-            );
+            run_toolbar_js("const a=document.getElementById('addr'); if(a){a.focus();a.select();}");
             1
         }
         // Ctrl+H 历史面板
@@ -4549,10 +4795,16 @@ pub(crate) fn downloads_panel_json(list: &[crate::db::downloads::Download]) -> S
 
 /// 通知工具栏面板重拉列表：库查询在 tokio 线程，JS 执行切回主线程。
 pub(crate) fn request_downloads_refresh() {
-    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
-    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
     tauri::async_runtime::spawn(async move {
-        let Ok(list) = crate::db::downloads::list_downloads(&pool).await else { return };
+        let Ok(list) = crate::db::downloads::list_downloads(&pool).await else {
+            return;
+        };
         let json = downloads_panel_json(&list);
         let _ = app.run_on_main_thread(move || {
             run_toolbar_js(&format!(
@@ -4563,7 +4815,12 @@ pub(crate) fn request_downloads_refresh() {
 }
 
 /// 登记一次下载：先建运行期槽，再异步写库（路径已去过重）。
-fn register_download(item_id: u32, filename: String, url: Option<String>, path: std::path::PathBuf) {
+fn register_download(
+    item_id: u32,
+    filename: String,
+    url: Option<String>,
+    path: std::path::PathBuf,
+) {
     let track = DlTrack {
         db_id: Arc::new(Mutex::new(None)),
         last_progress: Arc::new(Mutex::new(Instant::now())),
@@ -4670,22 +4927,19 @@ fn track_download(it: &mut DownloadItem) {
     if let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() {
         let state = state.to_string();
         tauri::async_runtime::spawn(async move {
-            let Some(db_id) = wait_dl_id(&db_id).await else { return };
+            let Some(db_id) = wait_dl_id(&db_id).await else {
+                return;
+            };
             if state.is_empty() {
-                if let Err(e) = crate::db::downloads::update_download_bytes(
-                    &pool,
-                    db_id,
-                    received,
-                    Some(total),
-                )
-                .await
+                if let Err(e) =
+                    crate::db::downloads::update_download_bytes(&pool, db_id, received, Some(total))
+                        .await
                 {
                     log::warn!("[cef] 下载进度写库失败 id={db_id}: {e}");
                 }
-            } else if let Err(e) = crate::db::downloads::update_download_state(
-                &pool, db_id, &state, Some(received),
-            )
-            .await
+            } else if let Err(e) =
+                crate::db::downloads::update_download_state(&pool, db_id, &state, Some(received))
+                    .await
             {
                 log::warn!("[cef] 下载状态写库失败 id={db_id}: {e}");
             }
@@ -4706,17 +4960,20 @@ fn track_download(it: &mut DownloadItem) {
 
 /// 打开下载文件所在目录（只允许下载目录内的路径，防任意路径打开）。
 fn open_download_location(download_id: i64) {
-    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
-    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
     tauri::async_runtime::spawn(async move {
-        let path = sqlx::query_scalar::<_, Option<String>>(
-            "SELECT path FROM downloads WHERE id = ?",
-        )
-        .bind(download_id)
-        .fetch_one(&pool)
-        .await
-        .ok()
-        .flatten();
+        let path =
+            sqlx::query_scalar::<_, Option<String>>("SELECT path FROM downloads WHERE id = ?")
+                .bind(download_id)
+                .fetch_one(&pool)
+                .await
+                .ok()
+                .flatten();
         let Some(path) = path else {
             log::warn!("[cef] 打开下载目录失败：记录 {download_id} 无路径");
             return;
@@ -4739,8 +4996,12 @@ fn open_download_location(download_id: i64) {
 
 /// 重新下载：按记录里的 URL 再走一次 `start_download`。
 fn retry_download(download_id: i64) {
-    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
-    let Some(app) = crate::cef_cmd::app_handle() else { return };
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
+    let Some(app) = crate::cef_cmd::app_handle() else {
+        return;
+    };
     tauri::async_runtime::spawn(async move {
         let url = sqlx::query_scalar::<_, Option<String>>("SELECT url FROM downloads WHERE id = ?")
             .bind(download_id)
@@ -4753,20 +5014,25 @@ fn retry_download(download_id: i64) {
             return;
         };
         let _ = app.run_on_main_thread(move || {
-            { let m = lock_state(browsers()); {
-                if let Some(b) = m.get(CONTENT_ID) {
-                    if let Some(host) = b.host() {
-                        host.start_download(Some(&CefString::from(url.as_str())));
+            {
+                let m = lock_state(browsers());
+                {
+                    if let Some(b) = m.get(CONTENT_ID) {
+                        if let Some(host) = b.host() {
+                            host.start_download(Some(&CefString::from(url.as_str())));
+                        }
                     }
                 }
-            } };
+            };
         });
     });
 }
 
 /// 删除下载记录（不删磁盘文件，与主应用 `delete_download` 语义一致）。
 fn delete_download_record(download_id: i64) {
-    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else { return };
+    let Some(pool) = crate::db::GLOBAL_POOL.get().cloned() else {
+        return;
+    };
     tauri::async_runtime::spawn(async move {
         match sqlx::query("DELETE FROM downloads WHERE id = ?")
             .bind(download_id)
@@ -4918,23 +5184,36 @@ mod fav_tests {
     fn parse_accepts_add_and_del() {
         assert_eq!(
             parse_fav_command(r#"{"op":"add","name":"知乎","url":"https://www.zhihu.com"}"#),
-            Some((true, "知乎".to_string(), "https://www.zhihu.com".to_string()))
+            Some((
+                true,
+                "知乎".to_string(),
+                "https://www.zhihu.com".to_string()
+            ))
         );
         assert_eq!(
             parse_fav_command(r#"{"op":"del","name":"知乎","url":"https://www.zhihu.com"}"#),
-            Some((false, "知乎".to_string(), "https://www.zhihu.com".to_string()))
+            Some((
+                false,
+                "知乎".to_string(),
+                "https://www.zhihu.com".to_string()
+            ))
         );
     }
 
     #[test]
     fn parse_rejects_bad_input() {
         // 危险 scheme
-        assert!(parse_fav_command(r#"{"op":"add","name":"x","url":"javascript:alert(1)"}"#).is_none());
+        assert!(
+            parse_fav_command(r#"{"op":"add","name":"x","url":"javascript:alert(1)"}"#).is_none()
+        );
         // 缺名称
         assert!(parse_fav_command(r#"{"op":"add","name":"","url":"https://a.com"}"#).is_none());
         // 名称超长
         let long = "名".repeat(65);
-        assert!(parse_fav_command(&format!(r#"{{"op":"add","name":"{long}","url":"https://a.com"}}"#)).is_none());
+        assert!(parse_fav_command(&format!(
+            r#"{{"op":"add","name":"{long}","url":"https://a.com"}}"#
+        ))
+        .is_none());
         // 未知操作
         assert!(parse_fav_command(r#"{"op":"toggle","name":"x","url":"https://a.com"}"#).is_none());
         // 非法 JSON
@@ -4952,7 +5231,13 @@ mod fav_tests {
         // 已存在的 URL 再 add：去重后仍在首位，数量不变
         apply_fav(&mut sites, true, "新站", "https://new.com");
         assert_eq!(sites.len(), 12);
-        assert_eq!(sites.iter().filter(|s| s["url"] == "https://new.com").count(), 1);
+        assert_eq!(
+            sites
+                .iter()
+                .filter(|s| s["url"] == "https://new.com")
+                .count(),
+            1
+        );
     }
 
     #[test]

@@ -79,14 +79,13 @@ impl AppError {
         let ctx = if self.ctx.is_empty() {
             String::new()
         } else {
-            let kv: Vec<String> = self
-                .ctx
-                .iter()
-                .map(|(k, v)| format!("{k}={v:?}"))
-                .collect();
+            let kv: Vec<String> = self.ctx.iter().map(|(k, v)| format!("{k}={v:?}")).collect();
             format!(" ctx{{{}}}", kv.join(", "))
         };
-        let line = format!("[{ts}] module={} detail={:?}{ctx}", self.module, self.detail);
+        let line = format!(
+            "[{ts}] module={} detail={:?}{ctx}",
+            self.module, self.detail
+        );
 
         // 1. 主日志（errata：error 级，会被 tauri-plugin-log 收进主日志文件）
         log::error!("[err] {line}");
@@ -138,7 +137,12 @@ pub(crate) fn error_counts() -> Vec<(String, u64)> {
 ///
 /// CEF 回调是 `extern "C"`，Rust panic 穿过 FFI 是未定义行为，通常表现为
 /// 进程直接消失、无栈无日志。所有 CEF handler 的方法体都该经它执行。
-pub(crate) fn guard<R>(module: &'static str, op: &'static str, f: impl FnOnce() -> R, fallback: R) -> R {
+pub(crate) fn guard<R>(
+    module: &'static str,
+    op: &'static str,
+    f: impl FnOnce() -> R,
+    fallback: R,
+) -> R {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(v) => v,
         Err(payload) => {
@@ -179,7 +183,10 @@ pub(crate) fn diagnostics_text() -> String {
     let mut out = String::from("=== ShiftBrowser 诊断快照 ===\n");
     out.push_str(&format!("生成时间: {}\n", local_time_string()));
     out.push_str(&format!("进程 PID: {}\n", std::process::id()));
-    out.push_str(&format!("线程: {}\n", std::thread::current().name().unwrap_or("?")));
+    out.push_str(&format!(
+        "线程: {}\n",
+        std::thread::current().name().unwrap_or("?")
+    ));
 
     let counts = error_counts();
     out.push_str(&format!("\n错误计数（共 {} 个模块）:\n", counts.len()));

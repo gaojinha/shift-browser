@@ -1,3 +1,5 @@
+// LINES-EXEMPT: 工具栏 HTML/CSS/JS 是单字符串内嵌页（一个 BrowserView 一个文件），
+// 按域拆成多文件只会造成跨文件字符串拼接、破坏"所见即所改"，故保留单文件。
 //! 工具栏 WebUI：本地 HTML 文件生成
 //!
 //! 工具栏本身就是一个网页，跑在 CEF 的独立 BrowserView 里——跟内容页同一套
@@ -9,7 +11,10 @@ use std::path::Path;
 
 /// 根类面板 class 清单（JSON 数组），来自 Rust 注册表 `shell::Panel`，注入 JS 侧
 fn panel_classes_json() -> String {
-    let items: Vec<String> = Panel::ALL.iter().map(|p| format!("\"{}\"", p.class())).collect();
+    let items: Vec<String> = Panel::ALL
+        .iter()
+        .map(|p| format!("\"{}\"", p.class()))
+        .collect();
     format!("[{}]", items.join(","))
 }
 
@@ -30,9 +35,18 @@ pub fn ensure_toolbar_html(
     let html = TOOLBAR_HTML
         .replace("__SHIFT_PANEL_CLASSES__", &panel_classes_json())
         .replace("__SHIFT_BOOKMARKS_JSON__", bookmarks_json)
-        .replace("__SHIFT_PASSWORDS_JSON__", &passwords_json.replace("</", "<\\/"))
-        .replace("__SHIFT_DOWNLOADS_JSON__", &downloads_json.replace("</", "<\\/"))
-        .replace("__SHIFT_USERSCRIPTS_JSON__", &userscripts_json.replace("</", "<\\/"));
+        .replace(
+            "__SHIFT_PASSWORDS_JSON__",
+            &passwords_json.replace("</", "<\\/"),
+        )
+        .replace(
+            "__SHIFT_DOWNLOADS_JSON__",
+            &downloads_json.replace("</", "<\\/"),
+        )
+        .replace(
+            "__SHIFT_USERSCRIPTS_JSON__",
+            &userscripts_json.replace("</", "<\\/"),
+        );
     let path = dir.join("toolbar.html");
     std::fs::write(&path, html).map_err(|e| format!("写工具栏页失败: {e}"))?;
 
@@ -2346,7 +2360,12 @@ mod tests {
         assert_eq!(Panel::ALL.len(), 13);
         let json = panel_classes_json();
         for p in Panel::ALL {
-            assert_eq!(json.matches(&format!("\"{}\"", p.class())).count(), 1, "{:?}", p);
+            assert_eq!(
+                json.matches(&format!("\"{}\"", p.class())).count(),
+                1,
+                "{:?}",
+                p
+            );
             let css = format!("html.{}", p.class());
             assert!(TOOLBAR_HTML.contains(&css), "CSS 缺根类 {css}");
         }
@@ -2357,8 +2376,14 @@ mod tests {
         // F-CEF-40：Menu 改 GTK 原生、Settings 改独立标签页，两者不再走 JS setter；
         // 其余 12 个面板仍必须走同一份 removePanelClasses 注册表。
         assert_eq!(TOOLBAR_HTML.matches("removePanelClasses('").count(), 12);
-        for line in TOOLBAR_HTML.lines().filter(|l| l.contains("classList.remove(")) {
-            assert!(line.matches("-open").count() <= 1, "残留手写互斥清单: {line}");
+        for line in TOOLBAR_HTML
+            .lines()
+            .filter(|l| l.contains("classList.remove("))
+        {
+            assert!(
+                line.matches("-open").count() <= 1,
+                "残留手写互斥清单: {line}"
+            );
         }
     }
 
@@ -2400,9 +2425,18 @@ mod tests {
         assert!(body.contains("pwpanel"), "工具栏 HTML 必须含密码面板");
         assert!(body.contains("dlpanel"), "工具栏 HTML 必须含下载面板");
         assert!(body.contains("menupanel"), "工具栏 HTML 必须含主菜单");
-        assert!(body.contains("uspanel"), "工具栏 HTML 必须含用户脚本面板（F-CEF-23）");
-        assert!(body.contains("findbar"), "工具栏 HTML 必须含页内查找栏（F-CEF-18）");
-        assert!(body.contains("zoomval"), "工具栏 HTML 必须含缩放百分比显示（F-CEF-18）");
+        assert!(
+            body.contains("uspanel"),
+            "工具栏 HTML 必须含用户脚本面板（F-CEF-23）"
+        );
+        assert!(
+            body.contains("findbar"),
+            "工具栏 HTML 必须含页内查找栏（F-CEF-18）"
+        );
+        assert!(
+            body.contains("zoomval"),
+            "工具栏 HTML 必须含缩放百分比显示（F-CEF-18）"
+        );
         assert!(
             body.contains(r#""filename":"a.zip""#),
             "下载记录 JSON 必须嵌进页面"

@@ -295,14 +295,16 @@ mod tests {
             ("脚本乙", "*://b.com/*\n*://c.com/*", "CODE_B", 0i64),
             ("脚本丙", "*://d.com/*", "CODE_C", 1i64),
         ] {
-            sqlx::query("INSERT INTO userscripts (name, matches, code, enabled) VALUES (?, ?, ?, ?)")
-                .bind(name)
-                .bind(matches)
-                .bind(code)
-                .bind(enabled)
-                .execute(&pool)
-                .await
-                .unwrap();
+            sqlx::query(
+                "INSERT INTO userscripts (name, matches, code, enabled) VALUES (?, ?, ?, ?)",
+            )
+            .bind(name)
+            .bind(matches)
+            .bind(code)
+            .bind(enabled)
+            .execute(&pool)
+            .await
+            .unwrap();
         }
         let got = list_userscripts(&pool).await.unwrap();
         assert_eq!(got.len(), 3);

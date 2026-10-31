@@ -24,7 +24,6 @@ use super::super::{unique_download_path, UI_FOCUSED};
 /// 从下载 URL 推导下载文件名（单一来源在 `tabs::util`，此处只做转引）。
 use crate::tabs::util::download_filename_from_url;
 
-
 /// 构造下载目的地的 file URI：路径含中文/空格时手拼 "file://…" 是非法 URI，
 /// WebKit 会取消下载（表现为"下载不能开始"），必须走 from_file_path（percent-编码）；
 /// 失败（相对路径/非 UTF-8）退回手拼，保证链路不断。

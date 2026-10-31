@@ -33,9 +33,7 @@ pub fn certificates_json(app: &AppHandle) -> String {
     let Some(db) = app.try_state::<crate::db::Db>() else {
         return "[]".to_string();
     };
-    match tauri::async_runtime::block_on(crate::db::certificates::list_certificates(
-        &db.pool,
-    )) {
+    match tauri::async_runtime::block_on(crate::db::certificates::list_certificates(&db.pool)) {
         Ok(rows) => {
             log::info!("[cef] 证书列表同步读取 {} 条（仅元信息）", rows.len());
             let list: Vec<serde_json::Value> = rows
@@ -67,7 +65,10 @@ pub fn certificates_json(app: &AppHandle) -> String {
 /// 解析删除动作参数 `host:port`（IPv6 支持括号形 `[::1]:8443`，也接受裸形 `::1:8443`）。
 fn parse_host_port(arg: &str) -> Option<(String, i64)> {
     let (host, port) = arg.rsplit_once(':')?;
-    let host = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
+    let host = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host);
     if host.is_empty() {
         return None;
     }
@@ -91,9 +92,9 @@ pub fn handle(cmd: &str, arg: &str) -> bool {
         "certdel" => {
             match parse_host_port(arg) {
                 Some((host, port)) => {
-                delete_record(&host, port);
-                super::shell::push_certs();
-            }
+                    delete_record(&host, port);
+                    super::shell::push_certs();
+                }
                 None => log::warn!("[cef] certdel 参数无效: {arg}（应为 host:port）"),
             }
             true
@@ -104,7 +105,9 @@ pub fn handle(cmd: &str, arg: &str) -> bool {
 
 fn delete_record(host: &str, port: i64) {
     let Some(app) = APP.get() else { return };
-    let Some(db) = app.try_state::<crate::db::Db>() else { return };
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return;
+    };
     match tauri::async_runtime::block_on(crate::db::certificates::delete(&db.pool, host, port)) {
         Ok(()) => log::info!("[cef] 已删除证书记录 {host}:{port}"),
         Err(e) => log::warn!("[cef] 删除证书记录失败 {host}:{port}: {e}"),
@@ -121,10 +124,7 @@ mod tests {
             parse_host_port("example.com:443"),
             Some(("example.com".into(), 443))
         );
-        assert_eq!(
-            parse_host_port("[::1]:8443"),
-            Some(("::1".into(), 8443))
-        );
+        assert_eq!(parse_host_port("[::1]:8443"), Some(("::1".into(), 8443)));
         assert_eq!(parse_host_port("::1:8443"), Some(("::1".into(), 8443)));
         // 畸形参数：无端口 / 端口非数字 / 空 host / 空串
         assert_eq!(parse_host_port("example.com"), None);

@@ -377,8 +377,8 @@ pub struct PasswordEntry {
 #[tokio::test]
 #[ignore]
 async fn import_passwords_from_csv() {
-    let path = std::env::var("PW_CSV")
-        .unwrap_or_else(|_| "/home/gao/Downloads/passwords.csv".to_string());
+    let path =
+        std::env::var("PW_CSV").unwrap_or_else(|_| "/home/gao/Downloads/passwords.csv".to_string());
     let content = std::fs::read_to_string(&path).expect("读 CSV 失败（路径用 PW_CSV 指定）");
     let home = std::env::var("HOME").expect("HOME");
     let dir = std::path::PathBuf::from(home).join(".local/share/com.shiftbrowser.app");
@@ -412,7 +412,11 @@ async fn import_passwords_from_csv() {
             .next()
             .unwrap_or(url)
             .to_string();
-        let user = if username.is_empty() { None } else { Some(username.clone()) };
+        let user = if username.is_empty() {
+            None
+        } else {
+            Some(username.clone())
+        };
         match save_password_inner(&db, &domain, user, password, None).await {
             Ok(_) => imported += 1,
             Err(e) => {

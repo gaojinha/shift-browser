@@ -15,6 +15,18 @@ use std::sync::{Mutex, OnceLock};
 use super::cef_ui::{cef_ui, cef_ui_call};
 use super::shell::lock_state;
 
+mod browser_inject;
+mod events;
+mod ops;
+
+pub use ops::focus;
+// eval_js 是 P2 快照/Agent 动作的预留注入口，当前只有接口没有调用方；
+// 一旦接入就删掉这行 allow（不是遮羞，是接口先行的过渡标记）。
+#[allow(unused_imports)]
+pub use ops::eval_js;
+
+pub use events::CefEvent;
+
 /// 已创建的浏览器句柄（按 tab_id 索引）。**句柄方法只能在 CEF UI 线程调用**，
 /// 存储本身跨线程安全（F-CEF-24b：thread_local → 全局 Mutex）。
 ///
@@ -40,36 +52,6 @@ static PENDING_SIZE: OnceLock<Mutex<HashMap<String, (i32, i32)>>> = OnceLock::ne
 /// 待应用尺寸表访问器（HashMap 非 const 构造，走 OnceLock 惰性初始化）
 fn pending_size() -> &'static Mutex<HashMap<String, (i32, i32)>> {
     PENDING_SIZE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// 标签页事件：从 CEF 回调发出，交给 Tauri 侧消费
-/// P1 阶段 Tauri 侧只消费 AfterCreated/Load*/BeforeClose；
-/// 其余字段随事件流转（cef_poll_events 调试可见），P2 标签体系接入后逐步消费。
-/// P2 标签体系接入前各变体字段随事件流转（cef_poll_events 调试可见），
-/// 暂无字段被 Tauri 侧消费，scoped 放行 dead_code（消费点在 M2 落地后自然消除）。
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum CefEvent {
-    /// 浏览器创建完成（此时才能安全调用导航类接口）
-    AfterCreated,
-    /// 页面标题变化
-    TitleChanged(String),
-    /// 地址变化（含重定向）
-    UrlChanged(String),
-    /// 开始加载
-    LoadStart(String),
-    /// 加载完成
-    LoadEnd(String),
-    /// 加载失败
-    LoadError {
-        url: String,
-        code: i32,
-        text: String,
-    },
-    /// 页面 console 输出
-    Console { level: String, message: String },
-    /// 即将关闭
-    BeforeClose,
 }
 
 /// 创建浏览器并嵌入到指定 X11 窗口（**异步**）。
@@ -100,9 +82,12 @@ fn create_browser_inner(
     bounds: (i32, i32, i32, i32),
     tx: Sender<(String, CefEvent)>,
 ) -> bool {
-    { let mut m = lock_state(pending_size()); {
-        m.insert(tab_id.clone(), (bounds.2, bounds.3));
-    } };
+    {
+        let mut m = lock_state(pending_size());
+        {
+            m.insert(tab_id.clone(), (bounds.2, bounds.3));
+        }
+    };
 
     let client: Client = CefTabClient::new(tab_id, tx);
 
@@ -118,7 +103,10 @@ fn create_browser_inner(
 
     let mut client = client;
     // 保活一份：CEF 在浏览器存活期间会引用 client
-    { let mut v = lock_state(&CLIENTS_ALIVE); v.push(client.clone()) };
+    {
+        let mut v = lock_state(&CLIENTS_ALIVE);
+        v.push(client.clone())
+    };
 
     let ret = browser_host_create_browser(
         Some(&window_info),
@@ -171,83 +159,26 @@ pub fn resize(browser: &Browser, width: i32, height: i32) {
     cef_ui(move || host.notify_screen_info_changed());
 }
 
-/// 让浏览器获得焦点（地址栏 ↔ 页面切换时调用）
-/// 浏览器聚焦（P2 标签切换/点击标签时调用），P1 预留。
-#[allow(dead_code)]
-pub fn focus(browser: &Browser) {
-    if let Some(host) = browser.host() {
-        host.set_focus(1);
-    }
-}
-
 /// document_start 阶段的注入标记（F-CEF-03 最小集）。
 ///
 /// 供 `CefTabLoadHandler` 与 `ShellContentLoadHandler` 共用——**同一类判定只许一份实现**。
-/// 本轮只注入一行标记，用于验证「CEF 能往页面注入 JS」这条链路；
-/// 后续 F-CEF-08（补 Google Chrome brand）、广告拦截、WebMCP 等全部搭这条通道。
+/// 脚本内容由 [`browser_inject::build_inject_script`] 生成（纯函数、可单测）；
+/// 本函数只负责"主框架判定 + 塞进 frame"。
 /// 只对主框架生效（子 frame 注入会重复且无意义）。
 pub fn inject_marker(frame: &mut Frame) -> bool {
     if frame.is_main() != 1 {
         return false;
     }
-    // ① 链路标记（证明通道可用）② 品牌表（F-CEF-08：CEF 用内核 154 派生，
-    // 与 user-agent 头自洽）。privacy.js 一旦接上注入通道，就会读 __SHIFT_UA_BRANDS__
-    // 去覆盖 navigator.userAgentData。
     let brands = crate::useragent::brands_json_for_engine();
-    // ③ userAgentData 覆盖：与 privacy.js 第 10 节同型（同一份品牌表语义），
-    //    这里是 CEF 侧的最小实现——完整 privacy.js 注入待 F-CEF-03 完整版。
-    //    真 Chrome 的 brands 有三项（含 Google Chrome），内核原生只有两项，
-    //    不覆盖就是「UA 说 Chrome、brands 里没有 Chrome」的硬伤（F-CEF-08）。
-    let script = format!(
-        r#"window.__SHIFT_INJECT_OK__ = true;
-window.__SHIFT_UA_BRANDS__ = {brands};
-(function () {{
-  try {{
-    var uad = navigator.userAgentData;
-    if (!uad) return;
-    var b = window.__SHIFT_UA_BRANDS__;
-    Object.defineProperty(navigator, 'userAgentData', {{
-      get: function () {{
-        return {{
-          brands: b || uad.brands,
-          mobile: false,
-          platform: 'Linux',
-          getHighEntropyValues: function () {{
-            return Promise.resolve({{ platform: 'Linux', platformVersion: '', architecture: '', model: '', uaFullVersion: '' }});
-          }},
-          toJSON: function () {{ return {{ brands: b || uad.brands, mobile: false, platform: 'Linux' }}; }}
-        }};
-      }},
-      configurable: true
-    }});
-  }} catch (e) {{}}
-}})();
-"#
-    );
     // F-CEF-11：同一次执行里带上预计算的扩展/隐私/广告拦截脚本（不注入两遍）。
-    // 放在品牌表之后：privacy.js 会读 __SHIFT_UA_BRANDS__（wl_prefix 里也会再赋同值）。
-    let script = match crate::extensions::cef_inject::cached_inject_js() {
-        Some(extra) => format!("{script}\n{extra}"),
-        None => script,
-    };
+    let extra = crate::extensions::cef_inject::cached_inject_js();
+    let script = browser_inject::build_inject_script(&brands, extra.as_deref());
     frame.execute_java_script(
         Some(&CefString::from(script.as_str())),
         Some(&CefString::from("shift://inject")),
         -1,
     );
     true
-}
-
-/// 在页面主框架执行 JS（忽略返回值）
-/// JS 注入（P2 快照/Agent 动作的注入口，接口已具备，见 docs/CEF换核规划_2026-10-25.md 第五节）。
-#[allow(dead_code)]
-pub fn eval_js(browser: &Browser, script: &str) {
-    let Some(frame) = browser.main_frame() else {
-        return;
-    };
-    let code = CefString::from(script);
-    let script_url = CefString::from("shift://inject");
-    frame.execute_java_script(Some(&code), Some(&script_url), -1);
 }
 
 /// 关闭浏览器（异步，`do_close` 生效）

@@ -189,7 +189,10 @@ mod tests {
         }
         let workspaces = super::list_workspaces_inner(&pool).await.unwrap();
         assert_eq!(
-            workspaces.iter().map(|w| w.name.as_str()).collect::<Vec<_>>(),
+            workspaces
+                .iter()
+                .map(|w| w.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["默认", "生活", "工作"]
         );
         assert_eq!(workspaces[1].color, "#12ab34");

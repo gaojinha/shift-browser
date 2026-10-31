@@ -11,7 +11,6 @@
 //!
 //! 未做：恢复会话（restore）需主应用 TabManager，CEF 侧留待 M2。
 
-
 use std::sync::OnceLock;
 use tauri::{AppHandle, Manager};
 
@@ -29,7 +28,10 @@ pub fn sessions_json(app: &AppHandle) -> String {
     };
     match tauri::async_runtime::block_on(crate::db::sessions::list_sessions_inner(&db.pool)) {
         Ok(rows) => {
-            log::info!("[cef] 会话列表同步读取 {} 条（仅展示字段，不含 data 全量）", rows.len());
+            log::info!(
+                "[cef] 会话列表同步读取 {} 条（仅展示字段，不含 data 全量）",
+                rows.len()
+            );
             let list: Vec<serde_json::Value> = rows
                 .iter()
                 .map(|s| {
@@ -101,16 +103,17 @@ pub fn handle(cmd: &str, arg: &str) -> bool {
 /// 恢复会话：读出 `data` 里的 URL 列表，逐个开标签（F-CEF-32）。
 fn restore_session(id: i64) {
     let Some(app) = APP.get() else { return };
-    let Some(db) = app.try_state::<crate::db::Db>() else { return };
-    let rows = match tauri::async_runtime::block_on(crate::db::sessions::list_sessions_inner(
-        &db.pool,
-    )) {
-        Ok(v) => v,
-        Err(e) => {
-            log::warn!("[cef] 恢复会话查库失败: {e}");
-            return;
-        }
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return;
     };
+    let rows =
+        match tauri::async_runtime::block_on(crate::db::sessions::list_sessions_inner(&db.pool)) {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("[cef] 恢复会话查库失败: {e}");
+                return;
+            }
+        };
     let Some(s) = rows.into_iter().find(|x| x.id == id) else {
         log::warn!("[cef] 恢复会话：id={id} 不存在");
         return;
@@ -118,11 +121,7 @@ fn restore_session(id: i64) {
     let urls: Vec<String> = serde_json::from_str::<Vec<serde_json::Value>>(&s.data)
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|v| {
-            v.get("url")
-                .and_then(|u| u.as_str())
-                .map(|x| x.to_string())
-        })
+        .filter_map(|v| v.get("url").and_then(|u| u.as_str()).map(|x| x.to_string()))
         .collect();
     if urls.is_empty() {
         log::warn!("[cef] 恢复会话 {id}：data 里没有可恢复的 URL");
@@ -134,7 +133,9 @@ fn restore_session(id: i64) {
 
 fn delete_session(id: i64) {
     let Some(app) = APP.get() else { return };
-    let Some(db) = app.try_state::<crate::db::Db>() else { return };
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return;
+    };
     match tauri::async_runtime::block_on(crate::db::sessions::delete_session_inner(&db.pool, id)) {
         Ok(()) => {
             log::info!("[cef] 已删除会话 {id}");
@@ -162,8 +163,14 @@ mod tests {
     #[test]
     fn parse_tab_count_forms() {
         assert_eq!(parse_tab_count("[]"), 0);
-        assert_eq!(parse_tab_count(r#"[{"url":"https://a.com"},{"url":"https://b.com"}]"#), 2);
-        assert_eq!(parse_tab_count(r#"[{"url":"https://a.com","title":"t","groupId":3}]"#), 1);
+        assert_eq!(
+            parse_tab_count(r#"[{"url":"https://a.com"},{"url":"https://b.com"}]"#),
+            2
+        );
+        assert_eq!(
+            parse_tab_count(r#"[{"url":"https://a.com","title":"t","groupId":3}]"#),
+            1
+        );
         // 损坏 / 非数组 → 0
         assert_eq!(parse_tab_count("not json"), 0);
         assert_eq!(parse_tab_count("123"), 0); // 数字不是数组
@@ -181,7 +188,7 @@ mod tests {
 
     #[test]
     fn own_cmds_swallowed() {
-        // 接线后 sesspanel/sessrefresh 走 shell setter（本阶段是 TODO no-op 分支，APP 未初始化也不触 DB）；
+        // 已接线：sesspanel/sessrefresh 走 shell setter（APP 未初始化时静默返回，不触 DB）；
         // sessdel 参数无效分支吞（warn 日志，不触 DB）
         assert!(handle("sesspanel", "1"));
         assert!(handle("sessrefresh", ""));

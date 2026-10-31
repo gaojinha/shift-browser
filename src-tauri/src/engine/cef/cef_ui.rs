@@ -204,7 +204,11 @@ mod tests {
         let ran2 = ran.clone();
         cef_ui_with(&ex, move || ran2.store(true, Ordering::SeqCst));
         assert!(ran.load(Ordering::SeqCst), "UI 线程上应原地执行");
-        assert_eq!(ex.post_count(), 0, "UI 线程上不得 post（防自 post 死锁回归）");
+        assert_eq!(
+            ex.post_count(),
+            0,
+            "UI 线程上不得 post（防自 post 死锁回归）"
+        );
     }
 
     /// 2) 非 UI 线程：恰好 post 1 次，取走前不执行、取走后执行。
@@ -235,7 +239,11 @@ mod tests {
         let ex = InlineExecutor::new(true, false);
         let r: &str = cef_ui_call_with(&ex, || "原地执行");
         assert_eq!(r, "原地执行");
-        assert_eq!(ex.post_count(), 0, "UI 线程上不得 post（防自 post 死锁回归）");
+        assert_eq!(
+            ex.post_count(),
+            0,
+            "UI 线程上不得 post（防自 post 死锁回归）"
+        );
     }
 
     /// 5) 顺序：连续 post 两个任务，UI 循环按 FIFO 取走，执行顺序不变。
@@ -254,6 +262,9 @@ mod tests {
             g.push("second");
         });
         ex.drain();
-        assert_eq!(*order.lock().unwrap_or_else(|e| e.into_inner()), vec!["first", "second"]);
+        assert_eq!(
+            *order.lock().unwrap_or_else(|e| e.into_inner()),
+            vec!["first", "second"]
+        );
     }
 }

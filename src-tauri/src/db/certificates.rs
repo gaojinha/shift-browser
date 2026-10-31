@@ -661,15 +661,17 @@ mod tests {
             ("m.com", 443, "fp-m", "+30 days"),
             ("a.com", 8443, "fp-a8", "+10 days"),
         ] {
-            let na: String =
-                sqlx::query_scalar(&format!("SELECT datetime('now', '{delta}')"))
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
+            let na: String = sqlx::query_scalar(&format!("SELECT datetime('now', '{delta}')"))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
             record(&pool, &info(host, port, fp, Some(&na))).await;
         }
         let got = list_certificates(&pool).await.unwrap();
-        let keys: Vec<String> = got.iter().map(|r| format!("{}:{}", r.host, r.port)).collect();
+        let keys: Vec<String> = got
+            .iter()
+            .map(|r| format!("{}:{}", r.host, r.port))
+            .collect();
         assert_eq!(
             keys,
             vec![
@@ -721,6 +723,9 @@ mod tests {
         let dl = r
             .days_left
             .expect("days_left 应解码成功（not_after 非 NULL，F-66 后不吞错）");
-        assert!((65..=66).contains(&dl), "not_after +66 天 → days_left 应为 65~66（实际 {dl}）");
+        assert!(
+            (65..=66).contains(&dl),
+            "not_after +66 天 → days_left 应为 65~66（实际 {dl}）"
+        );
     }
 }

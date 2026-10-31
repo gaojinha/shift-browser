@@ -102,7 +102,9 @@ pub fn handle(cmd: &str, arg: &str) -> bool {
 }
 
 fn rebuild_cef_inject_cache(app: &AppHandle) {
-    let Some(db) = app.try_state::<crate::db::Db>() else { return };
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return;
+    };
     tauri::async_runtime::block_on(async {
         if let Err(e) = crate::extensions::cef_inject::build_and_cache(&db).await {
             log::warn!("[cef] 注入缓存重建失败（下条标签重新载入时恢复）: {e}");
@@ -112,7 +114,9 @@ fn rebuild_cef_inject_cache(app: &AppHandle) {
 
 fn toggle_script(id: i64) {
     let Some(app) = APP.get() else { return };
-    let Some(db) = app.try_state::<crate::db::Db>() else { return };
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return;
+    };
     match tauri::async_runtime::block_on(crate::db::userscripts::toggle_userscript(&db.pool, id)) {
         Ok(Some(enabled)) => {
             log::info!("[cef] 用户脚本 {id} 启用状态 → {enabled}");
@@ -129,10 +133,11 @@ fn toggle_script(id: i64) {
 
 fn delete_script(id: i64) {
     let Some(app) = APP.get() else { return };
-    let Some(db) = app.try_state::<crate::db::Db>() else { return };
+    let Some(db) = app.try_state::<crate::db::Db>() else {
+        return;
+    };
     match tauri::async_runtime::block_on(crate::db::userscripts::delete_userscript_inner(
-        &db.pool,
-        id,
+        &db.pool, id,
     )) {
         Ok(()) => {
             log::info!("[cef] 已删除用户脚本 {id}");

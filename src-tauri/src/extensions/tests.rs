@@ -42,7 +42,11 @@ fn privacy_selftest_gpc_off_is_skip_not_fail() {
     let r = build_privacy_selftest("standard", "example.com", false, page);
     assert_eq!(r.total, 9);
     assert_eq!(r.passed, 8, "GPC 关闭时其余 8 项应全过");
-    let g = r.checks.iter().find(|c| c.id == "gpc").expect("应有 gpc 项");
+    let g = r
+        .checks
+        .iter()
+        .find(|c| c.id == "gpc")
+        .expect("应有 gpc 项");
     assert_eq!(g.status, "skip", "GPC 关闭属预期行为，应标 skip");
     assert!(
         g.detail.contains("与真 Chrome"),
@@ -56,7 +60,11 @@ fn privacy_selftest_gpc_field_missing_treated_as_on() {
     // 向后兼容：旧注入脚本不带 gpc_on 字段时按「开」处理，走原有 pass/fail 判定
     let page = r#"{"installed":true,"features":{"gpc":true,"canvas":true,"webgl":true,"audio":true,"hardware":true,"webrtc":true,"webgpu":true,"webgpu_engine":true,"misc":true}}"#;
     let r = build_privacy_selftest("standard", "example.com", false, page);
-    let g = r.checks.iter().find(|c| c.id == "gpc").expect("应有 gpc 项");
+    let g = r
+        .checks
+        .iter()
+        .find(|c| c.id == "gpc")
+        .expect("应有 gpc 项");
     assert_eq!(g.status, "pass", "缺字段应按开处理");
 }
 

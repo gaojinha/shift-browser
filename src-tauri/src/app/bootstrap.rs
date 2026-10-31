@@ -9,35 +9,17 @@ use tauri::Manager;
 // setup 的子步骤（按域拆出以控制本文件行数；调用顺序即原启动顺序，不可乱）
 #[path = "bootstrap/caches.rs"]
 mod caches;
+#[path = "bootstrap/fatal.rs"]
+mod fatal;
 #[path = "bootstrap/guards.rs"]
 mod guards;
+#[path = "bootstrap/stdio.rs"]
+mod stdio;
 #[path = "bootstrap/tray_setup.rs"]
 mod tray_setup;
 
-/// 致命错误提示：setup 失败路径（如数据库初始化失败）下 Vue UI 尚不可用，
-/// 只能走 GTK 原生层弹窗；与启动锁屏同模式——setup 在 GTK 主线程执行，
-/// `run()` 模态阻塞，用户确认后调用方返回 Err 退出。
-#[cfg(target_os = "linux")]
-fn show_fatal_dialog(app: &tauri::AppHandle, msg: &str) {
-    use gtk::prelude::*;
-    let parent = app.get_window("main").and_then(|w| w.gtk_window().ok());
-    let dialog = gtk::MessageDialog::new(
-        parent.as_ref(),
-        gtk::DialogFlags::MODAL,
-        gtk::MessageType::Error,
-        gtk::ButtonsType::Close,
-        msg,
-    );
-    dialog.set_title("Shift Browser 启动失败");
-    dialog.run();
-    dialog.close();
-}
-
-/// 非 Linux 平台暂无 GUI，致命信息落 stderr
-#[cfg(not(target_os = "linux"))]
-fn show_fatal_dialog(_app: &tauri::AppHandle, msg: &str) {
-    eprintln!("[ShiftBrowser] 致命错误: {msg}");
-}
+use fatal::show_fatal_dialog;
+use stdio::redirect_stdio_to_file;
 
 /// setup 闭包体（R2-1b 从 lib.rs 整体迁入）。
 ///
@@ -47,9 +29,7 @@ fn show_fatal_dialog(_app: &tauri::AppHandle, msg: &str) {
 /// 2026-10-27 高哥拍板：旧的主界面项目要停掉，CEF 构建只留单栈窗口。
 /// 之前用 `visible:false + hide()` 只是藏起来，X11 窗口仍 mapped（xwininfo 可见），
 /// 所以改成从 `tauri.conf.json` 删窗口声明、这里按模式创建。
-pub(crate) fn create_main_window(
-    app: &mut tauri::App,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn create_main_window(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let url = tauri::Url::parse("shift://main")?;
     tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::CustomProtocol(url))
         .title("Shift Browser")
@@ -410,37 +390,4 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     }
 
     Ok(())
-}
-
-/// 把 stdout/stderr 重定向到 `<app_data>/logs/stdio.log`（追加，超 5MB 轮转一份 .1）。
-///
-/// 必须在 CEF 初始化**之前**调用：CEF 子进程继承 stderr，Chromium 的崩溃线索
-/// （CHECK failed / renderer crash / GPU fallback）都从这里出来。
-fn redirect_stdio_to_file(app_data_dir: &std::path::Path) {
-    use std::os::fd::IntoRawFd;
-
-    let dir = app_data_dir.join("logs");
-    if std::fs::create_dir_all(&dir).is_err() {
-        return;
-    }
-    let path = dir.join("stdio.log");
-    // 简易轮转：只留一份上一版，避免无限增长
-    if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > 5 * 1024 * 1024 {
-        let _ = std::fs::rename(&path, dir.join("stdio.log.1"));
-    }
-    let Ok(f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    else {
-        return;
-    };
-    let fd = f.into_raw_fd();
-    // SAFETY: dup2 是异步信号安全的系统调用；成功后 fd 已复制，原 fd 可关。
-    unsafe {
-        libc::dup2(fd, libc::STDOUT_FILENO);
-        libc::dup2(fd, libc::STDERR_FILENO);
-        libc::close(fd);
-    }
-    log::info!("[ShiftBrowser] stdout/stderr 已落盘: {path:?}");
 }
