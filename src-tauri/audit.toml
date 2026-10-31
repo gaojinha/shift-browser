@@ -25,6 +25,15 @@ ignore = [
     "RUSTSEC-2025-0081", # unic-char-property 0.9.0 unmaintained
     "RUSTSEC-2025-0098", # unic-ucd-version 0.9.0 unmaintained
     "RUSTSEC-2025-0100", # unic-ucd-ident 0.9.0 unmaintained
+
+    # ── 2026-10-31 复核新增（王二狗）──
+    # tokio 1.53.1：unsound 点在 `AsyncFd::new` 系列构造（I/O safety）。
+    # 本仓 `grep -rn AsyncFd src-tauri/src` 零命中——不走 fd 注册路径，
+    # 只用 tokio 的 task/time/sync/process，触达面为零。等 tokio 发修复版再升。
+    "RUSTSEC-2026-0386", # tokio 1.53.1 AsyncFd I/O safety
+    # zvariant_derive 5.15.0：unmaintained（构建期 proc-macro）。
+    # 由 tauri → zbus 传递引入，非直接依赖；本仓不手写 D-Bus 序列化代码。
+    "RUSTSEC-2026-0372", # zvariant_derive 5.15.0 unmaintained
 ]
 
 # 评审日期：2026-09-24（R1 供应链加固）
