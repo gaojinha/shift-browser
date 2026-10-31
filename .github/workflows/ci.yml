@@ -82,6 +82,48 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
+  # 2026-10-31：CEF 已是主线（高哥 10-27 拍板只留单栈窗口），此前 CI 完全不覆盖
+  # cef-engine：14230 行代码 + 56 个单测从没在 CI 跑过。本 job 补这条缺口。
+  # 本机实测：check 0 警告、clippy --all-targets -D warnings 0 警告、
+  # test --lib 726 passed / 0 failed。clippy 暂不进 CI（CEF 冷编 + clippy 在 4 核上
+  # 近 30 分钟），等本 job 稳定一轮后再加，避免一次把 CI 拖成 25 分钟。
+  backend-cef:
+    name: 后端 CEF（cef-engine feature）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          # 与默认 feature 的缓存分开：feature 集合不同，混用会互相失效重编
+          shared-key: cef-engine
+      # cef-dll-sys 的 build.rs 走 cmake + ninja + C++ 工具链（本地实测依赖）
+      - name: 安装 Tauri + CEF 构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf \
+            cmake ninja-build clang libclang-dev
+      # 同 backend job：CI 不打包，占位文件让 build.rs / tauri 宏通过
+      - name: 占位 Web 扩展产物
+        run: |
+          mkdir -p src-tauri/resources
+          touch src-tauri/resources/libshift_web_extension.so
+      - name: 占位前端产物
+        run: |
+          mkdir -p dist
+          [ -f dist/index.html ] || echo '<!doctype html><title>ci</title>' > dist/index.html
+      - name: cargo fmt（格式不干净即失败）
+        working-directory: src-tauri
+        run: cargo fmt --check
+      - name: cargo check（cef-engine）
+        working-directory: src-tauri
+        run: cargo check --features cef-engine
+      - name: cargo test（cef-engine，含 CEF 模块 56 个单测）
+        working-directory: src-tauri
+        run: cargo test --lib --features cef-engine
+
   security:
     name: 供应链审计（cargo-audit）
     runs-on: ubuntu-latest
@@ -111,6 +153,7 @@ jobs:
           bash -n scripts/check-rs-file-size.sh
           bash -n scripts/check-bundle-size.sh
           bash -n scripts/check-log-secrets.sh
+          bash -n scripts/smoke-cef.sh
       # 大文件红线卡：任意 .rs >400 行必须在文件头带 LINES-EXEMPT 豁免标记
       # （防 page.rs 式治理后反弹，2026-10-14 落地）
       - name: 大文件行数红线检查
