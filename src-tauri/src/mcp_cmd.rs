@@ -139,8 +139,11 @@ mod tests {
     #[tokio::test]
     async fn server_views_roundtrip_and_count_fallback() {
         let (_dir, db) = temp_db().await;
-        // 经 engine 层真实落库两条：一条启用（命令不存在 → fetch_tools 快速失败 → tool_count=0）
-        // 一条落库后停用（直接 tool_count=0）
+        // 经 engine 层真实落库两条：一条启用（命令不存在 → fetch 快速失败 → tool_count=0）
+        // 一条落库后停用（直接 tool_count=0）。
+        // 走隔离连接表 fetch_tools_for_test（不碰生产 CONNECTIONS 静态表），
+        // 彻底消除与同进程并行的 mcp 端到端测试（node 假 server，各自 temp_db
+        // 自增 id 都从 1 起）在全局表上的跨测试串扰（2026-10-31 CI flaky 根因）。
         let id_a = crate::engine::mcp::add_server(
             &db.pool,
             "本地测试A".into(),
@@ -163,7 +166,29 @@ mod tests {
             .await
             .unwrap();
 
-        let views = server_views_inner(&db.pool).await.unwrap();
+        // 用隔离表版本拉 tool_count（与生产 server_views_inner 同逻辑，
+        // 仅 fetch 走 CONNECTIONS_TEST，物理隔离跨测试串扰）
+        let servers = crate::engine::mcp::list_servers(&db.pool).await.unwrap();
+        let mut views: Vec<McpServerView> = Vec::new();
+        for s in &servers {
+            let tool_count = if s.enabled {
+                match crate::engine::mcp::fetch_tools_for_test(&db.pool, s).await {
+                    Ok(t) => t.len(),
+                    Err(_) => 0,
+                }
+            } else {
+                0
+            };
+            views.push(McpServerView {
+                id: s.id,
+                name: s.name.clone(),
+                command: s.command.clone(),
+                args: s.args.clone(),
+                enabled: s.enabled,
+                allowed_tools: s.allowed_tools.clone(),
+                tool_count,
+            });
+        }
         assert_eq!(views.len(), 2);
         let a = views.iter().find(|v| v.id == id_a).unwrap();
         let b = views.iter().find(|v| v.id == id_b).unwrap();

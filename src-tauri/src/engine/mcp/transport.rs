@@ -185,6 +185,21 @@ pub(super) fn connections() -> &'static Mutex<HashMap<i64, Arc<tokio::sync::Mute
     CONNECTIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// 测试专用连接缓存（隔离表）：各测试 temp_db 的 server 自增 id 都从 1 起，
+/// 若共享生产 CONNECTIONS 表会跨测试撞车（connect 首步查表命中别的测试
+/// 残留条目 → tool_count 非 0，2026-10-31 CI flaky 根因）。
+/// `connect_for_test` / `remove_connection_for_test` 只操作本表，与生产
+/// 连接缓存物理隔离，彻底消除并发测试间的串扰窗口。
+#[cfg(test)]
+static CONNECTIONS_TEST: OnceLock<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<McpConnection>>>>> =
+    OnceLock::new();
+
+#[cfg(test)]
+pub(super) fn connections_test(
+) -> &'static Mutex<HashMap<i64, Arc<tokio::sync::Mutex<McpConnection>>>> {
+    CONNECTIONS_TEST.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// 首次连接串行锁（per-server）：`connect` 的缓存检查与插入之间隔着异步握手，
 /// 并发请求会各自 spawn 子进程（最后只留一个，白白浪费进程）。同一 server 的首次
 /// 连接在此排队，不同 server 互不阻塞。锁本身无状态，server 删除后残留条目可接受。
@@ -304,6 +319,92 @@ pub(super) async fn connect(
         .unwrap_or_else(|e| e.into_inner())
         .insert(row.id, conn.clone());
     Ok(conn)
+}
+
+/// 测试专用 `connect` 版本：查/插 `CONNECTIONS_TEST` 隔离表，不碰生产
+/// `CONNECTIONS`。逻辑与 `connect` 完全一致，仅缓存表不同（2026-10-31 CI
+/// flaky 根因修复：各测试 temp_db 自增 id 都从 1 起，共享生产表会跨测试
+/// 撞车；隔离表物理消除该窗口）。
+#[cfg(test)]
+pub(super) async fn connect_for_test(
+    pool: &SqlitePool,
+    row: &McpServerRow,
+) -> Result<Arc<tokio::sync::Mutex<McpConnection>>, String> {
+    let table = connections_test();
+    if let Some(conn) = table.lock().unwrap_or_else(|e| e.into_inner()).get(&row.id) {
+        return Ok(conn.clone());
+    }
+    let conn_lock = connect_lock(row.id);
+    let _guard = conn_lock.lock().await;
+    if let Some(conn) = table.lock().unwrap_or_else(|e| e.into_inner()).get(&row.id) {
+        return Ok(conn.clone());
+    }
+
+    let mut cmd = Command::new(&row.command);
+    cmd.args(&row.args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = cmd.spawn().map_err(|e| {
+        format!(
+            "启动 MCP server '{}' 失败: {}（命令: {}）",
+            row.name, e, row.command
+        )
+    })?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "无法获取 MCP stdin".to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "无法获取 MCP stdout".to_string())?;
+
+    let mut conn = McpConnection {
+        child,
+        stdin,
+        stdout: BufReader::new(stdout),
+        next_id: AtomicU64::new(1),
+        server_name: row.name.clone(),
+    };
+
+    match conn
+        .request(
+            "initialize",
+            json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": { "name": "shift-browser", "version": env!("CARGO_PKG_VERSION") },
+            }),
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            conn.kill().await;
+            return Err(e);
+        }
+    }
+    let _ = conn.notify("notifications/initialized", json!({})).await;
+    let enabled: Option<i64> = sqlx::query_scalar("SELECT enabled FROM mcp_servers WHERE id = ?")
+        .bind(row.id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("MCP server 状态复核失败: {}", e))?;
+    if enabled != Some(1) {
+        conn.kill().await;
+        return Err(format!(
+            "MCP server '{}' 已被删除或停用，连接已丢弃",
+            row.name
+        ));
+    }
+
+    let conn_arc = Arc::new(tokio::sync::Mutex::new(conn));
+    table
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(row.id, conn_arc.clone());
+    Ok(conn_arc)
 }
 
 #[cfg(test)]

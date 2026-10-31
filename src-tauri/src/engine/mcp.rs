@@ -249,6 +249,59 @@ pub async fn fetch_tools(pool: &SqlitePool, row: &McpServerRow) -> CommandResult
     Ok(out)
 }
 
+/// 测试专用 `fetch_tools` 版本：走 `connect_for_test`（隔离表 CONNECTIONS_TEST），
+/// 不碰生产 `CONNECTIONS` 缓存。mcp_cmd 测试族用它，彻底消除跨测试静态表串扰
+/// （2026-10-31 CI flaky 根因：各测试 temp_db 自增 id 都从 1 起，共享生产表
+/// 会在 connect() 首步查表时命中别的测试残留条目 → tool_count 非 0）。
+#[cfg(test)]
+pub async fn fetch_tools_for_test(
+    pool: &SqlitePool,
+    row: &McpServerRow,
+) -> CommandResult<Vec<McpTool>> {
+    let conn = transport::connect_for_test(pool, row)
+        .await
+        .map_err(AppError::net)?;
+    let mut conn = conn.lock().await;
+    let result = conn
+        .request("tools/list", json!({}))
+        .await
+        .map_err(|e| AppError::net(format!("server '{}' tools/list 失败: {}", row.name, e)))?;
+
+    let tools: Vec<Value> = result
+        .get("tools")
+        .and_then(|t| t.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut out = Vec::new();
+    for t in tools {
+        let tool_name = t
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or_default()
+            .to_string();
+        if tool_name.is_empty() {
+            continue;
+        }
+        if !row.allowed_tools.is_empty() && !row.allowed_tools.iter().any(|a| a == &tool_name) {
+            continue;
+        }
+        out.push(McpTool {
+            name: format!("{}__{}", row.name, tool_name),
+            tool_name: tool_name.clone(),
+            server_id: row.id,
+            server_name: row.name.clone(),
+            description: t
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            input_schema: t.get("inputSchema").cloned().unwrap_or(json!({})),
+        });
+    }
+    Ok(out)
+}
+
 /// 汇总全部启用 server 的工具列表（工具注册表快照）
 pub async fn list_tools(pool: &SqlitePool) -> CommandResult<Vec<McpTool>> {
     let servers = list_servers(pool).await?;

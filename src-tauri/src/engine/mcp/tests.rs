@@ -111,9 +111,11 @@ async fn mcp_end_to_end_with_fake_server() {
         err
     );
 
-    // 收尾清全局连接缓存：本测试 spawn 的假 server 连接插在进程级静态表里，
-    // 不清掉会串扰同进程并行的 mcp_cmd 测试（connect 首步查缓存命中 →
-    // tool_count 非 0，2026-10-31 CI flaky 根因）。
+    // 收尾清生产连接缓存（list_tools/call_tool 走生产 connections() 表），
+    // 避免残留 node 假 server 子进程。mcp_cmd 测试族走隔离表
+    // CONNECTIONS_TEST（fetch_tools_for_test），两条缓存物理隔离，互不串扰
+    // （2026-10-31 CI flaky 根因：各测试 temp_db 自增 id 都从 1 起，
+    // 共享生产表会在 connect() 首步查表时命中别的测试残留条目）。
     let removed = connections().lock().unwrap().remove(&id);
     if let Some(conn) = removed {
         if let Ok(mut c) = conn.try_lock() {
