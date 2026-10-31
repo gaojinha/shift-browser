@@ -83,7 +83,7 @@ uuid = { version = "1", features = ["v4"] }
 ammonia = "4"
 # readability 正文 HTML 转纯文本：用 HTML5 DOM 保留段落、标题和列表边界。
 html5ever = "0.26"
-markup5ever_rcdom = "0.2"
+markup5ever_rcdom = "0.39"
 # URL 解析（ai.rs SSRF 防护：校验 base_url 协议/主机）
 url = "2"
 # 系统文件对话框（XDG portal，走 DBus，不依赖 GTK 主线程）
