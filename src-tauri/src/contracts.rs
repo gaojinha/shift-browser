@@ -296,7 +296,8 @@ pub mod timeout {
     /// `mcp/transport.rs` 的 `request()` 双层超时）。本机 4 核秒级完成，但 CI
     /// 2vCPU 冷启动要连做两次 30s 级请求（initialize、tools/list）时偶发挤爆
     /// 单轮 30s 预算（2026-10-31 `mcp_cmd::tests::server_views_roundtrip`
-    /// 偶发红的根因）。60s 给足余量，生产路径对正常 server 无感知。
+    /// 偶发红的根因，30→60 修的是请求窗口）。60s 给足余量，生产路径对正常
+    /// server 无感知。
     pub const MCP_REQUEST_SECS: u64 = 60;
     /// 开放 API 命令执行（含长任务）
     pub const API_COMMAND_SECS: u64 = 120;

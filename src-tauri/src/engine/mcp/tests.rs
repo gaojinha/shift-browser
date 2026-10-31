@@ -110,6 +110,16 @@ async fn mcp_end_to_end_with_fake_server() {
         "应拒绝白名单外工具: {}",
         err
     );
+
+    // 收尾清全局连接缓存：本测试 spawn 的假 server 连接插在进程级静态表里，
+    // 不清掉会串扰同进程并行的 mcp_cmd 测试（connect 首步查缓存命中 →
+    // tool_count 非 0，2026-10-31 CI flaky 根因）。
+    let removed = connections().lock().unwrap().remove(&id);
+    if let Some(conn) = removed {
+        if let Ok(mut c) = conn.try_lock() {
+            c.kill().await;
+        }
+    }
 }
 
 #[test]
