@@ -29,9 +29,13 @@
 
 ## 四、交工关口（缺一不可）
 
+- `cargo fmt --check` 零 diff（2026-10-31 补：此前关口清单漏了它，机制上导致 144 处格式 diff 积累、CI 五连红）
 - `cargo clippy --all-targets` 零警告
 - `cargo test --lib` 全过，前端 `vitest` 全过
+- **动了 CEF 代码必跑**：`cargo test --lib --features cef-engine` 全过 +
+  `cargo clippy --all-targets --features cef-engine -- -D warnings` 零警告
 - `npm run lint` 过，`npm run build` 过，`vue-tsc --noEmit` 过
+- 静态卡：`bash scripts/check-rs-file-size.sh`、`bash scripts/check-log-secrets.sh` 均 exit 0
 - 提交前看 `status/diff/log`，只收 intended 文件；提交信息跟仓库风格（`fix(scope): ...`）
 - 收工后如实说：能验证的写验证方法，验不了的写缺什么条件
 

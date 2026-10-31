@@ -116,12 +116,17 @@ ShiftBrowser 的定位可以概括为三层：
 | 层 | 技术 |
 |---|---|
 | 桌面应用框架 | Tauri 2 + Rust |
-| 浏览器内核 | WebKitGTK + GTK |
-| 前端 | Vue 3 + TypeScript + Pinia + Tailwind + Vite |
-| 数据库 | SQLite + sqlx |
+| 浏览器内核 | **CEF（Chromium 154）单栈窗口为主线**；WebKitGTK 为 `--features cef-engine` 关闭时的回退构建 |
+| 前端 | Vue 3 + TypeScript + Pinia + Tailwind + Vite（WebKit 回退构建）；CEF 路径界面为内嵌 HTML（`engine/cef/toolbar.rs`） |
+| 数据库 | SQLite + sqlx（两条路径共用） |
 | AI 通信 | reqwest + OpenAI 兼容协议 + MCP JSON-RPC |
 | 安全 | AES-GCM / PBKDF2 / HMAC-SHA2 |
 | 契约生成 | ts-rs + build.rs |
+
+> 换核背景：WebKitGTK/GnuTLS 的 TLS 与 HTTP/2 指纹与真 Chrome 结构性不同，
+> JS 层无法修复，Cloudflare 类站点会直接判别。CEF 换核后 JA4/Akamai H2 五项与
+> Chrome 154 实测一致（见 `docs/test-reports/cef-fingerprint-2026-10-25.md`）。
+> 2026-10-27 高哥拍板：CEF 只留单栈窗口，不再嵌入旧主界面。
 
 ---
 
@@ -384,24 +389,29 @@ ShiftBrowser 的定位可以概括为三层：
 
 项目非常强，但是复杂度也明显较高，主要风险集中在下面几个方面：
 
-1. Linux / GTK 偏强绑定
-   - 当前平台偏 Linux
-   - WebKitGTK 和 GTK 必须兼容性良好
-   - 这会限制跨平台演进
+1. 平台绑定仍偏 Linux
+   - CEF 主线与 WebKit 回退都依赖 X11/GTK 系统库
+   - Wayland 需走 XWayland（`SHIFT_CEF_OZONE` 控制），纯 Wayland 待验证
+   - 跨平台（Windows/macOS）尚未排期
 
-2. 架构复杂度高
+2. **CEF 路径的 AI 能力尚未对齐（当前最大产品缺口）**
+   - 快照 / Agent 动作 / 翻译 / AI 侧边栏在 CEF 路径未接通
+   - 根因：`engine/content.rs` 的快照签名绑定 `webkit2gtk::WebView`，open API 也走 `with_webview`
+   - 方案与排期见 `docs/工程全面分析_2026-10-31.md` P1-5（先抽 `PageEval` trait）
+
+3. 架构复杂度高
    - 前端、浏览器内核、AI、数据库、安全治理交织
    - 模块边界需要持续维护，否则容易出现耦合回退
 
-3. Tauri unstable API 风险
+4. Tauri unstable API 风险
    - 项目使用了 unstable 能力
    - 升级 Tauri 版本时，底层行为可能变化
 
-4. 契约漂移风险
+5. 契约漂移风险
    - 这是项目特别强调治理的原因
    - 只要常量、契约或 schema 没有统一来源，就会出“看起来能用但实际上错位”的问题
 
-5. AI + 浏览器控制 + 本地系统访问叠加
+6. AI + 浏览器控制 + 本地系统访问叠加
    - 这是强能力，但也是高风险面
    - 必须持续维护白名单、权限、审计边界
 
@@ -426,6 +436,8 @@ ShiftBrowser 的定位可以概括为三层：
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf
+# CEF 主线构建额外需要（cmake/ninja 编 cef-dll-sys 的 wrapper）
+sudo apt install cmake ninja-build clang libclang-dev
 ```
 
 ### 安装前端依赖
@@ -445,8 +457,15 @@ cargo tauri dev
 
 ```bash
 npm run build
+# CEF 主线（当前发布物）
+cd src-tauri && cargo build --release --features cef-engine
+# WebKit 回退构建
 cd src-tauri && cargo build --release
 ```
+
+CEF 构建首次需下载约 150MB 的 CEF 运行时（crates.io 官方预编译包，SHA 校验内建），
+冷编译约 15 分钟。装到系统：`sudo bash scripts/install-cef.sh`。
+冒烟验收：`bash scripts/smoke-cef.sh`。
 
 ### MCP Server 构建
 

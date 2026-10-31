@@ -1,20 +1,36 @@
 # ShiftBrowser 架构文档（ARCH.md）
 
-> 建于 2026-10-15（F-11）。来源：仓库源码实读（非臆测）；行号会漂移，以文件/模块名为锚。
-> 配套文档：README.md（功能与使用）、CHANGELOG.md（变更台账）、docs/（专项方案与调研稿）。
+> 建于 2026-10-15（F-11）。**2026-10-31 重写技术栈与形态两节**：CEF 换核后原来的
+> "Tauri + WebKitGTK 单窗口多 webview" 已不是主线，文档滞后了一个月，与发布物完全相反。
+> 来源：仓库源码实读（非臆测）；行号会漂移，以文件/模块名为锚。
+> 配套文档：README.md（功能与使用）、CHANGELOG.md（变更台账）、
+> `docs/工程全面分析_2026-10-31.md`（质量门与产品缺口现状）、docs/（专项方案）。
 
 ## 一、技术栈与总览
 
 | 层 | 技术 |
 |---|---|
-| 桌面壳 | Tauri v2（GTK/WebKitGTK，Linux 主平台） |
+| 桌面壳 | Tauri v2（Linux 主平台）+ **CEF（Chromium 154）单栈窗口** |
+| 备用引擎 | WebKitGTK（`--features cef-engine` 关闭时的回退构建，功能对等） |
 | 后端 | Rust（sqlx 0.8 + SQLite，WAL；tokio 异步） |
 | 前端 | Vue 3 `<script setup>` + TypeScript + Pinia + vue-i18n + vitest |
-| 打包 | deb / appimage（package-deb.sh） |
+| 打包 | deb / appimage（package-deb.sh）；CEF 构建另有 scripts/install-cef.sh |
 
-架构形态：**单窗口多 webview**。每个标签一个 child webview（`tab-<id>`），
-Rust 侧 `TabManager`（内存态）为唯一事实来源，前端经事件 + invoke 同步；
-SQLite 落盘一切持久数据（`app_data_dir/shift-browser.db`，0600，目录 0700）。
+**双轨构建（编译期，不是运行期切换）**：
+
+| 构建 | 命令 | 形态 |
+|---|---|---|
+| CEF（主线，2026-10-27 高哥拍板） | `cargo build --release --features cef-engine` | CEF 自己创建的顶层窗口，自带工具栏/标签栏/内容区（`engine/cef/shell.rs`）；Tauri 主窗口**不创建** |
+| WebKit（回退） | `cargo build --release` | Tauri + GTK/WebKitGTK，单窗口多 webview |
+
+CEF 路径的界面是 `engine/cef/toolbar.rs` 里的单字符串 HTML/CSS/JS，跑在独立的
+`BrowserView` 上；动作经 `console.log("SHIFT_ACT:...")` 回到 Rust 侧
+`shell.rs::handle_action`（99 个动作分支 + 13 个面板注册表）。
+**这条路径不经过 Vue**，所以 `AISidebar.vue` / `TranslatePanel.vue` 只在 WebKit 回退构建里生效。
+
+WebKit 路径的形态：每个标签一个 child webview（`tab-<id>`），Rust 侧 `TabManager`
+（内存态）为唯一事实来源，前端经事件 + invoke 同步。
+两条路径共用 SQLite 落盘（`app_data_dir/shift-browser.db`，0600，目录 0700）。
 
 ## 二、目录地图
 
@@ -42,7 +58,19 @@ src-tauri/src/           后端（Rust）
     backend/layout.rs    GTK 布局与 webview 挂载
     commands/            Tauri command（lifecycle/nav_cmds/tab_state_cmds…）
     util.rs              clean_tracking_params / sanitize_filename
-  engine/                WebKit 引擎封装（webview 操作、mcp client）
+  engine/                引擎抽象与实现
+    webview.rs           WebKit 路径的 eval/快照封装（回退构建用）
+    content.rs           SNAPSHOT_JS 注入 + 语义快照（签名绑定 webkit2gtk::WebView，CEF 侧待抽象，见分析报告 P1-5）
+    mcp/ MCP client      MCP 工具桥
+    cef/                  CEF 引擎（`--features cef-engine` 才编译，14230 行）
+      shell.rs           单栈窗口 + 99 个 SHIFT_ACT 动作分发 + 13 个面板注册表（LINES-EXEMPT）
+      toolbar.rs         工具栏 HTML/CSS/JS 单字符串内嵌页（LINES-EXEMPT）
+      browser.rs         单标签 Browser 封装（388 行，拆出 browser/ 下的 inject/events/ops）
+      newtab.rs          新标签页（HTML 在 newtab_page.html，include_str! 引入）
+      *_ui.rs            各面板后端（书签/密码/历史/下载/证书/用户脚本/会话/分组/命令面板）
+      app.rs             CefApp 初始化与 CEF 消息循环
+  extensions/            注入体系：adblock / privacy / userscripts / cef_inject（CEF 侧预计算注入）
+  cef_cmd.rs             CEF 的 Tauri 命令 + 子进程入口（拆出 cef_cmd/{cef_boot,toolbar_data}.rs）
   translate.rs webzh.rs  引擎翻译 + AI 整页汉化（翻译记忆查/写在 db/translate_memory.rs）
   api/                   开放 API（本机 HTTP，SSRF 守卫 + 只读闸门 + 审计）
   capabilities/          能力注册表 SSOT（registry/skills/plugins/agent_actions）
@@ -89,13 +117,20 @@ src-tauri/src/           后端（Rust）
 
 ## 六、测试体系
 
-| 层 | 工具 | 现状（2026-10-15） |
+| 层 | 工具 | 现状（2026-10-31 实跑） |
 |---|---|---|
-| Rust 单测/集成 | `cargo test --lib` | 460 例（db 层多为真实临时库跑完整迁移） |
-| Rust 关口 | `cargo clippy --all-targets` | 0 警告红线 |
-| 前端组件/store | vitest（jsdom） | 506 例 / 50 文件；mock Tauri IPC + 真实 pinia |
-| 前端类型/lint | vue-tsc / eslint | 0 错红线 |
+| Rust 单测 | `cargo test --lib` | **670 passed / 0 failed / 2 ignored**（110s） |
+| Rust 单测（CEF） | `cargo test --lib --features cef-engine` | **726 passed / 0 failed / 2 ignored**（含 CEF 模块 56 例） |
+| Rust 关口 | `cargo clippy --all-targets -- -D warnings` | 0 警告；加 `--features cef-engine` 同样 0 警告 |
+| 格式 | `cargo fmt --check` | 0 diff（2026-10-31 全量格式化后） |
+| 前端组件/store | vitest（jsdom） | **902 例 / 86 文件全过**（约 55s） |
+| 前端类型/lint | vue-tsc / eslint | 0 错 |
+| 前端构建 | vite build + 首屏体积卡 | 通过（index 184 kB，豁免清单内） |
+| CEF 冒烟 | `scripts/smoke-cef.sh` | 2026-10-31 新增（检查项见脚本头注释） |
 | 真机 E2E | playwright MCP（e2e-verify 技能） | 按批次做，无常驻 |
+
+**数字口径**：以上均为本机实跑结果，不引用历史文档里的旧数字（ARCH 旧版写 460/506，
+已作废）。改动后以 `cargo test --lib` 与 `npx vitest run` 的实际输出为准。
 
 手法惯例：**核心逻辑抽纯函数使其可单测**（如 nav_scheme_error、crash_reload_allowed、
 file_internal_page），命令层/信号层薄壳依赖 AppHandle+GTK 的不硬测。
