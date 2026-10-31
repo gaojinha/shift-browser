@@ -572,7 +572,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "thiserror 2.0.20",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -626,7 +626,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "thiserror 2.0.20",
+ "thiserror 2.0.21",
  "windows-sys 0.61.2",
 ]
 
@@ -1257,7 +1257,7 @@ dependencies = [
  "serde_json",
  "sha1_smol",
  "tar",
- "thiserror 2.0.20",
+ "thiserror 2.0.21",
  "ureq",
 ]
 
