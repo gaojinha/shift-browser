@@ -63,3 +63,9 @@ __pycache__/
 
 # 临时截图/取证垃圾（2026-10-27 二狗补：曾被 git add -A 误入账）
 tmp/
+
+# 设计工具产物与页面快照（2026-10-31 清理：26 张 png/jpg + report.json 曾误入库）
+.taste-skill/
+tabsearch-hover.png
+# 世界导航数据的一次性回滚备份（保留本地，不入库；本体 worldnav.json 仍入库）
+src-tauri/resources/worldnav.json.bak-*
