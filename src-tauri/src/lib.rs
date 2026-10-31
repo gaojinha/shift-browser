@@ -462,6 +462,10 @@ pub fn run() {
             agent_cmd::agent_action_replay_or_retry,
             agent_cmd::agent_actions_batch_retry,
             agent_cmd::agent_debug_execute,
+            // CEF 引擎（换核实验，--features cef-engine）：页面理解层 CEF 侧接入
+            // （P1-5 步 1：console 前缀路由回收 JS 结果，WebKit 路径不变）
+            #[cfg(feature = "cef-engine")]
+            content_cmd::content_snapshot_cef,
             // 扩展管理
             extensions::load_extension,
             extensions::list_extensions,

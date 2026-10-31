@@ -2582,6 +2582,16 @@ wrap_display_handler! {
                 return 1;
             }
 
+            // P1-5：eval 结果回传前缀（`__shift_eval__:<req_id>:...`）。
+            // 直接内联 `dispatch_eval_result`——只动 pending 锁（线程不敏感），
+            // 不在 UI 线程阻塞。匹配不到 req_id 静默丢弃（站点误撞/已超时）。
+            if trimmed.starts_with(crate::engine::page_eval::CE_EVAL_PREFIX) {
+                crate::engine::cef::eval::dispatch_eval_result(
+                    trimmed.strip_prefix(crate::engine::page_eval::CE_EVAL_PREFIX).unwrap(),
+                );
+                return 1;
+            }
+
             match trimmed {
                 "SHIFT_ACT:ctxback" => handle_action("back"),
                 "SHIFT_ACT:ctxforward" => handle_action("forward"),

@@ -19,6 +19,7 @@ pub mod content_filter;
 pub mod layout;
 pub mod llmstxt;
 pub mod mcp;
+pub mod page_eval;
 pub mod platform;
 pub mod types;
 pub mod webmcp;

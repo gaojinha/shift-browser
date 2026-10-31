@@ -432,6 +432,110 @@ pub async fn execute_agent_action(
     crate::engine::agent::parse_js_result(&raw)
 }
 
+/// CEF 版 Agent 动作执行（P1-5 步 1）：不走 `TabManager`/GTK `webview`，
+/// 直接按 `shell::CONTENT_ID` 取 `BROWSERS` 句柄，经 `CefPageEval`（console
+/// 前缀路由）回收结果。`navigate`/`back` 走 CEF `frame.load_url`/`go_back`
+/// （不注 JS），其余动作（click/fill/scroll/read/submit）复用
+/// `build_action_js` 产物（字节不变），只把回收通道换成 CEF 的。
+/// 全程本地：CEF 页面 JS 执行，不抓 URL、不出网（SSRF 护栏在 navigate 分支内联保留）。
+#[cfg(feature = "cef-engine")]
+#[allow(dead_code)] // AI 循环接入 CEF 路径时调用，接口先行
+pub async fn execute_agent_action_cef(
+    _app: &AppHandle,
+    params: &crate::engine::agent::AgentActionParams,
+) -> CommandResult<String> {
+    use cef::{ImplBrowser, ImplFrame};
+
+    use crate::engine::cef::cef_ui::cef_ui_call;
+    use crate::engine::cef::eval::CefPageEval;
+    use crate::engine::cef::shell::CONTENT_ID;
+    use crate::engine::page_eval::PageEval;
+
+    let action = params.action.as_str();
+
+    match action {
+        "wait" => {
+            tokio::time::sleep(std::time::Duration::from_millis(
+                params.ms.unwrap_or(500).min(10000),
+            ))
+            .await;
+            return Ok(format!("已等待 {} 毫秒", params.ms.unwrap_or(500)));
+        }
+        "navigate" => {
+            let url = params
+                .url
+                .clone()
+                .ok_or_else(|| AppError::validation("缺少 url"))?;
+
+            // Agent 导航守卫（与 WebKit 版同口径：纯函数护栏 + 内网校验）
+            validate_agent_nav_url(&url)?;
+
+            let url_owned = url.clone();
+            cef_ui_call(move || {
+                use cef::ImplBrowser;
+                let frame = {
+                    use crate::engine::cef::browser::browsers;
+                    browsers()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .get(CONTENT_ID)
+                        .and_then(|b| b.main_frame())
+                };
+                if let Some(frame) = frame {
+                    frame.load_url(Some(&cef::CefString::from(url_owned.as_str())));
+                } else {
+                    log::warn!("[agent-cef] 找不到 CONTENT_ID 的 frame，导航跳过");
+                }
+            });
+
+            return Ok(format!("已跳转到 {url}（CEF）"));
+        }
+        "back" => {
+            cef_ui_call(|| {
+                let b = {
+                    use crate::engine::cef::browser::browsers;
+                    browsers()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .get(CONTENT_ID)
+                        .cloned()
+                };
+                if let Some(b) = b {
+                    // can_go_back/go_back 挂在 Browser 上（ImplBrowser），不在 Frame 上
+                    if b.can_go_back() == 1 {
+                        b.go_back();
+                    }
+                }
+            });
+            return Ok("已后退一页（CEF）".to_string());
+        }
+        "snapshot" => {
+            let snap = crate::content_cmd::content_snapshot_cef().await?;
+            let text = serde_json::to_string(&snap).unwrap_or_default();
+            return Ok(text.chars().take(3000).collect());
+        }
+        _ => {}
+    }
+
+    // 页面 JS 动作（click/fill/scroll/read/submit）
+    let js = crate::engine::agent::build_action_js(params)?
+        .ok_or_else(|| AppError::internal("动作未生成脚本"))?;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    cef_ui_call(move || {
+        let eval = CefPageEval::new(CONTENT_ID);
+        eval.eval_js_with(&js, tx);
+    });
+
+    let raw = rx
+        .recv_timeout(std::time::Duration::from_secs(
+            crate::contracts::timeout::WEBVIEW_IPC_SECS,
+        ))
+        .map_err(|e| AppError::timeout(format!("CEF 动作执行超时: {e}")))?
+        .map_err(|e| AppError::internal(format!("CEF 页面脚本执行失败: {e}")))?;
+    crate::engine::agent::parse_js_result(&raw)
+}
+
 /// 手动执行动作（前端"测试"用，绕过 AI 确认——仅供调试，生产由 AI 循环走确认流程）
 /// 注意：此命令不经过确认，仅限设置页调试入口使用。
 #[allow(clippy::too_many_arguments)]

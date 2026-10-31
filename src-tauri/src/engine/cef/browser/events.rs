@@ -29,6 +29,12 @@ pub enum CefEvent {
     },
     /// 页面 console 输出
     Console { level: String, message: String },
+    /// JS eval 结果回传（P1-5：CEF 侧"注 JS + 收回结果"链路专用）。
+    ///
+    /// `payload` 是注入 JS 通过 `console.log` 回打的**编码后**原文
+    /// （`<req_id>:<OK|ERR>:<urlencoded_result>`），由消费方按 req_id 匹配
+    /// 到 pending 表；不匹配直接丢弃（站点误打/残留消息无副作用）。
+    EvalResult { payload: String },
     /// 即将关闭
     BeforeClose,
 }

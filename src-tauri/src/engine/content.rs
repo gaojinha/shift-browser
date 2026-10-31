@@ -170,7 +170,7 @@ const MAX_LINKS: usize = 30;
 /// DOM 提取脚本（在 webview 内执行，返回 JSON 字符串）。
 /// 注意：这是字符串嵌入的 JS，**不能**用 Rust 的 {} 插值（会与 JS 模板串冲突），
 /// 用 const 拼接（与 content_filter.rs 的 JSON 转义教训一致）。
-const SNAPSHOT_JS: &str = r#"
+pub const SNAPSHOT_JS: &str = r#"
 (function() {
   var MAX_TEXT = 4000, MAX_FORMS = 20, MAX_LINKS = 30;
   var doc = document;

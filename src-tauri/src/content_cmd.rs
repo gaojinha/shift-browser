@@ -70,6 +70,50 @@ pub async fn content_snapshot(
     Ok(snap)
 }
 
+/// CEF 版语义快照（P1-5 步 1）：单栈窗口内容页固定是 `shell::CONTENT_ID`，
+/// 不走 `TabManager`（CEF 构建里没有），直接按 `CONTENT_ID` 取 `BROWSERS`
+/// 句柄，经 `CefPageEval`（console 前缀路由）回收结果。
+/// 全程本地：CEF 页面 JS 提取 DOM → 结构化 JSON，不抓 URL、不出网。
+#[cfg(feature = "cef-engine")]
+#[tauri::command]
+pub async fn content_snapshot_cef() -> Result<crate::engine::content::Snapshot, CommandError> {
+    use crate::engine::cef::eval::CefPageEval;
+    use crate::engine::cef::shell::CONTENT_ID;
+    use crate::engine::page_eval::PageEval;
+
+    // 只发起（CEF UI 线程铁律：绝不能在回调里阻塞等结果），结果经 channel
+    // 异步回来，在 async 线程（非 UI 线程）等待
+    let (tx, rx) = std::sync::mpsc::channel();
+    crate::engine::cef::cef_ui::cef_ui_call(move || {
+        let eval = CefPageEval::new(CONTENT_ID);
+        eval.eval_js_with(crate::engine::content::SNAPSHOT_JS, tx);
+    });
+
+    let snap_json = rx
+        .recv_timeout(std::time::Duration::from_secs(
+            crate::contracts::timeout::WEBVIEW_IPC_SECS,
+        ))
+        .map_err(|e| CommandError {
+            code: crate::error::E_TIMEOUT,
+            message: format!("CEF 快照提取超时: {e}"),
+        })??;
+
+    let snap: crate::engine::content::Snapshot =
+        serde_json::from_str(&snap_json).map_err(|e| CommandError {
+            code: crate::error::E_INTERNAL,
+            message: format!("CEF 快照解析失败: {e}"),
+        })?;
+
+    log::info!(
+        "[content] CEF 语义快照: title={} 链接={} 按钮={} 表单={}",
+        snap.title,
+        snap.interactive.links,
+        snap.interactive.buttons,
+        snap.forms.len()
+    );
+    Ok(snap)
+}
+
 /// 正文提取（content/extract）：复用 reader.rs 的抓取+readability 管线。
 /// 注意：这是出网操作（抓 URL），由调用方确保用户已授权。
 #[tauri::command]

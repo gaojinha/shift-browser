@@ -16,6 +16,7 @@ use super::cef_ui::{cef_ui, cef_ui_call};
 use super::shell::lock_state;
 
 mod browser_inject;
+mod console_route;
 mod events;
 mod ops;
 
@@ -348,10 +349,11 @@ wrap_display_handler! {
             _source: Option<&CefString>,
             _line: i32,
         ) -> i32 {
-            let _ = self.tx.send((self.tab_id.clone(), CefEvent::Console {
-                level: format!("{:?}", level),
-                message: message.map(|s| s.to_string()).unwrap_or_default(),
-            }));
+            let raw = message.map(|s| s.to_string()).unwrap_or_default();
+            // P1-5：eval 前缀路由在 console_route.rs（同一类判定只许一份实现），
+            // 命中走 EvalResult、不命中走 Console；只转发不阻塞（UI 线程铁律）。
+            let ev = console_route::route_console_message(&format!("{level:?}"), &raw);
+            let _ = self.tx.send((self.tab_id.clone(), ev));
             0
         }
     }
