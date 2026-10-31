@@ -25,8 +25,7 @@ fn host_of_extracts_host_and_strips_userinfo() {
 
 // ---- decrypt_login_blob：透传 F-90 原语（黄金向量语义在此再锁一层） ----
 
-const GOLDEN_V10_CT_HEX: &str =
-    "8a2f0711b2b584b62bd4f134bd2d425636de3c42f4b17b617ba3fa739ad827a7";
+const GOLDEN_V10_CT_HEX: &str = "8a2f0711b2b584b62bd4f134bd2d425636de3c42f4b17b617ba3fa739ad827a7";
 const GOLDEN_V11_SECRET: &str = "q7b7aG9hbm9yaXNlaGVpZGVp";
 const GOLDEN_V11_CT_HEX: &str = "035436fe29e7cbbcf01298db6336bf4f";
 

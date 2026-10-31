@@ -99,11 +99,10 @@ async fn test_sweep_interrupted_marks_stale_in_progress() {
         .unwrap();
     let swept = super::sweep_interrupted_downloads(&pool).await.unwrap();
     assert_eq!(swept, 1, "只有 in_progress 的 a.bin 被扫尾");
-    let state: String =
-        sqlx::query_scalar("SELECT state FROM downloads WHERE filename = 'a.bin'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let state: String = sqlx::query_scalar("SELECT state FROM downloads WHERE filename = 'a.bin'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(state, "interrupted");
     // completed 的不受影响；二次扫尾为 0（幂等）
     let swept2 = super::sweep_interrupted_downloads(&pool).await.unwrap();
