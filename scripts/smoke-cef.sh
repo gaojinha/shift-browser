@@ -9,6 +9,11 @@
 # 与 scripts/smoke.sh 的区别：那份检查 WebKitGTK 路径专有关键字（GtkOverlay/reparent），
 # CEF 构建下永远不会出现，直接跑必红。本脚本只认 CEF 侧日志与 X11 事实。
 #
+# 日志位置：CEF 构建启动时 redirect_stdio_to_file 把 stdout/stderr 落到
+#   ~/.local/share/com.shiftbrowser.app/logs/stdio.log（追加 + 5MB 轮转），
+# 本脚本直接读那个文件；每次完整冒烟前 truncate 一次，--no-restart 时截尾 200 行。
+# 前提：同机无其他 ShiftBrowser 实例在跑（脚本会 pkill 掉 CEF 构建实例）。
+#
 # 退出码：0=全过（SKIP 不算失败），1=任一关键项失败，2=用法错误
 #
 # 诚实边界（别当成万能验收）：
@@ -21,8 +26,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_BIN="${APP_BIN:-$REPO_ROOT/src-tauri/target/release/shift-browser}"
-LOG_DIR="${TMPDIR:-/tmp}/opencode"
-LOG="$LOG_DIR/shift-cef-smoke.log"
+APP_DATA="${HOME}/.local/share/com.shiftbrowser.app"
+LOG="$APP_DATA/logs/stdio.log"
 RESTART=1
 BOOT_TIMEOUT="${BOOT_TIMEOUT:-60}"
 
@@ -63,16 +68,15 @@ if [ ! -x "$APP_BIN" ]; then
   exit 2
 fi
 
-mkdir -p "$LOG_DIR"
-
 # ---------- 0. 启动 ----------
+# CEF 构建的启动脚本会把 stdio 重定向到 $LOG（redirect_stdio_to_file），
+# 该文件跨启动追加——用启动前行数 + 窗口内的 [cef] 关键字判断本次启动。
 if [ "$RESTART" = "1" ]; then
   echo "[0/3] 重启 CEF 构建..."
   pkill -x shift-browser 2>/dev/null || true
   sleep 2
-  rm -f "$LOG"
-  # CEF 子进程继承 stderr；setsid 让整棵进程树独立
-  setsid "$APP_BIN" >"$LOG" 2>&1 </dev/null &
+  : >"$LOG" 2>/dev/null || true
+  setsid "$APP_BIN" </dev/null &
   started=0
   for _ in $(seq 1 "$BOOT_TIMEOUT"); do
     sleep 1
@@ -92,7 +96,8 @@ if [ "$RESTART" = "1" ]; then
   echo "  已启动，等待窗口映射..."
   sleep 3
 else
-  echo "[0/3] 跳过重启（--no-restart）"
+  echo "[0/3] 跳过重启（--no-restart）；按已有 $LOG 尾部 200 行检查"
+  tail -200 "$LOG" >"$LOG.tmp" && cat "$LOG.tmp" >"$LOG" && rm -f "$LOG.tmp"
 fi
 
 echo ""
