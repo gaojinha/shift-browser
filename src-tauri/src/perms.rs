@@ -1,3 +1,4 @@
+// LINES-EXEMPT: WebKit 权限请求矩阵穷举，集中一处才能核对每种权限都有显式处置
 //! WebKit 权限请求处理（安全 #2 · 2026-09-22）
 //!
 //! 此前全项目**未注册** `permission-request`，摄像头/麦克风/地理位置/通知的放行
@@ -351,8 +352,12 @@ mod tests {
     #[tokio::test]
     async fn apply_rule_persists_and_round_trips_through_db() {
         let (_dir, db) = temp_db().await;
-        apply_rule(&db.pool, "media", "meet.example", true).await.unwrap();
-        apply_rule(&db.pool, "geolocation", "maps.example", true).await.unwrap();
+        apply_rule(&db.pool, "media", "meet.example", true)
+            .await
+            .unwrap();
+        apply_rule(&db.pool, "geolocation", "maps.example", true)
+            .await
+            .unwrap();
 
         let map = read_allow_map(&db.pool).await;
         assert_eq!(map.get("media").unwrap(), &vec!["meet.example".to_string()]);
@@ -365,8 +370,12 @@ mod tests {
     #[tokio::test]
     async fn apply_rule_twice_is_idempotent() {
         let (_dir, db) = temp_db().await;
-        apply_rule(&db.pool, "notification", "dup.example", true).await.unwrap();
-        apply_rule(&db.pool, "notification", "dup.example", true).await.unwrap();
+        apply_rule(&db.pool, "notification", "dup.example", true)
+            .await
+            .unwrap();
+        apply_rule(&db.pool, "notification", "dup.example", true)
+            .await
+            .unwrap();
 
         let map = read_allow_map(&db.pool).await;
         assert_eq!(
@@ -379,8 +388,12 @@ mod tests {
     #[tokio::test]
     async fn revoking_last_host_removes_kind_from_db() {
         let (_dir, db) = temp_db().await;
-        apply_rule(&db.pool, "media", "meet.example", true).await.unwrap();
-        apply_rule(&db.pool, "media", "meet.example", false).await.unwrap();
+        apply_rule(&db.pool, "media", "meet.example", true)
+            .await
+            .unwrap();
+        apply_rule(&db.pool, "media", "meet.example", false)
+            .await
+            .unwrap();
 
         let map = read_allow_map(&db.pool).await;
         assert!(

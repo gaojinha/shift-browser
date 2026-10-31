@@ -1,3 +1,4 @@
+// LINES-EXEMPT: shift:// 自定义协议路由表与各 scheme 响应实现同处，路由与实现必须一一对应
 //! shift:// 自定义协议响应（R1 拆分 · 2026-09-24）。
 //!
 //! - `shift://main` → dist 前端资源（asset_resolver 读嵌入资源，替换 invoke_key）
@@ -126,7 +127,10 @@ pub(crate) fn handle(
                 return shift_response(
                     200,
                     &[
-                        (tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                        (
+                            tauri::http::header::CONTENT_TYPE,
+                            "text/html; charset=utf-8",
+                        ),
                         (tauri::http::header::CONTENT_SECURITY_POLICY, csp.as_str()),
                     ],
                     html.into_bytes(),
@@ -228,7 +232,12 @@ pub(crate) fn handle(
                         Some(db) => {
                             let mem_key = crate::db::translate_memory::hmac_key(db.inner()).await;
                             crate::translate::translate_text_cached(
-                                &db.pool, &text, "zh-CN", &engine, &dual_mode, timeout,
+                                &db.pool,
+                                &text,
+                                "zh-CN",
+                                &engine,
+                                &dual_mode,
+                                timeout,
                                 mem_key.as_ref(),
                             )
                             .await
@@ -343,14 +352,24 @@ pub(crate) fn handle(
                             crate::translate::current_dual_mode(db.inner()).await,
                             crate::translate::current_timeout(db.inner()).await,
                         ),
-                        None => ("google".to_string(), "zh-CN".to_string(), "single".to_string(), 15),
+                        None => (
+                            "google".to_string(),
+                            "zh-CN".to_string(),
+                            "single".to_string(),
+                            15,
+                        ),
                     };
                     // C-9：命中记忆的段落不发第三方，仅翻未命中（每批 5 段并发的口径不变）
                     let out = match db.as_ref() {
                         Some(db) => {
                             let mem_key = crate::db::translate_memory::hmac_key(db.inner()).await;
                             crate::translate::translate_batch_cached(
-                                &db.pool, &texts, &target, &engine, &dual_mode, timeout,
+                                &db.pool,
+                                &texts,
+                                &target,
+                                &engine,
+                                &dual_mode,
+                                timeout,
                                 mem_key.as_ref(),
                             )
                             .await
@@ -419,7 +438,10 @@ pub(crate) fn handle(
         shift_response(
             200,
             &[
-                (tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (
+                    tauri::http::header::CONTENT_TYPE,
+                    "text/html; charset=utf-8",
+                ),
                 // 2026-09-19：WebKit 对自定义协议默认缓存（刷新走缓存不重新请求），
                 // 导致改启动页后高哥刷新看不到变化——强制 no-store，每次加载都读最新文件
                 (

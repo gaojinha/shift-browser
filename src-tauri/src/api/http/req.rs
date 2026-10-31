@@ -108,7 +108,10 @@ mod tests {
     #[test]
     fn find_header_end_locates_terminator() {
         // 精确定位（返回终止符之后的偏移；头部含 \r\n\r\n 的 27 字节例）
-        assert_eq!(find_header_end(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n"), Some(27));
+        assert_eq!(
+            find_header_end(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n"),
+            Some(27)
+        );
         // 终止符在最前 / 取首次出现
         assert_eq!(find_header_end(b"\r\n\r\n"), Some(4));
         assert_eq!(find_header_end(b"\r\n\r\nX\r\n\r\n"), Some(4));
@@ -122,16 +125,24 @@ mod tests {
     #[test]
     fn is_chunked_matches_key_and_value_case_insensitively() {
         // 请求行被跳过（含 "chunked" 字样的路径不算，无 TE 头不算）
-        assert!(is_chunked("GET / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nHost: x"));
+        assert!(is_chunked(
+            "GET / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nHost: x"
+        ));
         assert!(!is_chunked("GET /chunked HTTP/1.1\r\nHost: x"));
         // 大小写不敏感 + 逗号列表（任一分量为 chunked 即命中）
         assert!(is_chunked("POST / HTTP/1.1\r\ntransfer-encoding: CHUNKeD"));
-        assert!(is_chunked("POST / HTTP/1.1\r\nTransfer-Encoding: gzip, chunked"));
-        assert!(is_chunked("POST / HTTP/1.1\r\nTransfer-Encoding: chunked , gzip"));
+        assert!(is_chunked(
+            "POST / HTTP/1.1\r\nTransfer-Encoding: gzip, chunked"
+        ));
+        assert!(is_chunked(
+            "POST / HTTP/1.1\r\nTransfer-Encoding: chunked , gzip"
+        ));
         // 非 chunked / 无 TE / 前缀相似键均不算
         assert!(!is_chunked("POST / HTTP/1.1\r\nTransfer-Encoding: gzip"));
         assert!(!is_chunked("POST / HTTP/1.1\r\nHost: x"));
-        assert!(!is_chunked("POST / HTTP/1.1\r\nX-Transfer-Encoding: chunked"));
+        assert!(!is_chunked(
+            "POST / HTTP/1.1\r\nX-Transfer-Encoding: chunked"
+        ));
     }
 
     #[test]

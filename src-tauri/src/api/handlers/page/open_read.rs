@@ -184,12 +184,15 @@ pub(crate) async fn open_and_read(app: &AppHandle, req: &Value) -> Value {
     if ua_mobile {
         if let Some(wv) = app.get_webview(&format!("tab-{}", tab_id)) {
             let ua = MOBILE_UA.to_string();
-            crate::log_if_err!("webview", wv.with_webview(move |pwv| {
-                use webkit2gtk::{SettingsExt, WebViewExt};
-                if let Some(settings) = pwv.inner().settings() {
-                    settings.set_user_agent(Some(&ua));
-                }
-            }));
+            crate::log_if_err!(
+                "webview",
+                wv.with_webview(move |pwv| {
+                    use webkit2gtk::{SettingsExt, WebViewExt};
+                    if let Some(settings) = pwv.inner().settings() {
+                        settings.set_user_agent(Some(&ua));
+                    }
+                })
+            );
             if let Some(st) = app.try_state::<crate::tabs::TabManager>() {
                 crate::log_if_err!(
                     "tabs",

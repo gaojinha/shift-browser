@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 书签门面：CRUD 命令与导入导出编排同域，主体逻辑已拆到 bookmarks_html.rs，剩余为命令声明与事务编排
 // 书签管理（R1 拆分 2026-09-25：Netscape HTML 导入导出命令与解析见 db/bookmarks_html.rs）
 // 普通 file module 的子模块默认在同名子目录找，这里文件是兄弟路径，需显式 #[path]
 #[path = "bookmarks_html.rs"]
@@ -85,13 +86,15 @@ pub(crate) async fn get_bookmark_folders_inner(pool: &SqlitePool) -> DbResult<Ve
 
     Ok(rows
         .into_iter()
-        .map(|(id, name, parent_id, sort_order, created_at)| BookmarkFolder {
-            id,
-            name,
-            parent_id,
-            sort_order,
-            created_at,
-        })
+        .map(
+            |(id, name, parent_id, sort_order, created_at)| BookmarkFolder {
+                id,
+                name,
+                parent_id,
+                sort_order,
+                created_at,
+            },
+        )
         .collect())
 }
 
@@ -520,7 +523,10 @@ mod tests {
 
         delete_bookmark_folder_inner(&db.pool, root).await.unwrap();
 
-        assert!(get_bookmark_folders_inner(&db.pool).await.unwrap().is_empty());
+        assert!(get_bookmark_folders_inner(&db.pool)
+            .await
+            .unwrap()
+            .is_empty());
         let ids: Vec<i64> = get_bookmarks_inner(&db.pool)
             .await
             .unwrap()

@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 翻译引擎主流程：引擎选择、批量切分、重试与记忆回写共用一个请求上下文
 //! 翻译模块（Google 免费接口，免 API key）
 //!
 //! 右键菜单的"翻译选中文字 / 翻译整个页面"通过 `shift://__translate__/...`
@@ -380,7 +381,13 @@ pub async fn translate_with(
     } else {
         // ---- 单发（默认）：只走首选引擎，不向第二家发送 ----
         log::debug!("[translate] 单发模式 engine={first}");
-        translate_one(first.to_string(), text.to_string(), target.to_string(), timeout).await
+        translate_one(
+            first.to_string(),
+            text.to_string(),
+            target.to_string(),
+            timeout,
+        )
+        .await
     }
 }
 
@@ -540,10 +547,9 @@ pub async fn current_target(db: &crate::db::Db) -> String {
 
 /// 当前翻译数据流模式（设置 → 通用 → 数据流，默认 single）
 pub async fn current_dual_mode(db: &crate::db::Db) -> String {
-    let row: Option<(String,)> =
-        crate::db::settings_cache::get(&db.pool, "translate_dual_mode")
-            .await
-            .map(|v| (v,));
+    let row: Option<(String,)> = crate::db::settings_cache::get(&db.pool, "translate_dual_mode")
+        .await
+        .map(|v| (v,));
     row.map(|r| r.0).unwrap_or_else(|| "single".to_string())
 }
 

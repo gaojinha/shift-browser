@@ -269,20 +269,14 @@ mod tests {
             url: "https://h:8080".into(),
             ..Default::default()
         };
-        assert_eq!(
-            repo_url(&s),
-            "https://h:8080/shift-browser/sync.v1.e2e"
-        );
+        assert_eq!(repo_url(&s), "https://h:8080/shift-browser/sync.v1.e2e");
         assert_eq!(dir_url(&s), "https://h:8080/shift-browser");
         // 结尾斜杠（多个）全部去除，不产生双斜杠
         let s2 = SyncStore {
             url: "https://h:8080///".into(),
             ..Default::default()
         };
-        assert_eq!(
-            repo_url(&s2),
-            "https://h:8080/shift-browser/sync.v1.e2e"
-        );
+        assert_eq!(repo_url(&s2), "https://h:8080/shift-browser/sync.v1.e2e");
         // host_of：只留 host:port（路径/查询不带）
         assert_eq!(host_of("https://h:8080/a/b?c=d"), "h:8080");
         assert_eq!(host_of("http://host"), "host");

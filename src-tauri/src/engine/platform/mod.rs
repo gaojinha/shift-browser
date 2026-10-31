@@ -34,7 +34,9 @@ static DOWNLOAD_DIR_OVERRIDE: RwLock<Option<String>> = RwLock::new(None);
 /// 设置下载目录覆盖值（空串 = 清除覆盖，回退系统默认）
 pub fn set_download_dir_override(path: &str) {
     let trimmed = path.trim();
-    *DOWNLOAD_DIR_OVERRIDE.write().unwrap_or_else(|e| e.into_inner()) = if trimmed.is_empty() {
+    *DOWNLOAD_DIR_OVERRIDE
+        .write()
+        .unwrap_or_else(|e| e.into_inner()) = if trimmed.is_empty() {
         None
     } else {
         Some(trimmed.to_string())
@@ -43,7 +45,10 @@ pub fn set_download_dir_override(path: &str) {
 
 /// 获取下载目录覆盖值（None = 未设置，调用方回退系统默认）
 pub fn get_download_dir_override() -> Option<String> {
-    DOWNLOAD_DIR_OVERRIDE.read().unwrap_or_else(|e| e.into_inner()).clone()
+    DOWNLOAD_DIR_OVERRIDE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
 }
 
 /// 解析下载目标目录（**真实运行逻辑**，与 GTK 下载回调所用完全一致）。

@@ -102,7 +102,10 @@ mod tests {
         let e = entry(PluginKind::McpServer, "srv1", "文件服务器", false, "stdio");
         assert_eq!(e["kind"], "mcp_server");
         assert_eq!(e["kindLabel"], "MCP 服务器");
-        assert_eq!(e["togglable"], true, "MCP 服务器支持运行时启停（仅 WebExtension 不可）");
+        assert_eq!(
+            e["togglable"], true,
+            "MCP 服务器支持运行时启停（仅 WebExtension 不可）"
+        );
         assert_eq!(e["id"], "srv1");
         assert_eq!(e["name"], "文件服务器");
         assert_eq!(e["enabled"], false);
@@ -112,6 +115,9 @@ mod tests {
         assert_eq!(PluginKind::WebExtension.as_str(), "web_extension");
         assert!(PluginKind::ContentFilter.togglable());
         assert!(PluginKind::McpServer.togglable());
-        assert!(!PluginKind::WebExtension.togglable(), "Web 扩展编译期加载，不可运行时启停");
+        assert!(
+            !PluginKind::WebExtension.togglable(),
+            "Web 扩展编译期加载，不可运行时启停"
+        );
     }
 }

@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 会话状态机（登录/续期/注销）的整体性要求，分散后难以核对状态迁移完备
 //! 会话管理与账号认证（R2-1 拆分）
 
 use crate::db::Db;
@@ -429,7 +430,10 @@ mod tests {
 
         // 1. 未配置偏好的用户回退为 UserPrefs::default()
         let default_prefs = load_prefs(&db, 999).await;
-        assert_eq!(default_prefs.weather_city, UserPrefs::default().weather_city);
+        assert_eq!(
+            default_prefs.weather_city,
+            UserPrefs::default().weather_city
+        );
 
         // 2. 插入自定义偏好行
         sqlx::query(
@@ -453,18 +457,21 @@ mod tests {
         // 3. 应用偏好到 settings 表
         apply_prefs_to_settings(&db, &loaded).await.unwrap();
 
-        let val_city: String = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'weather_city'")
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
-        let val_quote: String = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'show_quote'")
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
-        let val_lunar: String = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'show_lunar'")
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
+        let val_city: String =
+            sqlx::query_scalar("SELECT value FROM settings WHERE key = 'weather_city'")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        let val_quote: String =
+            sqlx::query_scalar("SELECT value FROM settings WHERE key = 'show_quote'")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        let val_lunar: String =
+            sqlx::query_scalar("SELECT value FROM settings WHERE key = 'show_lunar'")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
 
         assert_eq!(val_city, "Shanghai");
         assert_eq!(val_quote, "1");
@@ -489,20 +496,22 @@ mod tests {
 
         // 插入历史算法（10 万次）用户验证
         insert_test_user(&db, "bob", "OldPass456", "pbkdf2").await;
-        let algo_before: String = sqlx::query_scalar("SELECT hash_algo FROM users WHERE username = 'bob'")
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
+        let algo_before: String =
+            sqlx::query_scalar("SELECT hash_algo FROM users WHERE username = 'bob'")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
         assert_eq!(algo_before, "pbkdf2");
 
         // 历史算法密码校验成功后，触发透明升级落库
         let ok = verify_password(&db, "bob", "OldPass456").await.unwrap();
         assert!(ok);
 
-        let algo_after: String = sqlx::query_scalar("SELECT hash_algo FROM users WHERE username = 'bob'")
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
+        let algo_after: String =
+            sqlx::query_scalar("SELECT hash_algo FROM users WHERE username = 'bob'")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
         assert_eq!(algo_after, HASH_ALGO_CURRENT);
 
         // 升级后再次校验依然通过

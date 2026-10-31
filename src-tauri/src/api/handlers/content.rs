@@ -345,7 +345,15 @@ mod tests {
         assert!(field_allowed("data-testid"));
         assert!(field_allowed("data-x"));
         // 非白名单拒（安全面：事件处理器/样式/结构属性不可被提取）
-        for f in ["onclick", "onmouseover", "style", "class", "id", "innerHTML", "DATA-x"] {
+        for f in [
+            "onclick",
+            "onmouseover",
+            "style",
+            "class",
+            "id",
+            "innerHTML",
+            "DATA-x",
+        ] {
             assert!(!field_allowed(f), "{f} 应拒绝");
         }
     }

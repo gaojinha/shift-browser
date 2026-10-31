@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 浏览器导入门面：扫描 / 解密 / 落库三段共用中间结构与 keyring 映射表，拆开需大量 pub(crate) 暴露
 //! 从本机浏览器导入（只读源 + 解密 + 落库）
 //! 安全：源库只读（只 copy 不打开）；明文零落盘；keyring label 硬映射不猜
 //!
@@ -19,11 +20,8 @@ use sqlx::Connection;
 use crate::error::CommandResult;
 
 /// 排除的 profile 目录名（无数据/测试残留，方案 §3.2）
-const EXCLUDED_PROFILE_DIRS: &[&str] = &[
-    "brave-anon",
-    "google-chrome-headless",
-    "ms-playwright-mcp",
-];
+const EXCLUDED_PROFILE_DIRS: &[&str] =
+    &["brave-anon", "google-chrome-headless", "ms-playwright-mcp"];
 
 /// 浏览器根目录（相对 `~/.config`）
 const CHROME_ROOT: &str = "google-chrome";
@@ -369,7 +367,8 @@ fn count_bookmark_json(path: &Path) -> Option<usize> {
 fn count_url_nodes(v: &serde_json::Value) -> usize {
     match v {
         serde_json::Value::Object(m) => {
-            let self_count = usize::from(m.get("type").and_then(serde_json::Value::as_str) == Some("url"));
+            let self_count =
+                usize::from(m.get("type").and_then(serde_json::Value::as_str) == Some("url"));
             m.values().map(count_url_nodes).sum::<usize>() + self_count
         }
         serde_json::Value::Array(a) => a.iter().map(count_url_nodes).sum(),
@@ -526,7 +525,9 @@ fn decrypt_os_crypt(blob: &[u8], v11_key: Option<&[u8]>) -> Result<String, Decry
     let mut plain = aes_cbc_decrypt(body, &key)?;
     key.zeroize(); // 密钥用完即清
     let out = pkcs7_unpad(&plain)?;
-    let s = std::str::from_utf8(out).map_err(|_| DecryptError::NotUtf8)?.to_string();
+    let s = std::str::from_utf8(out)
+        .map_err(|_| DecryptError::NotUtf8)?
+        .to_string();
     plain.zeroize(); // 含填充的明文副本清零
     Ok(s)
 }
@@ -655,7 +656,8 @@ mod f90_tests {
 
     // 黄金向量：openssl enc -aes-128-cbc + hashlib.pbkdf2_hmac(sha1) 生成（2026-10-18）
     const GOLDEN_V10_KEY_HEX: &str = "fd621fe5a2b402539dfa147ca9272778";
-    const GOLDEN_V10_CT_HEX: &str = "8a2f0711b2b584b62bd4f134bd2d425636de3c42f4b17b617ba3fa739ad827a7";
+    const GOLDEN_V10_CT_HEX: &str =
+        "8a2f0711b2b584b62bd4f134bd2d425636de3c42f4b17b617ba3fa739ad827a7";
     const GOLDEN_V11_SECRET: &str = "q7b7aG9hbm9yaXNlaGVpZGVp"; // 24 字符，不解 base64
     const GOLDEN_V11_KEY_HEX: &str = "07481d5306203a61a6bebdaf489f49d9";
     const GOLDEN_V11_CT_HEX: &str = "035436fe29e7cbbcf01298db6336bf4f";
@@ -710,10 +712,16 @@ mod f90_tests {
     #[test]
     fn malformed_blobs_rejected() {
         assert_eq!(decrypt_os_crypt(b"v1", None), Err(DecryptError::TooShort));
-        assert_eq!(decrypt_os_crypt(b"v99xxxx", None), Err(DecryptError::UnknownPrefix));
+        assert_eq!(
+            decrypt_os_crypt(b"v99xxxx", None),
+            Err(DecryptError::UnknownPrefix)
+        );
         // v11 无 key → 降级（keyring 锁着/不可用的命令级映射就是这条）
         let blob = [b"v11".as_slice(), &hex(GOLDEN_V11_CT_HEX)].concat();
-        assert_eq!(decrypt_os_crypt(&blob, None), Err(DecryptError::NoKeyringKey));
+        assert_eq!(
+            decrypt_os_crypt(&blob, None),
+            Err(DecryptError::NoKeyringKey)
+        );
         // 块长不对齐
         assert_eq!(
             decrypt_os_crypt(b"v10short", None),
@@ -772,7 +780,14 @@ mod tests {
         let json = serde_json::to_value(&pv).unwrap();
         let mut keys = Vec::new();
         collect_keys(&json, &mut keys);
-        for banned in ["password", "password_value", "plain", "plaintext", "secret", "cipher"] {
+        for banned in [
+            "password",
+            "password_value",
+            "plain",
+            "plaintext",
+            "secret",
+            "cipher",
+        ] {
             assert!(
                 !keys.iter().any(|k| k == banned),
                 "预览结构不得含 `{banned}` 叶子字段（keys={keys:?}）"
@@ -833,7 +848,10 @@ mod tests {
             base.path(),
             CHROME_ROOT,
             "Default",
-            &[("AccountBookmarks", bookmarks_json(&["https://a.com", "https://b.com"]).into_bytes())],
+            &[(
+                "AccountBookmarks",
+                bookmarks_json(&["https://a.com", "https://b.com"]).into_bytes(),
+            )],
         );
         // 测试残留目录：即使有数据也不入结果
         make_profile(
@@ -843,7 +861,10 @@ mod tests {
             &[("Bookmarks", bookmarks_json(&["https://x.com"]).into_bytes())],
         );
         let out = scan_from(base.path(), false).await;
-        assert!(out.iter().all(|r| r.profile == "Default"), "排除目录不得入结果: {out:?}");
+        assert!(
+            out.iter().all(|r| r.profile == "Default"),
+            "排除目录不得入结果: {out:?}"
+        );
         let default = reports_for(&out, "Default");
         assert_eq!(default.len(), 1);
         assert_eq!(default[0].file, "AccountBookmarks");
@@ -888,10 +909,25 @@ mod tests {
             CHROME_ROOT,
             "Default",
             &[
-                ("AccountBookmarks", bookmarks_json(&["https://a.com", "https://b.com", "https://c.com"]).into_bytes()),
-                ("Bookmarks.bak", bookmarks_json(&["https://old.com"]).into_bytes()),
-                ("Bookmarks", serde_json::json!({"roots": {"bookmark_bar": folder_node("bar", vec![])}}).to_string().into_bytes()),
-                ("EncryptedAccountBookmarks2", b"v11\xb7\xfb\xf6g\x74\xab".to_vec()),
+                (
+                    "AccountBookmarks",
+                    bookmarks_json(&["https://a.com", "https://b.com", "https://c.com"])
+                        .into_bytes(),
+                ),
+                (
+                    "Bookmarks.bak",
+                    bookmarks_json(&["https://old.com"]).into_bytes(),
+                ),
+                (
+                    "Bookmarks",
+                    serde_json::json!({"roots": {"bookmark_bar": folder_node("bar", vec![])}})
+                        .to_string()
+                        .into_bytes(),
+                ),
+                (
+                    "EncryptedAccountBookmarks2",
+                    b"v11\xb7\xfb\xf6g\x74\xab".to_vec(),
+                ),
                 ("EncryptedBookmarks2", b"v10\xb7\xfb\xf6g\x74\xab".to_vec()),
             ],
         );
@@ -901,7 +937,13 @@ mod tests {
         let files: Vec<&str> = r.iter().map(|x| x.file.as_str()).collect();
         assert_eq!(
             files,
-            ["AccountBookmarks", "Bookmarks.bak", "Bookmarks", "EncryptedAccountBookmarks2", "EncryptedBookmarks2"],
+            [
+                "AccountBookmarks",
+                "Bookmarks.bak",
+                "Bookmarks",
+                "EncryptedAccountBookmarks2",
+                "EncryptedBookmarks2"
+            ],
             "报告必须按 v3 §3.2 优先级序输出"
         );
         let counts: Vec<Option<usize>> = r.iter().map(|x| x.count).collect();
@@ -929,8 +971,14 @@ mod tests {
         let out = scan_from(base.path(), false).await;
         let r = reports_for(&out, "Default");
         assert_eq!(r.len(), 2);
-        assert_eq!(r.iter().find(|x| x.kind == "bookmarks").unwrap().count, None);
-        assert_eq!(r.iter().find(|x| x.kind == "passwords").unwrap().count, None);
+        assert_eq!(
+            r.iter().find(|x| x.kind == "bookmarks").unwrap().count,
+            None
+        );
+        assert_eq!(
+            r.iter().find(|x| x.kind == "passwords").unwrap().count,
+            None
+        );
     }
 
     // ---- WAL 快照（铁律 ①，v1 翻车回归）+ 源文件零改动 ----
@@ -987,14 +1035,20 @@ mod tests {
             .await
             .map(|(n,)| n as usize)
             .unwrap_or(0);
-        assert_eq!(main_only, 0, "v1 翻车根因必须可复现：未 checkpoint 的 WAL 页只读主库不可见");
+        assert_eq!(
+            main_only, 0,
+            "v1 翻车根因必须可复现：未 checkpoint 的 WAL 页只读主库不可见"
+        );
 
         // 铁律：db + -wal + -shm 一起快照 → 读全 3 行
         assert_eq!(count_logins_snapshot(&db).await, Some(3));
 
         // 源文件零改动（验收红线：mtime/hash 不变——内容字节级不变）
         assert_eq!(main_before, std::fs::read(&db).unwrap(), "主库源文件被改动");
-        assert_eq!(wal_before, std::fs::read(&wal_path).ok(), "-wal 源文件被改动");
+        assert_eq!(
+            wal_before,
+            std::fs::read(&wal_path).ok(),
+            "-wal 源文件被改动"
+        );
     }
 }
-

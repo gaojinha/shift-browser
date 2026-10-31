@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 翻译记忆的读写、命中统计与淘汰在同一事务域内，拆开需暴露内部连接
 // 翻译记忆（整页汉化提速 · 2026-09-27）
 //
 // 持久化「模型 + 归一化原文 → 译文」。命中缓存的段落不发 opencode 请求
@@ -154,7 +155,10 @@ pub async fn lookup(
         match q.fetch_all(pool).await {
             Ok(rows) => {
                 for (source_hash, target) in rows {
-                    if let Some(source) = window.iter().find(|s| source_hash_hex(key, s) == source_hash) {
+                    if let Some(source) = window
+                        .iter()
+                        .find(|s| source_hash_hex(key, s) == source_hash)
+                    {
                         out.entry(source.clone()).or_insert(target);
                     }
                 }
@@ -277,7 +281,10 @@ mod tests {
             engine_scope("bing", "zh-CN")
         );
         // 目标语言不同 → 键不同（防旧语言脏命中）
-        assert_ne!(engine_scope("google", "zh-CN"), engine_scope("google", "ja"));
+        assert_ne!(
+            engine_scope("google", "zh-CN"),
+            engine_scope("google", "ja")
+        );
         // 前缀保证与无前缀的 AI 模型名不撞键
         assert!(engine_scope("google", "zh-CN").starts_with("engine:"));
     }
@@ -352,15 +359,11 @@ mod tests {
         let other = lookup(&pool, "model-b", &["Save".to_string()], &KEY).await;
         assert!(other.is_empty(), "别的模型的记忆不能命中");
         // 空模型名直接 miss，不允许落到 "" 这种脏键
-        assert!(lookup(&pool, "", &["Save".to_string()], &KEY).await.is_empty());
+        assert!(lookup(&pool, "", &["Save".to_string()], &KEY)
+            .await
+            .is_empty());
         assert_eq!(
-            remember(
-                &pool,
-                "",
-                &[("Save".to_string(), "保存".to_string())],
-                &KEY
-            )
-            .await,
+            remember(&pool, "", &[("Save".to_string(), "保存".to_string())], &KEY).await,
             0
         );
     }
@@ -378,12 +381,11 @@ mod tests {
         )
         .await;
         // 1. source_hash 列 = HMAC(key, 归一化原文) 的 hex，且不等于明文
-        let (source_hash, target): (String, String) = sqlx::query_as(
-            "SELECT source_hash, target FROM translate_memory WHERE model='m'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let (source_hash, target): (String, String) =
+            sqlx::query_as("SELECT source_hash, target FROM translate_memory WHERE model='m'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(target, "译文");
         assert_eq!(source_hash, source_hash_hex(&KEY, "Secret Browsing Text"));
         assert_ne!(source_hash, "Secret Browsing Text");
@@ -403,19 +405,34 @@ mod tests {
         }
         // 3. 换密钥后同原文不得命中（键控 HMAC 的隔离语义）
         let wrong_key = [0u8; 32];
-        assert!(
-            lookup(&pool, "m", &["Secret Browsing Text".to_string()], &wrong_key)
-                .await
-                .is_empty()
-        );
+        assert!(lookup(
+            &pool,
+            "m",
+            &["Secret Browsing Text".to_string()],
+            &wrong_key
+        )
+        .await
+        .is_empty());
     }
 
     #[tokio::test]
     async fn 重复写入覆盖译文并累加命中() {
         let dir = tempfile_like_dir();
         let pool = test_pool(&dir).await;
-        remember(&pool, "m", &[("Open".to_string(), "打开".to_string())], &KEY).await;
-        remember(&pool, "m", &[("Open".to_string(), "开启".to_string())], &KEY).await;
+        remember(
+            &pool,
+            "m",
+            &[("Open".to_string(), "打开".to_string())],
+            &KEY,
+        )
+        .await;
+        remember(
+            &pool,
+            "m",
+            &[("Open".to_string(), "开启".to_string())],
+            &KEY,
+        )
+        .await;
         let got = lookup(&pool, "m", &["Open".to_string()], &KEY).await;
         assert_eq!(
             got.get("Open"),
@@ -459,14 +476,13 @@ mod tests {
             .unwrap();
         assert_eq!(count, super::MEMORY_KEEP);
         // 高命中与新条目保留
-        let kept: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM translate_memory WHERE source_hash IN (?, ?)",
-        )
-        .bind(source_hash_hex(&KEY, "old-0"))
-        .bind(source_hash_hex(&KEY, "New"))
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let kept: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM translate_memory WHERE source_hash IN (?, ?)")
+                .bind(source_hash_hex(&KEY, "old-0"))
+                .bind(source_hash_hex(&KEY, "New"))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(kept, 2);
     }
 

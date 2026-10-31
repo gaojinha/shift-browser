@@ -330,7 +330,10 @@ mod tests {
         assert_eq!(g.check(&ip, t + Duration::from_secs(10)), Some(6));
         // max(1) 下限：剩 0.5s 时 as_secs 截断为 0 → 报 1
         assert_eq!(
-            g.check(&ip, t + Duration::from_secs(15) + Duration::from_millis(500)),
+            g.check(
+                &ip,
+                t + Duration::from_secs(15) + Duration::from_millis(500)
+            ),
             Some(1)
         );
         // 到期边界：now == locked_until 即解封

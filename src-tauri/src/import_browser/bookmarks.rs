@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 多源合并 → 危险 scheme 过滤 → 写入内核三段流水线，中间结构共享
 //! 浏览器书签导入（F-91）：多源合并 → 危险 scheme 过滤 → 复用写入内核落库
 //!
 //! 入口 [`import_bookmarks_from_browser`]：拉 Chrome / Brave 全部 profile，
@@ -149,10 +150,12 @@ fn group_previews(raw: Vec<RawBookmark>) -> Vec<super::BookmarkPreviewGroup> {
         if !map.contains_key(&folder) {
             order.push(folder.clone());
         }
-        map.entry(folder).or_default().push(super::BookmarkPreviewItem {
-            title: b.title,
-            url: b.url,
-        });
+        map.entry(folder)
+            .or_default()
+            .push(super::BookmarkPreviewItem {
+                title: b.title,
+                url: b.url,
+            });
     }
     order
         .into_iter()
@@ -164,11 +167,7 @@ fn group_previews(raw: Vec<RawBookmark>) -> Vec<super::BookmarkPreviewGroup> {
 }
 
 /// profile 子目录列表（含书签源文件才算 profile；排除名单同 F-89 扫描）
-fn profile_dirs(
-    base: &std::path::Path,
-    rel_root: &str,
-    files: &[&str],
-) -> Vec<std::path::PathBuf> {
+fn profile_dirs(base: &std::path::Path, rel_root: &str, files: &[&str]) -> Vec<std::path::PathBuf> {
     super::profile_dirs(base, rel_root, files)
 }
 
@@ -236,7 +235,11 @@ fn walk_bookmark_node(
                 .to_string();
             out.push(RawBookmark {
                 url: url.to_string(),
-                title: if title.is_empty() { url.to_string() } else { title },
+                title: if title.is_empty() {
+                    url.to_string()
+                } else {
+                    title
+                },
                 folder_name: if in_bar { None } else { current_folder },
             });
         }
@@ -287,9 +290,17 @@ mod f91_tests {
         assert_eq!(items[0].url, "https://a.com");
         assert_eq!(items[0].folder_name, None, "书签栏散书签进书签栏");
         assert_eq!(items[1].url, "https://b.com");
-        assert_eq!(items[1].folder_name.as_deref(), Some("Inner"), "书签栏子文件夹保持层级");
+        assert_eq!(
+            items[1].folder_name.as_deref(),
+            Some("Inner"),
+            "书签栏子文件夹保持层级"
+        );
         assert_eq!(items[2].url, "https://c.com");
-        assert_eq!(items[2].folder_name.as_deref(), Some("其他书签"), "other 根不混进书签栏");
+        assert_eq!(
+            items[2].folder_name.as_deref(),
+            Some("其他书签"),
+            "other 根不混进书签栏"
+        );
     }
 
     #[test]
@@ -314,7 +325,11 @@ mod f91_tests {
         ]}}}"#;
         let items = parse_chrome_bookmark_json(json);
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].folder_name.as_deref(), Some("L2"), "层级取最近一层");
+        assert_eq!(
+            items[0].folder_name.as_deref(),
+            Some("L2"),
+            "层级取最近一层"
+        );
     }
 
     #[test]

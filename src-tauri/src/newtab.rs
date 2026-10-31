@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 新标签页 HTML 模板整块渲染，模板与数据绑定不可分割
 // 新标签页门面（原版左侧栏面板生态迁移）
 // 方案：Rust 读数据库渲染成完整 HTML，写到 app_data/newtab/index.html，
 // 标签用 file:// 打开。面板静态数据（最近访问/书签/快捷访问）渲染时嵌入，
@@ -370,10 +371,7 @@ mod tests {
         assert!(html.contains("https://bm.com"), "书签应嵌入");
         assert!(html.contains("https://example.com"), "快捷访问应嵌入");
         // P2 安全：危险 scheme 数据不得进入 HTML
-        assert!(
-            !html.contains("javascript:alert"),
-            "javascript: 必须被过滤"
-        );
+        assert!(!html.contains("javascript:alert"), "javascript: 必须被过滤");
         let _ = db;
     }
 
@@ -450,7 +448,8 @@ mod tests {
         let bad = vec![serde_json::json!({"icon": "🌐", "name": "无址站"})];
         assert!(save_quick_sites_inner(&db.pool, bad).await.is_err());
         // 危险 scheme
-        let bad = vec![serde_json::json!({"icon": "💥", "name": "注入", "url": "javascript:alert(1)"})];
+        let bad =
+            vec![serde_json::json!({"icon": "💥", "name": "注入", "url": "javascript:alert(1)"})];
         assert!(save_quick_sites_inner(&db.pool, bad).await.is_err());
         // 拒绝后库里无残值
         let row: Option<String> =

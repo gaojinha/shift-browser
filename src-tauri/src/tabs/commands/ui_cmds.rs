@@ -52,12 +52,15 @@ pub async fn set_webview_visible(
             let label = format!("tab-{}", id);
             if let Some(wv) = window.get_webview(&label) {
                 let wv2 = wv.clone();
-                crate::log_if_err!("webview", wv.with_webview(move |pwv| {
-                    let gtk_wv = pwv.inner();
-                    // 同时隐藏/显示 Fixed 容器：Fixed 覆盖内容区会拦截弹窗点击，必须一起隐藏
-                    crate::engine::layout::set_fixed_visible(&gtk_wv, false);
-                    crate::log_if_err!("tabs", wv2.hide());
-                }));
+                crate::log_if_err!(
+                    "webview",
+                    wv.with_webview(move |pwv| {
+                        let gtk_wv = pwv.inner();
+                        // 同时隐藏/显示 Fixed 容器：Fixed 覆盖内容区会拦截弹窗点击，必须一起隐藏
+                        crate::engine::layout::set_fixed_visible(&gtk_wv, false);
+                        crate::log_if_err!("tabs", wv2.hide());
+                    })
+                );
             }
         }
         // 焦点交还主 webview（HTML 层）：子 webview 一藏，GTK 焦点悬空，

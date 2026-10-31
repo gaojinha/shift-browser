@@ -85,7 +85,9 @@ mod tests {
         let b64 = url
             .strip_prefix("data:image/png;base64,")
             .expect("应为 PNG base64 data URL 前缀");
-        let bytes = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .unwrap();
         // 解码后与嵌入图标逐字节一致
         assert_eq!(bytes, APP_ICON_PNG);
         // PNG 魔数兜底：嵌入文件被替换/损坏时立刻暴露

@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 账号备份导入导出：事务边界必须完整，拆开易产生半成品备份
 //! 账号备份导入导出（R2-1 拆分）
 
 use crate::db::Db;
@@ -323,13 +324,10 @@ mod tests {
             "pbkdf2-sha512-210000"
         )
         .is_ok());
-        assert!(validate_import_account(
-            "测试用户",
-            &valid_hash,
-            &valid_salt,
-            "pbkdf2-sha512-1"
-        )
-        .is_ok());
+        assert!(
+            validate_import_account("测试用户", &valid_hash, &valid_salt, "pbkdf2-sha512-1")
+                .is_ok()
+        );
         assert!(validate_import_account(
             "valid-user_01",
             &valid_hash,
@@ -340,20 +338,12 @@ mod tests {
 
         // 2. 非法用户名（过短、中间含空格、非法标点、过长）
         assert!(validate_import_account("a", &valid_hash, &valid_salt, "pbkdf2").is_err());
-        assert!(validate_import_account(
-            "user with space",
-            &valid_hash,
-            &valid_salt,
-            "pbkdf2"
-        )
-        .is_err());
-        assert!(validate_import_account(
-            "invalid*char",
-            &valid_hash,
-            &valid_salt,
-            "pbkdf2"
-        )
-        .is_err());
+        assert!(
+            validate_import_account("user with space", &valid_hash, &valid_salt, "pbkdf2").is_err()
+        );
+        assert!(
+            validate_import_account("invalid*char", &valid_hash, &valid_salt, "pbkdf2").is_err()
+        );
         assert!(validate_import_account(
             &"toolong_username_".repeat(3),
             &valid_hash,
@@ -366,24 +356,25 @@ mod tests {
         let short_hash = "a".repeat(127);
         let non_hex_hash = format!("{}z", "a".repeat(127));
         assert!(validate_import_account("valid_user", &short_hash, &valid_salt, "pbkdf2").is_err());
-        assert!(validate_import_account("valid_user", &non_hex_hash, &valid_salt, "pbkdf2").is_err());
+        assert!(
+            validate_import_account("valid_user", &non_hex_hash, &valid_salt, "pbkdf2").is_err()
+        );
 
         // 4. 非法盐值
         let short_salt = "f".repeat(31);
         let non_hex_salt = format!("{}g", "f".repeat(31));
         assert!(validate_import_account("valid_user", &valid_hash, &short_salt, "pbkdf2").is_err());
-        assert!(validate_import_account("valid_user", &valid_hash, &non_hex_salt, "pbkdf2").is_err());
+        assert!(
+            validate_import_account("valid_user", &valid_hash, &non_hex_salt, "pbkdf2").is_err()
+        );
 
         // 5. 非法算法标记与 DoS 边界（> 1000 万）
         assert!(validate_import_account("valid_user", &valid_hash, &valid_salt, "bcrypt").is_err());
         assert!(validate_import_account("valid_user", &valid_hash, &valid_salt, "md5").is_err());
-        assert!(validate_import_account(
-            "valid_user",
-            &valid_hash,
-            &valid_salt,
-            "pbkdf2-sha512-0"
-        )
-        .is_err());
+        assert!(
+            validate_import_account("valid_user", &valid_hash, &valid_salt, "pbkdf2-sha512-0")
+                .is_err()
+        );
         assert!(validate_import_account(
             "valid_user",
             &valid_hash,
@@ -525,9 +516,15 @@ mod tests {
         });
 
         let acct = legacy_json.get("account").unwrap();
-        let algo = acct.get("hashAlgo").and_then(|u| u.as_str()).unwrap_or("pbkdf2");
+        let algo = acct
+            .get("hashAlgo")
+            .and_then(|u| u.as_str())
+            .unwrap_or("pbkdf2");
         let avatar = acct.get("avatar").and_then(|u| u.as_str()).unwrap_or("🦊");
-        let sig = acct.get("signature").and_then(|u| u.as_str()).unwrap_or("默认签名");
+        let sig = acct
+            .get("signature")
+            .and_then(|u| u.as_str())
+            .unwrap_or("默认签名");
 
         assert_eq!(algo, "pbkdf2");
         assert_eq!(avatar, "🦊");
@@ -537,11 +534,26 @@ mod tests {
         let prefs = UserPrefs {
             show_lunar: p.get("showLunar").and_then(|x| x.as_bool()).unwrap_or(true),
             show_quote: p.get("showQuote").and_then(|x| x.as_bool()).unwrap_or(true),
-            show_weather: p.get("showWeather").and_then(|x| x.as_bool()).unwrap_or(true),
+            show_weather: p
+                .get("showWeather")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(true),
             font_size: p.get("fontSize").and_then(|x| x.as_i64()).unwrap_or(14),
-            weather_city: p.get("weatherCity").and_then(|x| x.as_str()).unwrap_or("运城").to_string(),
-            theme_color: p.get("themeColor").and_then(|x| x.as_str()).unwrap_or("#4a9eff").to_string(),
-            wallpaper: p.get("wallpaper").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            weather_city: p
+                .get("weatherCity")
+                .and_then(|x| x.as_str())
+                .unwrap_or("运城")
+                .to_string(),
+            theme_color: p
+                .get("themeColor")
+                .and_then(|x| x.as_str())
+                .unwrap_or("#4a9eff")
+                .to_string(),
+            wallpaper: p
+                .get("wallpaper")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
         };
 
         assert_eq!(prefs.weather_city, "运城");

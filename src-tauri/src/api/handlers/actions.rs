@@ -613,7 +613,10 @@ mod tests {
         // 缺失/纯空白 → E_VALIDATION；trim 后放行
         assert!(required_selector(&json!({})).is_err());
         assert!(required_selector(&json!({"selector": "   "})).is_err());
-        assert_eq!(required_selector(&json!({"selector": " #buy "})).unwrap(), "#buy");
+        assert_eq!(
+            required_selector(&json!({"selector": " #buy "})).unwrap(),
+            "#buy"
+        );
         // 1024 字符硬顶（边界放行，超 1 拒）
         assert!(required_selector(&json!({"selector": "a".repeat(1024)})).is_ok());
         assert!(required_selector(&json!({"selector": "a".repeat(1025)})).is_err());

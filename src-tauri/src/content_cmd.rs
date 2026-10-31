@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 页面理解层命令：content_snapshot / content_extract 的出入参契约为同一组，拆开后契约核对要跨文件，风险大于收益
 //! 页面理解层命令（阶段 1.1 · Content Layer）
 //!
 //! `content_snapshot`：从活动标签的实时 DOM 提取语义快照（本地执行，不出网）

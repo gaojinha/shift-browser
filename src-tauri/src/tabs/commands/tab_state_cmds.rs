@@ -119,9 +119,12 @@ pub async fn toggle_mute(
         };
         let label = format!("tab-{}", id2);
         if let Some(wv) = window.get_webview(&label) {
-            crate::log_if_err!("webview", wv.with_webview(move |pwv| {
-                crate::engine::webview::set_muted(&pwv.inner(), muted);
-            }));
+            crate::log_if_err!(
+                "webview",
+                wv.with_webview(move |pwv| {
+                    crate::engine::webview::set_muted(&pwv.inner(), muted);
+                })
+            );
         }
     });
 
@@ -227,7 +230,9 @@ mod tests {
         sqlx::query("INSERT INTO downloads (filename, url, path, total_bytes, received_bytes) VALUES ('f.zip', 'https://a.com/f.zip', '/tmp/f.zip', 1, 1)")
             .execute(pool).await.unwrap();
         sqlx::query("INSERT INTO sessions (name, data) VALUES ('会话', '{}')")
-            .execute(pool).await.unwrap();
+            .execute(pool)
+            .await
+            .unwrap();
     }
 
     async fn count(pool: &sqlx::SqlitePool, table: &str) -> i64 {
@@ -266,17 +271,25 @@ mod tests {
         seed_all(&db.pool).await;
 
         // 单 scope：只清 history，其余两表不动
-        let done = clear_browsing_data_db(&db.pool, &["history".to_string()]).await.unwrap();
+        let done = clear_browsing_data_db(&db.pool, &["history".to_string()])
+            .await
+            .unwrap();
         assert_eq!(done, vec!["history".to_string()]);
         assert_eq!(count(&db.pool, "history").await, 0);
         assert_eq!(count(&db.pool, "downloads").await, 1);
         assert_eq!(count(&db.pool, "sessions").await, 1);
 
         // "all" 等价全部 DB scope：downloads/sessions 一并清空
-        let done = clear_browsing_data_db(&db.pool, &["all".to_string()]).await.unwrap();
+        let done = clear_browsing_data_db(&db.pool, &["all".to_string()])
+            .await
+            .unwrap();
         assert_eq!(
             done,
-            vec!["history".to_string(), "downloads".to_string(), "sessions".to_string()]
+            vec![
+                "history".to_string(),
+                "downloads".to_string(),
+                "sessions".to_string()
+            ]
         );
         assert_eq!(count(&db.pool, "downloads").await, 0);
         assert_eq!(count(&db.pool, "sessions").await, 0);
@@ -287,7 +300,9 @@ mod tests {
         let (_dir, db) = temp_db().await;
         seed_all(&db.pool).await;
         // 只要求 WebKit 侧 scope：DB 侧零动作，三表数据原样
-        let done = clear_browsing_data_db(&db.pool, &["cookies".to_string(), "cache".to_string()]).await.unwrap();
+        let done = clear_browsing_data_db(&db.pool, &["cookies".to_string(), "cache".to_string()])
+            .await
+            .unwrap();
         assert!(done.is_empty());
         assert_eq!(count(&db.pool, "history").await, 1);
         assert_eq!(count(&db.pool, "downloads").await, 1);

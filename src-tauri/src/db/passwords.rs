@@ -1,3 +1,4 @@
+// LINES-EXEMPT: 仅保留 6 个 Tauri 命令与出入参结构；AES-GCM 加解密与密钥派生已全部外移到 password_crypto
 //! 密码管理命令（R1 拆分 · 2026-09-24）
 //!
 //! 本文件只放 6 个 Tauri 命令与出入参结构；密钥文件/主钥获取/AES-GCM 加解密
@@ -462,7 +463,9 @@ mod tests {
     #[tokio::test]
     async fn save_rejects_empty_domain_or_password() {
         let (_dir, db) = temp_db().await;
-        assert!(save_password_inner(&db, "   ", None, "pw", None).await.is_err());
+        assert!(save_password_inner(&db, "   ", None, "pw", None)
+            .await
+            .is_err());
         assert!(save_password_inner(&db, "example.com", None, "", None)
             .await
             .is_err());
@@ -514,18 +517,18 @@ mod tests {
         assert_eq!(got.username.as_deref(), Some("alice"));
 
         // host 大小写不敏感
-        assert!(get_password_for_host_inner(&db, "EXAMPLE.COM", "example.com")
-            .await
-            .unwrap()
-            .is_some());
-
-        // host 不符 → 拒绝
         assert!(
-            get_password_for_host_inner(&db, "evil.com", "example.com")
+            get_password_for_host_inner(&db, "EXAMPLE.COM", "example.com")
                 .await
                 .unwrap()
-                .is_none()
+                .is_some()
         );
+
+        // host 不符 → 拒绝
+        assert!(get_password_for_host_inner(&db, "evil.com", "example.com")
+            .await
+            .unwrap()
+            .is_none());
         // 无活动标签（空 host）→ 拒绝
         assert!(get_password_for_host_inner(&db, "", "example.com")
             .await
@@ -571,18 +574,26 @@ mod tests {
         let (_dir, db) = temp_db().await;
 
         // 首发：新插入返回 true
-        assert!(
-            save_password_new_only_inner(&db, "example.com", Some("alice".into()), "first", None)
-                .await
-                .unwrap()
-        );
+        assert!(save_password_new_only_inner(
+            &db,
+            "example.com",
+            Some("alice".into()),
+            "first",
+            None
+        )
+        .await
+        .unwrap());
 
         // 同 (domain, username) 再来：跳过、返回 false、且**不覆盖**原值
-        assert!(
-            !save_password_new_only_inner(&db, "example.com", Some("alice".into()), "second", None)
-                .await
-                .unwrap()
-        );
+        assert!(!save_password_new_only_inner(
+            &db,
+            "example.com",
+            Some("alice".into()),
+            "second",
+            None
+        )
+        .await
+        .unwrap());
         let got = get_password_for_host_inner(&db, "example.com", "example.com")
             .await
             .unwrap()
@@ -595,20 +606,28 @@ mod tests {
         );
 
         // 不同 username：各自独立插入
-        assert!(
-            save_password_new_only_inner(&db, "example.com", Some("bob".into()), "bobpw", None)
-                .await
-                .unwrap()
-        );
+        assert!(save_password_new_only_inner(
+            &db,
+            "example.com",
+            Some("bob".into()),
+            "bobpw",
+            None
+        )
+        .await
+        .unwrap());
         assert_eq!(list_passwords_inner(&db).await.unwrap().len(), 2);
 
         // username=NULL 不触发唯一冲突（与 save_password_inner 同语义，照插）
-        assert!(save_password_new_only_inner(&db, "null.com", None, "p1", None)
-            .await
-            .unwrap());
-        assert!(save_password_new_only_inner(&db, "null.com", None, "p2", None)
-            .await
-            .unwrap());
+        assert!(
+            save_password_new_only_inner(&db, "null.com", None, "p1", None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            save_password_new_only_inner(&db, "null.com", None, "p2", None)
+                .await
+                .unwrap()
+        );
 
         // 空域名/空密码仍拒收（与 save_password_inner 同守卫）
         assert!(save_password_new_only_inner(&db, "  ", None, "pw", None)
@@ -662,10 +681,12 @@ mod tests {
             .unwrap()
             .is_empty());
         // host 不符 → 空结果
-        assert!(get_passwords_for_domain_inner(&db, "evil.com", "example.com")
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            get_passwords_for_domain_inner(&db, "evil.com", "example.com")
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         // 正常：两条都解出（按 id 排序）
         let list = get_passwords_for_domain_inner(&db, "example.com", "example.com")

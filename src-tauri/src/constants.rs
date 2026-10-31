@@ -99,7 +99,10 @@ mod tests {
 
     #[test]
     fn search_url_template_known_and_fallback() {
-        assert_eq!(search::url_template("bing"), "https://www.bing.com/search?q=");
+        assert_eq!(
+            search::url_template("bing"),
+            "https://www.bing.com/search?q="
+        );
         assert_eq!(search::url_template("baidu"), "https://www.baidu.com/s?wd=");
         assert_eq!(
             search::url_template("google"),

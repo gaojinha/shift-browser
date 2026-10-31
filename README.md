@@ -1,11 +1,42 @@
 # ShiftBrowser
 
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+[![Tauri](https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri&logoColor=white)](https://tauri.app)
+[![Rust](https://img.shields.io/badge/Rust-2021-000000?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Vue](https://img.shields.io/badge/Vue-3-42B883?logo=vuedotjs&logoColor=white)](https://vuejs.org)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%2F%20GTK-lightgrey.svg)](#)
+
 > AI 时代的个人网络操作系统 —— 数据主权归用户、AI 原生、可自托管。
 
-ShiftBrowser 是一个基于 Tauri 2 + Rust + Vue 3 的桌面端 AI 浏览器项目。它不是单纯的“浏览器应用”，而是在 WebKitGTK 上构建的、面向多任务协作与 AI 自动化的本地工作空间：页面内容可被本地理解、AI 助手可调用工具与执行动作、并在明确授权下完成浏览器级操作。
+**ShiftBrowser** 是跑在 WebKitGTK 上的桌面浏览器，把“理解页面”和“操作页面”做成本地能力 —— AI 能读、能点、能填，每一步都可审计、可拦截、可回溯。
 
-当前版本：v5.8.3
-平台：Linux / GTK
+| 项 | 说明 |
+|---|---|
+| 内核 | Tauri 2 + WebKitGTK |
+| 后端 | Rust + SQLite（WAL） |
+| 前端 | Vue 3 + TypeScript + Pinia |
+| 平台 | Linux / GTK（Windows、Android 见[移植规划](docs/跨平台移植规划_2026-09-22.md)） |
+| 许可 | GPL-3.0 |
+| 当前版本 | v5.8.3 |
+
+### 能干这些
+
+- 🧭 **完整的浏览器底子**：多标签、工作区、会话恢复、书签 / 历史 / 下载 / 密码、阅读模式、RSS 聚合
+- 🤖 **AI 原生**：页面快照与语义理解、AI 侧边栏、Agent 执行 `click` / `fill` / `scroll` / `read`
+- 🔌 **开放能力**：MCP Client + Server、本地 Open API（48 个工具）、Unix socket 与 HTTP 双形态
+- 🛡️ **默认安全**：SSRF / 内网拦截、动作白名单、审计日志、密码加密存储
+
+![世界导航：721 个站点按 20 个分类归档，支持搜索与收藏](docs/screenshots/world-nav.png)
+
+### 快速上手
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf
+npm install
+cd src-tauri && cargo tauri dev
+```
+
+依赖细节、生产构建与打包见 [§11 快速开始](#11-快速开始)；模块划分与运行时流程见 [ARCH.md](ARCH.md)。
 
 ---
 
@@ -771,4 +802,6 @@ AI 对话默认使用 AGNES AI（OpenAI 兼容协议）。API Key 两种配置�
 
 ## License
 
-个人项目，未采用公开许可证（All Rights Reserved）。
+[GPL-3.0](LICENSE)（GNU General Public License v3.0）。
+
+可自由使用、修改、分发；分发衍生作品时需同样以 GPL-3.0 开源，并保留版权与免责声明。

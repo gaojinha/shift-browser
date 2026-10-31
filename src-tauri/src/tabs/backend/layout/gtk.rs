@@ -43,9 +43,7 @@ fn scroll_debug_enabled(raw: Option<&str>) -> bool {
 /// 兜底补滚检查闸门：在途检查未完成时跳过（防 eval 积压）、
 /// 100ms 节流（正常页面 WebKit 100ms 内必滚动，不误伤）、零位移跳过
 fn scroll_check_due(in_flight: bool, since_last: std::time::Duration, dx: f64, dy: f64) -> bool {
-    !in_flight
-        && since_last >= std::time::Duration::from_millis(100)
-        && (dy != 0.0 || dx != 0.0)
+    !in_flight && since_last >= std::time::Duration::from_millis(100) && (dy != 0.0 || dx != 0.0)
 }
 
 /// GTK smooth delta（单位约行）→ 像素：1 行按 100px 换算
@@ -462,12 +460,21 @@ mod tests {
     #[test]
     fn download_filename_from_url_fallbacks() {
         // 域名根/尾斜杠 → 空段 → sanitize 兜底 download
-        assert_eq!(download_filename_from_url(Some("https://example.com")), "download");
-        assert_eq!(download_filename_from_url(Some("https://example.com/")), "download");
+        assert_eq!(
+            download_filename_from_url(Some("https://example.com")),
+            "download"
+        );
+        assert_eq!(
+            download_filename_from_url(Some("https://example.com/")),
+            "download"
+        );
         // URL 缺失 → download
         assert_eq!(download_filename_from_url(None), "download");
         // 解析不了 → 按 '?' 取首段
-        assert_eq!(download_filename_from_url(Some("not a url?x=1")), "not a url");
+        assert_eq!(
+            download_filename_from_url(Some("not a url?x=1")),
+            "not a url"
+        );
     }
 
     #[test]
@@ -495,15 +502,40 @@ mod tests {
     #[test]
     fn scroll_check_gate() {
         // 在途 → 跳过
-        assert!(!scroll_check_due(true, Duration::from_millis(999), 0.0, -1.0));
+        assert!(!scroll_check_due(
+            true,
+            Duration::from_millis(999),
+            0.0,
+            -1.0
+        ));
         // 未到 100ms 节流窗 → 跳过
-        assert!(!scroll_check_due(false, Duration::from_millis(99), 0.0, -1.0));
+        assert!(!scroll_check_due(
+            false,
+            Duration::from_millis(99),
+            0.0,
+            -1.0
+        ));
         // 恰好 100ms + 有位移 → 触发
-        assert!(scroll_check_due(false, Duration::from_millis(100), 0.0, -1.0));
+        assert!(scroll_check_due(
+            false,
+            Duration::from_millis(100),
+            0.0,
+            -1.0
+        ));
         // 零位移 → 跳过
-        assert!(!scroll_check_due(false, Duration::from_millis(999), 0.0, 0.0));
+        assert!(!scroll_check_due(
+            false,
+            Duration::from_millis(999),
+            0.0,
+            0.0
+        ));
         // 横向位移同样算
-        assert!(scroll_check_due(false, Duration::from_millis(100), 2.0, 0.0));
+        assert!(scroll_check_due(
+            false,
+            Duration::from_millis(100),
+            2.0,
+            0.0
+        ));
     }
 
     #[test]

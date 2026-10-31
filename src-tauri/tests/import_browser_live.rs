@@ -38,11 +38,8 @@ const BRAVE_LOGIN: usize = 20;
 const PASSWORD_EMPTY_ANCHOR: usize = 6;
 
 /// 排除目录（F-89 铁律 ②）：任何情况下都不得出现在结果里
-const EXCLUDED_PROFILE_DIRS: &[&str] = &[
-    "brave-anon",
-    "google-chrome-headless",
-    "ms-playwright-mcp",
-];
+const EXCLUDED_PROFILE_DIRS: &[&str] =
+    &["brave-anon", "google-chrome-headless", "ms-playwright-mcp"];
 
 /// 被监视的源文件（导入前后指纹必须一致）
 const WATCHED_FILES: &[&str] = &[
@@ -139,7 +136,10 @@ fn assert_sources_untouched(before: &BTreeMap<String, (String, u128)>) {
         assert_eq!(h_after, h_before, "源文件被改动（sha256 变了）：{path}");
         assert_eq!(m_after, m_before, "源文件被改动（mtime 变了）：{path}");
     }
-    println!("源库零改动 ✔ 共 {} 个源文件（sha256 + mtime 逐项一致）", before.len());
+    println!(
+        "源库零改动 ✔ 共 {} 个源文件（sha256 + mtime 逐项一致）",
+        before.len()
+    );
 }
 
 // ── 回执结构无明文字段（F-100 断言 ⑥）────────────────────────────────
@@ -192,11 +192,15 @@ fn print_scan(out: &[SourceReport]) {
 async fn scan_matches_real_profiles() {
     let out = scan_browser_import_inner().await;
     print_scan(&out);
-    assert!(!out.is_empty(), "真机必须扫到源（空结果说明 HOME/.config 路径没找对）");
+    assert!(
+        !out.is_empty(),
+        "真机必须扫到源（空结果说明 HOME/.config 路径没找对）"
+    );
 
     // Chrome：AccountBookmarks 条数
-    let ab = scan_find(&out, "chrome", "AccountBookmarks")
-        .unwrap_or_else(|| panic!("Chrome `AccountBookmarks` 必须扫到（实测应为 {CHROME_ACCOUNT_BOOKMARKS} 条）"));
+    let ab = scan_find(&out, "chrome", "AccountBookmarks").unwrap_or_else(|| {
+        panic!("Chrome `AccountBookmarks` 必须扫到（实测应为 {CHROME_ACCOUNT_BOOKMARKS} 条）")
+    });
     assert_eq!(
         ab.count,
         Some(CHROME_ACCOUNT_BOOKMARKS),
@@ -204,9 +208,8 @@ async fn scan_matches_real_profiles() {
     );
 
     // 空壳：必须**出现**且为 Some(0)——不许缺行、不许 None
-    let shell = scan_find(&out, "chrome", "Bookmarks").unwrap_or_else(|| {
-        panic!("Chrome 空壳 `Bookmarks` 必须出现在结果里（缺行=扫描漏源）")
-    });
+    let shell = scan_find(&out, "chrome", "Bookmarks")
+        .unwrap_or_else(|| panic!("Chrome 空壳 `Bookmarks` 必须出现在结果里（缺行=扫描漏源）"));
     assert_eq!(
         shell.count,
         Some(CHROME_BOOKMARKS_SHELL),
@@ -218,7 +221,11 @@ async fn scan_matches_real_profiles() {
     let lfa = scan_find(&out, "chrome", "Login Data For Account").unwrap_or_else(|| {
         panic!("Chrome `Login Data For Account` 必须扫到（实测应为 {CHROME_LOGIN_FOR_ACCOUNT} 行）")
     });
-    assert_eq!(lfa.count, Some(CHROME_LOGIN_FOR_ACCOUNT), "Chrome 密码源行数对不上");
+    assert_eq!(
+        lfa.count,
+        Some(CHROME_LOGIN_FOR_ACCOUNT),
+        "Chrome 密码源行数对不上"
+    );
 
     // Brave：书签 + 密码
     let bb = scan_find(&out, "brave", "Bookmarks")
@@ -262,7 +269,10 @@ async fn preview_rows_grouped_bookmarks_and_no_plaintext() {
     );
     for it in &pv.passwords {
         assert!(!it.domain.trim().is_empty(), "预览行 domain 不许为空");
-        assert!(!it.browser.is_empty() && !it.profile.is_empty(), "预览行须带来源标识");
+        assert!(
+            !it.browser.is_empty() && !it.profile.is_empty(),
+            "预览行须带来源标识"
+        );
     }
     assert!(
         pv.passwords.iter().any(|it| it.username.is_some()),
@@ -270,7 +280,10 @@ async fn preview_rows_grouped_bookmarks_and_no_plaintext() {
     );
 
     // 书签预览：按文件夹分组渲染是非空分组构成的列表
-    assert!(!pv.bookmark_groups.is_empty(), "书签预览必须按文件夹分组（不得为空）");
+    assert!(
+        !pv.bookmark_groups.is_empty(),
+        "书签预览必须按文件夹分组（不得为空）"
+    );
     let total_items: usize = pv.bookmark_groups.iter().map(|g| g.items.len()).sum();
     assert!(
         total_items >= BRAVE_BOOKMARKS,
@@ -293,7 +306,9 @@ async fn bookmark_import_writes_then_dedupes_and_leaves_sources_alone() {
     let (_tmp, db) = temp_db().await;
     let before = fingerprint_sources();
 
-    let r1 = import_bookmarks_inner(&db).await.expect("首次书签导入不得报错");
+    let r1 = import_bookmarks_inner(&db)
+        .await
+        .expect("首次书签导入不得报错");
     println!("首次：{}", serde_json::to_string(&r1).unwrap());
     assert!(r1.imported > 0, "首次导入必须真写入 >0 条（real profile）");
     assert!(
@@ -308,7 +323,9 @@ async fn bookmark_import_writes_then_dedupes_and_leaves_sources_alone() {
     assert_no_plaintext_leaves(&r1, "ImportBookmarksResult");
 
     // 二次导入：同 URL 已落库 → imported 必须 0（不许重复插入）
-    let r2 = import_bookmarks_inner(&db).await.expect("二次书签导入不得报错");
+    let r2 = import_bookmarks_inner(&db)
+        .await
+        .expect("二次书签导入不得报错");
     println!("二次：{}", serde_json::to_string(&r2).unwrap());
     assert_eq!(r2.imported, 0, "二次导入 imported 必须为 0（URL 去重）");
 
@@ -336,7 +353,9 @@ async fn password_import_is_insert_only_on_second_run() {
         "真机密码源总行数与卡面锚不符（Chrome {CHROME_LOGIN_FOR_ACCOUNT} + Brave {BRAVE_LOGIN}）"
     );
 
-    let r1 = import_passwords_inner(&db).await.expect("首次密码导入不得报错");
+    let r1 = import_passwords_inner(&db)
+        .await
+        .expect("首次密码导入不得报错");
     println!("首次：{}", serde_json::to_string(&r1).unwrap());
     assert_eq!(
         r1.imported + r1.skipped_existing + r1.skipped_empty + r1.failed,
@@ -356,9 +375,14 @@ async fn password_import_is_insert_only_on_second_run() {
     assert_no_plaintext_leaves(&r1, "ImportPasswordsResult");
 
     // 二次导入：F-98 insert-only —— imported=0 且 skipped_existing = 首次 imported（不覆盖）
-    let r2 = import_passwords_inner(&db).await.expect("二次密码导入不得报错");
+    let r2 = import_passwords_inner(&db)
+        .await
+        .expect("二次密码导入不得报错");
     println!("二次：{}", serde_json::to_string(&r2).unwrap());
-    assert_eq!(r2.imported, 0, "F-98 insert-only：二次导入不得新写（更不许覆盖）");
+    assert_eq!(
+        r2.imported, 0,
+        "F-98 insert-only：二次导入不得新写（更不许覆盖）"
+    );
     assert_eq!(
         r2.skipped_existing,
         r1.imported + r1.skipped_existing,
@@ -366,7 +390,10 @@ async fn password_import_is_insert_only_on_second_run() {
     );
 
     assert_sources_untouched(&before);
-    println!("④ 密码导入断言全过 ✔（首次写入 {} 条，空密码 {} 条）", r1.imported, r1.skipped_empty);
+    println!(
+        "④ 密码导入断言全过 ✔（首次写入 {} 条，空密码 {} 条）",
+        r1.imported, r1.skipped_empty
+    );
 }
 
 /// ⑥ 回执结构无明文字段（纯结构，不需真机，但一并放这里做留痕）

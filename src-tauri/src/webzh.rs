@@ -390,7 +390,9 @@ pub async fn translate_memory_lookup(
     let sources: Vec<String> = req.items.iter().map(|i| i.text.clone()).collect();
     // C-11：取 HMAC 密钥失败（translate.key 损坏/不可写）→ 记忆停用，按全 miss 处理
     let hits = match crate::db::translate_memory::hmac_key(&db).await {
-        Some(key) => crate::db::translate_memory::lookup(&db.pool, &req.model, &sources, &key).await,
+        Some(key) => {
+            crate::db::translate_memory::lookup(&db.pool, &req.model, &sources, &key).await
+        }
         None => Default::default(),
     };
     Ok(req

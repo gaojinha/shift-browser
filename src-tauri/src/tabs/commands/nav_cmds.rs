@@ -248,11 +248,9 @@ mod tests {
     #[test]
     fn 内部页file放行普通file拒绝() {
         let app_data = "/home/u/.local/share/com.shiftbrowser.app";
-        assert!(nav_scheme_error(
-            "file",
-            &format!("file://{}/newtab/index.html", app_data)
-        )
-        .is_none());
+        assert!(
+            nav_scheme_error("file", &format!("file://{}/newtab/index.html", app_data)).is_none()
+        );
         assert!(nav_scheme_error(
             "file",
             &format!("file://{}/newtab/world-nav.html", app_data)
