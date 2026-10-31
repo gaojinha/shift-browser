@@ -13,6 +13,11 @@
 //! 4. 内存里保留最近 200 条（诊断面板直接读，不依赖文件 IO）；
 //! 5. 提供 `guard()`：把可能 panic 的闭包包起来，panic 不穿过 FFI 边界
 //!    （CEF 回调是 `extern "C"`，panic 穿过去是 UB，会直接杀死进程且无栈）。
+//!
+//! 注：`guard`/`diagnostics_text`/`write_diagnostics` 等函数仅在 `cef-engine`
+//! 分支（`shell.rs`）中调用，默认配置下触发 dead_code 警告，故在此屏蔽。
+
+#![allow(dead_code)]
 
 use std::collections::VecDeque;
 use std::io::Write;
